@@ -319,8 +319,8 @@
       "params": {
         "bins": 2
       },
-      "status": "pending:14-04",
-      "definition": "tsfresh's min/max-quantized sub-word-growth algorithm, bins=2; current Rust is mean-thresholded with a different dictionary-growth loop and log2(n)/n normalization (full algorithm rewrite, D-08)."
+      "status": "match",
+      "definition": "tsfresh's bins=2 range-midpoint (linspace) quantization + sub-word dictionary-growth loop, result = dictionary size / n."
     },
     {
       "name": "longest_strike_above_mean",
@@ -367,8 +367,8 @@
       "reference": "tsfresh",
       "calculator": "benford_correlation",
       "params": {},
-      "status": "pending:14-04",
-      "definition": "Correlation of the first-significant-digit distribution to Benford's law over ALL nonzero finite values (incl. |v|<1); current Rust excludes |v|<1 and divides by the wrong denominator."
+      "status": "match",
+      "definition": "Correlation of the first-significant-digit distribution (via shortest scientific notation, incl. |v|<1) to Benford's law log10(1+1/d), denominator n (zeros/NaN count toward n as digit 0)."
     },
     {
       "name": "linear_trend_slope",
@@ -404,8 +404,8 @@
       "params": {
         "max_bins": 10
       },
-      "status": "pending:14-04",
-      "definition": "Shannon entropy over np.histogram(x, bins=10)'s floor-based bins; current Rust uses a rounding-based binning scheme with different boundaries."
+      "status": "match",
+      "definition": "Shannon entropy over np.histogram(x, bins=10)'s floor-based bins (edge corrections, min==max widened by 0.5); empty bins contribute 0; NaN on NaN input."
     },
     {
       "name": "sample_entropy",
@@ -423,8 +423,8 @@
         "m": 2,
         "r": 0.2
       },
-      "status": "pending:14-04",
-      "definition": "Pincus approximate entropy, m=2, r=0.2 (tsfresh approximate_entropy). Current Rust returns NaN (vs tsfresh 0.0) on constant/all-zero input, and the wrong sign on tiny_n8 -- both beyond the audit's original edge-case-only finding (the executor's real run is authoritative, 14-RESEARCH.md)."
+      "status": "match",
+      "definition": "tsfresh approximate_entropy: m=2, r=0.2*population std(x) (Pincus Phi_m - Phi_{m+1}), 0.0 when n<=m+1 (tsfresh's own degenerate branch, not NaN) -- shares the stats.rs template_match_counts band search."
     },
     {
       "name": "permutation_entropy",
@@ -434,8 +434,8 @@
         "tau": 1,
         "dimension": 3
       },
-      "status": "pending:14-04",
-      "definition": "-sum(p*ln(p)) over rank-encoded windows (dimension=3, tau=1), NOT normalized by ln(dimension!); current Rust normalizes by ln(order!)."
+      "status": "match",
+      "definition": "-sum(p*ln(p)) over rank-encoded windows (dimension=3, tau=1), NOT normalized by ln(dimension!) -- the stable single-argsort pattern key gives identical equivalence classes to tsfresh's literal double-argsort."
     },
     {
       "name": "count_unique",

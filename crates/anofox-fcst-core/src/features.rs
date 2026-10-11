@@ -225,7 +225,7 @@ pub fn extract_features(values: &[f64]) -> Result<HashMap<String, f64>> {
     features.insert("sample_entropy".to_string(), sample_entropy(values));
     features.insert(
         "approximate_entropy".to_string(),
-        approximate_entropy(values, 2, 0.2 * std_dev),
+        approximate_entropy(values, 2, 0.2),
     );
     features.insert(
         "permutation_entropy".to_string(),
@@ -305,10 +305,11 @@ pub fn extract_features(values: &[f64]) -> Result<HashMap<String, f64>> {
         features.insert(format!("c3_lag{}", lag), value);
     }
 
-    // Lempel-Ziv complexity
+    // Lempel-Ziv complexity (D-08, FEAT-04): tsfresh bins=2 range-midpoint
+    // quantisation (not the previous mean threshold).
     features.insert(
         "lempel_ziv_complexity".to_string(),
-        lempel_ziv_complexity(values, mean),
+        lempel_ziv_complexity(values, 2),
     );
 
     // One-sided rustfft spectrum (D-07, FEAT-03): numpy-rfft-exact,
@@ -622,59 +623,72 @@ fn count_peaks(values: &[f64]) -> usize {
         .count()
 }
 
+/// tsfresh `benford_correlation` (D-08, FEAT-04, audit F11 part 1): the
+/// leading significant digit of EVERY nonzero finite `|v|` -- including
+/// `|v| < 1`, via Rust's shortest round-trip scientific formatting
+/// (`format!("{:e}", av)`'s first character has the same leading digit as
+/// `np.format_float_scientific`, e.g. `0.0034 -> "3.4e-3"` -> digit `3`).
+/// `NaN -> digit 0` (`np.nan_to_num`'s zero), `+-inf -> +-f64::MAX` then
+/// `abs()` (matching `nan_to_num`'s finite-infinity replacement), an exact
+/// `0.0 -> digit 0`. `digit 0` never matches bins `1..=9`, so it only
+/// lowers every `data[d]` via the unchanged denominator `n` (zeros/NaNs stay
+/// in the denominator, D-03). Pearson correlation against
+/// `log10(1 + 1/d)` for `d in 1..=9`; `NaN` when either vector has zero
+/// variance (no epsilon guard -- `0.0/0.0 -> NaN` falls out of the formula).
 fn benford_correlation(values: &[f64]) -> f64 {
-    // Expected Benford distribution
-    let expected: [f64; 9] = [
-        0.301, 0.176, 0.125, 0.097, 0.079, 0.067, 0.058, 0.051, 0.046,
-    ];
-
-    let mut counts = [0usize; 9];
-    let mut total = 0;
+    let n = values.len() as f64;
+    let mut counts = [0usize; 10]; // index 0 = digit 0 (unused in the distribution, still counted toward n)
 
     for &v in values {
-        let abs_v = v.abs();
-        if abs_v >= 1.0 {
-            let first_digit = abs_v
-                .to_string()
-                .chars()
-                .find(|c| c.is_ascii_digit() && *c != '0');
-            if let Some(d) = first_digit {
-                if let Some(digit) = d.to_digit(10) {
-                    if (1..=9).contains(&digit) {
-                        counts[(digit - 1) as usize] += 1;
-                        total += 1;
-                    }
-                }
+        let x = if v.is_nan() {
+            0.0
+        } else if v.is_infinite() {
+            if v > 0.0 {
+                f64::MAX
+            } else {
+                -f64::MAX
             }
-        }
+        } else {
+            v
+        };
+        let av = x.abs();
+        let digit = if av == 0.0 {
+            0
+        } else {
+            format!("{:e}", av)
+                .chars()
+                .next()
+                .and_then(|c| c.to_digit(10))
+                .unwrap_or(0)
+        };
+        counts[digit as usize] += 1;
     }
 
-    if total == 0 {
-        return 0.0;
-    }
+    let benford: Vec<f64> = (1..=9u32).map(|d| (1.0 + 1.0 / d as f64).log10()).collect();
+    let data: Vec<f64> = (1..=9usize).map(|d| counts[d] as f64 / n).collect();
 
-    let observed: Vec<f64> = counts.iter().map(|&c| c as f64 / total as f64).collect();
+    pearson_correlation(&benford, &data)
+}
 
-    // Pearson correlation
-    let mean_exp: f64 = expected.iter().sum::<f64>() / 9.0;
-    let mean_obs: f64 = observed.iter().sum::<f64>() / 9.0;
+/// Pearson correlation coefficient of two equal-length slices. `NaN` when
+/// either slice has zero variance (`0.0/0.0 -> NaN`, no epsilon guard) --
+/// matches `np.corrcoef`'s degenerate-input behaviour exactly (benford_correlation,
+/// Task 2, D-08).
+fn pearson_correlation(a: &[f64], b: &[f64]) -> f64 {
+    let n = a.len() as f64;
+    let mean_a: f64 = a.iter().sum::<f64>() / n;
+    let mean_b: f64 = b.iter().sum::<f64>() / n;
 
     let mut num = 0.0;
-    let mut denom_exp = 0.0;
-    let mut denom_obs = 0.0;
-
-    for i in 0..9 {
-        num += (expected[i] - mean_exp) * (observed[i] - mean_obs);
-        denom_exp += (expected[i] - mean_exp).powi(2);
-        denom_obs += (observed[i] - mean_obs).powi(2);
+    let mut denom_a = 0.0;
+    let mut denom_b = 0.0;
+    for (&va, &vb) in a.iter().zip(b.iter()) {
+        num += (va - mean_a) * (vb - mean_b);
+        denom_a += (va - mean_a).powi(2);
+        denom_b += (vb - mean_b).powi(2);
     }
 
-    let denom = (denom_exp * denom_obs).sqrt();
-    if denom.abs() < f64::EPSILON {
-        0.0
-    } else {
-        num / denom
-    }
+    num / (denom_a.sqrt() * denom_b.sqrt())
 }
 
 fn linear_trend(values: &[f64]) -> (f64, f64, f64) {
@@ -718,38 +732,69 @@ fn linear_trend(values: &[f64]) -> (f64, f64, f64) {
     (slope, intercept, r_squared)
 }
 
+/// tsfresh `binned_entropy` (D-08, FEAT-04, audit F10): ports `np.histogram`'s
+/// exact floor-based binning (not the previous rounding-based scheme) --
+/// `first`/`last` edge = min/max, widened to `min-0.5`/`max+0.5` when they're
+/// equal; interior edges via `linspace` arithmetic (`k*step + first`), with
+/// the final edge forced to `last` exactly; the computed bin index is
+/// corrected against neighbouring edges exactly as `np.histogram` does, so a
+/// value never lands one bin off due to floating-point rounding of the
+/// `(v-first)/(last-first)*bins` ratio. Shannon entropy over the resulting
+/// bin probabilities, empty bins contributing `0`. `NaN` if any input value
+/// is `NaN` (T-14-10 -- a NaN would otherwise poison every bin boundary
+/// comparison into silent, wrong bin assignment rather than a clean NaN
+/// propagation).
 fn binned_entropy(values: &[f64], n_bins: usize) -> f64 {
+    if values.iter().any(|v| v.is_nan()) {
+        return f64::NAN;
+    }
     if values.is_empty() || n_bins == 0 {
         return 0.0;
     }
 
-    let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
-    let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    let range = max - min;
-
-    if range.abs() < f64::EPSILON {
-        return 0.0;
+    let mut first = values.iter().cloned().fold(f64::INFINITY, f64::min);
+    let mut last = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    if (last - first).abs() < f64::EPSILON {
+        first -= 0.5;
+        last += 0.5;
     }
+    let range = last - first;
+    let step = range / n_bins as f64;
+    let edge = |k: usize| -> f64 {
+        if k == n_bins {
+            last
+        } else {
+            k as f64 * step + first
+        }
+    };
 
     let mut bins = vec![0usize; n_bins];
-
     for &v in values {
-        let bin = (((v - min) / range) * (n_bins - 1) as f64).round() as usize;
-        let bin = bin.min(n_bins - 1);
-        bins[bin] += 1;
+        let scaled = ((v - first) / range) * n_bins as f64;
+        let mut idx = scaled as i64;
+        if idx == n_bins as i64 {
+            idx = n_bins as i64 - 1;
+        }
+        if v < edge(idx as usize) {
+            idx -= 1;
+        }
+        if idx != n_bins as i64 - 1 && v >= edge((idx + 1) as usize) {
+            idx += 1;
+        }
+        bins[idx as usize] += 1;
     }
 
     let n = values.len() as f64;
-    let mut entropy = 0.0;
-
-    for &count in &bins {
-        if count > 0 {
+    let sum_plogp: f64 = bins
+        .iter()
+        .filter(|&&count| count > 0)
+        .map(|&count| {
             let p = count as f64 / n;
-            entropy -= p * p.ln();
-        }
-    }
+            p * p.ln()
+        })
+        .sum();
 
-    entropy
+    -sum_plogp
 }
 
 // New helper functions for extended features
@@ -833,46 +878,46 @@ fn sample_entropy(values: &[f64]) -> f64 {
 /// `|Phi_m - Phi_{m+1}|` with `Phi_m = mean_i(ln(C_i / (n-m+1)))` over the
 /// shared [`template_match_counts`] band search. NaN if any input value is
 /// NaN.
-fn approximate_entropy(values: &[f64], m: usize, r: f64) -> f64 {
-    if values.len() < m + 1 || r <= 0.0 {
+fn approximate_entropy(values: &[f64], m: usize, r_ratio: f64) -> f64 {
+    if values.iter().any(|v| v.is_nan()) {
         return f64::NAN;
     }
 
-    let phi_m = phi_function(values, m, r);
-    let phi_m1 = phi_function(values, m + 1, r);
-
-    phi_m - phi_m1
-}
-
-fn phi_function(values: &[f64], m: usize, r: f64) -> f64 {
     let n = values.len();
-    if n < m {
+    if n <= m + 1 {
         return 0.0;
     }
 
-    let mut c_sum = 0.0;
-    for i in 0..=n - m {
-        let mut count = 0;
-        for j in 0..=n - m {
-            let mut is_match = true;
-            for k in 0..m {
-                if (values[i + k] - values[j + k]).abs() > r {
-                    is_match = false;
-                    break;
-                }
-            }
-            if is_match {
-                count += 1;
-            }
-        }
-        if count > 0 {
-            c_sum += (count as f64 / (n - m + 1) as f64).ln();
-        }
-    }
+    let mean = values.iter().sum::<f64>() / n as f64;
+    let variance = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n as f64;
+    let r = r_ratio * variance.sqrt();
 
-    c_sum / (n - m + 1) as f64
+    (phi_m_tsfresh(values, m, r) - phi_m_tsfresh(values, m + 1, r)).abs()
 }
 
+/// `Phi_m = mean_i(ln(C_i / (n-m+1)))` over the `n-m+1` length-`m` templates,
+/// via the shared [`template_match_counts`] band search (self-match always
+/// included, so `C_i >= 1` and the `ln` argument is always `> 0`).
+fn phi_m_tsfresh(values: &[f64], m: usize, r: f64) -> f64 {
+    let n_m = values.len() - m + 1;
+    let counts = template_match_counts(values, m, r);
+    let sum_log: f64 = counts.iter().map(|&c| (c as f64 / n_m as f64).ln()).sum();
+    sum_log / n_m as f64
+}
+
+/// tsfresh `permutation_entropy` (D-08, FEAT-04, audit F11 part 2):
+/// `dimension=3`, `tau=1` (contiguous windows, unchanged from before this
+/// plan). The pattern key here is a single stable argsort of each window
+/// (ties broken by original position, matching numpy's stable argsort) --
+/// this is NOT tsfresh's literal `np.argsort(np.argsort(X))` double-argsort,
+/// but double-argsort is exactly the inverse permutation of the single
+/// argsort, a bijection on same-length permutations, so the two give
+/// IDENTICAL equivalence classes (and therefore identical pattern counts
+/// and entropy) -- verified against `[0,0,5] -> [0,1,2]` and
+/// `[3,3,1] -> [2,0,1]` (both the single-argsort AND tsfresh's final
+/// grouping agree). The only real bug was the trailing `ln(order!)`
+/// normalisation (now removed) -- tsfresh's own calculator never
+/// normalises. `NaN` when `n < dimension`.
 fn permutation_entropy(values: &[f64], order: usize) -> f64 {
     if values.len() < order || order < 2 {
         return f64::NAN;
@@ -893,33 +938,35 @@ fn permutation_entropy(values: &[f64], order: usize) -> f64 {
     }
 
     let total = (n - order + 1) as f64;
-    let mut entropy = 0.0;
+    let sum_plogp: f64 = pattern_counts
+        .values()
+        .map(|&count| {
+            let p = count as f64 / total;
+            p * p.ln()
+        })
+        .sum();
 
-    for &count in pattern_counts.values() {
-        let p = count as f64 / total;
-        if p > 0.0 {
-            entropy -= p * p.ln();
-        }
-    }
+    -sum_plogp
+}
 
-    // Normalize by log of factorial of order
-    let max_entropy = (1..=order)
-        .map(|i| i as f64)
-        .fold(0.0, |acc, x| acc + x.ln());
-    if max_entropy > 0.0 {
-        entropy / max_entropy
+/// Canonicalises `-0.0` to `+0.0` before bit-hashing, matching `np.unique`'s
+/// equality semantics (`-0.0 == 0.0`, D-03) for `count_unique`/
+/// `has_duplicate`/`reoccurring_stats`.
+fn canonical_bits(v: f64) -> u64 {
+    if v == 0.0 {
+        0.0f64.to_bits()
     } else {
-        entropy
+        v.to_bits()
     }
 }
 
 fn count_unique(values: &[f64]) -> usize {
-    let unique: HashSet<u64> = values.iter().map(|&v| v.to_bits()).collect();
+    let unique: HashSet<u64> = values.iter().map(|&v| canonical_bits(v)).collect();
     unique.len()
 }
 
 fn has_duplicate(values: &[f64]) -> bool {
-    let unique: HashSet<u64> = values.iter().map(|&v| v.to_bits()).collect();
+    let unique: HashSet<u64> = values.iter().map(|&v| canonical_bits(v)).collect();
     unique.len() < values.len()
 }
 
@@ -932,7 +979,7 @@ fn has_duplicate_value(values: &[f64], target: f64) -> bool {
 fn reoccurring_stats(values: &[f64]) -> (f64, f64, f64, f64) {
     let mut value_counts: HashMap<u64, usize> = HashMap::new();
     for &v in values {
-        *value_counts.entry(v.to_bits()).or_insert(0) += 1;
+        *value_counts.entry(canonical_bits(v)).or_insert(0) += 1;
     }
 
     let n = values.len() as f64;
@@ -1001,51 +1048,64 @@ fn c3(values: &[f64], lag: usize) -> f64 {
     sum / (n - 2 * lag) as f64
 }
 
-fn lempel_ziv_complexity(values: &[f64], threshold: f64) -> f64 {
-    // Convert to binary string based on threshold
-    let binary: Vec<bool> = values.iter().map(|&v| v >= threshold).collect();
-    if binary.is_empty() {
+/// tsfresh `lempel_ziv_complexity` (D-08, FEAT-04, audit F11 part 3): a full
+/// algorithm rewrite, not a tweak. Quantises `values` into `bins` symbols via
+/// numpy-`linspace` quantization edges ([`lempel_ziv_quantization_edges`]:
+/// edge `k` for `k in 1..=bins` is `k*step + min` with the final edge forced
+/// to `max`, so a constant series collapses every edge to `min` via
+/// `step == 0`), with `symbol(v) = count of edges strictly < v` (equivalent
+/// to `np.searchsorted(edges, v, side="left")`). Then tsfresh's own
+/// sub-word dictionary-growth loop: no mean threshold, no `log2(n)/n`
+/// normalisation -- the result is `dictionary_size / n`.
+fn lempel_ziv_complexity(values: &[f64], bins: usize) -> f64 {
+    let n = values.len();
+    if n == 0 {
         return 0.0;
     }
 
-    let n = binary.len();
-    let mut complexity = 1;
-    let mut l = 1;
-    let mut k = 1;
-    let mut k_max = 1;
+    let edges = lempel_ziv_quantization_edges(values, bins);
+    let symbols: Vec<usize> = values
+        .iter()
+        .map(|&v| edges.iter().filter(|&&e| e < v).count())
+        .collect();
 
-    while l + k <= n {
-        // Check if substring [l..l+k] appears in [0..l+k-1]
-        let mut found = false;
-        let substr = &binary[l..l + k];
+    let mut sub_strings: HashSet<Vec<usize>> = HashSet::new();
+    let mut ind = 0usize;
+    let mut inc = 1usize;
 
-        for start in 0..l + k - k {
-            if &binary[start..start + k] == substr {
-                found = true;
-                break;
-            }
-        }
-
-        if found {
-            k += 1;
-            if k > k_max {
-                k_max = k;
-            }
+    while ind + inc <= n {
+        let sub_str = symbols[ind..ind + inc].to_vec();
+        if sub_strings.contains(&sub_str) {
+            inc += 1;
         } else {
-            complexity += 1;
-            l += k_max;
-            k = 1;
-            k_max = 1;
+            sub_strings.insert(sub_str);
+            ind += inc;
+            inc = 1;
         }
     }
 
-    // Normalize
-    let b = (n as f64).log2();
-    if b > 0.0 {
-        complexity as f64 * b / n as f64
-    } else {
-        0.0
-    }
+    sub_strings.len() as f64 / n as f64
+}
+
+/// `np.linspace(min(x), max(x), bins + 1)[1:]` (the quantisation edges tsfresh's
+/// `lempel_ziv_complexity` uses): edge `k` for `k in 1..=bins` is `k*step +
+/// min` where `step = (max-min)/bins`, except the final edge (`k == bins`) is
+/// forced to `max` exactly (linspace's own endpoint correction). When
+/// `min == max` (a constant series), `step == 0` and every edge collapses to
+/// `min` (which also equals `max`), matching numpy exactly.
+fn lempel_ziv_quantization_edges(values: &[f64], bins: usize) -> Vec<f64> {
+    let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
+    let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let step = (max - min) / bins as f64;
+    (1..=bins)
+        .map(|k| {
+            if k == bins {
+                max
+            } else {
+                k as f64 * step + min
+            }
+        })
+        .collect()
 }
 
 /// One-sided complex spectrum of a real-valued series, numpy `rfft`-exact
@@ -1685,6 +1745,158 @@ mod tests {
         assert!(
             got.is_nan(),
             "sample_entropy with a NaN element: got {got}, want NaN"
+        );
+    }
+
+    // --- Task 2 (D-08, FEAT-04): approximate_entropy, binned_entropy,
+    // benford_correlation, permutation_entropy, lempel_ziv_complexity,
+    // -0.0-safe unique/duplicate handling, and the NaN-input no-panic
+    // invariant. Literal values reproduced from the live tsfresh 0.21.2
+    // calculators (14-RESEARCH.md probe values / mapping.json fixtures).
+
+    #[test]
+    fn test_approximate_entropy_degenerate_inputs_are_zero() {
+        // n <= m+1 (tsfresh's own degenerate branch).
+        let got = approximate_entropy(&[1.0, 2.0, 3.0], 2, 0.2);
+        assert_eq!(
+            got, 0.0,
+            "approximate_entropy([1,2,3], 2, 0.2): got {got}, want 0.0"
+        );
+
+        // Constant series: r=0, every template matches every other -- Phi_m
+        // - Phi_{m+1} collapses to 0.0 exactly (previously NaN).
+        let constant = vec![3.0; 30];
+        let got = approximate_entropy(&constant, 2, 0.2);
+        assert_eq!(
+            got, 0.0,
+            "approximate_entropy(constant_n30): got {got}, want 0.0"
+        );
+
+        // All-zero series: same collapse.
+        let all_zero = vec![0.0; 50];
+        let got = approximate_entropy(&all_zero, 2, 0.2);
+        assert_eq!(
+            got, 0.0,
+            "approximate_entropy(all_zero_n50): got {got}, want 0.0"
+        );
+    }
+
+    #[test]
+    fn test_approximate_entropy_nan_input_is_nan() {
+        let got = approximate_entropy(&[1.0, f64::NAN, 3.0, 4.0, 5.0], 2, 0.2);
+        assert!(
+            got.is_nan(),
+            "approximate_entropy with a NaN element: got {got}, want NaN"
+        );
+    }
+
+    #[test]
+    fn test_binned_entropy_matches_numpy_histogram() {
+        let values: Vec<f64> = (0..=10).map(|i| i as f64).collect();
+        let got = binned_entropy(&values, 10);
+        assert!(
+            (got - 2.2718685126965625).abs() < 1e-12,
+            "binned_entropy(arange(11.0), 10): got {got}, want 2.2718685126965625"
+        );
+    }
+
+    #[test]
+    fn test_binned_entropy_nan_input_is_nan() {
+        let got = binned_entropy(&[1.0, f64::NAN, 2.0], 10);
+        assert!(
+            got.is_nan(),
+            "binned_entropy([1, NaN, 2], 10): got {got}, want NaN"
+        );
+    }
+
+    #[test]
+    fn test_binned_entropy_constant_series_is_zero() {
+        let got = binned_entropy(&[5.0; 30], 10);
+        assert_eq!(
+            got, 0.0,
+            "binned_entropy(constant, 10): got {got}, want 0.0"
+        );
+    }
+
+    #[test]
+    fn test_benford_correlation_matches_tsfresh() {
+        let values = [0.0034, 25.0, 0.0, 1000.0, 999.9999999999999, 7.0, 1.5, 0.12];
+        let got = benford_correlation(&values);
+        assert!(
+            (got - 0.82727315443529).abs() < 1e-9,
+            "benford_correlation: got {got}, want 0.82727315443529"
+        );
+    }
+
+    #[test]
+    fn test_benford_correlation_all_zero_is_nan() {
+        let got = benford_correlation(&[0.0; 50]);
+        assert!(
+            got.is_nan(),
+            "benford_correlation(all_zero): got {got}, want NaN"
+        );
+    }
+
+    #[test]
+    fn test_permutation_entropy_matches_tsfresh_unnormalised() {
+        let values = [4.0, 7.0, 9.0, 10.0, 6.0, 11.0, 3.0];
+        let got = permutation_entropy(&values, 3);
+        assert!(
+            (got - 1.0549201679861442).abs() < 1e-12,
+            "permutation_entropy: got {got}, want 1.0549201679861442"
+        );
+    }
+
+    #[test]
+    fn test_lempel_ziv_complexity_matches_tsfresh() {
+        let values = [0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0];
+        let got = lempel_ziv_complexity(&values, 2);
+        assert!(
+            (got - 0.6).abs() < 1e-12,
+            "lempel_ziv_complexity: got {got}, want 0.6"
+        );
+    }
+
+    #[test]
+    fn test_lempel_ziv_complexity_constant_matches_fixture() {
+        // constant_n30 fixture: tsfresh lempel_ziv_complexity(bins=2) ==
+        // 7/30 == 0.23333333333333334.
+        let got = lempel_ziv_complexity(&[7.0; 30], 2);
+        assert!(
+            (got - (7.0 / 30.0)).abs() < 1e-12,
+            "lempel_ziv_complexity(constant_n30): got {got}, want {}",
+            7.0 / 30.0
+        );
+    }
+
+    #[test]
+    fn test_negative_zero_treated_as_zero_in_unique_duplicate_features() {
+        let values = [0.0, -0.0, 1.0];
+        assert_eq!(
+            count_unique(&values),
+            2,
+            "count_unique([0.0, -0.0, 1.0]): np.unique treats -0.0 == 0.0"
+        );
+        assert!(
+            has_duplicate(&values),
+            "has_duplicate([0.0, -0.0, 1.0]): -0.0 and 0.0 are one value, so it's a duplicate"
+        );
+
+        let features = extract_features(&values).unwrap();
+        assert_eq!(features.get("count_unique"), Some(&2.0));
+        assert!((features.get("ratio_value_number_to_length").unwrap() - 2.0 / 3.0).abs() < 1e-12);
+        assert_eq!(features.get("has_duplicate"), Some(&1.0));
+    }
+
+    #[test]
+    fn test_extract_features_with_nan_returns_117_keys_without_panicking() {
+        let values = [1.0, f64::NAN, 3.0, 4.0, 5.0, 6.0];
+        let features = extract_features(&values).unwrap();
+        assert_eq!(
+            features.len(),
+            117,
+            "extract_features with a NaN element: expected 117 keys, got {}",
+            features.len()
         );
     }
 }

@@ -583,6 +583,219 @@ FROM x20;
 true
 
 #######################################
+# approximate_entropy, binned_entropy, benford_correlation,
+# permutation_entropy, lempel_ziv_complexity, number_peaks (Task 2, 14-04,
+# FEAT-04). tsfresh (short_n20): approximate_entropy 0.08780500866889396
+# (unchanged -- already matching), binned_entropy 1.7820471559051687
+# (previously 1.9206765920171578), benford_correlation 0.3816973836882482
+# (previously 0.42967594716771035), permutation_entropy 1.6731421371534196
+# (previously 0.933798406475988), lempel_ziv_complexity 0.4 (previously
+# 1.512674833210577), number_peaks 5.0 (confirmed unchanged).
+#######################################
+
+# --- ts_features_by('x20', id, ds, v) ---
+
+query I
+SELECT abs(approximate_entropy - 0.08780500866889396) <= 1e-9 + 1e-9 * abs(0.08780500866889396)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(binned_entropy - 1.7820471559051687) <= 1e-9 + 1e-9 * abs(1.7820471559051687)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(benford_correlation - 0.3816973836882482) <= 1e-9 + 1e-9 * abs(0.3816973836882482)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(permutation_entropy - 1.6731421371534196) <= 1e-9 + 1e-9 * abs(1.6731421371534196)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(lempel_ziv_complexity - 0.4) <= 1e-9 + 1e-9 * abs(0.4)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(number_peaks - 5.0) <= 1e-9 + 1e-9 * abs(5.0)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+# --- (ts_features(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features(ds, v)).approximate_entropy - 0.08780500866889396) <= 1e-9 + 1e-9 * abs(0.08780500866889396)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).binned_entropy - 1.7820471559051687) <= 1e-9 + 1e-9 * abs(1.7820471559051687)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).benford_correlation - 0.3816973836882482) <= 1e-9 + 1e-9 * abs(0.3816973836882482)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).permutation_entropy - 1.6731421371534196) <= 1e-9 + 1e-9 * abs(1.6731421371534196)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).lempel_ziv_complexity - 0.4) <= 1e-9 + 1e-9 * abs(0.4)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).number_peaks - 5.0) <= 1e-9 + 1e-9 * abs(5.0)
+FROM x20;
+----
+true
+
+# --- (ts_features_agg(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features_agg(ds, v)).approximate_entropy - 0.08780500866889396) <= 1e-9 + 1e-9 * abs(0.08780500866889396)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).binned_entropy - 1.7820471559051687) <= 1e-9 + 1e-9 * abs(1.7820471559051687)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).benford_correlation - 0.3816973836882482) <= 1e-9 + 1e-9 * abs(0.3816973836882482)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).permutation_entropy - 1.6731421371534196) <= 1e-9 + 1e-9 * abs(1.6731421371534196)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).lempel_ziv_complexity - 0.4) <= 1e-9 + 1e-9 * abs(0.4)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).number_peaks - 5.0) <= 1e-9 + 1e-9 * abs(5.0)
+FROM x20;
+----
+true
+
+#######################################
+# i100 (intermittent_n100, Task 2, 14-04, FEAT-04/FEAT-05): an intermittent
+# series (many zeros) exercises the degenerate paths of the entropy family.
+# tsfresh (intermittent_n100): benford_correlation -0.4135303840937026,
+# binned_entropy 1.083026882420419, lempel_ziv_complexity 0.24,
+# permutation_entropy 1.266513929850244, sample_entropy 0.852101712699849.
+#######################################
+
+statement ok
+CREATE TABLE i100 AS
+SELECT 'i100' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, v
+FROM (SELECT unnest(range(100)) AS i, unnest([
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 6.0, 0.0, 0.0, 0.0,
+    0.0, 7.0, 6.0, 0.0, 0.0, 5.0, 0.0, 6.0, 0.0, 0.0,
+    0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 5.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 4.0, 0.0, 0.0, 2.0,
+    0.0, 7.0, 0.0, 6.0, 0.0, 4.0, 0.0, 0.0, 6.0, 0.0,
+    0.0, 0.0, 0.0, 6.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 4.0,
+    0.0, 0.0, 3.0, 0.0, 0.0, 8.0, 0.0, 5.0, 0.0, 0.0,
+    9.0, 0.0, 0.0, 0.0, 0.0, 5.0, 7.0, 3.0, 0.0, 0.0
+]) AS v);
+
+# --- ts_features_by('i100', id, ds, v) ---
+
+query I
+SELECT abs(benford_correlation - (-0.4135303840937026)) <= 1e-9 + 1e-9 * abs(-0.4135303840937026)
+FROM ts_features_by('i100', id, ds, v);
+----
+true
+
+query I
+SELECT abs(binned_entropy - 1.083026882420419) <= 1e-9 + 1e-9 * abs(1.083026882420419)
+FROM ts_features_by('i100', id, ds, v);
+----
+true
+
+query I
+SELECT abs(lempel_ziv_complexity - 0.24) <= 1e-9 + 1e-9 * abs(0.24)
+FROM ts_features_by('i100', id, ds, v);
+----
+true
+
+query I
+SELECT abs(permutation_entropy - 1.266513929850244) <= 1e-9 + 1e-9 * abs(1.266513929850244)
+FROM ts_features_by('i100', id, ds, v);
+----
+true
+
+query I
+SELECT abs(sample_entropy - 0.852101712699849) <= 1e-9 + 1e-9 * abs(0.852101712699849)
+FROM ts_features_by('i100', id, ds, v);
+----
+true
+
+# --- (ts_features_agg(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features_agg(ds, v)).benford_correlation - (-0.4135303840937026)) <= 1e-9 + 1e-9 * abs(-0.4135303840937026)
+FROM i100;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).binned_entropy - 1.083026882420419) <= 1e-9 + 1e-9 * abs(1.083026882420419)
+FROM i100;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).lempel_ziv_complexity - 0.24) <= 1e-9 + 1e-9 * abs(0.24)
+FROM i100;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).permutation_entropy - 1.266513929850244) <= 1e-9 + 1e-9 * abs(1.266513929850244)
+FROM i100;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).sample_entropy - 0.852101712699849) <= 1e-9 + 1e-9 * abs(0.852101712699849)
+FROM i100;
+----
+true
+
+#######################################
 # 117-feature schema assertions (D-13, FEAT-05): autocorrelation_lag10 now
 # reaches every SQL surface. ts_features_by returns id + 117 feature columns
 # (118 total); ts_features_agg / ts_features return 117 struct keys;
