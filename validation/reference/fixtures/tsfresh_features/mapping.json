@@ -83,8 +83,8 @@
       "reference": "tsfresh",
       "calculator": "variation_coefficient",
       "params": {},
-      "status": "pending:14-02",
-      "definition": "std(x) / mean(x), signed; current Rust divides by |mean(x)| (always non-negative) instead of the signed mean."
+      "status": "match",
+      "definition": "std(x) / mean(x), signed (tsfresh variation_coefficient)."
     },
     {
       "name": "large_standard_deviation",
@@ -150,8 +150,16 @@
       "calculator": "skewness",
       "params": {},
       "input": "series",
-      "status": "pending:14-02",
-      "definition": "pandas Series.skew (bias-corrected G1); current Rust is the biased/population moment ratio."
+      "status": "match",
+      "definition": "pandas Series.skew (bias-corrected G1), shared with ts_stats (D-05).",
+      "deviation": {
+        "series": [
+          "constant_n30",
+          "all_zero_n50"
+        ],
+        "expected_ours": "NaN",
+        "reason": "zero-variance sample: G1/G2 are 0/0; scipy skew/kurtosis(bias=False) and ts_stats return NaN (D-05); pandas/tsfresh return 0 by convention, which is arguably wrong for an undefined moment (D-03)."
+      }
     },
     {
       "name": "kurtosis",
@@ -159,8 +167,16 @@
       "calculator": "kurtosis",
       "params": {},
       "input": "series",
-      "status": "pending:14-02",
-      "definition": "pandas Series.kurtosis (bias-corrected excess G2); current Rust is the biased/population moment ratio."
+      "status": "match",
+      "definition": "pandas Series.kurtosis (bias-corrected excess G2), shared with ts_stats (D-05).",
+      "deviation": {
+        "series": [
+          "constant_n30",
+          "all_zero_n50"
+        ],
+        "expected_ours": "NaN",
+        "reason": "zero-variance sample: G1/G2 are 0/0; scipy skew/kurtosis(bias=False) and ts_stats return NaN (D-05); pandas/tsfresh return 0 by convention, which is arguably wrong for an undefined moment (D-03)."
+      }
     },
     {
       "name": "count_above_mean",
@@ -275,8 +291,8 @@
       "reference": "tsfresh",
       "calculator": "mean_second_derivative_central",
       "params": {},
-      "status": "pending:14-02",
-      "definition": "(x[-1]-x[-2]-x[1]+x[0]) / (2*(n-2)); current Rust is missing the factor-of-2 in the denominator."
+      "status": "match",
+      "definition": "(x[-1]-x[-2]-x[1]+x[0]) / (2*(n-2)) (tsfresh mean_second_derivative_central)."
     },
     {
       "name": "cid_ce",
@@ -751,8 +767,8 @@
       "params": {
         "lag": 1
       },
-      "status": "pending:14-02",
-      "definition": "mean(x_lead^2*x - x*x_lag^2), lag=1 (tsfresh time_reversal_asymmetry_statistic); current Rust has the second term's operands transposed (x_lag*x^2 instead of x*x_lag^2)."
+      "status": "match",
+      "definition": "mean(x[i+2lag]^2*x[i+lag] - x[i+lag]*x[i]^2), lag=1 (tsfresh time_reversal_asymmetry_statistic)."
     },
     {
       "name": "time_reversal_asymmetry_stat_2",
@@ -761,8 +777,8 @@
       "params": {
         "lag": 2
       },
-      "status": "pending:14-02",
-      "definition": "mean(x_lead^2*x - x*x_lag^2), lag=2 (tsfresh time_reversal_asymmetry_statistic); current Rust has the second term's operands transposed (x_lag*x^2 instead of x*x_lag^2)."
+      "status": "match",
+      "definition": "mean(x[i+2lag]^2*x[i+lag] - x[i+lag]*x[i]^2), lag=2 (tsfresh time_reversal_asymmetry_statistic)."
     },
     {
       "name": "time_reversal_asymmetry_stat_3",
@@ -771,8 +787,8 @@
       "params": {
         "lag": 3
       },
-      "status": "pending:14-02",
-      "definition": "mean(x_lead^2*x - x*x_lag^2), lag=3 (tsfresh time_reversal_asymmetry_statistic); current Rust has the second term's operands transposed (x_lag*x^2 instead of x*x_lag^2)."
+      "status": "match",
+      "definition": "mean(x[i+2lag]^2*x[i+lag] - x[i+lag]*x[i]^2), lag=3 (tsfresh time_reversal_asymmetry_statistic)."
     },
     {
       "name": "c3_lag1",

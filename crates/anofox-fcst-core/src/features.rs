@@ -1,6 +1,7 @@
 //! Time series feature extraction (tsfresh-compatible).
 
 use crate::error::{ForecastError, Result};
+use crate::stats::{sample_excess_kurtosis_g2, sample_skewness_g1};
 use std::collections::{HashMap, HashSet};
 
 /// Extract all available features from a time series.
@@ -31,11 +32,12 @@ pub fn extract_features(values: &[f64]) -> Result<HashMap<String, f64>> {
     features.insert("variance".to_string(), variance);
     features.insert("standard_deviation".to_string(), std_dev);
 
-    // Coefficient of variation
-    if mean.abs() > f64::EPSILON {
-        features.insert("variation_coefficient".to_string(), std_dev / mean.abs());
-    } else {
+    // Coefficient of variation (FEAT-02, D-03): tsfresh's variation_coefficient
+    // is std(x)/mean(x), signed -- NaN exactly when mean == 0.0, not |mean()|.
+    if mean == 0.0 {
         features.insert("variation_coefficient".to_string(), f64::NAN);
+    } else {
+        features.insert("variation_coefficient".to_string(), std_dev / mean);
     }
 
     // Large standard deviation (std > r * range)
@@ -64,27 +66,13 @@ pub fn extract_features(values: &[f64]) -> Result<HashMap<String, f64>> {
     features.insert("quantile_0.75".to_string(), quantile(&sorted, 0.75));
     features.insert("quantile_0.9".to_string(), quantile(&sorted, 0.9));
 
-    // Skewness and Kurtosis (117-key invariant, D-13: NaN when std_dev is
-    // not above EPSILON, not omitted; formula itself corrected in plan 14-02)
-    if std_dev > f64::EPSILON {
-        let skewness = values
-            .iter()
-            .map(|v| ((v - mean) / std_dev).powi(3))
-            .sum::<f64>()
-            / n;
-        features.insert("skewness".to_string(), skewness);
-
-        let kurtosis = values
-            .iter()
-            .map(|v| ((v - mean) / std_dev).powi(4))
-            .sum::<f64>()
-            / n
-            - 3.0;
-        features.insert("kurtosis".to_string(), kurtosis);
-    } else {
-        features.insert("skewness".to_string(), f64::NAN);
-        features.insert("kurtosis".to_string(), f64::NAN);
-    }
+    // Skewness and Kurtosis (D-05, FEAT-02): shared with ts_stats via
+    // sample_skewness_g1 / sample_excess_kurtosis_g2 (bias-corrected G1/G2,
+    // scipy skew(bias=False)/kurtosis(bias=False)). NaN for n <= 2 / n <= 3
+    // or zero variance -- a documented intentional deviation from
+    // tsfresh/pandas, which return 0 for a zero-variance series (D-03).
+    features.insert("skewness".to_string(), sample_skewness_g1(values));
+    features.insert("kurtosis".to_string(), sample_excess_kurtosis_g2(values));
 
     // Counting features
     let count_above_mean = values.iter().filter(|&&v| v > mean).count() as f64;
@@ -158,14 +146,16 @@ pub fn extract_features(values: &[f64]) -> Result<HashMap<String, f64>> {
     // Root mean square
     features.insert("root_mean_square".to_string(), (abs_energy / n).sqrt());
 
-    // Mean second derivative central (117-key invariant, D-13: NaN for
-    // n <= 2, not omitted; the missing factor-of-2 bug is fixed in 14-02)
+    // Mean second derivative central (FEAT-02, D-13): tsfresh's closed form is
+    // (x[-1]-x[-2]-x[1]+x[0]) / (2*(n-2)) -- the windowed sum below telescopes
+    // to that same numerator, but the denominator needs the factor of 2
+    // (previously missing). NaN for n <= 2, not omitted (117-key invariant).
     if values.len() > 2 {
         let second_deriv: f64 = values
             .windows(3)
             .map(|w| w[2] - 2.0 * w[1] + w[0])
             .sum::<f64>()
-            / (values.len() - 2) as f64;
+            / (2.0 * (values.len() - 2) as f64);
         features.insert("mean_second_derivative_central".to_string(), second_deriv);
     } else {
         features.insert("mean_second_derivative_central".to_string(), f64::NAN);
@@ -982,6 +972,11 @@ fn reoccurring_stats(values: &[f64]) -> (f64, f64, f64, f64) {
     )
 }
 
+/// tsfresh `time_reversal_asymmetry_statistic`: mean over `i in 0..n-2*lag` of
+/// `x[i+2*lag]^2 * x[i+lag] - x[i+lag] * x[i]^2` (FEAT-02, D-03). Re-indexed
+/// with `j = i + lag` below (`x_lag = x[j-lag]`, `x = x[j]`, `x_lead =
+/// x[j+lag]`): the previous implementation had the second term's operands
+/// transposed (`x_lag * x^2` instead of `x * x_lag^2`).
 fn time_reversal_asymmetry(values: &[f64], lag: usize) -> f64 {
     if values.len() <= 2 * lag {
         return f64::NAN;
@@ -994,7 +989,7 @@ fn time_reversal_asymmetry(values: &[f64], lag: usize) -> f64 {
         let x_lag = values[i - lag];
         let x = values[i];
         let x_lead = values[i + lag];
-        sum += x_lead.powi(2) * x - x_lag * x.powi(2);
+        sum += x_lead.powi(2) * x - x * x_lag.powi(2);
     }
 
     sum / (n - 2 * lag) as f64

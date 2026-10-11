@@ -126,6 +126,54 @@ pub struct TsStats {
     pub n_gap_runs: Option<usize>,
 }
 
+/// Fisher's bias-corrected skewness G1, equal to `scipy.stats.skew(x, bias=False)`
+/// (D-05, Phase 13/14): population central moments `m2`/`m3` (divided by `n`, not
+/// `n-1`), then `g1 = m3/m2^1.5`, `G1 = g1 * sqrt(n(n-1)) / (n-2)`. `NaN` for
+/// `n < 3` or zero variance (`m2 <= EPSILON`) -- shared by [`compute_ts_stats`]
+/// and `anofox_fcst_core::features::extract_features` so both report an
+/// identical value from one implementation.
+pub(crate) fn sample_skewness_g1(values: &[f64]) -> f64 {
+    let n_valid = values.len();
+    if n_valid == 0 {
+        return f64::NAN;
+    }
+    let n = n_valid as f64;
+    let mean = values.iter().sum::<f64>() / n;
+    let m2 = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n;
+
+    if n_valid > 2 && m2 > f64::EPSILON {
+        let m3 = values.iter().map(|v| (v - mean).powi(3)).sum::<f64>() / n;
+        let g1 = m3 / m2.powf(1.5);
+        g1 * (n * (n - 1.0)).sqrt() / (n - 2.0)
+    } else {
+        f64::NAN
+    }
+}
+
+/// Fisher's bias-corrected excess kurtosis G2, equal to
+/// `scipy.stats.kurtosis(x, fisher=True, bias=False)` (D-05, Phase 13/14):
+/// population central moments `m2`/`m4` (divided by `n`), then
+/// `g2 = m4/m2^2 - 3`, `G2 = ((n+1)*g2 + 6)*(n-1) / ((n-2)(n-3))`. `NaN` for
+/// `n < 4` or zero variance (`m2 <= EPSILON`) -- shared by
+/// [`compute_ts_stats`] and `anofox_fcst_core::features::extract_features`.
+pub(crate) fn sample_excess_kurtosis_g2(values: &[f64]) -> f64 {
+    let n_valid = values.len();
+    if n_valid == 0 {
+        return f64::NAN;
+    }
+    let n = n_valid as f64;
+    let mean = values.iter().sum::<f64>() / n;
+    let m2 = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n;
+
+    if n_valid > 3 && m2 > f64::EPSILON {
+        let m4 = values.iter().map(|v| (v - mean).powi(4)).sum::<f64>() / n;
+        let g2 = m4 / m2.powi(2) - 3.0;
+        ((n + 1.0) * g2 + 6.0) * (n - 1.0) / ((n - 2.0) * (n - 3.0))
+    } else {
+        f64::NAN
+    }
+}
+
 /// Compute time series statistics for a series with potential NULL values.
 ///
 /// # Arguments
@@ -222,30 +270,14 @@ pub fn compute_ts_stats(series: &[Option<f64>], seasonal_period: usize) -> Resul
     let q3 = percentile(&sorted, 0.75);
     let iqr = q3 - q1;
 
-    // Moments (D-01, STAT-01): population central moments m2/m3/m4 (divided by n, NOT
-    // n-1), matching scipy's internal computation before its own bias correction.
+    // Moments (D-01, STAT-01; D-05 Phase 14): population central moments and the
+    // scipy bias-corrected G1/G2 factors now live in the shared
+    // `sample_skewness_g1` / `sample_excess_kurtosis_g2` helpers below, used by
+    // both ts_stats and ts_features (D-05, FEAT-02). Bit-identical to the
+    // previous inline computation.
     let n = n_valid as f64;
-    let m2 = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n;
-
-    // Skewness: scipy.stats.skew(x, bias=False) — Fisher's bias-corrected G1.
-    // g1 = m3 / m2^1.5; G1 = g1 * sqrt(n(n-1)) / (n-2)
-    let skewness = if n_valid > 2 && m2 > f64::EPSILON {
-        let m3 = values.iter().map(|v| (v - mean).powi(3)).sum::<f64>() / n;
-        let g1 = m3 / m2.powf(1.5);
-        g1 * (n * (n - 1.0)).sqrt() / (n - 2.0)
-    } else {
-        f64::NAN
-    };
-
-    // Excess kurtosis: scipy.stats.kurtosis(x, fisher=True, bias=False) — Fisher's
-    // bias-corrected G2. g2 = m4/m2^2 - 3; G2 = ((n+1)*g2 + 6)*(n-1) / ((n-2)(n-3))
-    let kurtosis = if n_valid > 3 && m2 > f64::EPSILON {
-        let m4 = values.iter().map(|v| (v - mean).powi(4)).sum::<f64>() / n;
-        let g2 = m4 / m2.powi(2) - 3.0;
-        ((n + 1.0) * g2 + 6.0) * (n - 1.0) / ((n - 2.0) * (n - 3.0))
-    } else {
-        f64::NAN
-    };
+    let skewness = sample_skewness_g1(&values);
+    let kurtosis = sample_excess_kurtosis_g2(&values);
 
     // Tail index (Hill estimator on absolute values)
     let tail_index = compute_hill_estimator(&values);
