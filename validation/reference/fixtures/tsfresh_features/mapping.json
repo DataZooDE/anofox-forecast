@@ -412,8 +412,8 @@
       "reference": "tsfresh",
       "calculator": "sample_entropy",
       "params": {},
-      "status": "pending:14-04",
-      "definition": "-ln(A/B), m=2, r=0.2*std(x), full symmetric-matrix double-sum (no triangular/combinatorial divisor); current Rust has a window-count off-by-one and a triangular-sum normalization tsfresh does not use."
+      "status": "match",
+      "definition": "tsfresh sample_entropy: m=2, r=0.2*population std(x), Chebyshev distance, full symmetric match-count matrix minus self-matches (B/A), -ln(A/B) on the raw sums -- shares the stats.rs template_match_counts band search with ts_stats' approximate_entropy."
     },
     {
       "name": "approximate_entropy",

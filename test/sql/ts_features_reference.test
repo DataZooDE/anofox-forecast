@@ -552,6 +552,37 @@ FROM x20;
 true
 
 #######################################
+# sample_entropy (Task 1, 14-04, FEAT-04): tsfresh's full symmetric
+# match-count algorithm on the shared stats.rs template_match_counts band
+# search -- ROADMAP anchor, ln(3) = 1.0986122886681098 (previously
+# 0.9808292530117262 under the window-count-off-by-one/triangular-sum bug).
+#######################################
+
+# --- ts_features_by('x20', id, ds, v) ---
+
+query I
+SELECT abs(sample_entropy - 1.0986122886681098) <= 1e-9 + 1e-9 * abs(1.0986122886681098)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+# --- (ts_features(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features(ds, v)).sample_entropy - 1.0986122886681098) <= 1e-9 + 1e-9 * abs(1.0986122886681098)
+FROM x20;
+----
+true
+
+# --- (ts_features_agg(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features_agg(ds, v)).sample_entropy - 1.0986122886681098) <= 1e-9 + 1e-9 * abs(1.0986122886681098)
+FROM x20;
+----
+true
+
+#######################################
 # 117-feature schema assertions (D-13, FEAT-05): autocorrelation_lag10 now
 # reaches every SQL surface. ts_features_by returns id + 117 feature columns
 # (118 total); ts_features_agg / ts_features return 117 struct keys;

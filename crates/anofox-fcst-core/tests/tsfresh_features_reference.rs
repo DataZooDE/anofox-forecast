@@ -215,6 +215,91 @@ fn all_nine_series_fixtures_present() {
     }
 }
 
+/// The ratchet (plan 14-02+): every `pending:<owner>` row must still
+/// genuinely mismatch on at least one of the nine fixture series (honouring
+/// `deviation` entries). A pending row that now matches everywhere means the
+/// underlying Rust fix already landed without the mapping being updated --
+/// fail loudly so `status` gets flipped to `"match"` deliberately.
+#[test]
+fn pending_features_still_mismatch() {
+    let rows = load_mapping_rows();
+
+    let fixtures: Vec<(&str, Value)> = SERIES_NAMES
+        .iter()
+        .map(|&name| (name, load_fixture(&format!("tsfresh_features/{name}.json"))))
+        .collect();
+
+    let mut now_matching_everywhere: Vec<String> = Vec::new();
+
+    for row in &rows {
+        let name = row["name"].as_str().unwrap();
+        let status = row["status"].as_str().unwrap();
+        if !status.starts_with("pending:") {
+            continue;
+        }
+
+        let mut mismatching_series: Vec<&str> = Vec::new();
+        for (series_name, fixture) in &fixtures {
+            let values = f64_vec(&fixture["series"]["values"]);
+            let got = extract_features(&values)
+                .unwrap_or_else(|e| panic!("{series_name}: extract_features failed: {e:?}"));
+            let got_value = got.get(name).copied().unwrap_or(f64::NAN);
+
+            let fixture_expected = fixture["expected"].get(name).map(num).unwrap_or_else(|| {
+                panic!("{series_name}: fixture 'expected' missing key {name:?}")
+            });
+            let want = expected_value_for(row, series_name, fixture_expected);
+            let (abs_tol, rel_tol) = row_tolerance(fixture, row);
+
+            let is_match = (got_value.is_nan() && want.is_nan())
+                || (got_value.is_infinite() && want.is_infinite() && got_value == want)
+                || (got_value - want).abs() <= abs_tol + rel_tol * want.abs();
+            if !is_match {
+                mismatching_series.push(series_name);
+            }
+        }
+
+        println!(
+            "pending {name} [{status}]: mismatches on {:?} ({} of {} series)",
+            mismatching_series,
+            mismatching_series.len(),
+            fixtures.len()
+        );
+
+        if mismatching_series.is_empty() {
+            now_matching_everywhere.push(name.to_string());
+        }
+    }
+
+    assert!(
+        now_matching_everywhere.is_empty(),
+        "these pending rows now match on every fixture series -- set their status to \"match\" in mapping.json: {now_matching_everywhere:?}"
+    );
+}
+
+/// ROADMAP Phase 14 success criterion 4's literal anchor (Task 1, D-08): on
+/// the audit `short_n20` vector, `sample_entropy` must equal `ln(3) =
+/// 1.0986122886681098` (previously `0.9808292530117262` under the old
+/// window-count-off-by-one/triangular-sum bug), pinned independently of the
+/// fixture JSON the same way `stats_reference.rs`'s `r_entropy` test pins
+/// its own literal values.
+#[test]
+fn sample_entropy_roadmap_anchor() {
+    let fixture = load_fixture("tsfresh_features/short_n20.json");
+    let values = f64_vec(&fixture["series"]["values"]);
+    let got = extract_features(&values).unwrap();
+
+    let want = 1.0986122886681098_f64; // ln(3)
+    let got_value = *got.get("sample_entropy").unwrap();
+    common::assert_close(
+        got_value,
+        want,
+        1e-12,
+        0.0,
+        "short_n20.sample_entropy_roadmap_anchor",
+    );
+}
+
 /// D-01 completeness gate: the mapping's names equal `list_features()`'s set
 /// exactly (117 rows, no duplicates), and every row is internally
 /// well-formed (D-10/D-11 preconditions the other tests rely on).
@@ -308,66 +393,4 @@ fn mapping_covers_list_features_exactly() {
             assert!(!reason.is_empty(), "{name}: 'tolerance.reason' is empty");
         }
     }
-}
-
-/// The ratchet (plan 14-02+): every `pending:<owner>` row must still
-/// genuinely mismatch on at least one of the nine fixture series (honouring
-/// `deviation` entries). A pending row that now matches everywhere means the
-/// underlying Rust fix already landed without the mapping being updated --
-/// fail loudly so `status` gets flipped to `"match"` deliberately.
-#[test]
-fn pending_features_still_mismatch() {
-    let rows = load_mapping_rows();
-
-    let fixtures: Vec<(&str, Value)> = SERIES_NAMES
-        .iter()
-        .map(|&name| (name, load_fixture(&format!("tsfresh_features/{name}.json"))))
-        .collect();
-
-    let mut now_matching_everywhere: Vec<String> = Vec::new();
-
-    for row in &rows {
-        let name = row["name"].as_str().unwrap();
-        let status = row["status"].as_str().unwrap();
-        if !status.starts_with("pending:") {
-            continue;
-        }
-
-        let mut mismatching_series: Vec<&str> = Vec::new();
-        for (series_name, fixture) in &fixtures {
-            let values = f64_vec(&fixture["series"]["values"]);
-            let got = extract_features(&values)
-                .unwrap_or_else(|e| panic!("{series_name}: extract_features failed: {e:?}"));
-            let got_value = got.get(name).copied().unwrap_or(f64::NAN);
-
-            let fixture_expected = fixture["expected"].get(name).map(num).unwrap_or_else(|| {
-                panic!("{series_name}: fixture 'expected' missing key {name:?}")
-            });
-            let want = expected_value_for(row, series_name, fixture_expected);
-            let (abs_tol, rel_tol) = row_tolerance(fixture, row);
-
-            let is_match = (got_value.is_nan() && want.is_nan())
-                || (got_value.is_infinite() && want.is_infinite() && got_value == want)
-                || (got_value - want).abs() <= abs_tol + rel_tol * want.abs();
-            if !is_match {
-                mismatching_series.push(series_name);
-            }
-        }
-
-        println!(
-            "pending {name} [{status}]: mismatches on {:?} ({} of {} series)",
-            mismatching_series,
-            mismatching_series.len(),
-            fixtures.len()
-        );
-
-        if mismatching_series.is_empty() {
-            now_matching_everywhere.push(name.to_string());
-        }
-    }
-
-    assert!(
-        now_matching_everywhere.is_empty(),
-        "these pending rows now match on every fixture series -- set their status to \"match\" in mapping.json: {now_matching_everywhere:?}"
-    );
 }

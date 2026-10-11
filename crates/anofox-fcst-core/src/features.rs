@@ -1,7 +1,7 @@
 //! Time series feature extraction (tsfresh-compatible).
 
 use crate::error::{ForecastError, Result};
-use crate::stats::{sample_excess_kurtosis_g2, sample_skewness_g1};
+use crate::stats::{sample_excess_kurtosis_g2, sample_skewness_g1, template_match_counts};
 use rustfft::{num_complex::Complex, FftPlanner};
 use std::collections::{HashMap, HashSet};
 
@@ -222,10 +222,7 @@ pub fn extract_features(values: &[f64]) -> Result<HashMap<String, f64>> {
 
     // Entropy features
     features.insert("binned_entropy".to_string(), binned_entropy(values, 10));
-    features.insert(
-        "sample_entropy".to_string(),
-        sample_entropy(values, 2, 0.2 * std_dev),
-    );
+    features.insert("sample_entropy".to_string(), sample_entropy(values));
     features.insert(
         "approximate_entropy".to_string(),
         approximate_entropy(values, 2, 0.2 * std_dev),
@@ -791,63 +788,51 @@ fn count_peaks_threshold(values: &[f64], threshold: f64) -> usize {
         .count()
 }
 
-fn sample_entropy(values: &[f64], m: usize, r: f64) -> f64 {
-    if values.len() < m + 1 || r <= 0.0 {
+/// tsfresh `sample_entropy` (D-08, FEAT-04, audit F9, RESEARCH Pitfall 3):
+/// `m=2`, `r = 0.2 * population std(x)`. `B` sums, over the `n-m+1`
+/// length-`m` templates, `(match count incl. self) - 1`; `A` is the same
+/// sum over the `n-m` length-`(m+1)` templates -- the shared
+/// [`template_match_counts`] band search gives per-template counts directly,
+/// no triangular restriction and no combinatorial divisor (tsfresh's own
+/// `_into_subchunks`/full-symmetric-matrix semantics). Returns `-ln(A/B)` on
+/// the raw sums: `A=0 < B` gives `+inf`, `B=0` (so `A=0` too) gives `NaN`.
+/// NaN if any input value is NaN (T-14-10) -- `template_match_counts`'s sort
+/// never panics on NaN, but a NaN template's Chebyshev distance is not
+/// physically meaningful, so this guards explicitly rather than relying on
+/// whatever count a NaN-laden band search happens to produce.
+fn sample_entropy(values: &[f64]) -> f64 {
+    if values.iter().any(|v| v.is_nan()) {
         return f64::NAN;
     }
 
     let n = values.len();
-
-    // Count matches for template length m
-    let count_m = count_template_matches(values, m, r);
-    let count_m1 = count_template_matches(values, m + 1, r);
-
-    if count_m == 0 || count_m1 == 0 {
+    let m = 2;
+    if n < m + 1 {
         return f64::NAN;
     }
 
-    // Normalize by number of comparisons
-    let norm_m = (n - m) * (n - m - 1) / 2;
-    let norm_m1 = (n - m - 1) * (n - m - 2) / 2;
+    let mean = values.iter().sum::<f64>() / n as f64;
+    let variance = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n as f64;
+    let r = 0.2 * variance.sqrt();
 
-    if norm_m == 0 || norm_m1 == 0 {
-        return f64::NAN;
-    }
+    let b: f64 = template_match_counts(values, m, r)
+        .iter()
+        .map(|&c| (c - 1) as f64)
+        .sum();
+    let a: f64 = template_match_counts(values, m + 1, r)
+        .iter()
+        .map(|&c| (c - 1) as f64)
+        .sum();
 
-    let phi_m = count_m as f64 / norm_m as f64;
-    let phi_m1 = count_m1 as f64 / norm_m1 as f64;
-
-    if phi_m1 <= 0.0 || phi_m <= 0.0 {
-        return f64::NAN;
-    }
-
-    -(phi_m1 / phi_m).ln()
+    -(a / b).ln()
 }
 
-fn count_template_matches(values: &[f64], m: usize, r: f64) -> usize {
-    let n = values.len();
-    if n < m {
-        return 0;
-    }
-
-    let mut count = 0;
-    for i in 0..n - m {
-        for j in i + 1..n - m {
-            let mut is_match = true;
-            for k in 0..m {
-                if (values[i + k] - values[j + k]).abs() > r {
-                    is_match = false;
-                    break;
-                }
-            }
-            if is_match {
-                count += 1;
-            }
-        }
-    }
-    count
-}
-
+/// tsfresh `approximate_entropy` (D-08, FEAT-04, audit F8-adjacent): `m=2`,
+/// `r_ratio=0.2` -- `r = r_ratio * population std(x)`. `0.0` when `n <= m+1`
+/// (tsfresh's own degenerate-input branch, not `NaN`); otherwise
+/// `|Phi_m - Phi_{m+1}|` with `Phi_m = mean_i(ln(C_i / (n-m+1)))` over the
+/// shared [`template_match_counts`] band search. NaN if any input value is
+/// NaN.
 fn approximate_entropy(values: &[f64], m: usize, r: f64) -> f64 {
     if values.len() < m + 1 || r <= 0.0 {
         return f64::NAN;
@@ -1658,5 +1643,48 @@ mod tests {
                 "extract_features panicked/errored for n={n}"
             );
         }
+    }
+
+    // --- Task 1 (D-08, FEAT-04): tsfresh sample_entropy on the shared
+    // template_match_counts band search. Literal values reproduced from the
+    // live tsfresh 0.21.2 `sample_entropy` calculator (14-RESEARCH.md probe
+    // values / mapping.json fixtures).
+
+    #[test]
+    fn test_sample_entropy_alternating_pair() {
+        let values: Vec<f64> = [1.0, 2.0].iter().cycle().take(10).cloned().collect();
+        let got = sample_entropy(&values);
+        assert!(
+            (got - 0.2876820724517809).abs() < 1e-12,
+            "sample_entropy([1,2]*5): got {got}, want 0.2876820724517809"
+        );
+    }
+
+    #[test]
+    fn test_sample_entropy_n3_is_nan() {
+        let got = sample_entropy(&[1.0, 2.0, 3.0]);
+        assert!(got.is_nan(), "sample_entropy([1,2,3]): got {got}, want NaN");
+    }
+
+    #[test]
+    fn test_sample_entropy_constant_matches_fixture() {
+        // constant_n30 fixture (validation/reference/fixtures/tsfresh_features/
+        // constant_n30.json): 30 copies of 7.0, tsfresh sample_entropy ==
+        // 0.07145896398214498.
+        let values = vec![7.0; 30];
+        let got = sample_entropy(&values);
+        assert!(
+            (got - 0.07145896398214498).abs() < 1e-12,
+            "sample_entropy(constant_n30): got {got}, want 0.07145896398214498"
+        );
+    }
+
+    #[test]
+    fn test_sample_entropy_nan_input_is_nan() {
+        let got = sample_entropy(&[1.0, 2.0, f64::NAN, 4.0, 5.0]);
+        assert!(
+            got.is_nan(),
+            "sample_entropy with a NaN element: got {got}, want NaN"
+        );
     }
 }

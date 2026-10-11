@@ -683,13 +683,40 @@ fn approximate_entropy(x: &[f64], m: usize) -> f64 {
 /// length-`m` templates starting at each index.
 fn phi(x: &[f64], m: usize, r: f64) -> f64 {
     let n_m = x.len() - m + 1;
+    let counts = template_match_counts(x, m, r);
+
+    let mut sum_log = 0.0;
+    for &count in &counts {
+        let c_i = count as f64 / n_m as f64;
+        sum_log += c_i.ln();
+    }
+
+    sum_log / n_m as f64
+}
+
+/// Shared sorted-band template-match counter (Phase 14 Task 1, T-14-09):
+/// for each of the `n - m + 1` length-`m` templates starting at each index,
+/// counts the number of templates `j` (self included) within Chebyshev
+/// (max-abs) distance `<= r` of template `i`, returned in index order
+/// `0..n-m+1`.
+///
+/// Sorts template-start indices by their first coordinate with
+/// [`f64::total_cmp`] (not `partial_cmp().unwrap()`, T-14-10) so a NaN
+/// element can never panic the sort -- callers that need NaN-safety should
+/// still short-circuit on NaN input before calling, since a NaN's
+/// `total_cmp` position does not participate meaningfully in a Chebyshev
+/// distance comparison. Used by `ts_stats`'s Pincus approximate entropy
+/// ([`phi`], above) and `ts_features`'s `sample_entropy`/`approximate_entropy`
+/// (features.rs).
+pub(crate) fn template_match_counts(x: &[f64], m: usize, r: f64) -> Vec<usize> {
+    let n_m = x.len() - m + 1;
 
     // Sort template-start indices by their first coordinate for the band search.
     let mut order: Vec<usize> = (0..n_m).collect();
-    order.sort_by(|&a, &b| x[a].partial_cmp(&x[b]).unwrap());
+    order.sort_by(|&a, &b| x[a].total_cmp(&x[b]));
     let sorted_first: Vec<f64> = order.iter().map(|&i| x[i]).collect();
 
-    let mut sum_log = 0.0;
+    let mut counts = vec![0usize; n_m];
     for i in 0..n_m {
         let xi = x[i];
         let lo = sorted_first.partition_point(|&v| v < xi - r);
@@ -708,12 +735,10 @@ fn phi(x: &[f64], m: usize, r: f64) -> f64 {
                 count += 1;
             }
         }
-
-        let c_i = count as f64 / n_m as f64;
-        sum_log += c_i.ln();
+        counts[i] = count;
     }
 
-    sum_log / n_m as f64
+    counts
 }
 
 /// Compute stability as inverse of coefficient of variation of rolling means.
