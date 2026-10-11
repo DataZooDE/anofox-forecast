@@ -692,8 +692,13 @@ fn pearson_correlation(a: &[f64], b: &[f64]) -> f64 {
 }
 
 fn linear_trend(values: &[f64]) -> (f64, f64, f64) {
+    // n < 2 is degenerate for scipy.stats.linregress (needs >= 2 points to fit
+    // a line): scipy returns NaN for every field, including intercept (not
+    // `values[0]`) -- matches sibling n<=1/n<=2 short-circuits elsewhere in
+    // this file (mean_change, mean_second_derivative_central). Confirmed live
+    // against scipy 1.18.1 (WR-01, 14-REVIEW.md).
     if values.len() < 2 {
-        return (0.0, values.first().cloned().unwrap_or(0.0), 0.0);
+        return (f64::NAN, f64::NAN, f64::NAN);
     }
 
     let n = values.len() as f64;
@@ -1591,6 +1596,52 @@ mod tests {
             features.get("linear_trend_r_squared"),
             Some(&1.0),
             "linear_trend_r_squared: perfect-fit line should clamp to 1.0"
+        );
+    }
+
+    #[test]
+    fn test_linear_trend_nan_for_n_lt_2() {
+        // scipy.stats.linregress(range(1), [5.0]) == LinregressResult(
+        //     slope=nan, intercept=nan, rvalue=nan, pvalue=nan, stderr=nan,
+        //     intercept_stderr=nan,
+        // ) -- confirmed live against scipy 1.18.1 (WR-01, 14-REVIEW.md).
+        // A single-point series cannot determine a line's intercept either,
+        // so scipy's intercept is NaN too, not `values[0]`.
+        let (slope, intercept, r_squared) = linear_trend(&[5.0]);
+        assert!(
+            slope.is_nan(),
+            "linear_trend slope: want NaN for n=1, got {slope}"
+        );
+        assert!(
+            intercept.is_nan(),
+            "linear_trend intercept: want NaN for n=1, got {intercept}"
+        );
+        assert!(
+            r_squared.is_nan(),
+            "linear_trend r_squared: want NaN for n=1, got {r_squared}"
+        );
+
+        // n=0 is equally degenerate and must not panic.
+        let (slope, intercept, r_squared) = linear_trend(&[]);
+        assert!(slope.is_nan());
+        assert!(intercept.is_nan());
+        assert!(r_squared.is_nan());
+
+        // Reachable end-to-end through extract_features (the FFI/SQL path,
+        // not just the private helper): a one-row group feeds a 1-element
+        // values slice into linear_trend via extract_features.
+        let features = extract_features(&[5.0]).unwrap();
+        assert!(
+            features.get("linear_trend_slope").unwrap().is_nan(),
+            "linear_trend_slope: want NaN for a 1-row series"
+        );
+        assert!(
+            features.get("linear_trend_intercept").unwrap().is_nan(),
+            "linear_trend_intercept: want NaN for a 1-row series"
+        );
+        assert!(
+            features.get("linear_trend_r_squared").unwrap().is_nan(),
+            "linear_trend_r_squared: want NaN for a 1-row series"
         );
     }
 

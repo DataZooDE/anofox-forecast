@@ -821,3 +821,28 @@ query I
 SELECT count(*) FROM (DESCRIBE SELECT * FROM ts_features_table('x20', ds, v));
 ----
 117
+
+#######################################
+# linear_trend n=1 edge case (14-REVIEW.md WR-01): scipy.stats.linregress
+# needs >= 2 points to fit a line and returns NaN for every field at n=1
+# (confirmed live against scipy 1.18.1), including intercept -- not
+# `values[0]`. Reachable from ordinary SQL via any one-row group.
+#######################################
+
+statement ok
+CREATE TABLE one_row AS SELECT 'a' AS id, DATE '2024-01-01' AS ds, 5.0 AS v;
+
+query I
+SELECT isnan(linear_trend_slope) FROM ts_features_by('one_row', id, ds, v);
+----
+true
+
+query I
+SELECT isnan(linear_trend_intercept) FROM ts_features_by('one_row', id, ds, v);
+----
+true
+
+query I
+SELECT isnan(linear_trend_r_squared) FROM ts_features_by('one_row', id, ds, v);
+----
+true
