@@ -1,131 +1,94 @@
 ---
 phase: 14-tsfresh-feature-parity
-reviewed: 2026-10-11T22:49:01Z
+reviewed: 2026-10-12T00:00:00Z
 depth: standard
-files_reviewed: 10
+files_reviewed: 2
 files_reviewed_list:
-  - crates/anofox-fcst-core/Cargo.toml
   - crates/anofox-fcst-core/src/features.rs
-  - crates/anofox-fcst-core/src/stats.rs
-  - crates/anofox-fcst-core/tests/tsfresh_features_reference.rs
-  - crates/anofox-fcst-ffi/src/types.rs
-  - src/macros/ts_macros.cpp
-  - test/sql/ts_agg_duplicate_timestamp_tiebreak.test
   - test/sql/ts_features_reference.test
-  - validation/reference/python/gen_tsfresh_features.py
-  - validation/reference/fixtures/tsfresh_features/mapping.json
 findings:
   critical: 0
-  warning: 1
+  warning: 0
   info: 2
-  total: 3
-status: issues_found
+  total: 2
+status: clean
 ---
 
-# Phase 14: Code Review Report
+# Phase 14: Code Review Report (iteration 2 — re-review of --auto fix loop)
 
-**Reviewed:** 2026-10-11T22:49:01Z
+**Reviewed:** 2026-10-12T00:00:00Z
 **Depth:** standard
-**Files Reviewed:** 10
-**Status:** issues_found
+**Files Reviewed:** 2
+**Status:** clean
 
 ## Summary
 
-This phase rewrites `anofox-fcst-core::features::extract_features` to be bit-faithful to
-tsfresh 0.21.2 across all 117 features, backed by a hand-maintained parity contract
-(`mapping.json`) and a Python fixture generator that calls tsfresh's calculators directly
-(never the settings-driven convenience API). The work is unusually well-evidenced:
+This is a re-review of commit `59a3e82`, which claims to fix WR-01 from iteration 1
+(`linear_trend()`'s n=1 short-circuit hardcoding `(0.0, values[0], 0.0)` instead of
+scipy's actual all-`NaN` output). Scope is narrow and proportionate to the size of the fix.
 
-- `cargo test -p anofox-fcst-core` (unit tests + the `tsfresh_features_reference`
-  integration suite) passes cleanly — 42 lib tests + 12 reference tests, all green,
-  independently re-run during this review.
-- `mapping.json` has exactly 117 rows, no duplicates, no `pending:*` status rows, and the
-  name set matches `list_features()` exactly (verified live, not just by reading the
-  test).
-- The fixture generator genuinely invokes the installed tsfresh 0.21.2 / scipy 1.18.1 /
-  numpy 2.5.3 (version-pinned and enforced via `check_tool_versions`); spot-checked
-  fixture values (e.g. `short_n20.sample_entropy == ln(3)`) are real computed tsfresh
-  output, not placeholders.
-- `assert_close`'s NaN/NaN handling was checked for vacuous-pass risk: a NaN on only one
-  side still fails the bound check (`NaN - number = NaN`, which is never `<= bound`), so
-  the gate cannot silently accept a wrong numeric value by miscomparing against NaN.
-- The `ts_stats` skewness/kurtosis refactor into shared `sample_skewness_g1` /
-  `sample_excess_kurtosis_g2` helpers is a verbatim code move (confirmed via diff) —
-  bit-identical, no behavior change for `ts_stats`.
-- End-to-end SQL verification against the built extension (`ts_features_by`,
-  `ts_features_table`) was run live for this review and matches the Rust/fixture values,
-  including the new `autocorrelation_lag10` column and `last_location_of_maximum`'s
-  `(idx+1)/n` fix (which the `ts_agg_duplicate_timestamp_tiebreak.test` update correctly
-  reflects).
-- No panics were reproducible from SQL for n=1, constant, all-zero, or very-large-value
-  (1e308) series; NaN propagates cleanly instead.
+**WR-01 is genuinely resolved.** Verified independently in this review, not just by
+reading the diff:
 
-One genuine numeric-edge-case defect was found (below): the `linear_trend` helper's own
-n=1 short-circuit returns non-NaN placeholder values that this phase's own fix to the
-same function's degenerate-case branch (`ss_xx`/`ss_yy == 0 → NaN`, in 14-02) did not
-extend to cover, leaving an inconsistency with scipy's actual n=1 `linregress` output and
-with sibling n=1 handling elsewhere in the same file (`mean_change`,
-`mean_second_derivative_central` correctly emit NaN for n=1).
+- `linear_trend()` (`features.rs:694-702`) now returns `(f64::NAN, f64::NAN, f64::NAN)`
+  for `values.len() < 2`, matching scipy's documented n<2 behavior.
+- Live scipy probe run against the pinned reference environment in this review
+  (`uv run --locked --project validation/reference/python python`):
+  ```
+  >>> linregress(np.arange(1), np.array([5.0]))
+  LinregressResult(slope=nan, intercept=nan, rvalue=nan, ...)
+  ```
+- Reproduced end-to-end against the actual built extension
+  (`build/release/duckdb -unsigned`, `LOAD 'build/release/extension/anofox_forecast/anofox_forecast.duckdb_extension'`):
+  a one-row group now returns `linear_trend_slope`/`intercept`/`r_squared` = `nan`/`nan`/`nan`
+  (previously `0.0`/`5.0`/`0.0`).
+- `cargo test -p anofox-fcst-core --lib test_linear_trend_nan_for_n_lt_2` passes and
+  genuinely exercises both the private helper (n=1, n=0) and the FFI/SQL-reachable
+  `extract_features(&[5.0])` path — not vacuous.
+- `./build/release/test/unittest test/sql/ts_features_reference.test` passes for real
+  against the built binary (111 assertions in 1 test case), including the three new
+  `isnan(...)` assertions. The test file is `require anofox_forecast`-gated only (no
+  json/pending gate), so it runs on every native build as claimed. The new assertions are
+  not vacuous: `isnan(0.0)` is `false`, so they would have failed against the pre-fix code.
+- Full regression suites re-run clean in this review: `cargo test -p anofox-fcst-core
+  --lib` (356 passed), `cargo test -p anofox-fcst-core --test
+  tsfresh_features_reference` (12 passed, including the unchanged 117/117
+  `tsfresh_parity_*` series — none of which has n=1, consistent with the fixer's stated
+  reasoning for not adding a fixture), `cargo fmt --all --check` (clean).
 
-## Warnings
+**No new defect was introduced by the fix:**
 
-### WR-01: `linear_trend_slope`/`linear_trend_intercept`/`linear_trend_r_squared` silently wrong (not NaN) for n=1 series
+- `linear_trend()` has exactly one call site (`features.rs:218`, inside
+  `extract_features`) — no other of the 117 features is derived from its output, so there
+  is no secondary feature that could inherit a stale `0.0`-vs-`NaN` inconsistency.
+- The n=2 boundary (the next value up from the changed n<2 branch) was explicitly
+  re-checked for regression: `linear_trend(&[3.0, 7.0])` and the equivalent SQL call both
+  produce `slope=4.0, intercept=3.0, r_squared=1.0`, matching
+  `scipy.stats.linregress(range(2), [3.0, 7.0])` (`rvalue=1.0 → r_squared=1.0`) exactly —
+  the n>=2 arithmetic path is untouched by this commit and was not regressed.
+- The only other consumer of `linear_trend_*` column names is a straight passthrough
+  struct-field selection in `src/macros/ts_macros.cpp:2000-2002` (no NaN-sensitive
+  comparison or arithmetic on the C++ side), so NaN propagates cleanly to SQL output as
+  intended.
+- The fixer's claim that `aggregated_linear_trend` (the separate `agg_linear_trend_*`
+  chunk-based feature, a different function) needed no change was spot-checked: it has its
+  own independent `scipy_linregress`-style computation, is not called by or related to
+  `linear_trend()`, and its guard (`chunk_len >= n -> NaN`) means a true single-point input
+  can't reach the degenerate branch the same way — this is a correct scope boundary, not a
+  missed sibling bug.
 
-**File:** `crates/anofox-fcst-core/src/features.rs:694-699`
+No new WARNING or CRITICAL findings from this re-review. IN-01 and IN-02 from iteration 1
+remain unaddressed (expected — both were explicitly out of scope for this fix per
+`fix_scope: critical_warning`) and are carried forward below unchanged, still Info-level.
 
-**Issue:** `linear_trend()`'s early-return for a 1-point series hardcodes
-`(slope=0.0, intercept=values[0], r_squared=0.0)`:
+## Structural Findings (fallow)
 
-```rust
-fn linear_trend(values: &[f64]) -> (f64, f64, f64) {
-    if values.len() < 2 {
-        return (0.0, values.first().cloned().unwrap_or(0.0), 0.0);
-    }
-    ...
-```
+None provided for this re-review (no `<structural_findings>` block).
 
-tsfresh's `linear_trend` calculator calls `scipy.stats.linregress(range(n), x)` directly,
-and scipy 1.18.1's actual behavior for `n=1` is **NaN for every field**, confirmed live
-against the installed reference tool in this review:
+## Narrative Findings (AI reviewer)
 
-```
->>> scipy.stats.linregress(np.arange(1), np.array([5.0]))
-LinregressResult(slope=nan, intercept=nan, rvalue=nan, pvalue=nan, stderr=nan, intercept_stderr=nan)
-```
-
-Reproduced end-to-end through the built extension (not just the Rust unit, confirming the
-bug is reachable from ordinary SQL — any group with exactly one row):
-
-```sql
-CREATE TABLE one_row AS SELECT 'a' id, DATE '2024-01-01' ds, 5.0 v;
-SELECT linear_trend_slope, linear_trend_intercept, linear_trend_r_squared
-FROM ts_features_by('one_row', id, ds, v);
--- 0.0 | 5.0 | 0.0   (want: NaN | NaN | NaN)
-```
-
-This is exactly the class of defect this phase otherwise took great care to eliminate
-elsewhere (silent `0.0` instead of `NaN` for a degenerate/underdetermined fit): the
-sibling fix in this same function, two lines below, replaced a hardcoded `0.0`
-`r_squared` with `f64::NAN` for the `ss_xx == 0 || ss_yy == 0` branch and explicitly
-documents "only `ss_yy == 0` ... is reachable, since x ... always varies for n >= 2" —
-correctly reasoning about the `n >= 2` path but not revisiting the `n < 2` short-circuit
-one level up, which the 14-01/14-02 parity contract and fixtures never exercise (no
-fixture series has `n == 1`), so the 117/117 gate does not catch it.
-
-Other n=1 branches in the same file get this right already (e.g.
-`mean_change`/`mean_abs_change`/`mean_second_derivative_central` all explicitly emit
-`f64::NAN` for `n <= 1`/`n <= 2`), making this short-circuit the outlier.
-
-**Fix:**
-```rust
-fn linear_trend(values: &[f64]) -> (f64, f64, f64) {
-    if values.len() < 2 {
-        return (f64::NAN, f64::NAN, f64::NAN);
-    }
-    ...
-```
-Add a fixture/unit test pinning `n=1` against a live scipy probe (as this review did) so a
-future change can't silently regress it back to `0.0` without the 117/117 gate noticing.
+No Critical or Warning findings in this iteration. See Info items below (carried forward
+from iteration 1, unaddressed by design).
 
 ## Info
 
@@ -166,6 +129,6 @@ given it's explicitly a non-functional cleanup.
 
 ---
 
-_Reviewed: 2026-10-11T22:49:01Z_
+_Reviewed: 2026-10-12T00:00:00Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
