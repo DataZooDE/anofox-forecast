@@ -1450,4 +1450,94 @@ mod tests {
             }
         }
     }
+
+    // --- Task 3 (14-02, FEAT-02): agg_linear_trend / linear_trend_r_squared
+    // on scipy 1.18 linregress semantics (signed rvalue, NaN degenerate
+    // cases). aggregated_linear_trend is exercised directly for precise
+    // control over chunk_len; see 14-02-PLAN.md Task 3 <behavior>.
+
+    #[test]
+    fn test_agg_linear_trend_nan_when_chunk_len_ge_n() {
+        // n=1, n=2 with chunk_len=2 (chunk_len >= n): all four NaN.
+        let (slope, intercept, rvalue, stderr) = aggregated_linear_trend(&[5.0], 2);
+        assert!(slope.is_nan() && intercept.is_nan() && rvalue.is_nan() && stderr.is_nan());
+
+        let (slope, intercept, rvalue, stderr) = aggregated_linear_trend(&[5.0, 7.0], 2);
+        assert!(slope.is_nan() && intercept.is_nan() && rvalue.is_nan() && stderr.is_nan());
+    }
+
+    #[test]
+    fn test_agg_linear_trend_signed_rvalue() {
+        // chunk_len=2 over 3 chunks -> chunk means [10, 6, 2] (perfectly
+        // linear, decreasing): current Rust always returns sqrt(r^2)
+        // (non-negative) and will report +1.0 instead of -1.0.
+        let values = vec![10.0, 10.0, 6.0, 6.0, 2.0, 2.0];
+        let (slope, intercept, rvalue, stderr) = aggregated_linear_trend(&values, 2);
+        assert!((slope - (-4.0)).abs() < 1e-12, "slope: got {slope}");
+        assert!(
+            (intercept - 10.0).abs() < 1e-12,
+            "intercept: got {intercept}"
+        );
+        assert!(
+            (rvalue - (-1.0)).abs() < 1e-12,
+            "agg_linear_trend_rvalue: got {rvalue}, want -1.0 (signed)"
+        );
+        assert!((stderr - 0.0).abs() < 1e-12, "stderr: got {stderr}");
+    }
+
+    #[test]
+    fn test_agg_linear_trend_degenerate_constant_chunk_means() {
+        // Constant series: every chunk mean equals the constant. ss_yy == 0
+        // (degenerate), ss_xy == 0 -> rvalue NaN; slope 0.0; intercept the
+        // constant; stderr NaN (0/0, current Rust returns 0.0).
+        let values = vec![7.0; 10];
+        let (slope, intercept, rvalue, stderr) = aggregated_linear_trend(&values, 2);
+        assert_eq!(slope, 0.0, "slope");
+        assert_eq!(intercept, 7.0, "intercept");
+        assert!(
+            rvalue.is_nan(),
+            "agg_linear_trend_rvalue: got {rvalue}, want NaN"
+        );
+        assert!(
+            stderr.is_nan(),
+            "agg_linear_trend_stderr: got {stderr}, want NaN"
+        );
+    }
+
+    #[test]
+    fn test_agg_linear_trend_two_chunk_means_stderr_nan() {
+        // m=2 chunk means [2.0, 6.0] (df = m-2 = 0): rvalue is exactly ±1.0
+        // (perfect 2-point fit), so (1 - r^2) == 0.0 exactly and
+        // stderr = sqrt(0.0/ss_xx/0.0) -> 0/0 -> NaN, as scipy 1.18 does.
+        let values = vec![1.0, 3.0, 5.0, 7.0];
+        let (slope, intercept, rvalue, stderr) = aggregated_linear_trend(&values, 2);
+        assert!((slope - 4.0).abs() < 1e-12, "slope: got {slope}");
+        assert!(
+            (intercept - 2.0).abs() < 1e-12,
+            "intercept: got {intercept}"
+        );
+        assert!((rvalue - 1.0).abs() < 1e-12, "rvalue: got {rvalue}");
+        assert!(
+            stderr.is_nan(),
+            "agg_linear_trend_stderr: got {stderr}, want NaN (0/0, df=0)"
+        );
+    }
+
+    #[test]
+    fn test_linear_trend_r_squared_nan_for_constant_series() {
+        let constant = vec![7.0; 10];
+        let features = extract_features(&constant).unwrap();
+        assert!(
+            features.get("linear_trend_r_squared").unwrap().is_nan(),
+            "linear_trend_r_squared: want NaN for a constant series"
+        );
+
+        let perfect_line = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let features = extract_features(&perfect_line).unwrap();
+        assert_eq!(
+            features.get("linear_trend_r_squared"),
+            Some(&1.0),
+            "linear_trend_r_squared: perfect-fit line should clamp to 1.0"
+        );
+    }
 }
