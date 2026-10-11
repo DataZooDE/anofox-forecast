@@ -1190,4 +1190,107 @@ mod tests {
             assert!(features.contains_key(&format!("fft_coefficient_{}_abs", i)));
         }
     }
+
+    // --- Task 3 (D-13/FEAT-05): tsfresh autocorrelation denominator + the
+    // 117-key output invariant. Pinned values below are reproduced from the
+    // live tsfresh 0.21.2 `feature_calculators.autocorrelation` calculator
+    // (see 14-01-PLAN.md Task 3 <behavior>; values confirmed independently
+    // via `uv run --project validation/reference/python`).
+
+    #[test]
+    fn test_autocorrelation_matches_tsfresh_denominator() {
+        // tsfresh: fc.autocorrelation([1,2,3,4], lag=1) == 0.3333333333333333,
+        // fc.autocorrelation([1,2,3,4], lag=2) == -0.6 ((n-lag)*var(x)
+        // denominator, not the whole-series sum of squared deviations).
+        let values = vec![1.0, 2.0, 3.0, 4.0];
+        let features = extract_features(&values).unwrap();
+        let lag1 = *features.get("autocorrelation_lag1").unwrap();
+        let lag2 = *features.get("autocorrelation_lag2").unwrap();
+        assert!(
+            (lag1 - 0.3333333333333333).abs() < 1e-12,
+            "autocorrelation_lag1: got {lag1}, want 0.3333333333333333"
+        );
+        assert!(
+            (lag2 - (-0.6)).abs() < 1e-12,
+            "autocorrelation_lag2: got {lag2}, want -0.6"
+        );
+    }
+
+    #[test]
+    fn test_autocorrelation_nan_on_zero_variance_or_lag_ge_n() {
+        // tsfresh: fc.autocorrelation([5,5,5,5], lag=1) is NaN (zero
+        // variance); fc.autocorrelation([1,2,3,4], lag=4) is NaN (lag >= n).
+        let constant = vec![5.0, 5.0, 5.0, 5.0];
+        let features = extract_features(&constant).unwrap();
+        assert!(features.get("autocorrelation_lag1").unwrap().is_nan());
+
+        let values = vec![1.0, 2.0, 3.0, 4.0];
+        let features = extract_features(&values).unwrap();
+        assert!(features.get("autocorrelation_lag4").unwrap().is_nan());
+    }
+
+    #[test]
+    fn test_117_key_invariant_across_lengths() {
+        let names = list_features();
+        for &n in &[1usize, 2, 3, 5, 8, 10] {
+            let values: Vec<f64> = (1..=n).map(|i| i as f64).collect();
+            let features = extract_features(&values)
+                .unwrap_or_else(|e| panic!("n={n}: extract_features failed: {e:?}"));
+            for name in &names {
+                assert!(
+                    features.contains_key(name),
+                    "n={n}: missing key {name:?}"
+                );
+            }
+            assert_eq!(
+                features.len(),
+                names.len(),
+                "n={n}: extract_features returned {} keys, list_features() has {}",
+                features.len(),
+                names.len()
+            );
+        }
+    }
+
+    #[test]
+    fn test_n1_edge_case_values() {
+        let features = extract_features(&[5.0]).unwrap();
+        assert_eq!(features.get("absolute_sum_of_changes"), Some(&0.0));
+        assert_eq!(features.get("cid_ce"), Some(&0.0));
+        assert!(features.get("mean_change").unwrap().is_nan());
+        assert!(features.get("mean_abs_change").unwrap().is_nan());
+        assert!(features
+            .get("mean_second_derivative_central")
+            .unwrap()
+            .is_nan());
+    }
+
+    #[test]
+    fn test_time_reversal_and_c3_zero_when_2lag_ge_n() {
+        // n=4: lag=2 has 2*lag=4 >= n -> 0.0 (tsfresh); lag=1 has 2*lag=2 < n,
+        // still computed normally (not asserted here).
+        let values = vec![1.0, 2.0, 3.0, 4.0];
+        let features = extract_features(&values).unwrap();
+        assert_eq!(features.get("time_reversal_asymmetry_stat_2"), Some(&0.0));
+        assert_eq!(features.get("c3_lag2"), Some(&0.0));
+        assert_eq!(features.get("time_reversal_asymmetry_stat_3"), Some(&0.0));
+        assert_eq!(features.get("c3_lag3"), Some(&0.0));
+    }
+
+    #[test]
+    fn test_fft_coefficient_nan_beyond_available_bins() {
+        // n=8: current DFT only produces bins 0..=7; bins 8 and 9 must still
+        // be present as NaN (the FFT algorithm itself is fixed in plan 14-03).
+        let values: Vec<f64> = (0..8).map(|i| i as f64).collect();
+        let features = extract_features(&values).unwrap();
+        for i in 8..10 {
+            for attr in ["real", "imag", "abs"] {
+                let key = format!("fft_coefficient_{i}_{attr}");
+                let v = *features
+                    .get(&key)
+                    .unwrap_or_else(|| panic!("missing key {key:?}"));
+                assert!(v.is_nan(), "{key}: got {v}, want NaN (n=8, bin unavailable)");
+            }
+        }
+    }
 }
