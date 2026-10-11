@@ -706,10 +706,14 @@ fn linear_trend(values: &[f64]) -> (f64, f64, f64) {
 
     let intercept = y_mean - slope * x_mean;
 
+    // linear_trend_r_squared (numpy/scipy reference row, Task 3 FEAT-02):
+    // scipy's rvalue is NaN when the x- or y-variance is degenerate (ss_xx ==
+    // 0 or ss_yy == 0) -- here only ss_yy == 0 (a constant series) is
+    // reachable, since x is the time index and always varies for n >= 2.
     let r_squared = if ss_xx.abs() > f64::EPSILON && ss_yy.abs() > f64::EPSILON {
         (ss_xy.powi(2) / (ss_xx * ss_yy)).clamp(0.0, 1.0)
     } else {
-        0.0
+        f64::NAN
     };
 
     (slope, intercept, r_squared)
@@ -1113,47 +1117,66 @@ fn spectral_features(fft_coeffs: &[(f64, f64)]) -> (f64, f64) {
     (centroid, variance)
 }
 
-fn aggregated_linear_trend(values: &[f64], chunk_len: usize) -> (f64, f64, f64, f64) {
-    if values.len() < chunk_len || chunk_len == 0 {
-        return (0.0, 0.0, 0.0, 0.0);
+/// scipy 1.18 `linregress(x, y)` semantics with `x = 0..m-1` (Task 3,
+/// FEAT-02): signed Pearson `r` clipped to `[-1, 1]`; degenerate
+/// (`ss_xx == 0` or `ss_yy == 0`) gives `r = NaN` when `ss_xy == 0` too,
+/// else `r = 0.0`; `slope = ss_xy/ss_xx`, `intercept = ybar - slope*xbar`
+/// (plain IEEE-754 division: `0.0/0.0 -> NaN`, nonzero/`0.0 -> inf`);
+/// `stderr = sqrt((1 - r^2) * ss_yy / ss_xx / df)` with `df = m - 2`
+/// evaluated in `f64` (so `m == 2` gives `df == 0.0`, and a numerator of
+/// exactly `0.0` -- e.g. a perfect 2-point fit -- yields `0.0/0.0 -> NaN`).
+fn scipy_linregress(y: &[f64]) -> (f64, f64, f64, f64) {
+    let m = y.len() as f64;
+    let x_mean = (y.len() as f64 - 1.0) / 2.0;
+    let y_mean: f64 = y.iter().sum::<f64>() / m;
+
+    let mut ss_xy = 0.0;
+    let mut ss_xx = 0.0;
+    let mut ss_yy = 0.0;
+    for (i, &yi) in y.iter().enumerate() {
+        let x = i as f64;
+        ss_xy += (x - x_mean) * (yi - y_mean);
+        ss_xx += (x - x_mean).powi(2);
+        ss_yy += (yi - y_mean).powi(2);
     }
 
-    // Split into chunks and compute aggregate (mean) for each
+    let degenerate = ss_xx == 0.0 || ss_yy == 0.0;
+    let rvalue = if degenerate {
+        if ss_xy == 0.0 {
+            f64::NAN
+        } else {
+            0.0
+        }
+    } else {
+        (ss_xy / (ss_xx * ss_yy).sqrt()).clamp(-1.0, 1.0)
+    };
+
+    let slope = ss_xy / ss_xx;
+    let intercept = y_mean - slope * x_mean;
+
+    let df = m - 2.0;
+    let stderr = ((1.0 - rvalue.powi(2)) * ss_yy / ss_xx / df).sqrt();
+
+    (slope, intercept, rvalue, stderr)
+}
+
+/// tsfresh `agg_linear_trend(x, [{attr, chunk_len, f_agg: "mean"}])` (D-07,
+/// FEAT-02): chunk means over consecutive chunks of `chunk_len`, including
+/// the last partial chunk (tsfresh `_aggregate_on_chunks`), then
+/// [`scipy_linregress`] on the chunk means against `x = 0..m-1`. NaN for
+/// all four outputs when `chunk_len >= n` (tsfresh's own degenerate case).
+fn aggregated_linear_trend(values: &[f64], chunk_len: usize) -> (f64, f64, f64, f64) {
+    let n = values.len();
+    if chunk_len == 0 || chunk_len >= n {
+        return (f64::NAN, f64::NAN, f64::NAN, f64::NAN);
+    }
+
     let chunk_means: Vec<f64> = values
         .chunks(chunk_len)
         .map(|chunk| chunk.iter().sum::<f64>() / chunk.len() as f64)
         .collect();
 
-    if chunk_means.len() < 2 {
-        return (0.0, chunk_means.first().cloned().unwrap_or(0.0), 0.0, 0.0);
-    }
-
-    let (slope, intercept, r_squared) = linear_trend(&chunk_means);
-
-    // Compute standard error
-    let n = chunk_means.len() as f64;
-    let x_mean = (n - 1.0) / 2.0;
-
-    let ss_xx: f64 = (0..chunk_means.len())
-        .map(|i| (i as f64 - x_mean).powi(2))
-        .sum();
-
-    let residual_ss: f64 = chunk_means
-        .iter()
-        .enumerate()
-        .map(|(i, &y)| {
-            let predicted = intercept + slope * i as f64;
-            (y - predicted).powi(2)
-        })
-        .sum();
-
-    let stderr = if n > 2.0 && ss_xx > f64::EPSILON {
-        (residual_ss / (n - 2.0) / ss_xx).sqrt()
-    } else {
-        0.0
-    };
-
-    (slope, intercept, r_squared.sqrt(), stderr)
+    scipy_linregress(&chunk_means)
 }
 
 #[cfg(test)]

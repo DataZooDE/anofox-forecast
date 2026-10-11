@@ -394,8 +394,8 @@
       "name": "linear_trend_r_squared",
       "reference": "numpy/scipy",
       "formula": "scipy.stats.linregress(np.arange(n), x).rvalue ** 2",
-      "status": "pending:14-02",
-      "definition": "R^2 of the OLS fit of x against index; no tsfresh counterpart (D-02). Matches on every non-degenerate series; scipy returns NaN on constant/all-zero input (zero variance) where current Rust returns 0.0."
+      "status": "match",
+      "definition": "scipy.stats.linregress(np.arange(n), x).rvalue ** 2; NaN for a constant series (scipy degenerate rvalue is NaN)."
     },
     {
       "name": "binned_entropy",
@@ -564,8 +564,8 @@
         "f_agg": "mean"
       },
       "input": "series",
-      "status": "pending:14-02",
-      "definition": "Signed Pearson r of the OLS fit over mean-aggregated chunks of length max(n//10,2) (tsfresh agg_linear_trend, f_agg=mean); current Rust always returns a non-negative sqrt(r^2)."
+      "status": "match",
+      "definition": "Signed Pearson r of the OLS fit over mean-aggregated chunks of length max(n//10,2) (tsfresh agg_linear_trend, f_agg=mean)."
     },
     {
       "name": "agg_linear_trend_stderr",
@@ -577,8 +577,8 @@
         "f_agg": "mean"
       },
       "input": "series",
-      "status": "pending:14-02",
-      "definition": "OLS stderr of the mean-aggregated-chunk fit, chunk_len=max(n//10,2), f_agg=mean (tsfresh agg_linear_trend). Matches on every non-degenerate series; scipy returns NaN on constant/all-zero input where current Rust returns 0.0."
+      "status": "match",
+      "definition": "OLS stderr of the mean-aggregated-chunk fit, chunk_len=max(n//10,2), f_agg=mean (tsfresh agg_linear_trend). NaN on a degenerate (zero-variance) chunk-mean series or when there are exactly 2 chunks (df=0)."
     },
     {
       "name": "autocorrelation_lag1",

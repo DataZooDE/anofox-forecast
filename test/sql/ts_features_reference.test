@@ -277,6 +277,173 @@ FROM x20;
 true
 
 #######################################
+# mean_second_derivative_central, time_reversal_asymmetry_stat_1, skewness,
+# kurtosis (Task 3, 14-02, FEAT-02). tsfresh (short_n20):
+# mean_second_derivative_central 0.030861111111111117,
+# time_reversal_asymmetry_stat_1 -1.0168216098333345,
+# skewness 0.30292879825084285, kurtosis 0.27652865463225274.
+#######################################
+
+# --- ts_features_by('x20', id, ds, v) ---
+
+query I
+SELECT abs(mean_second_derivative_central - 0.030861111111111117) <= 1e-9 + 1e-9 * abs(0.030861111111111117)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(time_reversal_asymmetry_stat_1 - (-1.0168216098333345)) <= 1e-9 + 1e-9 * abs(-1.0168216098333345)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(skewness - 0.30292879825084285) <= 1e-9 + 1e-9 * abs(0.30292879825084285)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(kurtosis - 0.27652865463225274) <= 1e-9 + 1e-9 * abs(0.27652865463225274)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+# --- (ts_features(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features(ds, v)).mean_second_derivative_central - 0.030861111111111117) <= 1e-9 + 1e-9 * abs(0.030861111111111117)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).time_reversal_asymmetry_stat_1 - (-1.0168216098333345)) <= 1e-9 + 1e-9 * abs(-1.0168216098333345)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).skewness - 0.30292879825084285) <= 1e-9 + 1e-9 * abs(0.30292879825084285)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).kurtosis - 0.27652865463225274) <= 1e-9 + 1e-9 * abs(0.27652865463225274)
+FROM x20;
+----
+true
+
+# --- (ts_features_agg(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features_agg(ds, v)).mean_second_derivative_central - 0.030861111111111117) <= 1e-9 + 1e-9 * abs(0.030861111111111117)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).time_reversal_asymmetry_stat_1 - (-1.0168216098333345)) <= 1e-9 + 1e-9 * abs(-1.0168216098333345)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).skewness - 0.30292879825084285) <= 1e-9 + 1e-9 * abs(0.30292879825084285)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).kurtosis - 0.27652865463225274) <= 1e-9 + 1e-9 * abs(0.27652865463225274)
+FROM x20;
+----
+true
+
+#######################################
+# D-05 cross-surface check: ts_features_by skewness/kurtosis on x20 must equal
+# ts_stats_by('x20', id, ds, v, '1d') skewness/kurtosis within 1e-12 -- both
+# now share the same sample_skewness_g1 / sample_excess_kurtosis_g2 helpers.
+#######################################
+
+query I
+SELECT abs(
+    (SELECT skewness FROM ts_features_by('x20', id, ds, v))
+    - (SELECT skewness FROM ts_stats_by('x20', id, ds, v, '1d'))
+) <= 1e-12;
+----
+true
+
+query I
+SELECT abs(
+    (SELECT kurtosis FROM ts_features_by('x20', id, ds, v))
+    - (SELECT kurtosis FROM ts_stats_by('x20', id, ds, v, '1d'))
+) <= 1e-12;
+----
+true
+
+#######################################
+# rw200 (random_walk_n200, Task 3, 14-02, FEAT-02): agg_linear_trend_rvalue
+# and variation_coefficient are now signed -- both negative on this series
+# (tsfresh agg_linear_trend_rvalue -0.7617386359686308, variation_coefficient
+# -0.7073077067644646). Previously agg_linear_trend_rvalue was always
+# non-negative (sqrt(r^2)) and variation_coefficient divided by |mean|.
+#######################################
+
+statement ok
+CREATE TABLE rw200 AS
+SELECT 'rw' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, v
+FROM (SELECT unnest(range(200)) AS i, unnest([
+    -0.0696, -0.0596, -1.3034, 1.0659, 1.2956, 0.0127, 0.3031, 1.3308, 0.0894, -0.9144,
+    -3.1402, -3.5596, -3.2528, -2.2983, -2.7286, -2.9042, -3.7146, -5.4347, -6.7176, -7.6104,
+    -7.2179, -6.592, -6.1262, -6.0636, -5.0741, -5.1462, -5.9392, -5.7934, -7.305, -8.5687,
+    -9.88, -14.1111, -13.171, -14.3802, -12.6565, -11.052, -11.625, -10.1314, -8.561, -7.4811,
+    -6.993, -6.4668, -6.9745, -6.5057, -7.1305, -5.3688, -4.3857, -4.9771, -5.5605, -6.0342,
+    -7.1747, -7.84, -7.6618, -5.8531, -3.9974, -3.4842, -0.5278, 0.9089, 0.0498, -0.8388,
+    -0.459, -1.4549, -2.7665, -3.5889, -3.8434, -4.917, -6.1107, -6.8922, -7.3403, -8.2339,
+    -6.7513, -4.8813, -4.5941, -3.8313, -2.4846, -4.213, -2.8029, -0.9339, -1.3886, -1.169,
+    -2.2528, -1.7954, -0.5494, -1.8674, -3.1724, -3.329, -5.191, -5.2873, -3.6818, -4.4975,
+    -4.8905, -4.46, -4.4366, -2.2971, -1.8934, -1.742, -1.6332, -0.673, 0.1576, -1.2583,
+    0.8771, 0.7671, 1.4123, -0.0732, 0.8994, 0.7291, -0.4248, -1.2108, -0.5141, -2.8243,
+    -2.1373, -2.3013, -3.5539, -3.5307, -4.1794, -3.8959, -3.9736, -4.6601, -6.0111, -6.0668,
+    -8.3054, -7.0295, -7.258, -6.7886, -7.9567, -8.5926, -9.1974, -10.1626, -11.2526, -11.2503,
+    -11.4811, -10.7589, -11.6055, -11.6755, -11.4618, -11.9126, -11.8376, -13.2704, -13.376,
+    -13.8708, -12.2323, -11.8249, -11.5119, -11.2518, -11.5006, -12.2109, -12.544, -12.5816,
+    -13.7002, -15.1004, -14.388, -14.0983, -13.4655, -14.7371, -15.4846, -15.2337, -14.5446,
+    -14.4552, -12.463, -12.37, -12.5874, -12.5317, -14.1603, -13.8391, -12.7649, -11.5302,
+    -10.9279, -11.5968, -13.3762, -13.9586, -15.0154, -16.2419, -16.7676, -15.4211, -16.6029,
+    -15.8809, -14.3677, -14.9556, -15.8159, -15.5313, -14.4699, -16.0786, -15.1837, -15.516,
+    -15.1953, -15.1783, -16.5123, -15.9857, -17.0501, -16.4342, -15.2676, -14.7203, -18.1064,
+    -15.6189, -15.7719, -15.6935, -16.1366, -15.3586, -16.0934, -15.9161
+]) AS v);
+
+query I
+SELECT abs(agg_linear_trend_rvalue - (-0.7617386359686308)) <= 1e-9 + 1e-9 * abs(-0.7617386359686308)
+FROM ts_features_by('rw200', id, ds, v);
+----
+true
+
+query I
+SELECT abs(variation_coefficient - (-0.7073077067644646)) <= 1e-9 + 1e-9 * abs(-0.7073077067644646)
+FROM ts_features_by('rw200', id, ds, v);
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).agg_linear_trend_rvalue - (-0.7617386359686308)) <= 1e-9 + 1e-9 * abs(-0.7617386359686308)
+FROM rw200;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).variation_coefficient - (-0.7073077067644646)) <= 1e-9 + 1e-9 * abs(-0.7073077067644646)
+FROM rw200;
+----
+true
+
+#######################################
 # 117-feature schema assertions (D-13, FEAT-05): autocorrelation_lag10 now
 # reaches every SQL surface. ts_features_by returns id + 117 feature columns
 # (118 total); ts_features_agg / ts_features return 117 struct keys;
