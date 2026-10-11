@@ -112,19 +112,38 @@ with the row's pinned params -- never via `tsfresh.extract_features()`'s
 settings-driven convenience API, which silently uses the wrong default
 parameter grid for several of this project's exact choices (agg_linear_trend
 chunk_len, approximate_entropy r=0.2, …; see 14-RESEARCH.md "Fixture
-Generation Methodology" / Pitfall 2). Each row's `status` is `"match"` once
-`extract_features()`'s Rust output matches that reference value on every one
-of the nine fixture series, or `"pending:<owner-plan>"` while a later Phase 14
-plan still owns the fix; an optional `deviation` entry documents a specific
-series where the row's own `expected_ours` value is the intentionally correct
-Rust output (with a reason), and an optional `tolerance` override replaces the
-family-wide default for that one row (also with a reason, D-10).
-`crates/anofox-fcst-core/tests/tsfresh_features_reference.rs` enforces all of
-this: `mapping_covers_list_features_exactly` guards the schema and 117/117
-coverage, the nine `tsfresh_parity_<series>` tests assert every `"match"` row,
-and `pending_features_still_mismatch` (the ratchet) fails if a `"pending"` row
-now matches on every series -- forcing its status to be flipped to `"match"`
-deliberately instead of silently going stale.
+Generation Methodology" / Pitfall 2). An optional `deviation` entry documents
+a specific series where the row's own `expected_ours` value is the
+intentionally correct Rust output (with a reason), and an optional
+`tolerance` override replaces the family-wide default for that one row (also
+with a reason, D-10).
+
+**As of Phase 14 plan 14-04, every one of the 117 rows is `status: "match"`
+(the FEAT-05 117/117 gate) -- `mapping.json` no longer carries any
+`"pending:<owner-plan>"` row.**
+`crates/anofox-fcst-core/tests/tsfresh_features_reference.rs` enforces this:
+`mapping_covers_list_features_exactly` guards the schema and 117/117
+coverage and asserts every row's `status` is `"match"`; the nine
+`tsfresh_parity_<series>` tests each assert all 117 rows and require exactly
+117 assertions per series (no silent skips); `sample_entropy_roadmap_anchor`
+pins the ROADMAP's literal `sample_entropy` anchor value independently of the
+fixture JSON.
+
+### Intentional deviations and tolerance overrides (D-03, D-10)
+
+The complete, authoritative list lives in `mapping.json`'s own `deviation`/
+`tolerance` keys per row; this table mirrors it for human readability.
+
+| Feature | Series | Our value | Reason |
+|---------|--------|-----------|--------|
+| `skewness` | `constant_n30`, `all_zero_n50` | `NaN` | Zero-variance sample: G1/G2 are `0/0`. `scipy.stats.skew(bias=False)` and `ts_stats` return `NaN` (D-05); pandas/tsfresh return `0` by convention, which is arguably wrong for an undefined moment (D-03). |
+| `kurtosis` | `constant_n30`, `all_zero_n50` | `NaN` | Same zero-variance rationale as `skewness` above (shared `sample_excess_kurtosis_g2` helper, D-05). |
+
+No `mapping.json` row carries a per-row `tolerance` override as of 14-04 --
+the family-wide default (`abs: 1e-9, rel: 1e-9`) held on every one of the 117
+features across all 9 fixture series, including the FFT/spectral family
+(rustfft's evaluation order) and the entropy/Benford/Lempel-Ziv family added
+in plans 14-03/14-04.
 
 ## 5. Tool versions
 

@@ -588,7 +588,7 @@
         "lag": 1
       },
       "status": "match",
-      "definition": "Autocorrelation at lag 1: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x))."
+      "definition": "Autocorrelation at lag 1: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation)."
     },
     {
       "name": "autocorrelation_lag2",
@@ -598,7 +598,7 @@
         "lag": 2
       },
       "status": "match",
-      "definition": "Autocorrelation at lag 2: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x))."
+      "definition": "Autocorrelation at lag 2: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation)."
     },
     {
       "name": "autocorrelation_lag3",
@@ -608,7 +608,7 @@
         "lag": 3
       },
       "status": "match",
-      "definition": "Autocorrelation at lag 3: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x))."
+      "definition": "Autocorrelation at lag 3: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation)."
     },
     {
       "name": "autocorrelation_lag4",
@@ -618,7 +618,7 @@
         "lag": 4
       },
       "status": "match",
-      "definition": "Autocorrelation at lag 4: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x))."
+      "definition": "Autocorrelation at lag 4: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation)."
     },
     {
       "name": "autocorrelation_lag5",
@@ -628,7 +628,7 @@
         "lag": 5
       },
       "status": "match",
-      "definition": "Autocorrelation at lag 5: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x))."
+      "definition": "Autocorrelation at lag 5: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation)."
     },
     {
       "name": "autocorrelation_lag6",
@@ -638,7 +638,7 @@
         "lag": 6
       },
       "status": "match",
-      "definition": "Autocorrelation at lag 6: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x))."
+      "definition": "Autocorrelation at lag 6: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation)."
     },
     {
       "name": "autocorrelation_lag7",
@@ -648,7 +648,7 @@
         "lag": 7
       },
       "status": "match",
-      "definition": "Autocorrelation at lag 7: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x))."
+      "definition": "Autocorrelation at lag 7: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation)."
     },
     {
       "name": "autocorrelation_lag8",
@@ -658,7 +658,7 @@
         "lag": 8
       },
       "status": "match",
-      "definition": "Autocorrelation at lag 8: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x))."
+      "definition": "Autocorrelation at lag 8: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation)."
     },
     {
       "name": "autocorrelation_lag9",
@@ -668,7 +668,7 @@
         "lag": 9
       },
       "status": "match",
-      "definition": "Autocorrelation at lag 9: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x))."
+      "definition": "Autocorrelation at lag 9: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation)."
     },
     {
       "name": "autocorrelation_lag10",
@@ -678,7 +678,7 @@
         "lag": 10
       },
       "status": "match",
-      "definition": "Autocorrelation at lag 10: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation); current Rust denominator is the full-series sum of squared deviations (n*var(x) instead of (n-lag)*var(x))."
+      "definition": "Autocorrelation at lag 10: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation)."
     },
     {
       "name": "partial_autocorrelation_lag1",
@@ -840,7 +840,7 @@
         "attr": "imag"
       },
       "status": "match",
-      "definition": "Coefficient 0's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "definition": "Coefficient 0's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; always exactly 0.0 for a real-valued input."
     },
     {
       "name": "fft_coefficient_0_abs",

@@ -302,7 +302,9 @@ ORDER BY series_id;
 ts_features_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
 ```
 
-Returns the group column + 116 feature columns: `mean`, `standard_deviation`, `skewness`, `kurtosis`, `length`, `linear_trend_slope`, `autocorrelation_lag1`, …
+Returns the group column + 117 feature columns: `mean`, `standard_deviation`, `skewness`, `kurtosis`, `length`, `linear_trend_slope`, `autocorrelation_lag1`, …
+
+Every feature matches tsfresh 0.21.2 (or a direct numpy/scipy reference for the 9 features with no tsfresh counterpart) on a 9-series fixture suite, or carries a documented, intentional deviation — see [`docs/api/21-feature-reference.md`](../../../../docs/api/21-feature-reference.md)'s Deviation column.
 
 ```sql
 -- Extract all features
@@ -316,7 +318,7 @@ WHERE length > 30 AND autocorrelation_lag1 > 0.5;
 
 ### `ts_features` (scalar)
 
-Scalar over `(date, value)`. Same 116 outputs as struct fields.
+Scalar over `(date, value)`. Same 117 outputs as struct fields.
 
 ### `ts_features_list` / `ts_features_table`
 

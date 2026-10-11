@@ -264,13 +264,14 @@ use the semver numbering this project started with.
   a special case to drop. Use `ts_smape` or `ts_mase` for intermittent-demand series
   where exact zeros are expected.
 - **`ts_features` / `ts_features_by` / `ts_features_agg` values now match tsfresh 0.21.2
-  (Phase 14).** Every one of the 117 features is checked against a tsfresh-generated
-  fixture (`validation/reference/fixtures/tsfresh_features/`, D-01); a feature counts as
-  fixed once its mapping row's `status` is `"match"`. Plan 14-01 fixes partial
-  autocorrelation and autocorrelation; plans 14-02 through 14-04 fix the remaining
-  mismatching features (moments, locations, derivatives, time reversal, `agg_linear_trend`
-  rvalue, FFT/spectral, entropy/complexity/Benford) and append their own before/after rows
-  to the table below.
+  (Phase 14) -- all 117/117 features (FEAT-05).** Every one of the 117 features is checked
+  against a tsfresh-generated fixture (`validation/reference/fixtures/tsfresh_features/`,
+  D-01); as of plan 14-04, every one of the 117 `mapping.json` rows is `status: "match"` --
+  no `"pending:<owner>"` row remains. Plan 14-01 fixes partial autocorrelation and
+  autocorrelation; plan 14-02 fixes moments/locations/derivatives/time
+  reversal/`agg_linear_trend` rvalue; plan 14-03 fixes FFT/spectral; plan 14-04 fixes the
+  remaining entropy/complexity/Benford family and closes the 117/117 gate. Each plan appends
+  its own before/after rows to the table below.
 
   | Feature | Before | After (= tsfresh) | What changed |
   |---------|--------|--------------------|--------------|
@@ -299,6 +300,22 @@ use the semver numbering this project started with.
   | `fft_coefficient_3_abs` | 0.4827471728054351 | 9.654943456108715 | same |
   | `spectral_centroid` | 2.016904841106497 | 2.740689544749791 | now tsfresh `fft_aggregated`'s first raw moment of the ONE-sided `\|rfft(x)\|` magnitude spectrum, instead of the first raw moment of the full two-sided power spectrum |
   | `spectral_variance` | 22.834066212475133 | 11.264706553070855 | same (second central moment of the one-sided magnitude spectrum, not the two-sided power spectrum) |
+  | `sample_entropy` | 0.9808292530117262 | 1.0986122886681098 (= ln 3, the ROADMAP anchor) | ported tsfresh's algorithm exactly: `n-m+1`/`n-m` windows (previously `n-m`, an off-by-one), full symmetric match-count matrix minus self-matches (previously a triangular sum with a combinatorial divisor tsfresh never applies), raw `-ln(A/B)` |
+  | `binned_entropy` | 1.9206765920171578 | 1.7820471559051687 | ported `np.histogram`'s exact floor-based 10-bin algorithm (edge corrections, `min==max` widened by `±0.5`), instead of a rounding-based binning scheme with different bin boundaries |
+  | `benford_correlation` | 0.42967594716771035 | 0.3816973836882482 | now includes every nonzero value's true leading significant digit via shortest scientific notation (incl. `\|v\|<1`, previously excluded entirely) and divides by `n` (previously divided by the digit-producing count only) |
+  | `permutation_entropy` | 0.933798406475988 | 1.6731421371534196 | removed the `ln(order!)` normalisation tsfresh's own calculator never applies -- the pattern-key generation itself was already correct |
+  | `lempel_ziv_complexity` | 1.512674833210577 | 0.4 | full algorithm rewrite: tsfresh's `bins=2` range-midpoint (`linspace`) quantisation and sub-word dictionary-growth loop, replacing a mean-threshold binarisation with a different dictionary-growth loop and a `log2(n)/n` normalisation tsfresh does not use |
+  | `approximate_entropy` (constant_n30, all_zero_n50) | NaN | 0.0 | `n<=m+1` degenerate branch and the zero-variance (`r=0`) full-match case both now collapse to tsfresh's own `0.0`, not `NaN`; `short_n20` is unchanged (`0.08780500866889396`) since it was already correct |
+  | `count_unique` / `has_duplicate` (e.g. `[0.0, -0.0, 1.0]`) | `count_unique=3`, `-0.0` and `+0.0` counted as distinct values | `count_unique=2`, treated as one value | canonicalises `-0.0` to `+0.0` before bit-hashing in `count_unique`/`has_duplicate`/`reoccurring_stats`, matching `np.unique`'s `-0.0 == 0.0` equality |
+
+  `number_peaks` (the 3-point local-max filter, `n=1` support) was confirmed numerically
+  equal to tsfresh's `number_peaks(x, n=1)` on all 9 fixture series -- no code change was
+  needed (plan 14-04, Task 2 item 6). See
+  [`validation/reference/README.md`](validation/reference/README.md)'s "Intentional
+  deviations and tolerance overrides" section and
+  [`docs/api/21-feature-reference.md`](docs/api/21-feature-reference.md)'s Deviation column
+  for the complete, authoritative deviation list (`skewness`/`kurtosis` on a zero-variance
+  series are the only two rows that still diverge from tsfresh/pandas, intentionally).
 
   `skewness`/`kurtosis` on a genuinely zero-variance series (`constant_n30`, `all_zero_n50`) are a documented intentional deviation from tsfresh/pandas, which return `0` by convention for an undefined moment (0/0) — see `validation/reference/fixtures/tsfresh_features/mapping.json`'s `deviation` entries for those two rows (D-03). `ts_stats` and `ts_features` now compute skewness/kurtosis via the same shared `sample_skewness_g1`/`sample_excess_kurtosis_g2` helpers in `stats.rs` (D-05) — the two surfaces can never again drift apart on this family. `fft_coefficient_*` are now unnormalised numpy-`rfft` values (previously divided by `n`), coefficients beyond `n/2` are `NaN`, the transform is `O(n log n)` via `rustfft` (D-07) instead of an `O(n^2)` naive DFT, and `spectral_centroid`/`spectral_variance` use tsfresh's one-sided magnitude-spectrum definition instead of the old two-sided power spectrum.
 

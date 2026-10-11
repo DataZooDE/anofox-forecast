@@ -34,15 +34,35 @@ SELECT (SELECT (ts_features_agg(ds, y)).mean FROM fx) =
 -- true
 ```
 
-## Known deviations from tsfresh
+## tsfresh parity
 
-These features are named/catalogued after tsfresh but currently compute something different
-from tsfresh's exact formula: `PACF` lags 3-5, `mean_second_derivative_central`,
-`first_location`/`last_location`, `time_reversal_asymmetry_statistic`, `fft_coefficient`,
-spectral centroid/variance, `agg_linear_trend` rvalue, `skewness`/`kurtosis`,
-`sample_entropy`, `binned_entropy`, Benford-law features, `permutation_entropy`, and
-`number_peaks`' threshold handling. See `docs/api/21-feature-reference.md` for the specific
-formula each one currently uses. (fix planned for v0.10.0, Phase 14)
+All 117 features are verified against tsfresh 0.21.2 (or, for 9 features with no tsfresh
+counterpart, a direct numpy/scipy reference) on a fixture suite of 9 series — white noise,
+random walk, seasonal AR(12), trend+season, intermittent/many-zeros, a short series, plus
+constant/all-zero/tiny-length edge cases (`validation/reference/fixtures/tsfresh_features/`).
+Every feature matches within `abs <= 1e-9 + 1e-9*|ref|`, or carries a documented, intentional
+deviation. The parity gate runs in `cargo test` (`tsfresh_features_reference.rs`) and is
+enforced on every change to the feature set.
+
+- **9 features have no tsfresh counterpart** and are checked against a direct numpy/scipy
+  formula instead: `range`, `first_value`, `last_value`, `zero_crossing_rate`,
+  `percentage_above_mean`, `count_unique`, `number_peaks_threshold_1`/`_2`,
+  `linear_trend_r_squared`.
+- **2 features carry a documented intentional deviation** from tsfresh/pandas on
+  zero-variance series: `skewness`/`kurtosis` return `NaN` (matching `scipy.stats.skew`/
+  `kurtosis(bias=False)` and `ts_stats`) where tsfresh/pandas return `0` by convention — an
+  undefined moment is `NaN`, not `0`, by this project's own choice (D-03).
+- **Fixed parameter choices** (not configurable at the SQL layer): `sample_entropy`/
+  `approximate_entropy` use `m=2, r=0.2*population std`; `binned_entropy` uses numpy
+  `np.histogram`'s exact 10-bin algorithm; `permutation_entropy` uses `dimension=3, tau=1`,
+  unnormalised (not divided by `ln(dimension!)`); `lempel_ziv_complexity` uses `bins=2`
+  range-midpoint quantisation with tsfresh's own dictionary-growth algorithm;
+  `agg_linear_trend_*` uses `chunk_len=max(length/10, 2), f_agg=mean`.
+
+See [Feature Reference](21-feature-reference.md) for the full per-feature Definition /
+tsfresh equivalent / Deviation table, and
+[`validation/reference/README.md`](../../validation/reference/README.md) for the complete
+intentional-deviation and tolerance-override list.
 
 ---
 
@@ -80,7 +100,7 @@ ts_features_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLU
 | `date_col` | COLUMN | Date/timestamp column |
 | `value_col` | COLUMN | Value column |
 
-**Returns:** TABLE with the original group column (preserving its name) and 116 feature columns including `mean`, `standard_deviation`, `skewness`, `kurtosis`, `length`, `linear_trend_slope`, `autocorrelation_lag1`, etc.
+**Returns:** TABLE with the original group column (preserving its name) and 117 feature columns including `mean`, `standard_deviation`, `skewness`, `kurtosis`, `length`, `linear_trend_slope`, `autocorrelation_lag1`, etc.
 
 **Example:**
 ```sql
