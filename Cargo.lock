@@ -30,6 +30,7 @@ dependencies = [
  "chrono",
  "faer",
  "fdars-core",
+ "rustfft",
  "serde_json",
  "statrs",
  "thiserror 2.0.17",

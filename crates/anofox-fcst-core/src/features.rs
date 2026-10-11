@@ -2,6 +2,7 @@
 
 use crate::error::{ForecastError, Result};
 use crate::stats::{sample_excess_kurtosis_g2, sample_skewness_g1};
+use rustfft::{num_complex::Complex, FftPlanner};
 use std::collections::{HashMap, HashSet};
 
 /// Extract all available features from a time series.
@@ -313,14 +314,14 @@ pub fn extract_features(values: &[f64]) -> Result<HashMap<String, f64>> {
         lempel_ziv_complexity(values, mean),
     );
 
-    // Simplified FFT features (using DFT for small series). 117-key
-    // invariant (D-13): bins beyond what the current DFT produces (n < 10)
-    // are still inserted, as NaN -- the FFT algorithm itself (one-sided
-    // rfft via rustfft) is fixed in plan 14-03.
-    let fft_coeffs = simple_dft(values);
+    // One-sided rustfft spectrum (D-07, FEAT-03): numpy-rfft-exact,
+    // unnormalised, O(n log n) for any n including large primes.
+    // fft_coefficient_{i}_{real,imag,abs} for i in 0..10 read bin i when it
+    // exists (i < n/2 + 1), else NaN (117-key invariant, D-13).
+    let spectrum = one_sided_spectrum(values);
     for i in 0..10 {
-        let (real, imag, abs) = match fft_coeffs.get(i) {
-            Some(&(r, im)) => (r, im, (r.powi(2) + im.powi(2)).sqrt()),
+        let (real, imag, abs) = match spectrum.get(i) {
+            Some(c) => (c.re, c.im, c.norm()),
             None => (f64::NAN, f64::NAN, f64::NAN),
         };
         features.insert(format!("fft_coefficient_{}_real", i), real);
@@ -328,8 +329,9 @@ pub fn extract_features(values: &[f64]) -> Result<HashMap<String, f64>> {
         features.insert(format!("fft_coefficient_{}_abs", i), abs);
     }
 
-    // Spectral features
-    let (spectral_centroid, spectral_variance) = spectral_features(&fft_coeffs);
+    // Spectral features: tsfresh fft_aggregated on the SAME one-sided
+    // magnitude spectrum as fft_coefficient_* above (D-07, FEAT-03).
+    let (spectral_centroid, spectral_variance) = fft_aggregated_moments(&spectrum);
     features.insert("spectral_centroid".to_string(), spectral_centroid);
     features.insert("spectral_variance".to_string(), spectral_variance);
 
@@ -1061,59 +1063,40 @@ fn lempel_ziv_complexity(values: &[f64], threshold: f64) -> f64 {
     }
 }
 
-fn simple_dft(values: &[f64]) -> Vec<(f64, f64)> {
+/// One-sided complex spectrum of a real-valued series, numpy `rfft`-exact
+/// (D-07, FEAT-03): unnormalised forward FFT of the zero-imaginary input,
+/// truncated to the `n/2 + 1` bins a real-input FFT needs. `rustfft` picks
+/// Rader/Bluestein for prime lengths, so this stays O(n log n) for any `n`
+/// -- including large primes, where a naive O(n^2) DFT would be infeasible.
+fn one_sided_spectrum(values: &[f64]) -> Vec<Complex<f64>> {
     let n = values.len();
-    let mut coeffs = Vec::with_capacity(n);
-
-    for k in 0..n {
-        let mut real = 0.0;
-        let mut imag = 0.0;
-
-        for (t, &x) in values.iter().enumerate() {
-            let angle = -2.0 * std::f64::consts::PI * k as f64 * t as f64 / n as f64;
-            real += x * angle.cos();
-            imag += x * angle.sin();
-        }
-
-        coeffs.push((real / n as f64, imag / n as f64));
-    }
-
-    coeffs
+    let mut buffer: Vec<Complex<f64>> = values.iter().map(|&v| Complex::new(v, 0.0)).collect();
+    let mut planner = FftPlanner::<f64>::new();
+    let fft = planner.plan_fft_forward(n);
+    fft.process(&mut buffer);
+    buffer.truncate(n / 2 + 1);
+    buffer
 }
 
-fn spectral_features(fft_coeffs: &[(f64, f64)]) -> (f64, f64) {
-    if fft_coeffs.is_empty() {
-        return (0.0, 0.0);
-    }
-
-    // Compute power spectrum
-    let power: Vec<f64> = fft_coeffs
-        .iter()
-        .map(|(r, i)| r.powi(2) + i.powi(2))
-        .collect();
-
-    let total_power: f64 = power.iter().sum();
-
-    if total_power <= f64::EPSILON {
-        return (0.0, 0.0);
-    }
-
-    // Spectral centroid: weighted mean of frequencies
-    let centroid: f64 = power
-        .iter()
-        .enumerate()
-        .map(|(i, &p)| i as f64 * p)
-        .sum::<f64>()
-        / total_power;
-
-    // Spectral variance
-    let variance: f64 = power
-        .iter()
-        .enumerate()
-        .map(|(i, &p)| (i as f64 - centroid).powi(2) * p)
-        .sum::<f64>()
-        / total_power;
-
+/// tsfresh `fft_aggregated` (D-07, FEAT-03) on the one-sided magnitude
+/// spectrum `y_k = |X_k|` of [`one_sided_spectrum`]'s output:
+/// `centroid = get_moment(y, 1) = sum(k*y_k)/sum(y_k)`,
+/// `variance = get_moment(y, 2) - centroid^2 = sum(k^2*y_k)/sum(y_k) -
+/// centroid^2`. No epsilon guard -- an all-zero series yields `0.0/0.0 ->
+/// NaN` exactly as tsfresh's `get_moment` does.
+fn fft_aggregated_moments(spectrum: &[Complex<f64>]) -> (f64, f64) {
+    let magnitudes: Vec<f64> = spectrum.iter().map(|c| c.norm()).collect();
+    let sum_y: f64 = magnitudes.iter().sum();
+    let moment = |power: i32| -> f64 {
+        magnitudes
+            .iter()
+            .enumerate()
+            .map(|(k, &y_k)| (k as f64).powi(power) * y_k)
+            .sum::<f64>()
+            / sum_y
+    };
+    let centroid = moment(1);
+    let variance = moment(2) - centroid * centroid;
     (centroid, variance)
 }
 
@@ -1456,11 +1439,13 @@ mod tests {
 
     #[test]
     fn test_fft_coefficient_nan_beyond_available_bins() {
-        // n=8: current DFT only produces bins 0..=7; bins 8 and 9 must still
-        // be present as NaN (the FFT algorithm itself is fixed in plan 14-03).
+        // n=8: numpy rfft produces n/2+1 = 5 bins (0..=4); bins 5..9 must be
+        // present as NaN (D-07, 14-03) -- the 117-key invariant inserts the
+        // key regardless, it just can't have a real value beyond the
+        // one-sided spectrum's length.
         let values: Vec<f64> = (0..8).map(|i| i as f64).collect();
         let features = extract_features(&values).unwrap();
-        for i in 8..10 {
+        for i in 5..10 {
             for attr in ["real", "imag", "abs"] {
                 let key = format!("fft_coefficient_{i}_{attr}");
                 let v = *features

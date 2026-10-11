@@ -444,6 +444,114 @@ FROM rw200;
 true
 
 #######################################
+# fft_coefficient_0_real/1_imag/3_abs, spectral_centroid/variance (Task 1,
+# 14-03, FEAT-03): rustfft one-sided rfft spectrum, numpy-rfft-exact and
+# unnormalised (previously an O(n^2) naive DFT normalised by n). tsfresh
+# (short_n20): fft_coefficient_0_real 55.537 (previously the mean
+# 2.7768499999999996), fft_coefficient_1_imag -0.35096037761454757,
+# fft_coefficient_3_abs 9.654943456108715 (previously 0.4827471728054351),
+# spectral_centroid 2.740689544749791 (previously 2.016904841106497 over the
+# two-sided power spectrum), spectral_variance 11.264706553070855
+# (previously 22.834066212475133).
+#######################################
+
+# --- ts_features_by('x20', id, ds, v) ---
+
+query I
+SELECT abs(fft_coefficient_0_real - 55.537) <= 1e-9 + 1e-9 * abs(55.537)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(fft_coefficient_1_imag - (-0.35096037761454757)) <= 1e-9 + 1e-9 * abs(-0.35096037761454757)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(fft_coefficient_3_abs - 9.654943456108715) <= 1e-9 + 1e-9 * abs(9.654943456108715)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(spectral_centroid - 2.740689544749791) <= 1e-9 + 1e-9 * abs(2.740689544749791)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(spectral_variance - 11.264706553070855) <= 1e-9 + 1e-9 * abs(11.264706553070855)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+# --- (ts_features(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features(ds, v)).fft_coefficient_0_real - 55.537) <= 1e-9 + 1e-9 * abs(55.537)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).fft_coefficient_1_imag - (-0.35096037761454757)) <= 1e-9 + 1e-9 * abs(-0.35096037761454757)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).fft_coefficient_3_abs - 9.654943456108715) <= 1e-9 + 1e-9 * abs(9.654943456108715)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).spectral_centroid - 2.740689544749791) <= 1e-9 + 1e-9 * abs(2.740689544749791)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).spectral_variance - 11.264706553070855) <= 1e-9 + 1e-9 * abs(11.264706553070855)
+FROM x20;
+----
+true
+
+# --- (ts_features_agg(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features_agg(ds, v)).fft_coefficient_0_real - 55.537) <= 1e-9 + 1e-9 * abs(55.537)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).fft_coefficient_1_imag - (-0.35096037761454757)) <= 1e-9 + 1e-9 * abs(-0.35096037761454757)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).fft_coefficient_3_abs - 9.654943456108715) <= 1e-9 + 1e-9 * abs(9.654943456108715)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).spectral_centroid - 2.740689544749791) <= 1e-9 + 1e-9 * abs(2.740689544749791)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).spectral_variance - 11.264706553070855) <= 1e-9 + 1e-9 * abs(11.264706553070855)
+FROM x20;
+----
+true
+
+#######################################
 # 117-feature schema assertions (D-13, FEAT-05): autocorrelation_lag10 now
 # reaches every SQL surface. ts_features_by returns id + 117 feature columns
 # (118 total); ts_features_agg / ts_features return 117 struct keys;

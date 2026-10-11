@@ -515,8 +515,8 @@
       "params": {
         "aggtype": "centroid"
       },
-      "status": "pending:14-03",
-      "definition": "First raw moment of the one-sided |rfft(x)| spectrum (tsfresh fft_aggregated, aggtype=centroid); current Rust runs over the full two-sided spectrum."
+      "status": "match",
+      "definition": "First raw moment of the one-sided |rfft(x)| spectrum (tsfresh fft_aggregated, aggtype=centroid), computed via rustfft's O(n log n) forward FFT."
     },
     {
       "name": "spectral_variance",
@@ -525,8 +525,8 @@
       "params": {
         "aggtype": "variance"
       },
-      "status": "pending:14-03",
-      "definition": "Second central moment of the one-sided |rfft(x)| spectrum (tsfresh fft_aggregated, aggtype=variance); current Rust runs over the full two-sided spectrum."
+      "status": "match",
+      "definition": "Second central moment of the one-sided |rfft(x)| spectrum (tsfresh fft_aggregated, aggtype=variance), computed via rustfft's O(n log n) forward FFT."
     },
     {
       "name": "agg_linear_trend_slope",
@@ -828,8 +828,8 @@
         "coeff": 0,
         "attr": "real"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 0's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 0's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_0_imag",
@@ -850,8 +850,8 @@
         "coeff": 0,
         "attr": "abs"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 0's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 0's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_1_real",
@@ -861,8 +861,8 @@
         "coeff": 1,
         "attr": "real"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 1's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 1's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_1_imag",
@@ -872,8 +872,8 @@
         "coeff": 1,
         "attr": "imag"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 1's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 1's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_1_abs",
@@ -883,8 +883,8 @@
         "coeff": 1,
         "attr": "abs"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 1's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 1's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_2_real",
@@ -894,8 +894,8 @@
         "coeff": 2,
         "attr": "real"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 2's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 2's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_2_imag",
@@ -905,8 +905,8 @@
         "coeff": 2,
         "attr": "imag"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 2's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 2's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_2_abs",
@@ -916,8 +916,8 @@
         "coeff": 2,
         "attr": "abs"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 2's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 2's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_3_real",
@@ -927,8 +927,8 @@
         "coeff": 3,
         "attr": "real"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 3's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 3's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_3_imag",
@@ -938,8 +938,8 @@
         "coeff": 3,
         "attr": "imag"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 3's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 3's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_3_abs",
@@ -949,8 +949,8 @@
         "coeff": 3,
         "attr": "abs"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 3's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 3's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_4_real",
@@ -960,8 +960,8 @@
         "coeff": 4,
         "attr": "real"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 4's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 4's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_4_imag",
@@ -971,8 +971,8 @@
         "coeff": 4,
         "attr": "imag"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 4's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 4's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_4_abs",
@@ -982,8 +982,8 @@
         "coeff": 4,
         "attr": "abs"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 4's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 4's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_5_real",
@@ -993,8 +993,8 @@
         "coeff": 5,
         "attr": "real"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 5's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 5's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_5_imag",
@@ -1004,8 +1004,8 @@
         "coeff": 5,
         "attr": "imag"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 5's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 5's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_5_abs",
@@ -1015,8 +1015,8 @@
         "coeff": 5,
         "attr": "abs"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 5's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 5's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_6_real",
@@ -1026,8 +1026,8 @@
         "coeff": 6,
         "attr": "real"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 6's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 6's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_6_imag",
@@ -1037,8 +1037,8 @@
         "coeff": 6,
         "attr": "imag"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 6's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 6's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_6_abs",
@@ -1048,8 +1048,8 @@
         "coeff": 6,
         "attr": "abs"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 6's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 6's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_7_real",
@@ -1059,8 +1059,8 @@
         "coeff": 7,
         "attr": "real"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 7's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 7's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_7_imag",
@@ -1070,8 +1070,8 @@
         "coeff": 7,
         "attr": "imag"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 7's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 7's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_7_abs",
@@ -1081,8 +1081,8 @@
         "coeff": 7,
         "attr": "abs"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 7's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 7's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_8_real",
@@ -1092,8 +1092,8 @@
         "coeff": 8,
         "attr": "real"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 8's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 8's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_8_imag",
@@ -1103,8 +1103,8 @@
         "coeff": 8,
         "attr": "imag"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 8's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 8's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_8_abs",
@@ -1114,8 +1114,8 @@
         "coeff": 8,
         "attr": "abs"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 8's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 8's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_9_real",
@@ -1125,8 +1125,8 @@
         "coeff": 9,
         "attr": "real"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 9's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 9's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_9_imag",
@@ -1136,8 +1136,8 @@
         "coeff": 9,
         "attr": "imag"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 9's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 9's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     },
     {
       "name": "fft_coefficient_9_abs",
@@ -1147,8 +1147,8 @@
         "coeff": 9,
         "attr": "abs"
       },
-      "status": "pending:14-03",
-      "definition": "Coefficient 9's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient); current Rust is an O(n^2) naive DFT normalized by n (two bugs: normalization and complexity)."
+      "status": "match",
+      "definition": "Coefficient 9's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
     }
   ]
 }
