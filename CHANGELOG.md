@@ -282,8 +282,22 @@ use the semver numbering this project started with.
   | `autocorrelation_lag1` | 0.02541518343629891 | 0.02675282466978834 | Denominator changed from the whole-series sum of squared deviations (`n*var(x)`) to tsfresh's `(n-lag)*var(x)` — a mismatch beyond the original audit's F1-F11 list, found by running the live tsfresh calculator this session |
   | `autocorrelation_lag2` | -0.06670486581681923 | -0.0741165175742436 | same |
   | `autocorrelation_lag10` | -0.17966429233157769 (never reached any SQL surface) | -0.35932858466315537 | same, PLUS the value now actually reaches `ts_features_by`/`ts_features`/`ts_features_agg`/`ts_features_table` (see next bullet) |
+  | `last_location_of_maximum` | 0.85 | 0.9 | `(last_idx+1)/n`, matching tsfresh's `1 - argmax(x[::-1])/n`, instead of the raw 0-based `last_idx/n` |
+  | `last_location_of_minimum` | 0.45 | 0.5 | same |
+  | `mean_second_derivative_central` | 0.06172222222222214 | 0.030861111111111117 | added the missing `1/2` factor in the denominator: `(x[-1]-x[-2]-x[1]+x[0]) / (2*(n-2))` |
+  | `time_reversal_asymmetry_stat_1` | 0.7533418356111107 | -1.0168216098333345 | fixed the second term's transposed operands (`x*x_lag^2`, not `x_lag*x^2`) |
+  | `time_reversal_asymmetry_stat_2` | 2.5632908058124997 | 5.0857501354375 | same |
+  | `time_reversal_asymmetry_stat_3` | 5.146344542642859 | 5.978017533928571 | same |
+  | `skewness` | 0.27971855030568227 | 0.30292879825084285 | now Fisher's bias-corrected G1 (`scipy.stats.skew(x, bias=False)`), shared with `ts_stats`' own moment helpers (D-05), instead of the biased population moment ratio |
+  | `kurtosis` | -0.07363967840233254 | 0.27652865463225274 | same (bias-corrected excess G2) |
+  | `variation_coefficient` (random_walk_n200) | 0.7073077067644646 | -0.7073077067644646 | now signed (`std(x)/mean(x)`), instead of always dividing by `\|mean(x)\|` |
+  | `agg_linear_trend_rvalue` (random_walk_n200) | 0.7617386359686308 | -0.7617386359686308 | now a signed scipy-`linregress`-semantics Pearson r (`ss_xy/sqrt(ss_xx*ss_yy)`, clipped to `[-1,1]`), instead of the unsigned `sqrt(r^2)` |
+  | `agg_linear_trend_stderr` (constant_n30) | 0.0 | NaN | degenerate (zero-variance chunk means) now reports scipy's `NaN` instead of a hard-coded `0.0` |
+  | `linear_trend_r_squared` (constant_n30) | 0.0 | NaN | same (scipy's degenerate rvalue is NaN, squared is still NaN) |
 
-  (All rows above are on the audit `x20`/`short_n20` vector, `validation/reference/fixtures/moments/scipy_moments.json` vectors.x20.)
+  `skewness`/`kurtosis` on a genuinely zero-variance series (`constant_n30`, `all_zero_n50`) are a documented intentional deviation from tsfresh/pandas, which return `0` by convention for an undefined moment (0/0) — see `validation/reference/fixtures/tsfresh_features/mapping.json`'s `deviation` entries for those two rows (D-03). `ts_stats` and `ts_features` now compute skewness/kurtosis via the same shared `sample_skewness_g1`/`sample_excess_kurtosis_g2` helpers in `stats.rs` (D-05) — the two surfaces can never again drift apart on this family.
+
+  (All rows above are on the audit `x20`/`short_n20` vector, `validation/reference/fixtures/moments/scipy_moments.json` vectors.x20, except where noted.)
 - **Every `ts_features` surface now returns all 117 features, including `autocorrelation_lag10`.**
   `ts_features_by`, `ts_features`, `ts_features_agg`, and `ts_features_table` previously
   derived their output schema from calling the Rust core on a 10-point dummy series —
