@@ -263,6 +263,36 @@ use the semver numbering this project started with.
   divisor count (the pre-v0.10.0 behavior) — MAPE is undefined with a zero actual, not
   a special case to drop. Use `ts_smape` or `ts_mase` for intermittent-demand series
   where exact zeros are expected.
+- **`ts_features` / `ts_features_by` / `ts_features_agg` values now match tsfresh 0.21.2
+  (Phase 14).** Every one of the 117 features is checked against a tsfresh-generated
+  fixture (`validation/reference/fixtures/tsfresh_features/`, D-01); a feature counts as
+  fixed once its mapping row's `status` is `"match"`. Plan 14-01 fixes partial
+  autocorrelation and autocorrelation; plans 14-02 through 14-04 fix the remaining
+  mismatching features (moments, locations, derivatives, time reversal, `agg_linear_trend`
+  rvalue, FFT/spectral, entropy/complexity/Benford) and append their own before/after rows
+  to the table below.
+
+  | Feature | Before | After (= tsfresh) | What changed |
+  |---------|--------|--------------------|--------------|
+  | `partial_autocorrelation_lag1` | 0.02541518343629891 | 0.026752824669788355 | Durbin-Levinson recursion on the adjusted `(n-k)`-divided autocovariance (statsmodels `pacf(method="ld")`), replacing an ad-hoc Yule-Walker shortcut |
+  | `partial_autocorrelation_lag2` | -0.06739432948956775 | -0.07488582800969257 | same (lag 2 is no longer a different, hard-coded estimator) |
+  | `partial_autocorrelation_lag3` | -0.06739432948956775 (reused the lag-2 value) | -0.025999690982590442 | same (lags 3-5 previously all reused the lag-2 formula verbatim — the headline bug this plan fixes) |
+  | `partial_autocorrelation_lag4` | -0.06739432948956775 (reused the lag-2 value) | -0.39110953857042163 | same |
+  | `partial_autocorrelation_lag5` | -0.06739432948956775 (reused the lag-2 value) | 0.1107535522386214 | same |
+  | `autocorrelation_lag1` | 0.02541518343629891 | 0.02675282466978834 | Denominator changed from the whole-series sum of squared deviations (`n*var(x)`) to tsfresh's `(n-lag)*var(x)` — a mismatch beyond the original audit's F1-F11 list, found by running the live tsfresh calculator this session |
+  | `autocorrelation_lag2` | -0.06670486581681923 | -0.0741165175742436 | same |
+  | `autocorrelation_lag10` | -0.17966429233157769 (never reached any SQL surface) | -0.35932858466315537 | same, PLUS the value now actually reaches `ts_features_by`/`ts_features`/`ts_features_agg`/`ts_features_table` (see next bullet) |
+
+  (All rows above are on the audit `x20`/`short_n20` vector, `validation/reference/fixtures/moments/scipy_moments.json` vectors.x20.)
+- **Every `ts_features` surface now returns all 117 features, including `autocorrelation_lag10`.**
+  `ts_features_by`, `ts_features`, `ts_features_agg`, and `ts_features_table` previously
+  derived their output schema from calling the Rust core on a 10-point dummy series —
+  `autocorrelation_lag10` requires `n > 10` to be computed at all under the old
+  length-gated insertion logic, so it silently never appeared in any SQL result (116
+  columns/struct keys instead of 117). `extract_features()` now inserts every one of the
+  117 `list_features()` names unconditionally for any input of length >= 1 (features
+  undefined for that input length — e.g. `mean_change` at `n=1`, `fft_coefficient_9_*` at
+  `n=8` — are `NULL`/NaN rather than a missing column).
 
 ### Added
 

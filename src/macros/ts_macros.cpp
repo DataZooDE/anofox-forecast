@@ -1944,6 +1944,7 @@ SELECT
     (_feat).autocorrelation_lag7 AS autocorrelation_lag7,
     (_feat).autocorrelation_lag8 AS autocorrelation_lag8,
     (_feat).autocorrelation_lag9 AS autocorrelation_lag9,
+    (_feat).autocorrelation_lag10 AS autocorrelation_lag10,
     (_feat).benford_correlation AS benford_correlation,
     (_feat).binned_entropy AS binned_entropy,
     (_feat).c3_lag1 AS c3_lag1,

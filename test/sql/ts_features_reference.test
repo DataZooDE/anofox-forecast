@@ -120,3 +120,136 @@ SELECT abs((ts_features_agg(ds, v)).partial_autocorrelation_lag5 - 0.11075355223
 FROM x20;
 ----
 true
+
+#######################################
+# autocorrelation_lag1/lag2/lag10 + anchors mean/abs_energy (Task 3, FEAT-05
+# -- tsfresh (n-lag)*var(x) denominator; autocorrelation_lag10 was previously
+# absent from every SQL surface because the C++ schema came from a 10-point
+# dummy series). tsfresh (short_n20): lag1 0.02675282466978834,
+# lag2 -0.0741165175742436, lag10 -0.35932858466315537. Anchors:
+# mean 2.7768499999999996, abs_energy 193.18060899999998 (already-matching,
+# unaffected features -- proves the new column doesn't disturb the rest).
+#######################################
+
+# --- ts_features_by('x20', id, ds, v) ---
+
+query I
+SELECT abs(autocorrelation_lag1 - 0.02675282466978834) <= 1e-9 + 1e-9 * abs(0.02675282466978834)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(autocorrelation_lag2 - (-0.0741165175742436)) <= 1e-9 + 1e-9 * abs(-0.0741165175742436)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(autocorrelation_lag10 - (-0.35932858466315537)) <= 1e-9 + 1e-9 * abs(-0.35932858466315537)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(mean - 2.7768499999999996) <= 1e-9 + 1e-9 * abs(2.7768499999999996)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(abs_energy - 193.18060899999998) <= 1e-9 + 1e-9 * abs(193.18060899999998)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+# --- (ts_features(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features(ds, v)).autocorrelation_lag1 - 0.02675282466978834) <= 1e-9 + 1e-9 * abs(0.02675282466978834)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).autocorrelation_lag2 - (-0.0741165175742436)) <= 1e-9 + 1e-9 * abs(-0.0741165175742436)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).autocorrelation_lag10 - (-0.35932858466315537)) <= 1e-9 + 1e-9 * abs(-0.35932858466315537)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).mean - 2.7768499999999996) <= 1e-9 + 1e-9 * abs(2.7768499999999996)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).abs_energy - 193.18060899999998) <= 1e-9 + 1e-9 * abs(193.18060899999998)
+FROM x20;
+----
+true
+
+# --- (ts_features_agg(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features_agg(ds, v)).autocorrelation_lag1 - 0.02675282466978834) <= 1e-9 + 1e-9 * abs(0.02675282466978834)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).autocorrelation_lag2 - (-0.0741165175742436)) <= 1e-9 + 1e-9 * abs(-0.0741165175742436)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).autocorrelation_lag10 - (-0.35932858466315537)) <= 1e-9 + 1e-9 * abs(-0.35932858466315537)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).mean - 2.7768499999999996) <= 1e-9 + 1e-9 * abs(2.7768499999999996)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).abs_energy - 193.18060899999998) <= 1e-9 + 1e-9 * abs(193.18060899999998)
+FROM x20;
+----
+true
+
+#######################################
+# 117-feature schema assertions (D-13, FEAT-05): autocorrelation_lag10 now
+# reaches every SQL surface. ts_features_by returns id + 117 feature columns
+# (118 total); ts_features_agg / ts_features return 117 struct keys;
+# ts_features_table returns 117 columns.
+#######################################
+
+query I
+SELECT count(*) FROM (DESCRIBE SELECT * FROM ts_features_by('x20', id, ds, v));
+----
+118
+
+query I
+SELECT len(struct_keys(ts_features_agg(ds, v))) FROM x20;
+----
+117
+
+query I
+SELECT len(struct_keys(ts_features(ds, v))) FROM x20;
+----
+117
+
+query I
+SELECT count(*) FROM (DESCRIBE SELECT * FROM ts_features_table('x20', ds, v));
+----
+117

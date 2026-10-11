@@ -127,8 +127,8 @@ pub fn extract_features(values: &[f64]) -> Result<HashMap<String, f64>> {
     // NaN for n <= 1 or lag >= n/2 (integer division), matching
     // statsmodels pacf(method="ld") / tsfresh partial_autocorrelation.
     let pacf = pacf_durbin_levinson(values, 5);
-    for lag in 1..=5 {
-        features.insert(format!("partial_autocorrelation_lag{}", lag), pacf[lag]);
+    for (lag, &value) in pacf.iter().enumerate().take(6).skip(1) {
+        features.insert(format!("partial_autocorrelation_lag{}", lag), value);
     }
 
     // First and last values

@@ -2098,8 +2098,10 @@ mod ts_stats_result_sentinel_tests {
     /// round-trip as `0.0`, not get confused with the `None` sentinel.
     #[test]
     fn some_zero_entropy_round_trips_as_zero_not_sentinel() {
-        let mut stats = anofox_fcst_core::TsStats::default();
-        stats.entropy = Some(0.0);
+        let stats = anofox_fcst_core::TsStats {
+            entropy: Some(0.0),
+            ..Default::default()
+        };
 
         let result: TsStatsResult = stats.into();
 

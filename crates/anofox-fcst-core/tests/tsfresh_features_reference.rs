@@ -346,13 +346,9 @@ fn pending_features_still_mismatch() {
             let want = expected_value_for(row, series_name, fixture_expected);
             let (abs_tol, rel_tol) = row_tolerance(fixture, row);
 
-            let is_match = if got_value.is_nan() && want.is_nan() {
-                true
-            } else if got_value.is_infinite() && want.is_infinite() && got_value == want {
-                true
-            } else {
-                (got_value - want).abs() <= abs_tol + rel_tol * want.abs()
-            };
+            let is_match = (got_value.is_nan() && want.is_nan())
+                || (got_value.is_infinite() && want.is_infinite() && got_value == want)
+                || (got_value - want).abs() <= abs_tol + rel_tol * want.abs();
             if !is_match {
                 mismatching_series.push(series_name);
             }
