@@ -97,6 +97,34 @@ test without a separate Rust edit.
 | `gap_counts` | `cases.json` | `python/gen_gap_counts.py` | `count_abs` (0, exact integer counts) | Phase 13 (STAT-03, D-04): `ts_stats` `n_gaps`/`n_gap_runs`/`expected_length` (13-01); Phase 13 data quality gap/temporal scoring and month-end-aware gap fill (`fill_cases`, 13-03) |
 | `quality_scores` | `cases.json` | `python/gen_quality_reference.py` | `score_abs` (1e-12) | Phase 13 (D-05/D-06, STAT-04, 13-03): `anofox_fcst_core::quality::compute_data_quality` -- all five scores, `n_gaps`/`n_gap_runs`/`n_missing`/`is_constant`/`is_short` |
 | `r_mase` | `accuracy_mase.json` | `r/gen_mase_reference.R` | `mase_abs` (1e-12) | Phase 13 (D-08, STAT-06, 13-04): `anofox_fcst_core::metrics::mase` (Hyndman-Koehler MASE, scaled by the in-sample seasonal-naive MAE at lag `seasonal_period`) -- each case carries BOTH `mase_accuracy` (`forecast::accuracy()`) and `mase_manual` (the formula), which must agree |
+| `tsfresh_features` | `mapping.json`, `white_noise_n200.json`, `random_walk_n200.json`, `seasonal_ar12_n144.json`, `trend_season_n120.json`, `intermittent_n100.json`, `short_n20.json`, `constant_n30.json`, `all_zero_n50.json`, `tiny_n8.json` | `python/gen_tsfresh_features.py` | `abs` (1e-9), `rel` (1e-9) -- see `mapping.json`'s own `tolerance` and per-row overrides | Phase 14 plans 14-01..14-04 (FEAT-01..FEAT-05): `anofox_fcst_core::features::extract_features` -- all 117 `list_features()` names, via `crates/anofox-fcst-core/tests/tsfresh_features_reference.rs` and `test/sql/ts_features_reference.test` |
+
+**`tsfresh_features`'s `mapping.json` is a second, hand-maintained fixture** (not
+generator output) alongside the nine series fixtures -- it is the D-01
+completeness contract that makes the other nine files meaningful. Each of its
+117 rows names, per feature in `anofox_fcst_core::features::list_features()`,
+either the exact `tsfresh.feature_extraction.feature_calculators` function and
+parameters to call (`reference: "tsfresh"`), or a hand-written numpy/scipy
+formula for names with no tsfresh counterpart (`reference: "numpy/scipy"`,
+D-02). `mapping.json`'s own `generator` key names the Python script that reads
+it (`gen_tsfresh_features.py`), which calls the named calculator **directly**
+with the row's pinned params -- never via `tsfresh.extract_features()`'s
+settings-driven convenience API, which silently uses the wrong default
+parameter grid for several of this project's exact choices (agg_linear_trend
+chunk_len, approximate_entropy r=0.2, …; see 14-RESEARCH.md "Fixture
+Generation Methodology" / Pitfall 2). Each row's `status` is `"match"` once
+`extract_features()`'s Rust output matches that reference value on every one
+of the nine fixture series, or `"pending:<owner-plan>"` while a later Phase 14
+plan still owns the fix; an optional `deviation` entry documents a specific
+series where the row's own `expected_ours` value is the intentionally correct
+Rust output (with a reason), and an optional `tolerance` override replaces the
+family-wide default for that one row (also with a reason, D-10).
+`crates/anofox-fcst-core/tests/tsfresh_features_reference.rs` enforces all of
+this: `mapping_covers_list_features_exactly` guards the schema and 117/117
+coverage, the nine `tsfresh_parity_<series>` tests assert every `"match"` row,
+and `pending_features_still_mismatch` (the ratchet) fails if a `"pending"` row
+now matches on every series -- forcing its status to be flipped to `"match"`
+deliberately instead of silently going stale.
 
 ## 5. Tool versions
 
@@ -131,6 +159,10 @@ uv run --locked --project validation/reference/python python validation/referenc
 # R families added in Phase 13:
 Rscript validation/reference/r/gen_entropy_reference.R
 Rscript validation/reference/r/gen_mase_reference.R
+
+# Python family added in Phase 14 (reads mapping.json; never edit the nine
+# series fixtures by hand -- only mapping.json and this script):
+uv run --locked --project validation/reference/python python validation/reference/python/gen_tsfresh_features.py
 
 # Determinism check — every generator is seeded and writes no timestamps/hostnames,
 # so regenerating with the same toolchain versions must produce an empty diff:
