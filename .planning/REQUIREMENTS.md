@@ -65,11 +65,11 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 
 ### Features (features.rs, tsfresh parity)
 
-- [ ] **FEAT-01**: PACF lags 1–N via Durbin-Levinson match statsmodels/tsfresh [F1].
-- [ ] **FEAT-02**: mean_second_derivative_central, last_location_of_max/min, time_reversal_asymmetry, agg_linear_trend rvalue, skewness/kurtosis match tsfresh exactly [F2–F4, F7, F8].
-- [ ] **FEAT-03**: fft_coefficient (unnormalised, O(n log n)) and spectral centroid/variance (one-sided, tsfresh fft_aggregated) match tsfresh [F5, F6].
-- [ ] **FEAT-04**: sample_entropy, binned_entropy, benford_correlation, permutation_entropy, lempel_ziv_complexity, number_peaks match tsfresh (or are renamed with documented definitions where deliberately different) [F9–F11].
-- [ ] **FEAT-05**: A tsfresh-generated fixture covers all 117 features on ≥4 series; every feature matches within tolerance or is listed as an intentional, documented deviation.
+- [x] **FEAT-01**: PACF lags 1–N via Durbin-Levinson match statsmodels/tsfresh [F1].
+- [x] **FEAT-02**: mean_second_derivative_central, last_location_of_max/min, time_reversal_asymmetry, agg_linear_trend rvalue, skewness/kurtosis match tsfresh exactly [F2–F4, F7, F8].
+- [x] **FEAT-03**: fft_coefficient (unnormalised, O(n log n)) and spectral centroid/variance (one-sided, tsfresh fft_aggregated) match tsfresh [F5, F6].
+- [x] **FEAT-04**: sample_entropy, binned_entropy, benford_correlation, permutation_entropy, lempel_ziv_complexity, number_peaks match tsfresh (or are renamed with documented definitions where deliberately different) [F9–F11].
+- [x] **FEAT-05**: A tsfresh-generated fixture covers all 117 features on ≥4 series; every feature matches within tolerance or is listed as an intentional, documented deviation.
 
 ### Detection & Decomposition
 
@@ -163,11 +163,11 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 | STAT-04 | Phase 13 | Complete |
 | STAT-05 | Phase 13 | Complete |
 | STAT-06 | Phase 13 | Complete |
-| FEAT-01 | Phase 14 | Pending |
-| FEAT-02 | Phase 14 | Pending |
-| FEAT-03 | Phase 14 | Pending |
-| FEAT-04 | Phase 14 | Pending |
-| FEAT-05 | Phase 14 | Pending |
+| FEAT-01 | Phase 14 | Complete |
+| FEAT-02 | Phase 14 | Complete |
+| FEAT-03 | Phase 14 | Complete |
+| FEAT-04 | Phase 14 | Complete |
+| FEAT-05 | Phase 14 | Complete |
 | DET-01 | Phase 15 | Pending |
 | DET-02 | Phase 15 | Pending |
 | DET-03 | Phase 15 | Pending |

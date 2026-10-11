@@ -72,7 +72,7 @@ Phase artifacts (plans, summaries, verification): [milestones/v0.9.0-phases/](mi
 - [ ] **Phase 11: Upstream anofox-forecast Correctness Fixes** - Augmented ADF + MacKinnon, bounded KPSS, AutoARIMA order selection, ETS likelihood/intervals, Theta — as PR(s) in the upstream repo
 - [x] **Phase 12: Statistics Marshalling Moves to Rust** - ToUnifiedFormat + validity for list args, Rust-owned NULL policy, diff/fill/backtest/hierarchy/agg delegated to Rust (completed 2026-10-10)
 - [x] **Phase 13: Core Statistics, Metrics & Data Quality** - scipy-exact moments, STL F_T/F_S strengths, Hyndman-Koehler MASE, MAPE zero policy, real gap/frequency data quality (completed 2026-10-11)
-- [ ] **Phase 14: tsfresh Feature Parity** - All 117 features match tsfresh on reference series or carry a documented deviation
+- [x] **Phase 14: tsfresh Feature Parity** - All 117 features match tsfresh on reference series or carry a documented deviation (completed 2026-10-12)
 - [ ] **Phase 15: Detection & Decomposition on fdars 0.47** - fdars 0.47 bump fixes detrend/seasonality no-ops; scipy peaks, correct BOCPD/PELT, STL-based MSTL, robust period detection
 - [ ] **Phase 16: Conformal & Bootstrap Correctness** - Horizon-ordered, per-group conformal surface computed in Rust; correct split/asymmetric/adaptive/jackknife+ and bootstrap sign
 - [ ] **Phase 17: Upstream Consumption & Diagnostics Parity** - Extension consumes the released upstream fixes; stationarity verdicts, model-aware Ljung-Box and R `forecast` parity verified from SQL
@@ -370,7 +370,7 @@ Phases execute in numeric order: 9 → 10 → 11 → 12 → 13 → 14 → 15 →
 | 11. Upstream anofox-forecast Correctness Fixes | 10/11 | In Progress|  |
 | 12. Statistics Marshalling Moves to Rust | 8/8 | Complete    | 2026-10-10 |
 | 13. Core Statistics, Metrics & Data Quality | 4/4 | Complete    | 2026-10-11 |
-| 14. tsfresh Feature Parity | 4/4 | In Progress|  |
+| 14. tsfresh Feature Parity | 4/4 | Complete    | 2026-10-12 |
 | 15. Detection & Decomposition on fdars 0.47 | 0/TBD | Not started | - |
 | 16. Conformal & Bootstrap Correctness | 0/TBD | Not started | - |
 | 17. Upstream Consumption & Diagnostics Parity | 0/TBD | Not started | - |
