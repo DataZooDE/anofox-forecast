@@ -1358,6 +1358,84 @@ mod tests {
         assert_eq!(features.get("last_location_of_minimum"), Some(&0.5));
     }
 
+    // --- Task 2 (14-02, FEAT-02/D-05): bias-corrected skewness/kurtosis
+    // shared with ts_stats, signed variation_coefficient, the
+    // mean_second_derivative_central 1/2 factor, and the
+    // time_reversal_asymmetry term order. Pinned values reproduced from
+    // tsfresh 0.21.2 / this project's own scipy-moments fixture (see
+    // 14-02-PLAN.md Task 2 <behavior>).
+
+    #[test]
+    fn test_skewness_kurtosis_bias_corrected_matches_tsfresh() {
+        // short_n20 (validation/reference/fixtures/tsfresh_features/short_n20.json):
+        // tsfresh skewness 0.30292879825084285, kurtosis 0.27652865463225274
+        // (bias-corrected G1/G2) -- current Rust is the biased population
+        // moment ratio and will NOT match these values.
+        let values = vec![
+            3.337, 2.674, 2.292, 3.491, 2.217, 4.765, 3.613, 3.258, 0.928, 0.481, 1.015, 3.755,
+            3.21, 0.738, 3.727, 1.651, 1.653, 6.178, 3.053, 3.501,
+        ];
+        let features = extract_features(&values).unwrap();
+        let skewness = *features.get("skewness").unwrap();
+        let kurtosis = *features.get("kurtosis").unwrap();
+        assert!(
+            (skewness - 0.30292879825084285).abs() < 1e-9,
+            "skewness: got {skewness}, want 0.30292879825084285 (bias-corrected G1)"
+        );
+        assert!(
+            (kurtosis - 0.27652865463225274).abs() < 1e-9,
+            "kurtosis: got {kurtosis}, want 0.27652865463225274 (bias-corrected G2)"
+        );
+    }
+
+    #[test]
+    fn test_variation_coefficient_is_signed() {
+        // tsfresh variation_coefficient = std(x)/mean(x), signed.
+        let negative_mean = vec![-1.0, -2.0, -3.0];
+        let features = extract_features(&negative_mean).unwrap();
+        let vc = *features.get("variation_coefficient").unwrap();
+        assert!(
+            (vc - (-0.408248290463863)).abs() < 1e-9,
+            "variation_coefficient([-1,-2,-3]): got {vc}, want -0.408248290463863 (signed)"
+        );
+
+        let zero_mean = vec![-1.0, 0.0, 1.0];
+        let features = extract_features(&zero_mean).unwrap();
+        assert!(
+            features.get("variation_coefficient").unwrap().is_nan(),
+            "variation_coefficient([-1,0,1]): want NaN (mean == 0)"
+        );
+
+        let constant = vec![7.0, 7.0, 7.0];
+        let features = extract_features(&constant).unwrap();
+        assert_eq!(features.get("variation_coefficient"), Some(&0.0));
+    }
+
+    #[test]
+    fn test_mean_second_derivative_central_half_factor() {
+        // (x[-1]-x[-2]-x[1]+x[0]) / (2*(n-2)): [1,4,9,16,25] ->
+        // (25-16-4+1)/(2*3) = 6/6 = 1.0; current Rust is missing the /2
+        // factor and will report 2.0.
+        let values = vec![1.0, 4.0, 9.0, 16.0, 25.0];
+        let features = extract_features(&values).unwrap();
+        assert_eq!(features.get("mean_second_derivative_central"), Some(&1.0));
+    }
+
+    #[test]
+    fn test_time_reversal_asymmetry_term_order() {
+        // mean(x[i+2lag]^2*x[i+lag] - x[i+lag]*x[i]^2), lag=1, over [1,2,3,4,5]
+        // = (18-2 + 48-12 + 100-36)/3 = 38.666666666666664; current Rust has
+        // the second term's operands transposed (x_lag*x^2 instead of
+        // x*x_lag^2) and will report a different value.
+        let values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let features = extract_features(&values).unwrap();
+        let stat1 = *features.get("time_reversal_asymmetry_stat_1").unwrap();
+        assert!(
+            (stat1 - 38.666666666666664).abs() < 1e-9,
+            "time_reversal_asymmetry_stat_1: got {stat1}, want 38.666666666666664"
+        );
+    }
+
     #[test]
     fn test_fft_coefficient_nan_beyond_available_bins() {
         // n=8: current DFT only produces bins 0..=7; bins 8 and 9 must still
