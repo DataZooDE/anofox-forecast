@@ -1,0 +1,53 @@
+{
+  "family": "tsfresh_features",
+  "generator": "validation/reference/python/gen_tsfresh_features.py",
+  "tool_versions": {
+    "python": "3.12.12",
+    "numpy": "2.5.3",
+    "scipy": "1.18.1",
+    "pandas": "3.0.6",
+    "statsmodels": "0.15.0",
+    "tsfresh": "0.21.2"
+  },
+  "tolerance": {
+    "abs": 1e-09,
+    "rel": 1e-09,
+    "notes": "D-10 default abs <= 1e-9 + 1e-9*|ref|; per-feature overrides live in features[].tolerance with a reason"
+  },
+  "series": {
+    "name": "short_n20",
+    "n": 20,
+    "recipe": "audit x20 vector (ROADMAP SC4 anchor: tsfresh sample_entropy = ln 3 = 1.0986122886681098)",
+    "seed": null,
+    "source": "validation/reference/fixtures/moments/scipy_moments.json",
+    "values": [
+      3.337,
+      2.674,
+      2.292,
+      3.491,
+      2.217,
+      4.765,
+      3.613,
+      3.258,
+      0.928,
+      0.481,
+      1.015,
+      3.755,
+      3.21,
+      0.738,
+      3.727,
+      1.651,
+      1.653,
+      6.178,
+      3.053,
+      3.501
+    ]
+  },
+  "expected": {
+    "partial_autocorrelation_lag1": 0.026752824669788355,
+    "partial_autocorrelation_lag2": -0.07488582800969257,
+    "partial_autocorrelation_lag3": -0.025999690982590442,
+    "partial_autocorrelation_lag4": -0.39110953857042163,
+    "partial_autocorrelation_lag5": 0.1107535522386214
+  }
+}

@@ -115,14 +115,13 @@ pub fn extract_features(values: &[f64]) -> Result<HashMap<String, f64>> {
         }
     }
 
-    // Extended Partial autocorrelation - lags 1-5
+    // Extended Partial autocorrelation - lags 1-5 (Durbin-Levinson, D-06/FEAT-01).
+    // Always inserted (no length gate): pacf_durbin_levinson itself returns
+    // NaN for n <= 1 or lag >= n/2 (integer division), matching
+    // statsmodels pacf(method="ld") / tsfresh partial_autocorrelation.
+    let pacf = pacf_durbin_levinson(values, 5);
     for lag in 1..=5 {
-        if values.len() > lag + 1 {
-            features.insert(
-                format!("partial_autocorrelation_lag{}", lag),
-                partial_autocorr(values, lag),
-            );
-        }
+        features.insert(format!("partial_autocorrelation_lag{}", lag), pacf[lag]);
     }
 
     // First and last values
@@ -503,20 +502,63 @@ fn autocorr(values: &[f64], lag: usize) -> f64 {
     }
 }
 
-fn partial_autocorr(values: &[f64], lag: usize) -> f64 {
-    // Simplified PACF using Yule-Walker
-    if lag == 1 {
-        return autocorr(values, 1);
+/// Partial autocorrelation via the Durbin-Levinson recursion on the
+/// "adjusted" (divide-by-`(n-k)`) autocovariance, matching statsmodels
+/// `pacf(x, method="ld")` -- what tsfresh's `partial_autocorrelation`
+/// calculator calls internally (D-06, FEAT-01).
+///
+/// Returns a vector indexed `0..=max_lag`: `pacf[0]` is always `1.0` unless
+/// `values.len() <= 1` (every entry NaN). A demanded lag `k >= n / 2`
+/// (integer division -- statsmodels' own boundary) is NaN. A zero lag-0
+/// autocovariance (constant or all-zero input) propagates as NaN through the
+/// recursion via IEEE-754 `0.0 / 0.0` -- no epsilon guard returning 0.
+fn pacf_durbin_levinson(values: &[f64], max_lag: usize) -> Vec<f64> {
+    let n = values.len();
+    let mut pacf = vec![f64::NAN; max_lag + 1];
+
+    if n <= 1 {
+        return pacf;
     }
 
-    let acf1 = autocorr(values, 1);
-    let acf2 = autocorr(values, 2);
+    // statsmodels/tsfresh: a demanded lag >= n/2 is NaN; only lags
+    // 1..=(n/2 - 1) are computable (n >= 2 here, so n/2 >= 1, no underflow).
+    let max_computable_lag = n / 2 - 1;
+    let effective_max_lag = max_lag.min(max_computable_lag);
 
-    if (1.0 - acf1.powi(2)).abs() < f64::EPSILON {
-        return 0.0;
+    pacf[0] = 1.0;
+    if effective_max_lag == 0 {
+        return pacf;
     }
 
-    (acf2 - acf1.powi(2)) / (1.0 - acf1.powi(2))
+    let mean = values.iter().sum::<f64>() / n as f64;
+    let xo: Vec<f64> = values.iter().map(|v| v - mean).collect();
+
+    // "Adjusted" autocovariance: divide lag k by (n-k), not n.
+    let mut acov = vec![0.0; effective_max_lag + 1];
+    acov[0] = xo.iter().map(|v| v * v).sum::<f64>() / n as f64;
+    for k in 1..=effective_max_lag {
+        let s: f64 = (k..n).map(|i| xo[i] * xo[i - k]).sum();
+        acov[k] = s / (n - k) as f64;
+    }
+
+    // Durbin-Levinson recursion.
+    let mut phi = vec![vec![0.0; effective_max_lag + 1]; effective_max_lag + 1];
+    let mut sig = vec![0.0; effective_max_lag + 1];
+    phi[1][1] = acov[1] / acov[0];
+    sig[1] = acov[0] - phi[1][1] * acov[1];
+    pacf[1] = phi[1][1];
+
+    for k in 2..=effective_max_lag {
+        let dot: f64 = (1..k).map(|j| phi[j][k - 1] * acov[k - j]).sum();
+        phi[k][k] = (acov[k] - dot) / sig[k - 1];
+        for j in 1..k {
+            phi[j][k] = phi[j][k - 1] - phi[k][k] * phi[k - j][k - 1];
+        }
+        sig[k] = sig[k - 1] * (1.0 - phi[k][k].powi(2));
+        pacf[k] = phi[k][k];
+    }
+
+    pacf
 }
 
 fn longest_strike(values: &[f64], threshold: f64, above: bool) -> f64 {

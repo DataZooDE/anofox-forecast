@@ -1,0 +1,122 @@
+# name: test/sql/ts_features_reference.test
+# description: ts_features value assertions against tsfresh fixtures (Phase 14 plan 14-01, FEAT-01/FEAT-05)
+# group: [sql]
+#
+# Non-json-gated so it runs on every native build (Phase 13 lesson, D-12).
+# Literals below are copied from
+# validation/reference/fixtures/tsfresh_features/short_n20.json via:
+#   python3 -c "import json; d=json.load(open('validation/reference/fixtures/tsfresh_features/short_n20.json')); print(d['expected'])"
+# (short_n20's values are the audit x20 vector, also used by test/sql/ts_stats_reference.test).
+
+require anofox_forecast
+
+# --- tsfresh_features/short_n20.json: series.values (= moments/scipy_moments.json vectors.x20) ---
+statement ok
+CREATE TABLE x20 AS
+SELECT 'x20' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, v
+FROM (SELECT unnest(range(20)) AS i, unnest([
+    3.337, 2.674, 2.292, 3.491, 2.217, 4.765, 3.613, 3.258, 0.928, 0.481,
+    1.015, 3.755, 3.21, 0.738, 3.727, 1.651, 1.653, 6.178, 3.053, 3.501
+]) AS v);
+
+#######################################
+# partial_autocorrelation_lag1..5 (D-06/FEAT-01, Durbin-Levinson)
+# tsfresh (short_n20): lag1 0.026752824669788355, lag2 -0.07488582800969257,
+#   lag3 -0.025999690982590442, lag4 -0.39110953857042163, lag5 0.1107535522386214
+#######################################
+
+# --- ts_features_by('x20', id, ds, v) ---
+
+query I
+SELECT abs(partial_autocorrelation_lag1 - 0.026752824669788355) <= 1e-9 + 1e-9 * abs(0.026752824669788355)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(partial_autocorrelation_lag2 - (-0.07488582800969257)) <= 1e-9 + 1e-9 * abs(-0.07488582800969257)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(partial_autocorrelation_lag3 - (-0.025999690982590442)) <= 1e-9 + 1e-9 * abs(-0.025999690982590442)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(partial_autocorrelation_lag4 - (-0.39110953857042163)) <= 1e-9 + 1e-9 * abs(-0.39110953857042163)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(partial_autocorrelation_lag5 - 0.1107535522386214) <= 1e-9 + 1e-9 * abs(0.1107535522386214)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+# --- (ts_features(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features(ds, v)).partial_autocorrelation_lag1 - 0.026752824669788355) <= 1e-9 + 1e-9 * abs(0.026752824669788355)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).partial_autocorrelation_lag2 - (-0.07488582800969257)) <= 1e-9 + 1e-9 * abs(-0.07488582800969257)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).partial_autocorrelation_lag3 - (-0.025999690982590442)) <= 1e-9 + 1e-9 * abs(-0.025999690982590442)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).partial_autocorrelation_lag4 - (-0.39110953857042163)) <= 1e-9 + 1e-9 * abs(-0.39110953857042163)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).partial_autocorrelation_lag5 - 0.1107535522386214) <= 1e-9 + 1e-9 * abs(0.1107535522386214)
+FROM x20;
+----
+true
+
+# --- (ts_features_agg(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features_agg(ds, v)).partial_autocorrelation_lag1 - 0.026752824669788355) <= 1e-9 + 1e-9 * abs(0.026752824669788355)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).partial_autocorrelation_lag2 - (-0.07488582800969257)) <= 1e-9 + 1e-9 * abs(-0.07488582800969257)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).partial_autocorrelation_lag3 - (-0.025999690982590442)) <= 1e-9 + 1e-9 * abs(-0.025999690982590442)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).partial_autocorrelation_lag4 - (-0.39110953857042163)) <= 1e-9 + 1e-9 * abs(-0.39110953857042163)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).partial_autocorrelation_lag5 - 0.1107535522386214) <= 1e-9 + 1e-9 * abs(0.1107535522386214)
+FROM x20;
+----
+true

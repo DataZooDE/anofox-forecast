@@ -1,0 +1,59 @@
+{
+  "family": "tsfresh_features",
+  "generator": "validation/reference/python/gen_tsfresh_features.py",
+  "tool_versions": {
+    "tsfresh": "0.21.2",
+    "statsmodels": "0.15.0",
+    "numpy": "2.5.3",
+    "scipy": "1.18.1",
+    "pandas": "3.0.6"
+  },
+  "tolerance": {
+    "abs": 1e-9,
+    "rel": 1e-9,
+    "notes": "D-10 default abs <= 1e-9 + 1e-9*|ref|; per-feature overrides live in features[].tolerance with a reason"
+  },
+  "notes": "Hand-maintained 117-row tsfresh/numpy parity contract (D-01/D-02, Phase 14). Each row names the exact tsfresh.feature_extraction.feature_calculators function + params (reference: 'tsfresh'), or a hand-written numpy/scipy formula (reference: 'numpy/scipy') for names with no tsfresh counterpart. validation/reference/python/gen_tsfresh_features.py reads this file and calls the named calculator DIRECTLY (never tsfresh.extract_features()'s settings-driven convenience API, which silently uses the wrong parameter grid for several of this project's exact choices -- see 14-RESEARCH.md Pitfall 2). status is 'match' once the Rust extract_features() output matches the computed reference value on every fixture series, or 'pending:<owner-plan>' while a later Phase 14 plan (14-02/14-03/14-04) still owns the fix. crates/anofox-fcst-core/tests/tsfresh_features_reference.rs enforces that every pending row still mismatches somewhere (the ratchet) and that every match row matches everywhere, honouring any documented 'deviation' entries. This plan (14-01) adds only the five partial_autocorrelation_lag{1..5} rows (FEAT-01); the remaining 112 names are added by plan 14-02 task 1.",
+  "features": [
+    {
+      "name": "partial_autocorrelation_lag1",
+      "reference": "tsfresh",
+      "calculator": "partial_autocorrelation",
+      "params": { "lag": 1 },
+      "status": "match",
+      "definition": "Partial autocorrelation at lag 1, Durbin-Levinson recursion on the adjusted (n-k denominator) autocovariance (statsmodels pacf(method='ld'))."
+    },
+    {
+      "name": "partial_autocorrelation_lag2",
+      "reference": "tsfresh",
+      "calculator": "partial_autocorrelation",
+      "params": { "lag": 2 },
+      "status": "match",
+      "definition": "Partial autocorrelation at lag 2, Durbin-Levinson recursion on the adjusted (n-k denominator) autocovariance (statsmodels pacf(method='ld'))."
+    },
+    {
+      "name": "partial_autocorrelation_lag3",
+      "reference": "tsfresh",
+      "calculator": "partial_autocorrelation",
+      "params": { "lag": 3 },
+      "status": "match",
+      "definition": "Partial autocorrelation at lag 3, Durbin-Levinson recursion on the adjusted (n-k denominator) autocovariance (statsmodels pacf(method='ld'))."
+    },
+    {
+      "name": "partial_autocorrelation_lag4",
+      "reference": "tsfresh",
+      "calculator": "partial_autocorrelation",
+      "params": { "lag": 4 },
+      "status": "match",
+      "definition": "Partial autocorrelation at lag 4, Durbin-Levinson recursion on the adjusted (n-k denominator) autocovariance (statsmodels pacf(method='ld'))."
+    },
+    {
+      "name": "partial_autocorrelation_lag5",
+      "reference": "tsfresh",
+      "calculator": "partial_autocorrelation",
+      "params": { "lag": 5 },
+      "status": "match",
+      "definition": "Partial autocorrelation at lag 5, Durbin-Levinson recursion on the adjusted (n-k denominator) autocovariance (statsmodels pacf(method='ld'))."
+    }
+  ]
+}

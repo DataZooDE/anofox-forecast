@@ -1,0 +1,63 @@
+{
+  "family": "tsfresh_features",
+  "generator": "validation/reference/python/gen_tsfresh_features.py",
+  "tool_versions": {
+    "python": "3.12.12",
+    "numpy": "2.5.3",
+    "scipy": "1.18.1",
+    "pandas": "3.0.6",
+    "statsmodels": "0.15.0",
+    "tsfresh": "0.21.2"
+  },
+  "tolerance": {
+    "abs": 1e-09,
+    "rel": 1e-09,
+    "notes": "D-10 default abs <= 1e-9 + 1e-9*|ref|; per-feature overrides live in features[].tolerance with a reason"
+  },
+  "series": {
+    "name": "constant_n30",
+    "n": 30,
+    "recipe": "np.full(30, 7.0)",
+    "seed": null,
+    "source": null,
+    "values": [
+      7.0,
+      7.0,
+      7.0,
+      7.0,
+      7.0,
+      7.0,
+      7.0,
+      7.0,
+      7.0,
+      7.0,
+      7.0,
+      7.0,
+      7.0,
+      7.0,
+      7.0,
+      7.0,
+      7.0,
+      7.0,
+      7.0,
+      7.0,
+      7.0,
+      7.0,
+      7.0,
+      7.0,
+      7.0,
+      7.0,
+      7.0,
+      7.0,
+      7.0,
+      7.0
+    ]
+  },
+  "expected": {
+    "partial_autocorrelation_lag1": "NaN",
+    "partial_autocorrelation_lag2": "NaN",
+    "partial_autocorrelation_lag3": "NaN",
+    "partial_autocorrelation_lag4": "NaN",
+    "partial_autocorrelation_lag5": "NaN"
+  }
+}
