@@ -29,6 +29,7 @@ Execution note: planned in parallel with Phases 15/16, but EXECUTES after Phase 
 
   A constant series gets an explicit `constant` verdict (C4). Breaking label change, documented in the CHANGELOG.
 - **D-05:** A `regression := 'c' | 'ct'` parameter (default `'c'`, statsmodels/urca naming) on `ts_adf_by`, `ts_kpss_by` and `ts_stationarity_by`, so trend variants and the trend-stationary verdict are reachable. `ts_adf_by` / `ts_kpss_by` return the corrected 0.16.0 statistics and p-values (augmented ADF with MacKinnon p-values; KPSS p bounded [0.01, 0.10]) matching the Phase 11 fixtures.
+- **D-05a:** anofox-forecast 0.16.0 has no trend-KPSS variant, so KPSS `'ct'` is implemented in the extension's Rust core. Residuals come from an OLS fit on constant + time trend; the statistic uses the same Bartlett long-run variance as level KPSS; critical values are the tseries Trend values (0.119 / 0.146 / 0.176 / 0.216) with the p-value interpolated and bounded to [0.01, 0.10]. Checked against R `tseries::kpss.test(x, null = "Trend")` (installed). With this the full four-way mapping works under `'ct'`. An upstream port to anofox-forecast is deferred. *(Added 2026-10-12 after research, user decision.)*
 - **D-06:** `ts_ljung_box_by` takes a named parameter `fitted_params := 0` (default), with df = lags − fitted_params; df ≤ 0 raises an error. The p-value matches R `Box.test(..., type = "Ljung-Box", fitdf = p + q)` (C5).
 - **D-07:** `docs/api/10-diagnostics.md` is rewritten to claim only what fixtures verify (C6). Every snippet runs against the built extension via the snippet harness.
 
@@ -72,6 +73,7 @@ Execution note: planned in parallel with Phases 15/16, but EXECUTES after Phase 
 <deferred>
 ## Deferred Ideas
 
+- Port the KPSS trend variant (D-05a) upstream into anofox-forecast.
 - A follow-up bump to the anofox-forecast release containing AutoARIMA #223 (closes UPST-01, tightens the AutoARIMA parity tolerance).
 
 </deferred>
