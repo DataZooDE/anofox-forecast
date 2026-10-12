@@ -365,7 +365,20 @@ Plans:
   3. `ts_ljung_box_by(..., fitted_params := p + q)` uses df = lags − p − q with a p-value matching R `Box.test(..., fitdf = p + q)`, and `docs/api/10-diagnostics.md` makes only claims these fixtures verify, with every snippet run against the built extension.
   4. On AirPassengers and simulated-series fixtures, point forecasts and 95% intervals for Naive, SNaive, RWD, SES, Holt, HW, AutoETS, AutoARIMA, Theta and Croston are within documented tolerance of R `forecast`, and Monte-Carlo interval coverage for the local-level case is within ±3pp of nominal.
 
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 17-01-PLAN.md — anofox-forecast 0.16.0 bump, ADF/KPSS `regression := 'c' | 'ct'` (incl. core trend KPSS), standard four-way verdict + 'constant', statsmodels/tseries fixtures, bump fallout with attribution (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 17-02-PLAN.md — Ljung-Box `fitted_params` with R Box.test(fitdf) parity, diagnostics docs/skill/examples rewritten to fixture-verified claims, Phase 17 snippet harness (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 17-03-PLAN.md — R `forecast` parity suite (new trend series, 36 per-model checks with documented known gaps), Monte Carlo coverage, forecasting docs and model pages (wave 3)
 
 ### Phase 18: Correctness Regression Suite, Audit & Docs
 
