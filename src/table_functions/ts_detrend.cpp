@@ -196,6 +196,10 @@ static void TsDecomposeSeasonalFunction(DataChunk &args, ExpressionState &state,
         );
 
         if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_decompose_seasonal: %s",
+                    error.message ? error.message : "invalid input");
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }

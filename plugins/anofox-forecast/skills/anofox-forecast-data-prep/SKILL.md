@@ -110,9 +110,11 @@ SELECT * FROM ts_drop_short_by('nulls_filled', product_id, 24);   -- ≥ 2 years
   reading `y[t] - y[t-k]` (breaking change from pre-Phase-12: `diff_order` used to mean lag-k).
   One row per input row; first `diff_order * seasonal_lag` rows per group are NULL; any
   difference touching a NULL/NaN input is NULL (never an error).
-- **`ts_detrend_by(source, group_col, date_col, value_col, method)`** — currently a **no-op**
-  (an argument-order bug makes `trend` all-zero and `detrended` equal the input); `'quadratic'`
-  / `'cubic'` also silently fall back to `'auto'`. (fix planned for v0.10.0, Phase 15)
+- **`ts_detrend_by(source, group_col, date_col, value_col, method)`** — removes a fitted trend
+  per group. `method`: `'linear'`; `'quadratic'` (alias `'polynomial'`, `'poly'`, degree 2);
+  `'cubic'` (degree 3); `'diff'`/`'diff2'`; `'loess'` (alias `'lowess'`, `O(n^2)`); `'auto'`
+  (default, AIC-selects among the above). An unrecognised method name is a SQL error naming
+  every valid choice, not a silent fallback.
 - **`ts_validate_timestamps_by`** — check for out-of-order / duplicate timestamps.
 
 ```sql

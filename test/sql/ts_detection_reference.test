@@ -153,3 +153,96 @@ query I
 SELECT starts_with((SELECT ts_detrend(LIST(v ORDER BY ds)) FROM c40).method, 'auto(');
 ----
 true
+
+#######################################
+# 15-01: seasonality classification / amplitude modulation / decompose
+# (WRAP-01, D-01, D-02) -- before the fdars-core 0.47 bump (B2), the strong
+# sine below classified as 'non_seasonal' with NaN strength, and
+# ts_decompose_seasonal's trend on a constant series was not reliably 1.0.
+#######################################
+
+statement ok
+CREATE TABLE sine120 AS
+SELECT 'g1' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, (10 + 5 * sin(2 * pi() * i / 12))::DOUBLE AS v
+FROM range(120) t(i);
+
+# --- strong sine: stable_seasonal, is_seasonal, seasonal_strength >= 0.99 ---
+
+query I
+SELECT (ts_classify_seasonality(list_transform(range(120), lambda i: (10 + 5 * sin(2 * pi() * i / 12))::DOUBLE), 12.0)).is_seasonal;
+----
+true
+
+query I
+SELECT (ts_classify_seasonality(list_transform(range(120), lambda i: (10 + 5 * sin(2 * pi() * i / 12))::DOUBLE), 12.0)).timing_classification = 'stable_seasonal';
+----
+true
+
+query I
+SELECT (ts_classify_seasonality(list_transform(range(120), lambda i: (10 + 5 * sin(2 * pi() * i / 12))::DOUBLE), 12.0)).seasonal_strength >= 0.99;
+----
+true
+
+# --- same, through ts_classify_seasonality_by on a 120-row table ---
+
+query III
+SELECT is_seasonal, timing_classification, seasonal_strength >= 0.99
+FROM ts_classify_seasonality_by('sine120', id, ds, v, 12.0);
+----
+true	stable_seasonal	true
+
+# --- deterministic noise: not seasonal ---
+
+query I
+SELECT (ts_classify_seasonality(list_transform(range(120), lambda i: ((i * 7919) % 101) / 101.0 - 0.5), 12.0)).is_seasonal;
+----
+false
+
+# --- amplitude modulation: growing amplitude -> emerging, constant -> stable ---
+
+query I
+SELECT (ts_detect_amplitude_modulation(list_transform(range(240), lambda i: (1 + i / 30.0) * sin(2 * pi() * i / 12)), 12.0)).modulation_type;
+----
+emerging
+
+query I
+SELECT (ts_detect_amplitude_modulation(list_transform(range(240), lambda i: sin(2 * pi() * i / 12)), 12.0)).modulation_type;
+----
+stable
+
+# --- ts_decompose_seasonal: constant series -> trend exactly 1.0, seasonal ~0 ---
+
+query I
+SELECT max(abs(t - 1.0)) <= 1e-12
+FROM (SELECT unnest((ts_decompose_seasonal(list_transform(range(48), lambda i: 1.0), 12.0)).trend) AS t);
+----
+true
+
+# --- additive identity: trend + seasonal + remainder == input, within 1e-10 ---
+
+query I
+SELECT max(abs(tr + se + re - v)) <= 1e-10
+FROM (
+    SELECT unnest(tr_list) AS tr, unnest(se_list) AS se, unnest(re_list) AS re, unnest(v_list) AS v
+    FROM (
+        SELECT
+            (ts_decompose_seasonal(list_transform(range(120), lambda i: (10 + 0.1 * i + 3 * sin(2 * pi() * i / 12))::DOUBLE), 12.0)).trend AS tr_list,
+            (ts_decompose_seasonal(list_transform(range(120), lambda i: (10 + 0.1 * i + 3 * sin(2 * pi() * i / 12))::DOUBLE), 12.0)).seasonal AS se_list,
+            (ts_decompose_seasonal(list_transform(range(120), lambda i: (10 + 0.1 * i + 3 * sin(2 * pi() * i / 12))::DOUBLE), 12.0)).remainder AS re_list,
+            list_transform(range(120), lambda i: (10 + 0.1 * i + 3 * sin(2 * pi() * i / 12))::DOUBLE) AS v_list
+    )
+);
+----
+true
+
+# --- strict method / period validation (D-02, applied to decompose too) ---
+
+statement error
+SELECT ts_decompose_seasonal([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], 2.0, 'classicalish');
+----
+expected one of
+
+statement error
+SELECT ts_decompose_seasonal([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], 0.0);
+----
+Period must be positive

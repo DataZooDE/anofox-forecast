@@ -98,11 +98,17 @@ ts_detrend_by(source, group_col, date_col, value_col, method)
 | `value_col` | IDENTIFIER | Value column |
 | `method` | VARCHAR | Detrending method: 'linear', 'quadratic', 'cubic', or 'auto' |
 
-**Current limitation:** `ts_detrend_by` is currently a **no-op** — due to an argument-order
-issue in the underlying call, `trend` comes back all-zero and `detrended` equals the input
-values unchanged, for every `method`. Additionally, `'quadratic'` and `'cubic'` currently
-fall back to `'auto'` (and report `method = 'auto(none)'`, `n_params = 0`) rather than
-fitting the requested polynomial degree. (fix planned for v0.10.0, Phase 15)
+**Methods (Phase 15):** `'linear'`; `'quadratic'` (alias `'polynomial'`, `'poly'`, degree 2);
+`'cubic'` (degree 3); `'diff'` (alias `'diff1'`, `'difference'`); `'diff2'`; `'loess'` (alias
+`'lowess'`); `'auto'` (default — evaluates linear, quadratic, cubic, and loess by AIC and
+reports the chosen one as e.g. `method = 'auto(polynomial(3))'`). Any other method name is a
+SQL error naming every valid choice (e.g. `expected one of: linear, quadratic (alias
+polynomial, poly), cubic, diff (alias diff1, difference), diff2, loess (alias lowess),
+auto`) — there is no silent fallback. `coefficients` for `'quadratic'`/`'cubic'` are ascending
+powers of the raw 0-based time index (`coefficients[k]` is the coefficient of `t^k`, `t =
+0..n-1`), not fdars-core's internal normalised-time basis. `'loess'` and `'auto'` (which
+evaluates a loess fit) are `O(n^2)` in series length — prefer `'linear'`/`'quadratic'`/
+`'cubic'` on long series (tens of thousands of points) if `'auto'`'s cost is a concern.
 
 **Returns:**
 | Column | Type | Description |
@@ -141,6 +147,41 @@ FROM ts_detrend_by('sensor_data', sensor_id, timestamp, reading, 'auto');
 
 ---
 
+### ts_decompose_seasonal
+
+Single-series additive/multiplicative seasonal decomposition (scalar function).
+
+**Signature:**
+```sql
+ts_decompose_seasonal(values DOUBLE[], period DOUBLE[, method VARCHAR]) → STRUCT(trend DOUBLE[], seasonal DOUBLE[], remainder DOUBLE[], period DOUBLE, method VARCHAR)
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `values` | DOUBLE[] | Time series values, ordered |
+| `period` | DOUBLE | Seasonal period; must be positive, else a SQL error (`Period must be positive`) |
+| `method` | VARCHAR | `'additive'` (alias `'add'`, default) — `data = trend + seasonal + remainder`; or `'multiplicative'` (alias `'mult'`, `'mul'`) — `data = trend * seasonal * remainder`. Any other name is a SQL error naming both choices. |
+
+Both methods extract the trend via fdars-core's LOESS detrending (bandwidth 0.3, local
+degree 2), then fit a 3-harmonic Fourier seasonal model to the detrended/deseasonalised
+residual. A constant series decomposes to `trend = ` the constant and `seasonal ≈ 0`
+everywhere (within 1e-12); for a non-trivial series, `trend + seasonal + remainder`
+reconstructs the input to ~1e-10 (additive) or `trend * seasonal * remainder` reconstructs it
+to ~1e-9 (multiplicative).
+
+**Example:**
+```sql
+SELECT (ts_decompose_seasonal(LIST(quantity ORDER BY date), 12.0)).trend[1:5]
+FROM monthly_sales WHERE product_id = 1;
+
+-- Multiplicative, for a series with multiplicative seasonality
+SELECT (ts_decompose_seasonal(LIST(quantity ORDER BY date), 12.0, 'multiplicative')).seasonal[1:5]
+FROM monthly_sales WHERE product_id = 1;
+```
+
+---
+
 ### ts_classify_seasonality_by
 
 Classify seasonality type per group in a multi-series table.
@@ -172,12 +213,10 @@ ts_classify_seasonality_by(source VARCHAR, group_col COLUMN, date_col COLUMN, va
 | `cycle_strengths` | DOUBLE[] | Strength per cycle |
 | `weak_seasons` | INTEGER[] | Indices of weak seasonal cycles |
 
-**Current limitation:** due to an argument-order issue in the underlying call, a clearly
-seasonal series (e.g. a clean sine wave with the correct period) can currently come back as
-`timing_classification = 'non_seasonal'`, `modulation_type = 'non_seasonal'`,
-`is_seasonal = false`, with `seasonal_strength` / `timing_variability` as `NaN`. Treat
-results from this function as unreliable until this is fixed.
-(fix planned for v0.10.0, Phase 15)
+**Phase 15:** a clearly seasonal series (e.g. a clean sine wave with the correct period) now
+correctly comes back as `timing_classification = 'stable_seasonal'`, `is_seasonal = true`,
+and `seasonal_strength` close to 1.0 — a fdars-core dimension-swap bug that previously made
+every call return `'non_seasonal'` / `NaN` has been fixed (WRAP-01).
 
 **Example:**
 ```sql

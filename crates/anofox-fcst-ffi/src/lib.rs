@@ -2494,13 +2494,22 @@ pub unsafe extern "C" fn anofox_ts_decompose(
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
+        // D-02 (Phase 15, Task 3): strict method-name parsing, same
+        // discipline as anofox_ts_detrend -- an unknown method name is a
+        // caller error, not a silent fallback to "additive".
         let method_str = if method.is_null() {
             "additive"
         } else {
-            CStr::from_ptr(method).to_str().unwrap_or("additive")
+            match CStr::from_ptr(method).to_str() {
+                Ok(s) => s,
+                Err(_) => {
+                    return Err(anofox_fcst_core::ForecastError::InvalidInput(
+                        "method is not valid UTF-8".to_string(),
+                    ))
+                }
+            }
         };
-        let decompose_method: anofox_fcst_core::DecomposeMethod =
-            method_str.parse().unwrap_or_default();
+        let decompose_method: anofox_fcst_core::DecomposeMethod = method_str.parse()?;
         anofox_fcst_core::decompose(&values_vec, period, decompose_method)
     }));
 
@@ -2519,7 +2528,7 @@ pub unsafe extern "C" fn anofox_ts_decompose(
         }
         Ok(Err(e)) => {
             if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+                (*out_error).set_error(ffi_error_code(&e), &e.to_string());
             }
             false
         }

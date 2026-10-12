@@ -879,13 +879,46 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_classify_seasonality() {
-        let values = generate_seasonal_series(120, 12.0, 5.0);
-        let result = classify_seasonality(&values, 12.0, None, None);
+    /// Deterministic LCG noise in `[-1, 1)` -- never `thread_rng` (the
+    /// result must be byte-reproducible across runs/machines).
+    fn deterministic_noise(n: usize, seed: u64) -> Vec<f64> {
+        let mut state = seed;
+        (0..n)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                ((state >> 11) as f64 / (1u64 << 53) as f64) * 2.0 - 1.0
+            })
+            .collect()
+    }
 
-        // Just verify function runs without error
-        assert!(result.is_ok());
+    #[test]
+    fn test_classify_seasonality_strong_sine_is_stable_seasonal() {
+        // Before fdars-core 0.47 (B2), classify_seasonality passed
+        // (values, n, 1, ...) -- backwards for a single series -- and
+        // returned NonSeasonal with NaN strength for this exact input.
+        let values: Vec<f64> = (0..120)
+            .map(|i| 10.0 + 5.0 * (2.0 * PI * i as f64 / 12.0).sin())
+            .collect();
+        let result = classify_seasonality(&values, 12.0, None, None).unwrap();
+
+        assert!(result.is_seasonal);
+        assert_eq!(result.classification, SeasonalType::StableSeasonal);
+        assert!(
+            result.seasonal_strength > 0.99,
+            "seasonal_strength = {}",
+            result.seasonal_strength
+        );
+    }
+
+    #[test]
+    fn test_classify_seasonality_white_noise_is_non_seasonal() {
+        let noise = deterministic_noise(120, 42);
+        let result = classify_seasonality(&noise, 12.0, None, None).unwrap();
+
+        assert!(!result.is_seasonal);
+        assert_eq!(result.classification, SeasonalType::NonSeasonal);
     }
 
     #[test]
@@ -917,19 +950,27 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_amplitude_modulation() {
-        // Series with amplitude modulation
+    fn test_detect_amplitude_modulation_constant_amplitude_is_stable() {
+        // Before fdars-core 0.47 (B2), detect_amplitude_modulation passed
+        // (values, n, 1, ...) -- backwards for a single series.
         let values: Vec<f64> = (0..240)
-            .map(|i| {
-                let amp = 3.0 + 2.0 * (2.0 * PI * i as f64 / 60.0).sin(); // Modulated amplitude
-                amp * (2.0 * PI * i as f64 / 12.0).sin()
-            })
+            .map(|i| (2.0 * PI * i as f64 / 12.0).sin())
             .collect();
+        let result = detect_amplitude_modulation(&values, 12.0, None, None).unwrap();
 
-        let result = detect_amplitude_modulation(&values, 12.0, None, None);
+        assert_eq!(result.modulation_type, AmplitudeModulationType::Stable);
+        assert!(!result.has_modulation);
+    }
 
-        // Just verify function runs without error
-        assert!(result.is_ok());
+    #[test]
+    fn test_detect_amplitude_modulation_growing_amplitude_is_emerging() {
+        let values: Vec<f64> = (0..240)
+            .map(|i| (1.0 + i as f64 / 30.0) * (2.0 * PI * i as f64 / 12.0).sin())
+            .collect();
+        let result = detect_amplitude_modulation(&values, 12.0, None, None).unwrap();
+
+        assert_eq!(result.modulation_type, AmplitudeModulationType::Emerging);
+        assert!(result.has_modulation);
     }
 
     #[test]

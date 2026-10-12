@@ -320,6 +320,51 @@ use the semver numbering this project started with.
   `skewness`/`kurtosis` on a genuinely zero-variance series (`constant_n30`, `all_zero_n50`) are a documented intentional deviation from tsfresh/pandas, which return `0` by convention for an undefined moment (0/0) — see `validation/reference/fixtures/tsfresh_features/mapping.json`'s `deviation` entries for those two rows (D-03). `ts_stats` and `ts_features` now compute skewness/kurtosis via the same shared `sample_skewness_g1`/`sample_excess_kurtosis_g2` helpers in `stats.rs` (D-05) — the two surfaces can never again drift apart on this family. `fft_coefficient_*` are now unnormalised numpy-`rfft` values (previously divided by `n`), coefficients beyond `n/2` are `NaN`, the transform is `O(n log n)` via `rustfft` (D-07) instead of an `O(n^2)` naive DFT, and `spectral_centroid`/`spectral_variance` use tsfresh's one-sided magnitude-spectrum definition instead of the old two-sided power spectrum.
 
   (All rows above are on the audit `x20`/`short_n20` vector, `validation/reference/fixtures/moments/scipy_moments.json` vectors.x20, except where noted.)
+- **Detection & decomposition run on fdars-core 0.47 and match numpy / scipy / R (Phase 15).**
+  fdars-core 0.3 → 0.47 introduces a dimension-tracked `FdMatrix` type for most
+  detrend/decompose/seasonality functions; the project's own wrapper code was
+  passing `(values, n, 1, ...)` to the 0.3 raw-argument API for a single
+  series of length `n` — backwards (should be `(values, 1, n, ...)`). fdars
+  0.3's own invalid-dimension guard (`m < 4`) then silently returned a no-op
+  / degenerate result instead of erroring, so `ts_detrend`, `ts_detrend_by`,
+  `ts_decompose_seasonal`, `ts_classify_seasonality(_by)`, and
+  `ts_detect_amplitude_modulation` were effectively dead code (B1/B2). Plan
+  15-01 bumps to fdars-core 0.47 (`["parallel"]` native, no `"linalg"` —
+  removes the duplicate `anofox-regression 0.4.0` / `faer` pulled in
+  transitively by 0.3's `linalg` feature) and routes every call through one
+  reviewed `single_series_matrix()` helper. Unknown `ts_detrend`/
+  `ts_decompose_seasonal` method names now raise an error naming every valid
+  choice instead of silently falling back to `'auto'`/`'additive'` (D-02).
+
+  | Function (input) | Before | After | What changed |
+  |---|---|---|---|
+  | `ts_detrend(cubic40, 'cubic')` `.trend[1]` | `0.0` | `3.154511161980401` | B1 fix: matches `numpy.polyfit(t, y, 3)` to 1e-8 |
+  | `ts_detrend(cubic40, 'cubic')` `.method` | `'auto(none)'` (unrecognised name silently became `auto`, which then hit the same dimension guard) | `'polynomial(3)'` | B1 + D-02: `'cubic'` is now a real degree-3 fit, not a silent `auto` fallback |
+  | `ts_detrend(cubic40, 'quadratic')` `.method` | `'auto(none)'` (same silent-`auto` path as `'cubic'` above) | `'polynomial(2)'` | D-02: `'quadratic'` now fits degree 2 (previously not a recognised method name at all) |
+  | `ts_detrend(.., 'quartic')` / `ts_detrend(.., '7')` | silently became `'auto(none)'`, no error | SQL error: `expected one of: linear, quadratic (alias polynomial, poly), cubic, diff (alias diff1, difference), diff2, loess (alias lowess), auto` | D-02/B3: unknown method names are now a caller error |
+  | `ts_detrend_by(.., 'cubic')` `.trend` | all `0.0` (same B1 bug) | identical to the `ts_detrend` scalar result | B1 fix, grouped macro parity |
+  | `ts_classify_seasonality(strong_sine_n120, 12)` | `is_seasonal=false`, `timing_classification='non_seasonal'`, `seasonal_strength=NaN` | `is_seasonal=true`, `timing_classification='stable_seasonal'`, `seasonal_strength≈0.9999999999999993` | B2 fix |
+  | `ts_detect_amplitude_modulation(growing_amplitude_sine_n240, 12)` `.modulation_type` | `'non_seasonal'` (`has_modulation=false`, dimension guard short-circuited before any analysis) | `'emerging'` (`has_modulation=true`) | B2 fix |
+  | `ts_decompose_seasonal(constant_1.0_n48, 12)` `.trend[1]` | `0.0` | `1.0` | B1 fix |
+  | `ts_decompose_seasonal(.., 0.0)` (non-positive period) | returned a `NULL` row | SQL error: `Period must be positive` | the FFI's existing `period <= 0` pre-check already reported `INVALID_INPUT`; the C++ layer now raises on it instead of swallowing it into a `NULL` row |
+  | `ts_decompose_seasonal(.., 'classicalish')` (unknown method) | silently became `'additive'`, no error | SQL error: `expected one of: additive (alias add), multiplicative (alias mult, mul)` | D-02, applied to decompose |
+
+  "Before" values for `ts_classify_seasonality`/`ts_detect_amplitude_modulation`/
+  `ts_decompose_seasonal` are reproduced from fdars-core 0.3.0's own source
+  (its `m < 4` dimension guard on the swapped single-series call, read
+  directly from the cached crate at
+  `~/.cargo/registry/src/*/fdars-core-0.3.0/src/{detrend,seasonal}.rs`), not
+  a live re-run of the pre-bump binary — the binary was already rebuilt with
+  the fix by the time this table was written; the guard's early-return
+  values are deterministic and match the audit's and this plan's own
+  pre-bump probes exactly (`ts_detrend`'s `'linear'`/`'cubic'` before-values
+  were captured live from the pre-bump build per plan 15-01 Task 2 step 1,
+  before any rebuild). `fdars-core 0.47`'s own `detrend_loess`/`auto_detrend`
+  are `O(n^2)`: `ts_detrend(.., 'auto')` on a 20000-point series took ~2.5s
+  wall and `ts_detrend(.., 'loess')` alone ~0.27s wall on this machine
+  (previously instantaneous, since the swapped-argument bug returned a
+  no-op before fdars did any real work) — prefer `'linear'`/`'quadratic'`/
+  `'cubic'` over `'loess'`/`'auto'` on long series.
 - **Every `ts_features` surface now returns all 117 features, including `autocorrelation_lag10`.**
   `ts_features_by`, `ts_features`, `ts_features_agg`, and `ts_features_table` previously
   derived their output schema from calling the Rust core on a 10-point dummy series —

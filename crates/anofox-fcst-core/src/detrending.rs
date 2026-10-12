@@ -88,14 +88,24 @@ pub enum DecomposeMethod {
     Multiplicative,
 }
 
+/// All decompose method names accepted by [`DecomposeMethod::from_str`], for
+/// the error message naming every valid choice.
+const VALID_DECOMPOSE_METHODS: &str = "additive (alias add), multiplicative (alias mult, mul)";
+
 impl FromStr for DecomposeMethod {
-    type Err = std::convert::Infallible;
+    type Err = ForecastError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         Ok(match s.to_lowercase().as_str() {
             "additive" | "add" => Self::Additive,
             "multiplicative" | "mult" | "mul" => Self::Multiplicative,
-            _ => Self::Additive,
+            other => {
+                return Err(ForecastError::InvalidParameter {
+                    param: "method".to_string(),
+                    value: other.to_string(),
+                    reason: format!("expected one of: {VALID_DECOMPOSE_METHODS}"),
+                })
+            }
         })
     }
 }
@@ -532,6 +542,121 @@ mod tests {
         let result = decompose_multiplicative(&values, 12.0, None, None, None).unwrap();
 
         assert_eq!(result.method, "multiplicative");
+    }
+
+    // ------------------------------------------------------------------
+    // Decompose behavior (Task 3): constant/non-trivial decomposition and
+    // strict DecomposeMethod::from_str.
+    // ------------------------------------------------------------------
+
+    fn pearson(a: &[f64], b: &[f64]) -> f64 {
+        let n = a.len() as f64;
+        let ma = a.iter().sum::<f64>() / n;
+        let mb = b.iter().sum::<f64>() / n;
+        let cov: f64 = a.iter().zip(b).map(|(x, y)| (x - ma) * (y - mb)).sum();
+        let va: f64 = a.iter().map(|x| (x - ma).powi(2)).sum();
+        let vb: f64 = b.iter().map(|y| (y - mb).powi(2)).sum();
+        cov / (va.sqrt() * vb.sqrt())
+    }
+
+    #[test]
+    fn test_decompose_constant_series_trend_is_exact_and_seasonal_is_zero() {
+        // Before fdars-core 0.47 (B1), decompose_additive passed
+        // (values, n, 1, ...) -- backwards for a single series.
+        let constant = vec![1.0; 48];
+        let result = decompose(&constant, 12.0, DecomposeMethod::Additive).unwrap();
+
+        for (i, &t) in result.trend.iter().enumerate() {
+            assert!((t - 1.0).abs() < 1e-12, "trend[{i}] = {t}");
+        }
+        for (i, &s) in result.seasonal.iter().enumerate() {
+            assert!(s.abs() < 1e-12, "seasonal[{i}] = {s}");
+        }
+    }
+
+    #[test]
+    fn test_decompose_additive_reconstructs_input_and_recovers_seasonal() {
+        let n = 120;
+        let seasonal_component: Vec<f64> = (0..n)
+            .map(|i| 3.0 * (2.0 * PI * i as f64 / 12.0).sin())
+            .collect();
+        let values: Vec<f64> = (0..n)
+            .map(|i| 10.0 + 0.1 * i as f64 + seasonal_component[i])
+            .collect();
+        let result = decompose(&values, 12.0, DecomposeMethod::Additive).unwrap();
+
+        for (i, &want) in values.iter().enumerate() {
+            let recon = result.trend[i] + result.seasonal[i] + result.remainder[i];
+            assert!(
+                (recon - want).abs() < 1e-10,
+                "index {i}: trend+seasonal+remainder = {recon}, input = {want}"
+            );
+        }
+        let corr = pearson(&result.seasonal, &seasonal_component);
+        assert!(corr > 0.99, "correlation with generating seasonal = {corr}");
+    }
+
+    #[test]
+    fn test_decompose_multiplicative_reconstructs_input() {
+        let n = 120;
+        let values: Vec<f64> = (0..n)
+            .map(|i| {
+                let trend = 10.0 + 0.1 * i as f64;
+                let seasonal = 1.0 + 0.3 * (2.0 * PI * i as f64 / 12.0).sin();
+                trend * seasonal
+            })
+            .collect();
+        let result = decompose(&values, 12.0, DecomposeMethod::Multiplicative).unwrap();
+
+        for (i, &want) in values.iter().enumerate() {
+            let recon = result.trend[i] * result.seasonal[i] * result.remainder[i];
+            assert!(
+                (recon - want).abs() < 1e-9,
+                "index {i}: trend*seasonal*remainder = {recon}, input = {want}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_decompose_method_accepted_spellings() {
+        assert_eq!(
+            "additive".parse::<DecomposeMethod>().unwrap(),
+            DecomposeMethod::Additive
+        );
+        assert_eq!(
+            "add".parse::<DecomposeMethod>().unwrap(),
+            DecomposeMethod::Additive
+        );
+        assert_eq!(
+            "multiplicative".parse::<DecomposeMethod>().unwrap(),
+            DecomposeMethod::Multiplicative
+        );
+        assert_eq!(
+            "mult".parse::<DecomposeMethod>().unwrap(),
+            DecomposeMethod::Multiplicative
+        );
+        assert_eq!(
+            "mul".parse::<DecomposeMethod>().unwrap(),
+            DecomposeMethod::Multiplicative
+        );
+    }
+
+    #[test]
+    fn test_decompose_method_unknown_name_errors_naming_valid_methods() {
+        let err = "classicalish".parse::<DecomposeMethod>().unwrap_err();
+        match err {
+            ForecastError::InvalidParameter {
+                param,
+                value,
+                reason,
+            } => {
+                assert_eq!(param, "method");
+                assert_eq!(value, "classicalish");
+                assert!(reason.contains("additive"));
+                assert!(reason.contains("multiplicative"));
+            }
+            other => panic!("expected InvalidParameter, got {other:?}"),
+        }
     }
 
     #[test]

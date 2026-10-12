@@ -218,11 +218,10 @@ Output columns (group column preserved):
 | `cycle_strengths` | DOUBLE[] | Per-cycle strengths |
 | `weak_seasons` | BIGINT[] | Indices of weak seasonal peaks |
 
-**Current limitation:** an argument-order bug in the underlying call can make even a clean,
-clearly-seasonal series (e.g. a sine wave at the correct period) come back as
-`timing_classification = 'non_seasonal'`, `is_seasonal = false`, with `seasonal_strength` /
-`timing_variability` as `NaN`. Treat results as unreliable until this is fixed.
-(fix planned for v0.10.0, Phase 15)
+**Phase 15:** a clean, clearly-seasonal series (e.g. a sine wave at the correct period) now
+correctly comes back as `timing_classification = 'stable_seasonal'`, `is_seasonal = true`,
+with `seasonal_strength` close to 1.0 (previously a fdars-core dimension-swap bug made every
+call return `'non_seasonal'` / `NaN`).
 
 ```sql
 SELECT product_id, timing_classification, modulation_type, is_seasonal, seasonal_strength
@@ -283,7 +282,15 @@ SELECT product_id, trend, seasonal, remainder
 FROM ts_mstl_decomposition_by('sales', product_id, ds, y, MAP{});
 ```
 
-### `ts_decompose_seasonal` (scalar) — classical additive / multiplicative
+### `ts_decompose_seasonal` (scalar) — LOESS trend + Fourier-seasonal additive / multiplicative
+
+Signature `ts_decompose_seasonal(DOUBLE[] values, DOUBLE period [, VARCHAR method]) → STRUCT(trend DOUBLE[], seasonal DOUBLE[], remainder DOUBLE[], period DOUBLE, method VARCHAR)`.
+`method`: `'additive'` (alias `'add'`, default, `data = trend + seasonal + remainder`) or
+`'multiplicative'` (alias `'mult'`/`'mul'`, `data = trend * seasonal * remainder`) — not
+classical (centred moving-average) decomposition, which `ts_mstl_decomposition_by` /
+plan 15-04 add separately. Trend comes from fdars-core LOESS (bandwidth 0.3, degree 2);
+seasonal is a 3-harmonic Fourier fit to the detrended residual. Any other method name, or a
+non-positive `period`, is a SQL error naming the valid choices.
 
 ### `ts_detrend_by`
 
@@ -293,17 +300,16 @@ Remove linear or polynomial trend:
 ts_detrend_by(source, group_col, date_col, value_col, method) → TABLE
 ```
 
-`method`: `'linear'`, `'quadratic'`, `'cubic'`, or `'auto'` (default).
-
-**Current limitation:** `ts_detrend_by` is currently a **no-op** — an argument-order bug
-makes `trend` come back all-zero and `detrended` equal the input values, for every
-`method`. `'quadratic'` / `'cubic'` additionally fall back silently to `'auto'` (reporting
-`method = 'auto(none)'`, `n_params = 0`) rather than fitting the requested degree.
-(fix planned for v0.10.0, Phase 15)
+`method`: `'linear'`; `'quadratic'` (alias `'polynomial'`, `'poly'`, degree 2); `'cubic'`
+(degree 3); `'diff'` (alias `'diff1'`, `'difference'`); `'diff2'`; `'loess'` (alias
+`'lowess'`); `'auto'` (default — AIC-selects among linear/quadratic/cubic/loess). Any other
+name is a SQL error naming every valid choice — there is no silent fallback. `'loess'` and
+`'auto'` are `O(n^2)` in series length; prefer `'linear'`/`'quadratic'`/`'cubic'` on long
+series.
 
 ### `ts_detrend` (scalar) — array-level trend removal
 
-The array-level primitive behind `ts_detrend_by`. Signature `ts_detrend(DOUBLE[] values [, VARCHAR method]) → STRUCT(trend DOUBLE[], detrended DOUBLE[], method VARCHAR, coefficients DOUBLE[], rss DOUBLE, n_params BIGINT)`. **For grouped series prefer `ts_detrend_by`** (methods `'linear'` / `'quadratic'` / `'cubic'` / `'auto'`) — it handles the per-group `GROUP BY` shape and is the documented path.
+The array-level primitive behind `ts_detrend_by`. Signature `ts_detrend(DOUBLE[] values [, VARCHAR method]) → STRUCT(trend DOUBLE[], detrended DOUBLE[], method VARCHAR, coefficients DOUBLE[], rss DOUBLE, n_params BIGINT)`. `coefficients` for `'quadratic'`/`'cubic'` are ascending powers of the raw 0-based time index. **For grouped series prefer `ts_detrend_by`** — it handles the per-group `GROUP BY` shape and is the documented path.
 
 ## Gotchas
 
@@ -337,8 +343,7 @@ SELECT product_id, primary_period AS sp, periods[1].confidence AS conf
 FROM ts_detect_periods_by('sales', product_id, ds, y, MAP{'method': 'autoperiod'});
 
 -- 2. Classify seasonality mode at the modal period (real column names are
--- timing_classification / modulation_type, not classification / confidence --
--- treat results as unreliable, see Current limitation above)
+-- timing_classification / modulation_type, not classification / confidence)
 CREATE OR REPLACE TABLE modes AS
 SELECT product_id, timing_classification, modulation_type
 FROM ts_classify_seasonality_by('sales', product_id, ds, y,

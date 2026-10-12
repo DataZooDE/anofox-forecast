@@ -1824,6 +1824,65 @@ mod tests {
         assert_eq!(result.method, "multi");
     }
 
+    // ------------------------------------------------------------------
+    // Call-order pins (Task 3, RESEARCH.md Pitfall 1): estimate_period_acf,
+    // estimate_period_regression, and detect_multiple_periods were NOT
+    // migrated to fdars-core 0.47's FdMatrix -- they still take raw
+    // `(data, n_samples, m_timepoints, argvals, ...)` arguments with no
+    // structural protection against the swap that caused B1/B2 elsewhere.
+    // Each test below documents that it fails if `(n, m)` were swapped
+    // back to the wrong order for a single series (should be `(1, len)`).
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_estimate_period_acf_call_order_pin() {
+        // fdars-core's estimate_period_acf is not FdMatrix-protected: this
+        // crate's call site must keep passing (values, 1, m, argvals, ...)
+        // -- swapping to (values, m, 1, ...) would silently reinterpret a
+        // single m-point series as m one-point samples and this assertion
+        // would fail.
+        let values: Vec<f64> = (0..120)
+            .map(|i| (2.0 * PI * i as f64 / 12.0).sin())
+            .collect();
+        let result = estimate_period_acf_ts(&values, None).unwrap();
+        assert!(
+            (result.period - 12.0).abs() < 1e-9,
+            "expected period 12.0, got {}",
+            result.period
+        );
+    }
+
+    #[test]
+    fn test_estimate_period_regression_call_order_pin() {
+        // Same call-order risk as estimate_period_acf above --
+        // estimate_period_regression is not FdMatrix-protected.
+        let values: Vec<f64> = (0..120)
+            .map(|i| (2.0 * PI * i as f64 / 12.0).sin())
+            .collect();
+        let result =
+            estimate_period_regression_ts(&values, Some(2.0), Some(60.0), Some(59), None).unwrap();
+        assert!(
+            (result.period - 12.0).abs() < 1e-9,
+            "expected period 12.0, got {}",
+            result.period
+        );
+    }
+
+    #[test]
+    fn test_detect_multiple_periods_call_order_pin() {
+        // Same call-order risk as estimate_period_acf above --
+        // detect_multiple_periods is not FdMatrix-protected.
+        let values: Vec<f64> = (0..240)
+            .map(|i| (2.0 * PI * i as f64 / 12.0).sin())
+            .collect();
+        let result = detect_multiple_periods_ts(&values, None, None, None).unwrap();
+        assert!(
+            (result.primary_period - 12.0).abs() < 0.5,
+            "expected primary period within 0.5 of 12.0, got {}",
+            result.primary_period
+        );
+    }
+
     #[test]
     fn test_detect_periods_auto() {
         let values = generate_seasonal_series(120, 12.0, 5.0);
