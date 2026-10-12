@@ -338,7 +338,20 @@ Plans:
   4. Asymmetric conformal uses the α/2 and 1−α/2 quantiles of signed residuals, with simulated coverage within ±2pp of nominal (previously ~40% too wide); adaptive conformal uses |r|/d scores at calibration and d-scaling at prediction, giving the same interval for a row regardless of what else is in the batch.
   5. `'JackknifePlus'` either implements jackknife+ (verified against a reference implementation) or is renamed/removed, with the old name producing a clear error.
 
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 16-01-PLAN.md — SQL contract tracer (RUST-04): date-ordered, per-row-paired long-format ts_conformal_by / ts_conformal_apply_by (calibration table) / ts_interval_width_by, per-group ts_conformal_calibrate with pooled opt-out, residuals + empirical coverage in Rust (_ts_conformal_from_pairs), json-free params, numpy split fixture + non-gated SQL test (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 16-02-PLAN.md — split/asymmetric/adaptive core (CONF-02/03/04): unbounded NULL + calibration_insufficient instead of clamping, alpha errors, non-finite filtering (incl. per-step), signed-residual asymmetric with Monte Carlo ±2pp, adaptive |r|/d with difficulty_col and no batch normalisation (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 16-03-PLAN.md — bootstrap residual sign vs numpy simulation (CONF-01), jackknife+ removed with explanatory errors + strict strategy/method parsing (CONF-05), ts_conformal.test migrated (still gated), CHANGELOG before/after table, docs/skills, Phase 16 snippet harness (wave 3)
 
 ### Phase 17: Upstream Consumption & Diagnostics Parity
 
