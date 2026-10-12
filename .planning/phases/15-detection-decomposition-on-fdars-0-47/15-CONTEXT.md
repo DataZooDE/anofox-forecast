@@ -24,7 +24,7 @@ Out of scope: conformal/bootstrap (G2, G12–G16 → Phase 16) and gaps/frequenc
 ### Peaks and changepoints (DET-01, DET-02, DET-03)
 - **D-05:** Peaks: re-implement scipy `find_peaks` in core instead of calling fdars, covering plateau midpoints, prominence, height and distance. Existing SQL parameters map onto it. A scipy fixture must find every reference peak at the right index and no minima (audit: 51 found vs scipy 66, only 31 matching).
 - **D-06:** BOCPD: Adams & MacKay done properly (G3–G6): a normalised Student-t predictive, a Normal-Gamma update using the sample mean, and run-length truncation that renormalises instead of dropping mass. A changepoint is flagged when the MAP run length resets. The reference is an independent numpy implementation in `validation/reference/python`, plus behaviour tests: a 3σ step is detected within a few steps, and stationary noise produces no changepoints.
-- **D-07:** PELT (G7, G8): the cost is normalised by a robust noise variance (MAD of first differences) with a BIC-style penalty, so a series and that series ×100 give identical changepoints. L1 cost uses the median, and pruning actually works. The reference is a numpy exact optimal-partitioning DP (PELT must equal it on small n), because R `changepoint` and Python `ruptures` are not installed.
+- **D-07:** PELT (G7, G8): the cost is normalised by a robust noise variance (MAD of first differences) with a BIC-style penalty, so a series and that series ×100 give identical changepoints. L1 cost uses the median, and pruning actually works. The reference is a numpy exact optimal-partitioning DP (PELT must equal it on small n), because R `changepoint` and Python `ruptures` are not installed. PELT stays Rust-only: its SQL wrapper was removed as dead code in Phase 12, and `ts_detect_changepoints` stays BOCPD. PELT is checked by Rust reference tests only. *(Added 2026-10-12, user decision.)*
 - **D-08:** Breaking output changes get a CHANGELOG before/after table and no compatibility flag (same as Phases 13 and 14).
 
 ### Decomposition, periods and seasonal strength (DET-04, DET-05, DET-06)
@@ -40,7 +40,7 @@ Out of scope: conformal/bootstrap (G2, G12–G16 → Phase 16) and gaps/frequenc
 
 ### Smaller fixes, testing and plan split (DET-07)
 - **D-13:** `is_constant` uses a scale-relative tolerance: constant if `max − min ≤ 1e-10 · max(1, max|x|)`, ignoring NaN/NULL (G25).
-- **D-14:** Edge-NULL interpolation behaviour is documented, not changed: linear interpolation does not extrapolate leading/trailing NULLs, and LOCF/NOCB fill in one direction only. Docs plus a SQL assertion pinning it (G26).
+- **D-14:** Edge-NULL interpolation behaviour is documented, not changed. Research verified that `imputation.rs::fill_nulls_interpolate` fills leading/trailing NULLs by constant extension (nearest observed value); LOCF/NOCB fill in one direction only. Docs state this and a SQL assertion pins it (G26). *(Revised 2026-10-12 after research: the user chose to keep the current edge fill.)*
 - **D-15:** Testing: a new NON-json-gated `test/sql/ts_detection_reference.test` covers every requirement, plus Rust `crates/anofox-fcst-core/tests/*_reference.rs` tests over checked-in fixtures (validation harness: numpy/scipy/statsmodels via the uv project, R via Rscript). The existing detection SQL tests are all json-gated; removing that gate is left to Phase 18 (TEST-03). The assertion count must visibly rise in `make test_release`.
 - **D-16:** 5 plans: (1) fdars bump + detrend/classify/amplitude-modulation tracer [DEP-03, WRAP-01]; (2) scipy peaks [DET-01]; (3) BOCPD + PELT [DET-02, DET-03]; (4) MSTL + classical decomposition [DET-04]; (5) periods, seasonal strength, `is_constant`, edge-NULL docs and the docs/skills/CHANGELOG sweep [DET-05, DET-06, DET-07].
 
@@ -79,6 +79,7 @@ Out of scope: conformal/bootstrap (G2, G12–G16 → Phase 16) and gaps/frequenc
 <deferred>
 ## Deferred Ideas
 
+- A SQL surface for PELT (e.g. `method := 'pelt'` on `ts_detect_changepoints`).
 - An upstream fdars-core issue or PR for the ACF period, FFT period and wavelet-strength defects (G17–G19).
 - Removing the json gate from the existing detection SQL test files (Phase 18 / TEST-03).
 - A correct wavelet seasonal strength, if it is ever wanted again.
