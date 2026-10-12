@@ -11,15 +11,34 @@ use fdars_core::detrend::{
     detrend_polynomial as fdars_detrend_polynomial, DecomposeResult as FdarsDecomposeResult,
     TrendResult as FdarsTrendResult,
 };
+use fdars_core::matrix::FdMatrix;
 use std::str::FromStr;
+
+/// Build the single-series `(1 x n)` `FdMatrix` that every fdars-core call in
+/// this crate must go through -- the ONLY place `FdMatrix::from_slice` is
+/// called (T-15-01). fdars-core's `FdMatrix` convention is rows =
+/// observations, columns = evaluation points; a single time series of
+/// length `n` is one observation (row) of `n` evaluation points (columns),
+/// i.e. `FdMatrix::from_slice(values, 1, n)`.
+///
+/// `FdMatrix::from_slice(values, n, 1)` still compiles -- it silently builds
+/// an n-observation, 1-timepoint matrix -- and was exactly the B1/B2 bug
+/// this helper exists to prevent. Review this literal `(1, n)` order at
+/// every change to this function.
+pub(crate) fn single_series_matrix(values: &[f64]) -> Result<FdMatrix> {
+    FdMatrix::from_slice(values, 1, values.len())
+        .map_err(|e| ForecastError::InvalidInput(e.to_string()))
+}
 
 /// Method for detrending.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DetrendMethod {
     /// Linear trend removal using least squares
     Linear,
-    /// Polynomial trend removal
-    Polynomial,
+    /// Quadratic (degree 2) polynomial trend removal
+    Quadratic,
+    /// Cubic (degree 3) polynomial trend removal
+    Cubic,
     /// First-order differencing
     Diff,
     /// Second-order differencing
@@ -31,18 +50,30 @@ pub enum DetrendMethod {
     Auto,
 }
 
+/// All detrend method names accepted by [`DetrendMethod::from_str`], for the
+/// error message naming every valid choice (D-02).
+const VALID_DETREND_METHODS: &str =
+    "linear, quadratic (alias polynomial, poly), cubic, diff (alias diff1, difference), diff2, loess (alias lowess), auto";
+
 impl FromStr for DetrendMethod {
-    type Err = std::convert::Infallible;
+    type Err = ForecastError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         Ok(match s.to_lowercase().as_str() {
             "linear" => Self::Linear,
-            "polynomial" | "poly" => Self::Polynomial,
+            "quadratic" | "polynomial" | "poly" => Self::Quadratic,
+            "cubic" => Self::Cubic,
             "diff" | "diff1" | "difference" => Self::Diff,
             "diff2" => Self::Diff2,
             "loess" | "lowess" => Self::Loess,
             "auto" => Self::Auto,
-            _ => Self::Auto,
+            other => {
+                return Err(ForecastError::InvalidParameter {
+                    param: "method".to_string(),
+                    value: other.to_string(),
+                    reason: format!("expected one of: {VALID_DETREND_METHODS}"),
+                })
+            }
         })
     }
 }
@@ -78,7 +109,12 @@ pub struct DetrendResult {
     pub detrended: Vec<f64>,
     /// Method used for detrending
     pub method: String,
-    /// Polynomial coefficients (for polynomial methods)
+    /// Polynomial coefficients (for polynomial methods). For
+    /// `DetrendMethod::Quadratic`/`Cubic` these are ascending powers of the
+    /// raw 0-based time index (`t = 0..n-1`): `coefficients[k]` is the
+    /// coefficient of `t^k`. fdars-core itself fits in normalised time
+    /// `t/(n-1)`; `detrend_polynomial` below converts back to the raw-index
+    /// basis before returning.
     pub coefficients: Option<Vec<f64>>,
     /// Residual sum of squares
     pub rss: f64,
@@ -90,10 +126,10 @@ impl From<FdarsTrendResult> for DetrendResult {
     fn from(r: FdarsTrendResult) -> Self {
         let rss = r.rss.first().copied().unwrap_or(0.0);
         Self {
-            trend: r.trend,
-            detrended: r.detrended,
-            method: r.method,
-            coefficients: r.coefficients,
+            trend: r.trend.as_slice().to_vec(),
+            detrended: r.detrended.as_slice().to_vec(),
+            method: r.method.into_owned(),
+            coefficients: r.coefficients.map(|c| c.as_slice().to_vec()),
             rss,
             n_params: r.n_params,
         }
@@ -118,11 +154,11 @@ pub struct DecomposeResult {
 impl From<FdarsDecomposeResult> for DecomposeResult {
     fn from(r: FdarsDecomposeResult) -> Self {
         Self {
-            trend: r.trend,
-            seasonal: r.seasonal,
-            remainder: r.remainder,
+            trend: r.trend.as_slice().to_vec(),
+            seasonal: r.seasonal.as_slice().to_vec(),
+            remainder: r.remainder.as_slice().to_vec(),
             period: r.period,
-            method: r.method,
+            method: r.method.into_owned(),
         }
     }
 }
@@ -146,7 +182,8 @@ pub fn detrend_linear(values: &[f64]) -> Result<DetrendResult> {
     }
 
     let argvals = make_argvals(n);
-    let result = fdars_detrend_linear(values, n, 1, &argvals);
+    let mat = single_series_matrix(values)?;
+    let result = fdars_detrend_linear(&mat, &argvals);
 
     Ok(result.into())
 }
@@ -158,7 +195,12 @@ pub fn detrend_linear(values: &[f64]) -> Result<DetrendResult> {
 /// * `degree` - Polynomial degree (1 = linear, 2 = quadratic, etc.)
 ///
 /// # Returns
-/// Detrend result with trend and detrended data
+/// Detrend result with trend and detrended data. For `degree >= 2` the
+/// returned `coefficients` are converted from fdars-core's normalised-time
+/// basis (`t/(n-1)`) to the raw 0-based index basis: coefficient `k` is
+/// divided by `(n-1)^k`. `degree == 1` delegates to fdars-core's own
+/// `detrend_linear`, whose coefficients are already in the raw-index basis
+/// (no conversion applied).
 pub fn detrend_polynomial(values: &[f64], degree: usize) -> Result<DetrendResult> {
     let n = values.len();
     if n < degree + 1 {
@@ -169,9 +211,20 @@ pub fn detrend_polynomial(values: &[f64], degree: usize) -> Result<DetrendResult
     }
 
     let argvals = make_argvals(n);
-    let result = fdars_detrend_polynomial(values, n, 1, &argvals, degree);
+    let mat = single_series_matrix(values)?;
+    let result = fdars_detrend_polynomial(&mat, &argvals, degree);
+    let mut detrend_result: DetrendResult = result.into();
 
-    Ok(result.into())
+    if degree >= 2 {
+        if let Some(ref mut coefs) = detrend_result.coefficients {
+            let scale = (n - 1) as f64;
+            for (k, c) in coefs.iter_mut().enumerate() {
+                *c /= scale.powi(k as i32);
+            }
+        }
+    }
+
+    Ok(detrend_result)
 }
 
 /// Remove trend by differencing.
@@ -192,7 +245,8 @@ pub fn detrend_diff(values: &[f64], order: usize) -> Result<DetrendResult> {
         });
     }
 
-    let result = fdars_detrend_diff(values, n, 1, order);
+    let mat = single_series_matrix(values)?;
+    let result = fdars_detrend_diff(&mat, order);
 
     Ok(result.into())
 }
@@ -221,7 +275,8 @@ pub fn detrend_loess(values: &[f64], bandwidth: f64, degree: usize) -> Result<De
     }
 
     let argvals = make_argvals(n);
-    let result = fdars_detrend_loess(values, n, 1, &argvals, bandwidth, degree);
+    let mat = single_series_matrix(values)?;
+    let result = fdars_detrend_loess(&mat, &argvals, bandwidth, degree);
 
     Ok(result.into())
 }
@@ -243,7 +298,8 @@ pub fn detrend_auto(values: &[f64]) -> Result<DetrendResult> {
     }
 
     let argvals = make_argvals(n);
-    let result = fdars_auto_detrend(values, n, 1, &argvals);
+    let mat = single_series_matrix(values)?;
+    let result = fdars_auto_detrend(&mat, &argvals);
 
     Ok(result.into())
 }
@@ -259,7 +315,8 @@ pub fn detrend_auto(values: &[f64]) -> Result<DetrendResult> {
 pub fn detrend(values: &[f64], method: DetrendMethod) -> Result<DetrendResult> {
     match method {
         DetrendMethod::Linear => detrend_linear(values),
-        DetrendMethod::Polynomial => detrend_polynomial(values, 2),
+        DetrendMethod::Quadratic => detrend_polynomial(values, 2),
+        DetrendMethod::Cubic => detrend_polynomial(values, 3),
         DetrendMethod::Diff => detrend_diff(values, 1),
         DetrendMethod::Diff2 => detrend_diff(values, 2),
         DetrendMethod::Loess => detrend_loess(values, 0.3, 1),
@@ -308,7 +365,8 @@ pub fn decompose_additive(
     let bw = bandwidth.unwrap_or(0.3);
     let harmonics = n_harmonics.unwrap_or(3);
 
-    let result = fdars_decompose_additive(values, n, 1, &argvals, period, method, bw, harmonics);
+    let mat = single_series_matrix(values)?;
+    let result = fdars_decompose_additive(&mat, &argvals, period, method, bw, harmonics);
 
     Ok(result.into())
 }
@@ -354,8 +412,8 @@ pub fn decompose_multiplicative(
     let bw = bandwidth.unwrap_or(0.3);
     let harmonics = n_harmonics.unwrap_or(3);
 
-    let result =
-        fdars_decompose_multiplicative(values, n, 1, &argvals, period, method, bw, harmonics);
+    let mat = single_series_matrix(values)?;
+    let result = fdars_decompose_multiplicative(&mat, &argvals, period, method, bw, harmonics);
 
     Ok(result.into())
 }
@@ -487,5 +545,142 @@ mod tests {
     fn test_insufficient_data() {
         let values = vec![1.0];
         assert!(detrend_linear(&values).is_err());
+    }
+
+    // ------------------------------------------------------------------
+    // D-02 / B3: strict DetrendMethod::from_str (Task 2)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_detrend_method_accepted_spellings() {
+        assert_eq!(
+            "linear".parse::<DetrendMethod>().unwrap(),
+            DetrendMethod::Linear
+        );
+        assert_eq!(
+            "quadratic".parse::<DetrendMethod>().unwrap(),
+            DetrendMethod::Quadratic
+        );
+        assert_eq!(
+            "polynomial".parse::<DetrendMethod>().unwrap(),
+            DetrendMethod::Quadratic
+        );
+        assert_eq!(
+            "poly".parse::<DetrendMethod>().unwrap(),
+            DetrendMethod::Quadratic
+        );
+        assert_eq!(
+            "cubic".parse::<DetrendMethod>().unwrap(),
+            DetrendMethod::Cubic
+        );
+        assert_eq!(
+            "diff".parse::<DetrendMethod>().unwrap(),
+            DetrendMethod::Diff
+        );
+        assert_eq!(
+            "diff1".parse::<DetrendMethod>().unwrap(),
+            DetrendMethod::Diff
+        );
+        assert_eq!(
+            "difference".parse::<DetrendMethod>().unwrap(),
+            DetrendMethod::Diff
+        );
+        assert_eq!(
+            "diff2".parse::<DetrendMethod>().unwrap(),
+            DetrendMethod::Diff2
+        );
+        assert_eq!(
+            "loess".parse::<DetrendMethod>().unwrap(),
+            DetrendMethod::Loess
+        );
+        assert_eq!(
+            "lowess".parse::<DetrendMethod>().unwrap(),
+            DetrendMethod::Loess
+        );
+        assert_eq!(
+            "auto".parse::<DetrendMethod>().unwrap(),
+            DetrendMethod::Auto
+        );
+        // Case-insensitive
+        assert_eq!(
+            "CUBIC".parse::<DetrendMethod>().unwrap(),
+            DetrendMethod::Cubic
+        );
+    }
+
+    #[test]
+    fn test_detrend_method_unknown_name_errors_naming_valid_methods() {
+        let err = "quartic".parse::<DetrendMethod>().unwrap_err();
+        match err {
+            ForecastError::InvalidParameter {
+                param,
+                value,
+                reason,
+            } => {
+                assert_eq!(param, "method");
+                assert_eq!(value, "quartic");
+                assert!(reason.contains("linear"));
+                assert!(reason.contains("quadratic"));
+                assert!(reason.contains("cubic"));
+                assert!(reason.contains("diff"));
+                assert!(reason.contains("loess"));
+                assert!(reason.contains("auto"));
+            }
+            other => panic!("expected InvalidParameter, got {other:?}"),
+        }
+
+        let err2 = "7".parse::<DetrendMethod>().unwrap_err();
+        assert!(matches!(err2, ForecastError::InvalidParameter { .. }));
+    }
+
+    #[test]
+    fn test_detrend_polynomial_insufficient_data_for_degree() {
+        // Cubic needs degree + 1 = 4 points
+        let values = vec![1.0, 2.0, 3.0];
+        let result = detrend_polynomial(&values, 3);
+        assert!(matches!(
+            result,
+            Err(ForecastError::InsufficientData { needed: 4, got: 3 })
+        ));
+    }
+
+    #[test]
+    fn test_single_series_matrix_shape() {
+        let values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let mat = single_series_matrix(&values).unwrap();
+        assert_eq!(mat.shape(), (1, 5));
+    }
+
+    #[test]
+    fn test_detrend_cubic_matches_polyfit_shape() {
+        // Cubic series: 0.002 t^3 - 0.08 t^2 + 0.5 t + 3 (noise-free, exact fit expected)
+        let n = 40;
+        let values: Vec<f64> = (0..n)
+            .map(|i| {
+                let t = i as f64;
+                0.002 * t.powi(3) - 0.08 * t.powi(2) + 0.5 * t + 3.0
+            })
+            .collect();
+        let result = detrend_polynomial(&values, 3).unwrap();
+        assert_eq!(result.n_params, 4);
+        assert_eq!(result.method, "polynomial(3)");
+        // Exact cubic should fit essentially perfectly.
+        for (t_val, trend_val) in result.trend.iter().enumerate() {
+            let expected = {
+                let t = t_val as f64;
+                0.002 * t.powi(3) - 0.08 * t.powi(2) + 0.5 * t + 3.0
+            };
+            assert!(
+                (trend_val - expected).abs() < 1e-6,
+                "trend[{t_val}] = {trend_val}, expected {expected}"
+            );
+        }
+        // Coefficients (ascending powers of raw index) should recover the
+        // generating polynomial.
+        let coefs = result.coefficients.unwrap();
+        assert!((coefs[0] - 3.0).abs() < 1e-6, "c0 = {}", coefs[0]);
+        assert!((coefs[1] - 0.5).abs() < 1e-6, "c1 = {}", coefs[1]);
+        assert!((coefs[2] - (-0.08)).abs() < 1e-6, "c2 = {}", coefs[2]);
+        assert!((coefs[3] - 0.002).abs() < 1e-6, "c3 = {}", coefs[3]);
     }
 }

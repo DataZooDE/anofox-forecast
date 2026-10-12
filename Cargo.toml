@@ -19,7 +19,7 @@ anofox-forecast = { version = "0.15.10", features = ["anomaly", "serde"] }
 
 # Functional data analysis (seasonality, peaks, detrending)
 # Note: default-features disabled to allow WASM builds; features enabled per-target in crates
-fdars-core = { version = "0.3", default-features = false }
+fdars-core = { version = "0.47", default-features = false }
 
 # FFI and memory management
 libc = "0.2"

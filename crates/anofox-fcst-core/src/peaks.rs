@@ -3,6 +3,7 @@
 //! This module wraps fdars-core's peak detection functions for use with
 //! time series data in DuckDB.
 
+use crate::detrending::single_series_matrix;
 use crate::error::{ForecastError, Result};
 use fdars_core::seasonal::{
     analyze_peak_timing as fdars_analyze_peak_timing, detect_peaks as fdars_detect_peaks,
@@ -146,12 +147,12 @@ pub fn detect_peaks(
     let m = n; // m = number of time points
     let argvals = make_argvals(m);
 
-    // fdars_detect_peaks expects: data, n_samples, m_timepoints, argvals, ...
-    // For a single time series: n_samples=1, m_timepoints=len(values)
+    // fdars 0.47: detect_peaks(data: &FdMatrix, argvals, ...) -- the matrix
+    // carries (n_samples, m_timepoints) together, built once via
+    // single_series_matrix(values) as (1, m).
+    let mat = single_series_matrix(values)?;
     let result = fdars_detect_peaks(
-        values,
-        1, // n = 1 sample (one time series)
-        m, // m = number of time points
+        &mat,
         &argvals,
         min_distance,
         min_prominence,
@@ -208,9 +209,9 @@ pub fn analyze_peak_timing(
     let m = n; // m = number of time points
     let argvals = make_argvals(m);
 
-    // fdars_analyze_peak_timing expects: data, n_samples, m_timepoints, argvals, ...
-    // For a single time series: n_samples=1, m_timepoints=len(values)
-    let result = fdars_analyze_peak_timing(values, 1, m, &argvals, period, smooth_nbasis);
+    // fdars 0.47: analyze_peak_timing(data: &FdMatrix, argvals, period, smooth_nbasis)
+    let mat = single_series_matrix(values)?;
+    let result = fdars_analyze_peak_timing(&mat, &argvals, period, smooth_nbasis);
 
     Ok(result.into())
 }

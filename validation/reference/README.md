@@ -98,6 +98,7 @@ test without a separate Rust edit.
 | `quality_scores` | `cases.json` | `python/gen_quality_reference.py` | `score_abs` (1e-12) | Phase 13 (D-05/D-06, STAT-04, 13-03): `anofox_fcst_core::quality::compute_data_quality` -- all five scores, `n_gaps`/`n_gap_runs`/`n_missing`/`is_constant`/`is_short` |
 | `r_mase` | `accuracy_mase.json` | `r/gen_mase_reference.R` | `mase_abs` (1e-12) | Phase 13 (D-08, STAT-06, 13-04): `anofox_fcst_core::metrics::mase` (Hyndman-Koehler MASE, scaled by the in-sample seasonal-naive MAE at lag `seasonal_period`) -- each case carries BOTH `mase_accuracy` (`forecast::accuracy()`) and `mase_manual` (the formula), which must agree |
 | `tsfresh_features` | `mapping.json`, `white_noise_n200.json`, `random_walk_n200.json`, `seasonal_ar12_n144.json`, `trend_season_n120.json`, `intermittent_n100.json`, `short_n20.json`, `constant_n30.json`, `all_zero_n50.json`, `tiny_n8.json` | `python/gen_tsfresh_features.py` | `abs` (1e-9), `rel` (1e-9) -- see `mapping.json`'s own `tolerance` and per-row overrides | Phase 14 plans 14-01..14-04 (FEAT-01..FEAT-05): `anofox_fcst_core::features::extract_features` -- all 117 `list_features()` names, via `crates/anofox-fcst-core/tests/tsfresh_features_reference.rs` and `test/sql/ts_features_reference.test` |
+| `numpy_detrend` | `polyfit_cases.json` | `python/gen_detrend_reference.py` | `trend_abs` (1e-8), `coef_rel` (1e-8), `coef_abs` (1e-10), `rss_rel` (1e-8) | Phase 15 plan 15-01 (DEP-03, WRAP-01, D-01): `anofox_fcst_core::detrending::{detrend_linear,detrend_polynomial,detrend}` -- fitted trend, ascending-power coefficients (raw 0-based index basis), detrended residuals, and RSS for degree 1/2/3 on 4 seeded series, via `crates/anofox-fcst-core/tests/detrend_reference.rs` and `test/sql/ts_detection_reference.test` |
 
 **`tsfresh_features`'s `mapping.json` is a second, hand-maintained fixture** (not
 generator output) alongside the nine series fixtures -- it is the D-01
@@ -145,6 +146,21 @@ features across all 9 fixture series, including the FFT/spectral family
 (rustfft's evaluation order) and the entropy/Benford/Lempel-Ziv family added
 in plans 14-03/14-04.
 
+**`numpy_detrend` tolerance rationale (Phase 15 plan 15-01):** `trend_abs`
+(1e-8) and `coef_abs` (1e-10) bound the fitted-trend and coefficient
+differences in absolute terms -- both `numpy.polyfit` (SVD-based) and
+fdars-core's own QR/SVD polynomial fit are well-conditioned for the degree
+1-3, n <= 60 cases here, so double-precision linear-algebra noise is the
+only expected discrepancy, well under 1e-8. `coef_rel` (1e-8) additionally
+bounds the larger-magnitude coefficients in relative terms, since the raw
+0-based index basis (as opposed to fdars-core's internal `t/(n-1)`
+normalisation) can produce leading coefficients orders of magnitude apart in
+size. `rss_rel` (1e-8) is relative for the same reason, but the Rust test
+additionally folds in `trend_abs` as an absolute floor: a perfect/constant
+fit's true RSS is conceptually 0, and `numpy.polyfit`'s own floating-point
+evaluation of that 0 is not bit-identical to fdars-core's (observed ~1e-29
+vs exactly `0.0`), which a relative-only bound cannot absorb.
+
 ## 5. Tool versions
 
 These are the toolchain versions this phase verified against. **Each fixture's own
@@ -182,6 +198,9 @@ Rscript validation/reference/r/gen_mase_reference.R
 # Python family added in Phase 14 (reads mapping.json; never edit the nine
 # series fixtures by hand -- only mapping.json and this script):
 uv run --locked --project validation/reference/python python validation/reference/python/gen_tsfresh_features.py
+
+# Python family added in Phase 15 plan 15-01:
+uv run --locked --project validation/reference/python python validation/reference/python/gen_detrend_reference.py
 
 # Determinism check — every generator is seeded and writes no timestamps/hostnames,
 # so regenerating with the same toolchain versions must produce an empty diff:

@@ -1,0 +1,155 @@
+# name: test/sql/ts_detection_reference.test
+# description: Phase 15 detection/decomposition value assertions against checked-in fixtures (plans 15-01..15-05)
+# group: [sql]
+#
+# Non-json-gated so it runs on every native build (Phase 13 lesson, D-12).
+# Literals below are copied from fixture JSON via a one-line python3 snippet,
+# e.g. for validation/reference/fixtures/numpy_detrend/polyfit_cases.json:
+#   python3 -c "import json; d=json.load(open('validation/reference/fixtures/numpy_detrend/polyfit_cases.json')); cases={c['name']: c for c in d['cases']}; print(cases['cubic40']['degrees']['3']['fitted'])"
+#
+# This file stays free of any json-extension requirement line (Phase 13
+# lesson) -- every macro used here is json-free (ts_detrend_by,
+# ts_classify_seasonality_by).
+
+require anofox_forecast
+
+#######################################
+# 15-01: ts_detrend / ts_detrend_by on numpy_detrend/polyfit_cases.json
+# cubic40 (DEP-03, WRAP-01, D-01, D-02) -- before the fdars-core 0.47 bump
+# (B1), every trend value here was 0.0 and method was 'auto(none)'.
+#######################################
+
+statement ok
+CREATE TABLE c40 AS
+SELECT 'c40' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, v
+FROM (SELECT unnest(range(40)) AS i, unnest([
+    3.3415, 3.4674, 3.4188, 3.6566, 4.3669, 4.343, 3.1133, 2.6994, 2.7134,
+    2.6692, 1.7653, 1.5972, 0.6845, 0.1635, -0.0077, -0.6544, -1.8044,
+    -1.4394, -2.6328, -3.0114, -2.8217, -3.089, -3.2557, -3.4062, -3.91,
+    -3.6834, -2.7239, -2.704, -2.0794, -0.9526, 0.2703, 0.9545, 3.247,
+    3.8274, 6.3386, 8.1952, 10.5395, 13.0925, 16.4851, 19.1749
+]) AS v);
+
+# --- method 'cubic' -> polynomial(3), n_params 4 ---
+
+query I
+SELECT max(abs(t - e)) <= 1e-8
+FROM (SELECT unnest((SELECT ts_detrend(LIST(v ORDER BY ds), 'cubic') FROM c40).trend) AS t,
+             unnest([
+    3.154511161980401, 3.533623876010552, 3.769283044848695, 3.8732775038496206,
+    3.857396088368119, 3.7334276337589816, 3.5131609753769975, 3.2083849485769584,
+    2.8308883887136544, 2.3924601311418767, 1.9048890112164134, 1.379963864292057,
+    0.829473525723599, 0.2652068308658291, -0.301047384926465, -0.8575002862984888,
+    -1.3923630378954535, -1.8938468043625667, -2.350162750345045, -2.749522040488089,
+    -3.080135839436913, -3.3302153118367217, -3.4879716223327337, -3.541615935570152,
+    -3.4793594161941828, -3.2894132288500417, -2.95998853818294, -2.4792965088380816,
+    -1.8355483054606765, -1.0169550926959312, -0.011728035189070063, 1.1919217024147128,
+    2.6057829554702048, 4.2416445593321965, 6.111295349355477, 8.226524160894819,
+    10.59911982930505, 13.24087118994094, 16.163567078157257, 19.378996329308837
+]) AS e);
+----
+true
+
+query I
+SELECT (SELECT ts_detrend(LIST(v ORDER BY ds), 'cubic') FROM c40).method;
+----
+polynomial(3)
+
+query I
+SELECT (SELECT ts_detrend(LIST(v ORDER BY ds), 'cubic') FROM c40).n_params;
+----
+4
+
+# --- method 'quadratic' -> polynomial(2), n_params 3 ---
+
+query I
+SELECT max(abs(t - e)) <= 1e-8
+FROM (SELECT unnest((SELECT ts_detrend(LIST(v ORDER BY ds), 'quadratic') FROM c40).trend) AS t,
+             unnest([
+    8.541419477351912, 7.263021940498522, 6.059264312516747, 4.930146593406589,
+    3.875668783168047, 2.895830881801122, 1.9906328893058127, 1.1600748056821182,
+    0.40415663093004106, -0.2771216349504204, -0.8837599919592662, -1.4157584400964947,
+    -1.8731169793621074, -2.2558356097561045, -2.5639143312784825, -2.7973531439292483,
+    -2.9561520477083967, -3.0403110426159294, -3.0498301286518448, -2.9847093058161445,
+    -2.8449485741088285, -2.630547933529897, -2.341507384079346, -1.9778269257571814,
+    -1.5395065585634011, -1.0265462824980052, -0.4389460975609918, 0.22329399624763724,
+    0.9601739989278872, 1.7716939104797484, 2.6578537309032253, 3.6186534601983187,
+    4.654093098365028, 5.764172645403353, 6.9488921013132945, 8.208251466094852,
+    9.542250739748026, 10.950889922272824, 12.43416901366923, 13.992088013937252
+]) AS e);
+----
+true
+
+query I
+SELECT (SELECT ts_detrend(LIST(v ORDER BY ds), 'quadratic') FROM c40).method;
+----
+polynomial(2)
+
+query I
+SELECT (SELECT ts_detrend(LIST(v ORDER BY ds), 'quadratic') FROM c40).n_params;
+----
+3
+
+# --- method 'linear' -> linear, n_params 2 ---
+
+query I
+SELECT max(abs(t - e)) <= 1e-8
+FROM (SELECT unnest((SELECT ts_detrend(LIST(v ORDER BY ds), 'linear') FROM c40).trend) AS t,
+             unnest([
+    -0.6766092682926831, -0.536848536585366, -0.397087804878049, -0.257327073170732,
+    -0.11756634146341494, 0.02219439024390213, 0.16195512195121908, 0.30171585365853615,
+    0.4414765853658532, 0.5812373170731703, 0.7209980487804873, 0.8607587804878044,
+    1.0005195121951211, 1.1402802439024384, 1.2800409756097553, 1.4198017073170726,
+    1.5595624390243894, 1.6993231707317062, 1.8390839024390235, 1.9788446341463404,
+    2.1186053658536577, 2.2583660975609745, 2.398126829268292, 2.5378875609756086,
+    2.6776482926829255, 2.8174090243902428, 2.9571697560975596, 3.096930487804877,
+    3.2366912195121937, 3.3764519512195106, 3.5162126829268283, 3.655973414634145,
+    3.795734146341462, 3.935494878048779, 4.075255609756096, 4.215016341463413,
+    4.35477707317073, 4.494537804878047, 4.634298536585364, 4.774059268292682
+]) AS e);
+----
+true
+
+query I
+SELECT (SELECT ts_detrend(LIST(v ORDER BY ds), 'linear') FROM c40).method;
+----
+linear
+
+query I
+SELECT (SELECT ts_detrend(LIST(v ORDER BY ds), 'linear') FROM c40).n_params;
+----
+2
+
+# --- ts_detrend_by parity: grouped macro matches the scalar function ---
+
+query I
+SELECT max(abs(t - e)) <= 1e-8
+FROM (
+    SELECT unnest(by_trend) AS t, unnest(scalar_trend) AS e
+    FROM (
+        SELECT
+            (SELECT trend FROM ts_detrend_by('c40', id, ds, v, 'cubic')) AS by_trend,
+            (SELECT ts_detrend(LIST(v ORDER BY ds), 'cubic') FROM c40).trend AS scalar_trend
+    )
+);
+----
+true
+
+# --- D-02 / B3: unknown method names raise an error naming every valid choice ---
+
+statement error
+SELECT ts_detrend([1.0, 2.0, 3.0, 4.0, 5.0], 'quartic');
+----
+expected one of
+
+statement error
+SELECT ts_detrend([1.0, 2.0, 3.0, 4.0, 5.0], '7');
+----
+expected one of
+
+# --- 1-argument form (no method) still defaults to auto ---
+
+query I
+SELECT starts_with((SELECT ts_detrend(LIST(v ORDER BY ds)) FROM c40).method, 'auto(');
+----
+true

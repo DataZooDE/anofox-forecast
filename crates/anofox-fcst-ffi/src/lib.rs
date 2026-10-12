@@ -2364,6 +2364,22 @@ pub unsafe extern "C" fn anofox_ts_analyze_peak_timing(
 // Detrending Functions (fdars-core integration)
 // ============================================================================
 
+/// Map a core `ForecastError` to the FFI `ErrorCode` a caller should see.
+///
+/// `InvalidParameter` (D-02: strict method-name parsing) and `InvalidInput`
+/// are caller mistakes -- the C++ layer re-throws these as a DuckDB
+/// `InvalidInputException` (precedent: `ts_data_quality.cpp`). Every other
+/// `ForecastError` variant is an internal computation failure. Phase 15
+/// plans reuse this helper for `anofox_ts_decompose` and future strict
+/// parameter validation.
+fn ffi_error_code(e: &anofox_fcst_core::ForecastError) -> ErrorCode {
+    match e {
+        anofox_fcst_core::ForecastError::InvalidParameter { .. }
+        | anofox_fcst_core::ForecastError::InvalidInput(_) => ErrorCode::InvalidInput,
+        _ => ErrorCode::ComputationError,
+    }
+}
+
 /// Detrend time series using specified method.
 ///
 /// # Safety
@@ -2390,8 +2406,9 @@ pub unsafe extern "C" fn anofox_ts_detrend(
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
         // D-07/T-10-07: invalid UTF-8 is an error, never a silent "auto"
-        // fallback. The method-NAME parse itself (unknown name → default)
-        // is unchanged here — that strict-parsing pass is Phase 15's scope.
+        // fallback. D-02 (Phase 15): the method-NAME parse itself is now
+        // strict too -- an unknown method name is a caller error, not a
+        // silent fallback to "auto".
         let method_str = if method.is_null() {
             "auto"
         } else {
@@ -2404,8 +2421,7 @@ pub unsafe extern "C" fn anofox_ts_detrend(
                 }
             }
         };
-        let detrend_method: anofox_fcst_core::DetrendMethod =
-            method_str.parse().unwrap_or_default();
+        let detrend_method: anofox_fcst_core::DetrendMethod = method_str.parse()?;
         anofox_fcst_core::detrend(&values_vec, detrend_method)
     }));
 
@@ -2432,7 +2448,7 @@ pub unsafe extern "C" fn anofox_ts_detrend(
         }
         Ok(Err(e)) => {
             if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+                (*out_error).set_error(ffi_error_code(&e), &e.to_string());
             }
             false
         }

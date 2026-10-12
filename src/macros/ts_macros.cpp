@@ -496,7 +496,9 @@ SELECT * FROM _ts_mstl_decomposition_native(
 
     // ts_detrend_by: Remove trend from grouped time series
     // C++ API: ts_detrend_by(table_name, group_col, date_col, value_col, method)
-    // method: 'linear', 'quadratic', 'cubic', 'auto' (default: 'auto')
+    // method: 'linear', 'quadratic' (alias 'polynomial', 'poly'), 'cubic',
+    //   'diff' (alias 'diff1', 'difference'), 'diff2', 'loess' (alias 'lowess'),
+    //   'auto' (default); an unknown method raises an error naming these choices.
     // Returns: TABLE(id, trend[], detrended[], method, coefficients[], rss, n_params)
     {"ts_detrend_by", {"source", "group_col", "date_col", "value_col", "method", nullptr}, {{nullptr, nullptr}},
 R"(
@@ -518,7 +520,7 @@ SELECT
 FROM detrend_data
 )",
     "Removes the trend component from each group's time series.",
-    "SELECT * FROM ts_detrend_by('sales', product_id, date, qty, 7)",
+    "SELECT * FROM ts_detrend_by('sales', product_id, date, qty, 'cubic')",
     "decomposition"},
 
     // ts_classify_seasonality_by: Classify seasonality type per group

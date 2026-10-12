@@ -65,6 +65,10 @@ static void TsDetrendFunction(DataChunk &args, ExpressionState &state, Vector &r
         );
 
         if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_detrend: %s",
+                    error.message ? error.message : "invalid input");
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -118,8 +122,8 @@ void RegisterTsDetrendFunction(ExtensionLoader &loader) {
     {
         CreateScalarFunctionInfo info(ts_detrend_set);
         FunctionDescription desc;
-        desc.description = "Removes the trend component from a time series using linear or seasonal decomposition, returning detrended values.";
-        desc.examples = {"ts_detrend(LIST(value ORDER BY date), 7)"};
+        desc.description = "Removes the trend component from a time series. method is one of: linear, quadratic (alias polynomial, poly), cubic, diff (alias diff1, difference), diff2, loess (alias lowess), auto (default); an unknown method raises an error naming the valid choices.";
+        desc.examples = {"ts_detrend(LIST(value ORDER BY date), 'linear')"};
         desc.categories = {"time-series", "decomposition"};
         desc.parameter_names = {"values"};
         desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};

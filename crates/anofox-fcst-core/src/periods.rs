@@ -4,6 +4,7 @@
 //! time series data in DuckDB.
 
 use crate::decomposition::{mstl_decompose, InsufficientDataMode};
+use crate::detrending::single_series_matrix;
 use crate::error::{ForecastError, Result};
 use fdars_core::seasonal::{
     detect_multiple_periods as fdars_detect_multiple_periods, estimate_period_acf,
@@ -279,9 +280,10 @@ pub fn estimate_period_fft_ts(values: &[f64]) -> Result<SinglePeriodResult> {
     }
 
     let argvals = make_argvals(m);
-    // fdars-core expects: data, n_samples, m_timepoints, argvals
-    // We have 1 sample (our time series) with m time points
-    let result = estimate_period_fft(values, 1, m, &argvals);
+    // fdars 0.47: estimate_period_fft(data: &FdMatrix, argvals) -- (n, m)
+    // now travel inside the matrix, built once as (1, m).
+    let mat = single_series_matrix(values)?;
+    let result = estimate_period_fft(&mat, &argvals);
 
     Ok((result, "fft").into())
 }
@@ -482,9 +484,9 @@ pub fn cfd_autoperiod(values: &[f64], acf_threshold: Option<f64>) -> Result<Auto
     // Get FFT period estimate on differenced series
     let m = differenced.len();
     let argvals = make_argvals(m);
-    // fdars-core expects: data, n_samples, m_timepoints, argvals
-    // We have 1 sample (differenced series) with m time points
-    let fft_est = estimate_period_fft(&differenced, 1, m, &argvals);
+    // fdars 0.47: estimate_period_fft(data: &FdMatrix, argvals), built as (1, m).
+    let diff_mat = single_series_matrix(&differenced)?;
+    let fft_est = estimate_period_fft(&diff_mat, &argvals);
 
     let period = fft_est.period.round() as usize;
 

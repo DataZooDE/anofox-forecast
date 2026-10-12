@@ -3,6 +3,7 @@
 //! This module provides functions for detecting and analyzing seasonal patterns
 //! in time series data, wrapping both custom implementations and fdars-core functions.
 
+use crate::detrending::single_series_matrix;
 use crate::error::{ForecastError, Result};
 use fdars_core::seasonal::{
     classify_seasonality as fdars_classify_seasonality,
@@ -92,6 +93,9 @@ impl From<FdarsSeasonalType> for SeasonalType {
             FdarsSeasonalType::VariableTiming => Self::VariableTiming,
             FdarsSeasonalType::IntermittentSeasonal => Self::IntermittentSeasonal,
             FdarsSeasonalType::NonSeasonal => Self::NonSeasonal,
+            // fdars-core 0.47 marked this enum #[non_exhaustive]; fall back
+            // to NonSeasonal for any future variant rather than panicking.
+            _ => Self::NonSeasonal,
         }
     }
 }
@@ -155,6 +159,9 @@ impl From<ChangeType> for ChangePointType {
         match t {
             ChangeType::Onset => Self::Onset,
             ChangeType::Cessation => Self::Cessation,
+            // fdars-core 0.47 marked this enum #[non_exhaustive]; fall back
+            // to Cessation for any future variant rather than panicking.
+            _ => Self::Cessation,
         }
     }
 }
@@ -258,6 +265,9 @@ impl From<ModulationType> for AmplitudeModulationType {
             ModulationType::Fading => Self::Fading,
             ModulationType::Oscillating => Self::Oscillating,
             ModulationType::NonSeasonal => Self::NonSeasonal,
+            // fdars-core 0.47 marked this enum #[non_exhaustive]; fall back
+            // to NonSeasonal for any future variant rather than panicking.
+            _ => Self::NonSeasonal,
         }
     }
 }
@@ -496,10 +506,10 @@ pub fn seasonal_strength_variance(
     let argvals = make_argvals(n);
     let harmonics = n_harmonics.unwrap_or(3);
 
-    // fdars-core expects: data, n_samples, m_timepoints, argvals, ...
-    // We have 1 sample (our time series) with n time points
+    // fdars 0.47: seasonal_strength_variance(data: &FdMatrix, argvals, period, n_harmonics)
+    let mat = single_series_matrix(values)?;
     Ok(fdars_seasonal_strength_variance(
-        values, 1, n, &argvals, period, harmonics,
+        &mat, &argvals, period, harmonics,
     ))
 }
 
@@ -529,11 +539,9 @@ pub fn seasonal_strength_spectral(values: &[f64], period: f64) -> Result<f64> {
 
     let argvals = make_argvals(n);
 
-    // fdars-core expects: data, n_samples, m_timepoints, argvals, ...
-    // We have 1 sample (our time series) with n time points
-    Ok(fdars_seasonal_strength_spectral(
-        values, 1, n, &argvals, period,
-    ))
+    // fdars 0.47: seasonal_strength_spectral(data: &FdMatrix, argvals, period)
+    let mat = single_series_matrix(values)?;
+    Ok(fdars_seasonal_strength_spectral(&mat, &argvals, period))
 }
 
 /// Compute seasonal strength using wavelet transform.
@@ -562,11 +570,9 @@ pub fn seasonal_strength_wavelet(values: &[f64], period: f64) -> Result<f64> {
 
     let argvals = make_argvals(n);
 
-    // fdars-core expects: data, n_samples, m_timepoints, argvals, ...
-    // We have 1 sample (our time series) with n time points
-    Ok(fdars_seasonal_strength_wavelet(
-        values, 1, n, &argvals, period,
-    ))
+    // fdars 0.47: seasonal_strength_wavelet(data: &FdMatrix, argvals, period)
+    let mat = single_series_matrix(values)?;
+    Ok(fdars_seasonal_strength_wavelet(&mat, &argvals, period))
 }
 
 /// Compute seasonal strength using the specified method.
@@ -619,12 +625,10 @@ pub fn seasonal_strength_windowed(
     let win_size = window_size.unwrap_or(2.0 * period);
     let strength_method: FdarsStrengthMethod = method.unwrap_or(StrengthMethod::Variance).into();
 
-    // fdars-core expects: data, n_samples, m_timepoints, argvals, ...
-    // We have 1 sample (our time series) with n time points
+    // fdars 0.47: seasonal_strength_windowed(data: &FdMatrix, argvals, period, window_size, method)
+    let mat = single_series_matrix(values)?;
     Ok(fdars_seasonal_strength_windowed(
-        values,
-        1,
-        n,
+        &mat,
         &argvals,
         period,
         win_size,
@@ -669,15 +673,12 @@ pub fn classify_seasonality(
 
     let argvals = make_argvals(n);
 
-    let result = fdars_classify_seasonality(
-        values,
-        n,
-        1,
-        &argvals,
-        period,
-        strength_threshold,
-        timing_threshold,
-    );
+    // fdars 0.47 / B2 fix: classify_seasonality(data: &FdMatrix, argvals, period, ...)
+    // -- the matrix is built once as (1, n), not the swapped (n, 1) this
+    // function used to pass.
+    let mat = single_series_matrix(values)?;
+    let result =
+        fdars_classify_seasonality(&mat, &argvals, period, strength_threshold, timing_threshold);
 
     Ok(result.into())
 }
@@ -724,10 +725,10 @@ pub fn detect_seasonality_changes(
     let win_size = window_size.unwrap_or(2.0 * period);
     let min_dur = min_duration.unwrap_or(period);
 
-    // fdars-core expects: data, n_samples, m_timepoints, argvals, ...
-    // We have 1 sample (our time series) with n time points
+    // fdars 0.47: detect_seasonality_changes(data: &FdMatrix, argvals, period, threshold, window_size, min_duration)
+    let mat = single_series_matrix(values)?;
     let result =
-        fdars_detect_seasonality_changes(values, 1, n, &argvals, period, thresh, win_size, min_dur);
+        fdars_detect_seasonality_changes(&mat, &argvals, period, thresh, win_size, min_dur);
 
     Ok(result.into())
 }
@@ -749,9 +750,9 @@ pub fn instantaneous_period(values: &[f64]) -> Result<InstantaneousPeriodResult>
 
     let argvals = make_argvals(n);
 
-    // fdars-core expects: data, n_samples, m_timepoints, argvals
-    // We have 1 sample (our time series) with n time points
-    let result = fdars_instantaneous_period(values, 1, n, &argvals);
+    // fdars 0.47: instantaneous_period(data: &FdMatrix, argvals)
+    let mat = single_series_matrix(values)?;
+    let result = fdars_instantaneous_period(&mat, &argvals);
 
     Ok(result.into())
 }
@@ -795,15 +796,13 @@ pub fn detect_amplitude_modulation(
     let mod_thresh = modulation_threshold.unwrap_or(0.2);
     let seas_thresh = seasonality_threshold.unwrap_or(0.3);
 
-    let result = fdars_detect_amplitude_modulation_wavelet(
-        values,
-        n,
-        1,
-        &argvals,
-        period,
-        mod_thresh,
-        seas_thresh,
-    );
+    // fdars 0.47 / B2 fix: detect_amplitude_modulation_wavelet(data: &FdMatrix,
+    // argvals, period, modulation_threshold, seasonality_threshold) -- matrix
+    // built once as (1, n); thresholds are now plain f64 (no more Option
+    // wrapping needed on the fdars side).
+    let mat = single_series_matrix(values)?;
+    let result =
+        fdars_detect_amplitude_modulation_wavelet(&mat, &argvals, period, mod_thresh, seas_thresh);
 
     Ok(result.into())
 }
