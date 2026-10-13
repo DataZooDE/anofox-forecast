@@ -10,9 +10,8 @@
 //! reported local minima, and gave every plateau prominence 0 (51 found vs
 //! scipy's 66 on an audited random walk, only 31 matching).
 //!
-//! Cases carrying a `height`/`distance`/`prominence` filter are enabled
-//! here starting Task 15-02/2 (TDD) -- Task 15-02/1 asserts only the
-//! no-filter cases through `find_peaks`'s default-options path.
+//! Cases carrying a `height`/`distance`/`prominence` filter are asserted
+//! here too (Task 15-02/2, TDD) -- every case in the fixture is covered.
 
 mod common;
 
@@ -49,15 +48,6 @@ fn scipy_find_peaks_parity() {
         let name = case["name"].as_str().unwrap();
         let x = f64_vec(&case["x"]);
         let params = &case["params"];
-        let has_filter = params["height"].is_f64()
-            || params["distance"].is_f64()
-            || params["prominence"].is_f64();
-
-        // Task 15-02/1 wires the no-filter path only; filter cases are
-        // enabled in Task 15-02/2 (TDD GREEN) once find_peaks applies them.
-        if has_filter {
-            continue;
-        }
 
         let want_peaks: Vec<usize> = case["expected"]["peaks"]
             .as_array()

@@ -516,4 +516,263 @@ mod tests {
         assert_eq!(local_maxima(&[]), Vec::<usize>::new());
         assert_eq!(local_maxima(&[1.0, 2.0]), Vec::<usize>::new());
     }
+
+    // -----------------------------------------------------------------
+    // Task 15-02/2 (TDD): height/distance/prominence filters, option
+    // validation, smoothing, O(n)-vs-naive cross-check, performance.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn test_find_peaks_height_filter_keeps_only_tall_peaks() {
+        let x = vec![1.0, 5.0, 1.0, 2.0, 1.0, 8.0, 1.0];
+        let opts = FindPeaksOptions {
+            height: Some(6.0),
+            distance: None,
+            prominence: None,
+        };
+        let found = find_peaks(&x, &opts).unwrap();
+        let indices: Vec<usize> = found.iter().map(|p| p.index).collect();
+        assert_eq!(indices, vec![5], "height filter should keep only x[5]=8.0 >= 6.0");
+    }
+
+    #[test]
+    fn test_find_peaks_distance_filter_rightmost_tie_wins() {
+        // ties_distance fixture case (scipy_peaks/cases.json): distance 3
+        // keeps only index 3, the rightmost of the two tied height-5 peaks.
+        let x = vec![0.0, 5.0, 0.0, 5.0, 0.0, 3.0, 0.0];
+        let opts = FindPeaksOptions {
+            height: None,
+            distance: Some(3.0),
+            prominence: None,
+        };
+        let found = find_peaks(&x, &opts).unwrap();
+        let indices: Vec<usize> = found.iter().map(|p| p.index).collect();
+        assert_eq!(indices, vec![3]);
+    }
+
+    #[test]
+    fn test_find_peaks_prominence_filter_applied_after_distance() {
+        let x = vec![0.0, 10.0, 0.0, 1.0, 0.0, 1.0, 0.0, 10.0, 0.0];
+        let opts = FindPeaksOptions {
+            height: None,
+            distance: None,
+            prominence: Some(5.0),
+        };
+        let found = find_peaks(&x, &opts).unwrap();
+        let indices: Vec<usize> = found.iter().map(|p| p.index).collect();
+        assert_eq!(indices, vec![1, 7]);
+    }
+
+    #[test]
+    fn test_find_peaks_rejects_distance_below_one() {
+        let x = vec![1.0, 2.0, 1.0, 2.0, 1.0];
+        let opts = FindPeaksOptions {
+            height: None,
+            distance: Some(0.5),
+            prominence: None,
+        };
+        assert!(matches!(
+            find_peaks(&x, &opts),
+            Err(ForecastError::InvalidParameter { .. })
+        ));
+    }
+
+    #[test]
+    fn test_find_peaks_rejects_non_finite_options() {
+        let x = vec![1.0, 2.0, 1.0, 2.0, 1.0];
+        assert!(matches!(
+            find_peaks(
+                &x,
+                &FindPeaksOptions {
+                    height: Some(f64::NAN),
+                    distance: None,
+                    prominence: None
+                }
+            ),
+            Err(ForecastError::InvalidParameter { .. })
+        ));
+        assert!(matches!(
+            find_peaks(
+                &x,
+                &FindPeaksOptions {
+                    height: None,
+                    distance: Some(f64::INFINITY),
+                    prominence: None
+                }
+            ),
+            Err(ForecastError::InvalidParameter { .. })
+        ));
+        assert!(matches!(
+            find_peaks(
+                &x,
+                &FindPeaksOptions {
+                    height: None,
+                    distance: None,
+                    prominence: Some(f64::NEG_INFINITY)
+                }
+            ),
+            Err(ForecastError::InvalidParameter { .. })
+        ));
+    }
+
+    #[test]
+    fn test_find_peaks_never_panics_on_nan_input() {
+        let x = vec![1.0, f64::NAN, 3.0, f64::NAN, 2.0, 5.0, 1.0];
+        let result = find_peaks(&x, &FindPeaksOptions::default());
+        assert!(result.is_ok(), "find_peaks must not panic/error on NaN input");
+    }
+
+    /// scipy's own linear (`wlen=None`) prominence scan, used only to
+    /// cross-check the `O(n)` monotonic-stack port (`peak_prominences`) --
+    /// NOT a re-export of production code.
+    fn naive_peak_prominence(x: &[f64], peak: usize) -> f64 {
+        let n = x.len();
+        let mut left_min = x[peak];
+        let mut i = peak;
+        loop {
+            if x[i] <= x[peak] {
+                if x[i] < left_min {
+                    left_min = x[i];
+                }
+            } else {
+                break;
+            }
+            if i == 0 {
+                break;
+            }
+            i -= 1;
+        }
+        let mut right_min = x[peak];
+        let mut j = peak;
+        while j < n && x[j] <= x[peak] {
+            if x[j] < right_min {
+                right_min = x[j];
+            }
+            j += 1;
+        }
+        x[peak] - left_min.max(right_min)
+    }
+
+    /// Deterministic xorshift64 PRNG so the cross-check below needs no
+    /// extra crate dependency and is byte-reproducible across runs.
+    struct Xorshift64(u64);
+    impl Xorshift64 {
+        fn next_f64_0_5(&mut self) -> f64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            (x % 51) as f64 / 10.0 // 0.0..=5.0 in steps of 0.1 -> plateaus/ties likely
+        }
+    }
+
+    #[test]
+    fn test_peak_prominences_matches_naive_scan_on_random_series() {
+        let mut rng = Xorshift64(0x9E3779B97F4A7C15);
+        for trial in 0..300u32 {
+            let n = 2 + (trial as usize % 199); // lengths 2..=200
+            let x: Vec<f64> = (0..n).map(|_| rng.next_f64_0_5()).collect();
+            let peaks = local_maxima(&x);
+            if peaks.is_empty() {
+                continue;
+            }
+            let fast = peak_prominences(&x, &peaks);
+            for (k, &p) in peaks.iter().enumerate() {
+                let naive = naive_peak_prominence(&x, p);
+                assert!(
+                    (fast[k] - naive).abs() <= 1e-12,
+                    "trial {trial} n {n} peak {p}: fast {} naive {} x {x:?}",
+                    fast[k],
+                    naive
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_prominence_performance_on_long_trending_sawtooth() {
+        let n = 200_000usize;
+        let x: Vec<f64> = (0..n)
+            .map(|i| {
+                if i % 2 == 1 {
+                    0.01 * i as f64 + 0.5
+                } else {
+                    0.01 * i as f64
+                }
+            })
+            .collect();
+        let start = std::time::Instant::now();
+        let found = find_peaks(&x, &FindPeaksOptions::default()).unwrap();
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed.as_secs_f64() < 5.0,
+            "find_peaks on a 200000-point trending sawtooth took {elapsed:?}, expected < 5s \
+             (the naive O(n) per-peak scipy-style scan is quadratic here)"
+        );
+        assert!(
+            found.len() > 90_000,
+            "expected roughly 100000 peaks on an every-other-sample sawtooth, got {}",
+            found.len()
+        );
+    }
+
+    #[test]
+    fn test_detect_peaks_min_distance_macro_default_is_noop() {
+        // ts_detect_peaks_by's macro default min_distance is 1.0; scipy
+        // requires distance >= 1 and ceil(1.0) == 1 never suppresses a
+        // local-maxima sequence (consecutive local maxima are always more
+        // than 1 apart), so Some(1.0) must behave identically to None.
+        let values = generate_seasonal_series(120, 12.0, 5.0);
+        let with_default = detect_peaks(&values, Some(1.0), None, false, None).unwrap();
+        let without = detect_peaks(&values, None, None, false, None).unwrap();
+        assert_eq!(with_default.n_peaks, without.n_peaks);
+    }
+
+    #[test]
+    fn test_detect_peaks_min_distance_filters_close_peaks() {
+        let values = generate_seasonal_series(120, 12.0, 5.0);
+        let filtered = detect_peaks(&values, Some(20.0), None, false, None).unwrap();
+        let unfiltered = detect_peaks(&values, None, None, false, None).unwrap();
+        assert!(
+            filtered.n_peaks < unfiltered.n_peaks,
+            "min_distance=20 should suppress some of the period-12 peaks"
+        );
+    }
+
+    #[test]
+    fn test_detect_peaks_min_prominence_filters_all_peaks() {
+        let values = generate_seasonal_series(120, 12.0, 5.0);
+        let filtered = detect_peaks(&values, None, Some(100.0), false, None).unwrap();
+        assert_eq!(
+            filtered.n_peaks, 0,
+            "a prominence threshold far above the series' own amplitude swing should drop every peak"
+        );
+    }
+
+    #[test]
+    fn test_detect_peaks_smooth_first_reports_smoothed_values() {
+        let mut values = generate_seasonal_series(96, 12.0, 5.0);
+        for (i, v) in values.iter_mut().enumerate() {
+            if i % 7 == 0 {
+                *v += 0.3; // deterministic jitter a Fourier smooth should remove
+            }
+        }
+        let smoothed = detect_peaks(&values, None, None, true, None).unwrap();
+        let raw = detect_peaks(&values, None, None, false, None).unwrap();
+        assert_ne!(
+            smoothed
+                .peaks
+                .iter()
+                .map(|p| p.value)
+                .collect::<Vec<_>>(),
+            raw.peaks.iter().map(|p| p.value).collect::<Vec<_>>(),
+            "smooth_first=true should report smoothed values, not raw ones"
+        );
+        let idxs: Vec<usize> = smoothed.peaks.iter().map(|p| p.index).collect();
+        assert!(
+            idxs.windows(2).all(|w| w[0] < w[1]),
+            "smoothed peak indices must be strictly increasing: {idxs:?}"
+        );
+    }
 }
