@@ -39,6 +39,9 @@ Execution note: planned in parallel with Phases 15/16, but EXECUTES after Phase 
 - **D-10:** A seeded Monte Carlo coverage test for the local-level case (about 2,000 repetitions): ETS(A,N,N)/SES 95% intervals must cover within ±3pp of nominal.
 - **D-11:** 3 plans: (1) bump to 0.16.0 + ADF/KPSS from SQL + four-way stationarity mapping + `regression` parameter [UPST-06, DIAG-03]; (2) Ljung-Box `fitted_params` + diagnostics docs [DIAG-04, DIAG-05]; (3) R forecast parity fixtures + Monte Carlo coverage [FCST-09]. New SQL assertions go in a NON-json-gated reference test file. Breaking changes get CHANGELOG before/after rows; docs and skills are updated.
 
+### Post-planning decision (user, 2026-10-13)
+- **D-12:** Root-cause the R-parity gaps before accepting them. The planner measured HW / ETS 'AAA' about 21% off R on AirPassengers, 'Holt' 11.5% off, and AutoETS selecting (M,A,M) vs R's (M,Ad,M). 17-03 starts with a diagnosis task: compare the extension wrapper's call path (model mapping, seasonal variant, damping, initialisation, parameter defaults, data handling) against calling anofox-forecast 0.16.0 directly on the same fixture, and both against R. If the cause is extension-side, fix it in 17-03 and tighten the tolerances to what is achieved. If crate-side, file an upstream issue with a minimal reproduction and keep a documented known gap citing the cause. Only gaps with an identified cause may be recorded as known gaps.
+
 ### Claude's Discretion
 - Exact tolerance values per model (each justified), the Monte Carlo seed and size, simulated-series parameters, and where the parity test lives (Rust integration test over the core forecast wrapper and/or SQL).
 
