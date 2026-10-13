@@ -394,6 +394,65 @@ use the semver numbering this project started with.
   were captured live from the pre-port build (plan 15-02 Task 1 step 1,
   before any rebuild) — see `.planning/phases/15-detection-decomposition-on-fdars-0-47/15-02-SUMMARY.md`
   for the exact commands.
+
+  **Plan 15-03 (DET-02, DET-03): BOCPD is now Adams & MacKay (2007) done
+  properly, and PELT (Rust/FFI only) is scale-invariant with a working
+  prune.** `_ts_detect_changepoints_bocpd`/`ts_detect_changepoints(_by)`/
+  `ts_detect_changepoints_agg` gained a normalised Student-t predictive (the
+  full `Gamma((nu+1)/2)/(Gamma(nu/2)*sqrt(nu*pi)*scale)` kernel, computed in
+  the log domain — the old code had no normalising constant at all), a
+  Normal-Gamma posterior update using each run's SAMPLE mean (not the
+  posterior mean), and run-length truncation at 500 that merges the tail
+  probability mass into the last kept run length instead of dropping it.
+  The series is standardised first (`z = (x - median(x)) / sigma_hat`,
+  `sigma_hat` = a MAD-of-first-differences robust scale), making the result
+  scale/shift invariant. A changepoint is now flagged on a MAP run-length
+  *reset* (the start of the new, shorter run), not `P(r=1) > 0.5` directly;
+  `changepoint_probability` is `P(r_t = 1)` — the probability `x_t` itself
+  opened a new run — under the corrected predictive.
+
+  | Function (input, hazard 250) | Before | After | What changed |
+  |---|---|---|---|
+  | `_ts_detect_changepoints_bocpd(step3_n200, 250.0, true)` `.changepoint_indices` | `[]` (missed the 3-sigma step) | `[100]` | normalised Student-t + sample-mean update (G3/G4) |
+  | `_ts_detect_changepoints_bocpd(noise_n200, 250.0, true)` `.changepoint_indices` | `[]` | `[]` | unchanged — stays quiet on stationary noise |
+  | `_ts_detect_changepoints_bocpd([100]*12+[10]*12, 250.0, true)` `.changepoint_indices` | `[12]` | `[12]` | same flag, but now via the MAP-reset rule, not the old unnormalised `P(r=1)>0.5` heuristic |
+  | same, `.changepoint_probability[12]` | `0.9935515031241058` | `0.8798758070736283` | the normalised Student-t predictive changes every probability value (G3) |
+  | `_ts_detect_changepoints_bocpd(step3_n200 * 100 + 7, 250.0, true)` `.changepoint_indices` | not scale-invariant (unnormalised raw-data prior) | `[100]` (identical to the unscaled series) | standardisation on `z` makes BOCPD scale/shift invariant |
+
+  Measured false-alarm rate (100 independent `N(0,1)` series of length 200,
+  seeds `16000..16099`, run against the fixed implementation): `hazard_lambda
+  250` flags 20 points in total across all 100 series, `500` flags 11, `1000`
+  flags 5 — hazard is a real false-alarm/sensitivity knob, not a cosmetic
+  default. On 100 independent 3-sigma-step series (seeds `17000..17099`), the
+  step is flagged within 3 samples of the true changepoint in 94/100 series
+  at every one of those three hazard values — detection delay is essentially
+  hazard-independent over this range, only the false-alarm rate changes.
+  "Before" values above were captured live from the pre-fix build
+  (`_ts_detect_changepoints_bocpd(step3_n200, 250.0, true)`,
+  `_ts_detect_changepoints_bocpd(noise_n200, 250.0, true)`, and the
+  issue-71 step, all at `hazard_lambda=250.0`) before any rebuild.
+
+  **PELT** (`anofox_fcst_core::changepoint::detect_changepoints` —
+  Rust/FFI-only: its SQL wrapper was removed as dead code in Phase 12, and
+  `ts_detect_changepoints` stays BOCPD; adding a PELT SQL surface is
+  deferred) now normalises every cost by the same `sigma_hat` used by
+  BOCPD's standardisation, so a series and that series `* 100` (or `+ 1e6`)
+  give identical changepoints. `L1`'s cost now uses the segment median, not
+  the mean (previously `mean3_n150 * 100` found 25 spurious changepoints
+  vs. 2 real ones on the unscaled series — the `* 100` audit repro).
+  Pruning is a real exact-safe prune (Killick et al. 2012), not dead code —
+  on a 3000-point, 10-segment series it evaluates well under 20% of the
+  `n(n+1)/2` segment costs an unpruned exact DP needs, and reproduces that
+  unpruned DP's result exactly (`ChangepointResult.n_cost_evaluations`
+  measures this directly).
+
+  | Function (input) | Before | After | What changed |
+  |---|---|---|---|
+  | `detect_changepoints(mean3_n150, 5, None, L2)` | `[50, 100]` (2 changepoints) | `[50, 100]` | unchanged — correct even pre-fix on the unscaled series |
+  | `detect_changepoints(mean3_n150 * 100, 5, None, L2)` | `[8, 13, 20, 26, 31, 38, 43, 50, 55, 61, 66, 71, 77, 82, 87, 93, 100, 105, 110, 116, 121, 126, 131, 136, 142]` (25 spurious changepoints) | `[50, 100]` (identical to the unscaled series) | sigma-normalised cost (D-07) |
+
+  "Before" values above were captured live from the pre-fix build (`mean3_n150` =
+  `[0]*50 ++ [2.5]*50 ++ [-1.0]*50 + N(0,1)` noise, `rng(15501)`) before any rebuild.
 - **Every `ts_features` surface now returns all 117 features, including `autocorrelation_lag10`.**
   `ts_features_by`, `ts_features`, `ts_features_agg`, and `ts_features_table` previously
   derived their output schema from calling the Rust core on a 10-point dummy series —

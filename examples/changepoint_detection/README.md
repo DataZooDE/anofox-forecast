@@ -145,12 +145,31 @@ hazard_lambda = 500  -> Very conservative
 
 ## BOCPD Algorithm
 
-This extension uses **Bayesian Online Changepoint Detection (BOCPD)**, which:
+This extension uses **Bayesian Online Changepoint Detection (BOCPD, Adams &
+MacKay 2007)**, which:
 
 - Provides **probability scores** for each point being a changepoint
+  (`changepoint_probability[t] = P(r_t = 1)` — the probability that `x_t`
+  itself opened a brand-new run)
 - Works **online** (streaming) - doesn't need future data
-- **Adapts automatically** to different series characteristics
-- Uses **uninformative priors** - no domain knowledge required
+- **Adapts automatically** to different series characteristics via a
+  standardised series (`z = (x - median(x)) / sigma_hat`), so results are
+  scale/shift invariant
+- Uses a weak Normal-Gamma prior on the standardised series — no domain
+  knowledge required
+
+A changepoint is flagged when the run-length posterior's most-likely run
+length **resets** (a shorter run suddenly becomes most likely), landing on
+the point that *started* the new run, not the point where the reset was
+detected.
+
+**Measured false-alarm rate (Phase 15 plan 15-03):** on 100 independent
+`N(0,1)` series with no real changepoint, `hazard_lambda=250` (default)
+flags ~20 false alarms in total, `500` flags ~11, `1000` flags ~5 — while a
+clean 3-sigma step is still detected within 3 samples in ~94/100 cases at
+every one of those hazard values. Raising `hazard_lambda` trades fewer
+false alarms for the same detection delay over this range; it does not cost
+detection speed on an obvious step.
 
 ---
 

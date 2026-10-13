@@ -167,7 +167,7 @@ SELECT * FROM ts_forecast_by('sales', product_id, ds, y,
 
 ## Changepoint detection
 
-### `ts_detect_changepoints_by` — Bayesian Online Changepoint Detection (BOCD)
+### `ts_detect_changepoints_by` — Bayesian Online Changepoint Detection (Adams & MacKay 2007)
 
 ```sql
 ts_detect_changepoints_by(source, group_col, date_col, value_col, params) → TABLE
@@ -176,7 +176,7 @@ ts_detect_changepoints_by(source, group_col, date_col, value_col, params) → TA
 Params:
 | Key | Default | Description |
 |---|---|---|
-| `hazard_lambda` | 250.0 | Hazard rate. Lower → more changepoints |
+| `hazard_lambda` | 250.0 | Expected run length between changepoints. Lower → more changepoints (and more false alarms) |
 
 Returns one row per input point with `<group_col>`, `<date_col>`, `is_changepoint BOOLEAN`,
 and `changepoint_probability DOUBLE` only — the value column is **not** included in the
@@ -195,6 +195,24 @@ shape that DOES include the value column: `(date_col, value_col, is_changepoint,
 changepoint_probability)`. It is not a simple alias of the `_by` form.
 
 Also: `ts_detect_changepoints` (scalar) and `ts_detect_changepoints_agg` (aggregate).
+
+**Algorithm (Phase 15 plan 15-03, DET-02):** the series is standardised first
+(`z = (x - median(x)) / sigma_hat`, `sigma_hat` a MAD-of-first-differences robust
+scale), making detection scale/shift invariant. The run-length posterior uses a
+fully normalised Student-t predictive and a Normal-Gamma update on each run's
+sample mean; run lengths beyond 500 are merged (not dropped) into the last kept
+entry. A changepoint is flagged on a MAP run-length *reset* (the point that
+started the new, shorter run) — `changepoint_probability` is the separate
+quantity `P(r_t=1)` (this point opened a brand-new run). Measured on 100
+independent `N(0,1)` series (no real changepoint): `hazard_lambda=250` (default)
+flags ~20 false alarms total, `500` flags ~11, `1000` flags ~5 — while a 3-sigma
+step is still detected within 3 samples in ~94/100 cases at every one of those
+hazard values. See `docs/api/06-changepoint-detection.md` for the full writeup.
+
+**PELT has no SQL surface.** The crate's PELT implementation
+(`anofox_fcst_core::changepoint::detect_changepoints`) is sigma-normalised and
+exact-safe-pruned, but is Rust/FFI-only — its SQL wrapper was removed as dead
+code in Phase 12, and `ts_detect_changepoints` always dispatches to BOCPD above.
 
 ## Seasonality analysis — classify / measure strength
 

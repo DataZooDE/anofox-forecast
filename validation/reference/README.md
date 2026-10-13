@@ -187,6 +187,17 @@ total cost sums `O(n)` segment-cost terms (each itself a sum over a
 segment), so floating-point summation-order noise compounds across segments
 more than a single scale computation does.
 
+**`changepoints` measured false-alarm rate (Phase 15 plan 15-03, not part of
+the fixture itself but measured against the fixed implementation and
+recorded here per D-06's own instruction that BOCPD's real false-alarm
+behaviour be documented, not tuned away):** on 100 independent `N(0,1)`
+series of length 200 (seeds `16000..16099`), `hazard_lambda=250` (default)
+flags 20 points in total across all 100 series, `500` flags 11, `1000`
+flags 5. On 100 independent 3-sigma-step series of length 200 (step at
+index 100, seeds `17000..17099`), the step is flagged within 3 samples of
+the true changepoint (index 100-103) in 94/100 series at every one of
+those three hazard values.
+
 ## 5. Tool versions
 
 These are the toolchain versions this phase verified against. **Each fixture's own

@@ -31,6 +31,75 @@ SELECT _ts_detect_changepoints_bocpd([NULL, 1.0, 2.0, 1.5, 8.0, 7.5, NULL]::DOUB
 
 ---
 
+## Algorithm (Phase 15 plan 15-03, DET-02, D-06)
+
+`ts_detect_changepoints(_by)`/`ts_detect_changepoints_agg` (and the internal
+`_ts_detect_changepoints_bocpd` scalar they all dispatch to) run Bayesian
+Online Changepoint Detection (BOCPD, Adams & MacKay 2007) — a *different*
+algorithm from PELT, which has no SQL surface at all (see the note at the
+end of this section).
+
+**Standardisation.** Before any detection runs, the series is standardised:
+`sigma_hat` is a robust noise scale (the MAD of first differences, rescaled
+to a Normal-equivalent sigma, with a fallback chain for a degenerate/
+constant series), `loc = median(values)`, and `z = (values - loc) /
+sigma_hat`. All run-length statistics below operate on `z`, not the raw
+input — this is what makes the result scale- and shift-invariant:
+`ts_detect_changepoints(x, ...)` and `ts_detect_changepoints(x*k+c, ...)`
+flag identical changepoints for any `k != 0`.
+
+**Model.** At each run length `r`, the Normal-Gamma conjugate prior is
+`(mu0=0, kappa0=1, alpha0=1, beta0=1)` on `z`'s mean/precision. The
+posterior update at each step uses the run's own SAMPLE mean (not the
+posterior mean) for the sum-of-squares term — the textbook conjugate-update
+formula. The predictive distribution for the next observation is a fully
+normalised Student-t (the `Gamma((nu+1)/2) / (Gamma(nu/2) * sqrt(nu*pi) *
+scale)` kernel, computed in the log domain for numerical stability), not an
+unnormalised kernel. The hazard is a constant rate `1 / max(hazard_lambda,
+1)` — `hazard_lambda` is the expected run length between changepoints.
+Run-length state is capped at 500 entries: once a run length would exceed
+that, the tail probability mass is merged into the last kept entry (not
+dropped) and the distribution is renormalised, keeping both memory and the
+total probability mass bounded on arbitrarily long series.
+
+**Flag rule.** A changepoint is flagged when the run-length posterior's MAP
+(most likely) run length *resets*: if `argmax_{r>=1} P(r_t) < argmax_{r>=1}
+P(r_{t-1})`, the point `t - m_t + 1` is flagged — i.e. the flag lands at the
+**start of the new, shorter run**, not at `t` itself. `changepoint_probability[t]`
+is `P(r_t = 1)`: the probability that `x_t` itself opened a brand new run
+(a different, complementary quantity from the flag rule above — a point can
+have a low `P(r=1)` yet still be the flagged *start* of a run that was only
+recognised as shorter a few steps later).
+
+**Hazard guidance — the measured false-alarm/detection-delay tradeoff.**
+Measured on 100 independent `N(0,1)` series of length 200 (no real
+changepoint) and 100 independent 3-sigma-step series (step at index 100),
+with the fixed implementation:
+
+| `hazard_lambda` | False-alarm flags (total, over 100 noise series) | 3-sigma step detected within 3 samples |
+|---|---|---|
+| 250 (default) | 20 | 94/100 |
+| 500 | 11 | 94/100 |
+| 1000 | 5 | 94/100 |
+
+A larger `hazard_lambda` (longer expected run length between changepoints)
+trades fewer false alarms for the same detection delay over this range —
+raising it does not cost detection latency on a clean 3-sigma step, only
+reduces sensitivity to noise. This is measured behaviour, not a tuned-away
+property: BOCPD will flag some fraction of stationary noise at any finite
+`hazard_lambda`, by design (it is a continuously-updating online posterior,
+not a fixed-false-alarm-rate test).
+
+**PELT is Rust/FFI-only — not reachable from SQL.** `anofox_fcst_core::changepoint::detect_changepoints`
+(PELT, Killick et al. 2012) is a separate, sigma-normalised algorithm with
+working exact-safe pruning, verified against an independent numpy exact-DP
+reference (`crates/anofox-fcst-core/tests/changepoint_reference.rs`). Its
+SQL wrapper was removed as dead code in Phase 12, and `ts_detect_changepoints`
+dispatches exclusively to BOCPD above — restoring a PELT SQL surface is a
+deferred idea, not part of this phase.
+
+---
+
 ## Quick Start
 
 Detect changepoints using table macros:
