@@ -39,6 +39,10 @@ Execution note: this phase is planned in parallel with Phase 15 but EXECUTES aft
 - **D-11:** References: independent numpy implementations in `validation/reference/python` (split/asymmetric/adaptive quantiles, bootstrap paths) and Rust `crates/anofox-fcst-core/tests/conformal_reference.rs` with the Monte Carlo coverage tests. A new NON-json-gated `test/sql/ts_conformal_reference.test` holds the SQL assertions; existing ts_conformal.test / ts_conformal_coverage.test are json-gated, and un-gating them is Phase 18. Breaking changes get CHANGELOG before/after rows; docs and the backtest skill are updated; no compatibility flag.
 - **D-12:** 3 plans: (1) SQL contract tracer [RUST-04]; (2) split/asymmetric/adaptive core [CONF-02, CONF-03, CONF-04]; (3) bootstrap sign + jackknife+ removal + docs/skill/CHANGELOG [CONF-01, CONF-05].
 
+### Post-planning shape decisions (user, 2026-10-13)
+- **D-13:** `ts_conformal_by` and `ts_conformal_apply_by` return one row per (group, date) with forecast/lower/upper columns, instead of one row per group with lists. A second breaking change, documented in the CHANGELOG.
+- **D-14:** `ts_conformal_apply_by` takes a calibration TABLE (per-group quantiles from `ts_conformal_calibrate`), joined per group. A literal score is applied through a one-row table with group_col NULL. No separate scalar overload.
+
 ### Claude's Discretion
 - Exact parameter names for the step column and difficulty input (consistent with existing `_by` macro naming), Monte Carlo sample sizes and seeds, and the internal structure of conformal.rs.
 
