@@ -100,6 +100,7 @@ test without a separate Rust edit.
 | `tsfresh_features` | `mapping.json`, `white_noise_n200.json`, `random_walk_n200.json`, `seasonal_ar12_n144.json`, `trend_season_n120.json`, `intermittent_n100.json`, `short_n20.json`, `constant_n30.json`, `all_zero_n50.json`, `tiny_n8.json` | `python/gen_tsfresh_features.py` | `abs` (1e-9), `rel` (1e-9) -- see `mapping.json`'s own `tolerance` and per-row overrides | Phase 14 plans 14-01..14-04 (FEAT-01..FEAT-05): `anofox_fcst_core::features::extract_features` -- all 117 `list_features()` names, via `crates/anofox-fcst-core/tests/tsfresh_features_reference.rs` and `test/sql/ts_features_reference.test` |
 | `numpy_detrend` | `polyfit_cases.json` | `python/gen_detrend_reference.py` | `trend_abs` (1e-8), `coef_rel` (1e-8), `coef_abs` (1e-10), `rss_rel` (1e-8) | Phase 15 plan 15-01 (DEP-03, WRAP-01, D-01): `anofox_fcst_core::detrending::{detrend_linear,detrend_polynomial,detrend}` -- fitted trend, ascending-power coefficients (raw 0-based index basis), detrended residuals, and RSS for degree 1/2/3 on 4 seeded series, via `crates/anofox-fcst-core/tests/detrend_reference.rs` and `test/sql/ts_detection_reference.test` |
 | `scipy_peaks` | `cases.json` | `python/gen_scipy_peaks_reference.py` | `prominence_abs` (1e-12), `height_abs` (0.0) | Phase 15 plan 15-02 (DET-01, D-05): `anofox_fcst_core::peaks::{local_maxima,peak_prominences,find_peaks,detect_peaks}` -- `scipy.signal.find_peaks` 1.18.1 plateau-midpoint local maxima and `scipy.signal.peak_prominences` (every case, even without a `prominence` filter), for an audited random walk, a seasonal sine with height/distance/prominence filters (incl. a combined case), plateau/edge/tie/degenerate series, via `crates/anofox-fcst-core/tests/peaks_reference.rs` and `test/sql/ts_detection_reference.test` |
+| `changepoints` | `bocpd_cases.json`, `pelt_cases.json` | `python/gen_changepoint_reference.py` | `prob_abs` (1e-10), `sigma_rel`/`cost_rel` (1e-12/1e-9) | Phase 15 plan 15-03 (DET-02, DET-03, D-06, D-07): `anofox_fcst_core::changepoint::{robust_noise_scale,bocpd_trace,detect_changepoints_bocpd,detect_changepoints}` -- an independent numpy BOCPD (Adams & MacKay 2007: normalised Student-t predictive, sample-mean Normal-Gamma update, truncation-with-renormalisation at run length 500) and an independent numpy exact optimal-partitioning DP (PELT's own ground truth, no pruning), via `crates/anofox-fcst-core/tests/changepoint_reference.rs` and `test/sql/ts_detection_reference.test` (BOCPD only -- PELT has no SQL surface) |
 
 **`tsfresh_features`'s `mapping.json` is a second, hand-maintained fixture** (not
 generator output) alongside the nine series fixtures -- it is the D-01
@@ -173,6 +174,19 @@ read directly from the input series at an integer index on both sides, with
 no floating-point computation involved -- any non-zero difference would
 mean the port picked the wrong index, not a rounding difference.
 
+**`changepoints` tolerance rationale (Phase 15 plan 15-03):** `prob_abs`
+(1e-10) bounds BOCPD's per-step `P(r_t=1)` in absolute terms -- the
+Student-t predictive is computed via `ln_gamma` (statrs vs scipy's
+`gammaln`, both IEEE-754 double implementations of the same special
+function), so the two can differ at the level of the last 1-2 ULPs of the
+log-gamma evaluation itself, well under 1e-10 even after 1500 sequential
+updates (`long_n1500`) compound that noise. `sigma_rel` (1e-12) is tight
+because `robust_noise_scale` is a closed-form MAD/median computation with no
+iterative fit. `cost_rel` (1e-9) is looser than `sigma_rel` because PELT's
+total cost sums `O(n)` segment-cost terms (each itself a sum over a
+segment), so floating-point summation-order noise compounds across segments
+more than a single scale computation does.
+
 ## 5. Tool versions
 
 These are the toolchain versions this phase verified against. **Each fixture's own
@@ -216,6 +230,9 @@ uv run --locked --project validation/reference/python python validation/referenc
 
 # Python family added in Phase 15 plan 15-02:
 uv run --locked --project validation/reference/python python validation/reference/python/gen_scipy_peaks_reference.py
+
+# Python family added in Phase 15 plan 15-03:
+uv run --locked --project validation/reference/python python validation/reference/python/gen_changepoint_reference.py
 
 # Determinism check — every generator is seeded and writes no timestamps/hostnames,
 # so regenerating with the same toolchain versions must produce an empty diff:

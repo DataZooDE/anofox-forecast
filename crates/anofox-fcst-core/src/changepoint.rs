@@ -1,8 +1,70 @@
-//! Changepoint detection using PELT algorithm.
+//! Changepoint detection: Bayesian Online Changepoint Detection (BOCPD, Adams
+//! & MacKay 2007) and PELT (Pruned Exact Linear Time, Killick et al. 2012).
+//!
+//! BOCPD is the only SQL-reachable surface (`_ts_detect_changepoints_bocpd`,
+//! `ts_detect_changepoints(_by)`, `ts_detect_changepoints_agg`). PELT has no
+//! SQL caller as of Phase 12 (removed as dead code) and stays Rust/FFI-only
+//! per the Phase 15 plan 15-03 scope decision (revised D-07) -- it is checked
+//! by `crates/anofox-fcst-core/tests/changepoint_reference.rs` against an
+//! independent numpy exact-DP reference, never via SQL.
 
 use crate::error::{ForecastError, Result};
+use statrs::function::gamma::ln_gamma;
 
-/// Result of changepoint detection.
+/// 1 / Phi^-1(0.75) -- the usual constant that rescales a MAD to a
+/// Normal-equivalent standard deviation.
+const MAD_TO_SIGMA: f64 = 1.482602218505602;
+
+/// Robust noise scale shared by BOCPD's standardisation and PELT's cost
+/// normalisation (D-06, D-07): the MAD of first differences, rescaled to a
+/// Normal-equivalent sigma, with a fallback chain so a degenerate series
+/// (constant, or whose MAD underflows to zero) never produces a zero/NaN
+/// scale.
+///
+/// `sigma_hat = 1.482602218505602 * MAD(diff(x)) / sqrt(2)`, falling back to
+/// `std(diff(x), ddof=0) / sqrt(2)` if that is not a finite positive number,
+/// then to `1.0` if that fallback also fails (e.g. a 2-point series, or a
+/// perfectly constant series where every difference is exactly 0).
+pub fn robust_noise_scale(values: &[f64]) -> f64 {
+    if values.len() < 2 {
+        return 1.0;
+    }
+    let diffs: Vec<f64> = values.windows(2).map(|w| w[1] - w[0]).collect();
+    let med_d = median(&diffs);
+    let abs_dev: Vec<f64> = diffs.iter().map(|d| (d - med_d).abs()).collect();
+    let mad = median(&abs_dev);
+    let s = MAD_TO_SIGMA * mad / std::f64::consts::SQRT_2;
+    if s > 0.0 && s.is_finite() {
+        return s;
+    }
+
+    let mean: f64 = diffs.iter().sum::<f64>() / diffs.len() as f64;
+    let var: f64 = diffs.iter().map(|d| (d - mean).powi(2)).sum::<f64>() / diffs.len() as f64;
+    let s = var.sqrt() / std::f64::consts::SQRT_2;
+    if s > 0.0 && s.is_finite() {
+        return s;
+    }
+
+    1.0
+}
+
+/// Median of a slice (numpy convention: mean of the two middle values for
+/// even length). Does not mutate the caller's slice.
+fn median(values: &[f64]) -> f64 {
+    let mut sorted = values.to_vec();
+    sorted.sort_by(|a, b| a.total_cmp(b));
+    let n = sorted.len();
+    if n == 0 {
+        return 0.0;
+    }
+    if n % 2 == 1 {
+        sorted[n / 2]
+    } else {
+        (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0
+    }
+}
+
+/// Result of PELT changepoint detection.
 #[derive(Debug, Clone)]
 pub struct ChangepointResult {
     /// Indices of detected changepoints
@@ -41,6 +103,10 @@ fn cost_l2(values: &[f64], start: usize, end: usize) -> f64 {
 }
 
 /// Calculate segment cost using L1 (mean absolute deviation) cost function.
+///
+/// TODO (Phase 15 plan 15-03, G8, D-07): uses the mean, not the median --
+/// scheduled to be fixed to the median-based Laplace-MLE cost in Task 2 of
+/// this plan.
 fn cost_l1(values: &[f64], start: usize, end: usize) -> f64 {
     if end <= start {
         return 0.0;
@@ -99,6 +165,10 @@ fn get_cost_fn(cost_fn: CostFunction) -> fn(&[f64], usize, usize) -> f64 {
 ///
 /// # Returns
 /// Vector of changepoint indices
+///
+/// NOTE (Phase 15 plan 15-03, G7/G8, D-07): this is the pre-fix PELT,
+/// unchanged by Task 1 (BOCPD tracer) -- the cost normalisation, L1 median
+/// fix, and exact-safe pruning land in Task 2 of this plan.
 pub fn detect_changepoints(
     values: &[f64],
     min_size: usize,
@@ -174,24 +244,251 @@ pub fn detect_changepoints(
     })
 }
 
+/// A full BOCPD trace: the run-length posterior's MAP trajectory, the
+/// per-point "new run started here" probability, and the resulting
+/// changepoint flags -- everything `detect_changepoints_bocpd` needs plus
+/// the intermediate quantities the numpy reference fixture pins exactly.
+#[derive(Debug, Clone)]
+pub struct BocpdTrace {
+    /// The robust noise scale used to standardise `values` before running BOCPD.
+    pub sigma_hat: f64,
+    /// The median used to centre `values` before running BOCPD.
+    pub loc: f64,
+    /// `prob[t] = P(r_t = 1)`: the probability that `x_t` opened a new run.
+    pub prob: Vec<f64>,
+    /// `map_run_length[t]`: `argmax_{r >= 1} P(r_t = r)` (first maximum).
+    pub map_run_length: Vec<usize>,
+    /// Per-point changepoint flags (MAP run-length reset rule).
+    pub is_changepoint: Vec<bool>,
+    /// Sorted indices where `is_changepoint` is true.
+    pub changepoints: Vec<usize>,
+}
+
+/// Run-length state over run lengths `r = 0..len(p)-1`: sufficient
+/// statistics for the Normal-Gamma posterior at each run length, plus the
+/// run-length probability distribution itself.
+struct RunLengthState {
+    p: Vec<f64>,
+    cnt: Vec<f64>,
+    s1: Vec<f64>,
+    s2: Vec<f64>,
+}
+
+/// Normal-Gamma prior (Adams & MacKay 2007): uninformative but proper
+/// (`kappa0 = alpha0 = beta0 = 1`, `mu0 = 0`, matched against `z =
+/// (x - median(x)) / sigma_hat`, which is already centred near 0).
+const MU0: f64 = 0.0;
+const KAPPA0: f64 = 1.0;
+const ALPHA0: f64 = 1.0;
+const BETA0: f64 = 1.0;
+
+/// Run-length state is capped at this many entries (T-15-09): tail
+/// probability mass beyond this is merged into the last kept entry rather
+/// than dropped, keeping both memory/time O(`MAX_RUN_LENGTH` * n) and the
+/// total probability mass conserved (renormalised after the merge).
+const MAX_RUN_LENGTH: usize = 500;
+
+/// Run the Bayesian Online Changepoint Detection (BOCPD) algorithm (Adams &
+/// MacKay, 2007) and return the full trace.
+///
+/// The series is standardised first: `sigma_hat = robust_noise_scale(values)`,
+/// `loc = median(values)`, `z = (values - loc) / sigma_hat` -- this makes
+/// the result scale- and shift-invariant (D-06): `bocpd_trace(values, h)`
+/// and `bocpd_trace(values * k + c, h)` flag identical changepoints.
+///
+/// At each step the run-length posterior is updated via a normalised
+/// Student-t predictive (the full `Gamma((nu+1)/2) / (Gamma(nu/2) *
+/// sqrt(nu*pi) * scale)` kernel, computed in the log domain) over a
+/// Normal-Gamma conjugate update that uses each run's SAMPLE mean (`xbar`,
+/// not the posterior mean) for the sum-of-squares term -- the standard
+/// conjugate-update formula, not an approximation. Run lengths beyond
+/// `MAX_RUN_LENGTH` have their tail probability merged into the last kept
+/// entry (not dropped) and the distribution renormalised.
+///
+/// A changepoint is flagged when the MAP run length resets: if
+/// `argmax_{r>=1} P(r_t) < argmax_{r>=1} P(r_{t-1})`, the run start
+/// `t - m_t + 1` is flagged (the point that opened the now-current,
+/// shorter run). `prob[t] = P(r_t = 1)` -- the probability that `x_t`
+/// itself opened a brand new run.
+///
+/// # Errors
+/// `InsufficientData` if `values.len() < 3`; `InvalidInput` if any value is
+/// non-finite.
+pub fn bocpd_trace(values: &[f64], hazard_lambda: f64) -> Result<BocpdTrace> {
+    let n = values.len();
+    if n < 3 {
+        return Err(ForecastError::InsufficientData { needed: 3, got: n });
+    }
+    if values.iter().any(|v| !v.is_finite()) {
+        return Err(ForecastError::InvalidInput(
+            "bocpd_trace: all values must be finite".to_string(),
+        ));
+    }
+
+    let sigma_hat = robust_noise_scale(values);
+    let loc = median(values);
+    let z: Vec<f64> = values.iter().map(|v| (v - loc) / sigma_hat).collect();
+
+    let h = 1.0 / hazard_lambda.max(1.0);
+
+    let mut state = RunLengthState {
+        p: vec![1.0],
+        cnt: vec![0.0],
+        s1: vec![0.0],
+        s2: vec![0.0],
+    };
+
+    let mut prob = vec![0.0; n];
+    let mut map_run_length = vec![0usize; n];
+    let mut is_changepoint = vec![false; n];
+
+    let mut prev_m: Option<usize> = None;
+
+    for (t, &zt) in z.iter().enumerate() {
+        let max_run = state.p.len();
+        let mut logw = vec![0.0; max_run];
+
+        for (r, logw_r) in logw.iter_mut().enumerate() {
+            let n_r = state.cnt[r];
+            let xbar = if n_r > 0.0 { state.s1[r] / n_r } else { 0.0 };
+            let ss = (state.s2[r]
+                - if n_r > 0.0 {
+                    state.s1[r].powi(2) / n_r
+                } else {
+                    0.0
+                })
+            .max(0.0);
+
+            let kappa_n = KAPPA0 + n_r;
+            let mu_n = state.s1[r] / kappa_n; // (kappa0*mu0 + s1) / kappa_n, mu0 = 0
+            let alpha_n = ALPHA0 + n_r / 2.0;
+            let beta_n = BETA0 + ss / 2.0 + KAPPA0 * n_r * (xbar - MU0).powi(2) / (2.0 * kappa_n);
+
+            let nu = 2.0 * alpha_n;
+            let scale = (beta_n * (kappa_n + 1.0) / (alpha_n * kappa_n)).sqrt();
+            let u = (zt - mu_n) / scale;
+
+            let logpred = ln_gamma((nu + 1.0) / 2.0)
+                - ln_gamma(nu / 2.0)
+                - 0.5 * (nu * std::f64::consts::PI).ln()
+                - scale.ln()
+                - (nu + 1.0) / 2.0 * (1.0 + u * u / nu).ln();
+
+            *logw_r = state.p[r].ln() + logpred;
+        }
+
+        let m = logw.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let w: Vec<f64> = logw.iter().map(|lw| (lw - m).exp()).collect();
+        let sum_w: f64 = w.iter().sum();
+
+        let mut g = vec![0.0; max_run + 1];
+        g[0] = h * sum_w;
+        for r in 0..max_run {
+            g[r + 1] = (1.0 - h) * w[r];
+        }
+        let sum_g: f64 = g.iter().sum();
+        let mut p_next: Vec<f64> = g.iter().map(|v| v / sum_g).collect();
+
+        let mut cnt_next = vec![0.0; max_run + 1];
+        let mut s1_next = vec![0.0; max_run + 1];
+        let mut s2_next = vec![0.0; max_run + 1];
+        for r in 0..max_run {
+            cnt_next[r + 1] = state.cnt[r] + 1.0;
+            s1_next[r + 1] = state.s1[r] + zt;
+            s2_next[r + 1] = state.s2[r] + zt * zt;
+        }
+
+        if p_next.len() > MAX_RUN_LENGTH {
+            let tail: f64 = p_next[MAX_RUN_LENGTH - 1..].iter().sum();
+            p_next.truncate(MAX_RUN_LENGTH);
+            p_next[MAX_RUN_LENGTH - 1] = tail;
+            cnt_next.truncate(MAX_RUN_LENGTH);
+            s1_next.truncate(MAX_RUN_LENGTH);
+            s2_next.truncate(MAX_RUN_LENGTH);
+            let sum_p: f64 = p_next.iter().sum();
+            for v in &mut p_next {
+                *v /= sum_p;
+            }
+        }
+
+        // MAP run length: first argmax over r >= 1.
+        let m_t = if p_next.len() > 1 {
+            let (idx, _) = p_next[1..].iter().enumerate().fold(
+                (0usize, f64::NEG_INFINITY),
+                |(bi, bv), (i, &v)| {
+                    if v > bv {
+                        (i, v)
+                    } else {
+                        (bi, bv)
+                    }
+                },
+            );
+            idx + 1
+        } else {
+            0
+        };
+
+        prob[t] = if p_next.len() > 1 { p_next[1] } else { 0.0 };
+        map_run_length[t] = m_t;
+
+        if let Some(prev) = prev_m {
+            if m_t < prev {
+                let i = t as isize - m_t as isize + 1;
+                if i >= 1 && (i as usize) < n {
+                    is_changepoint[i as usize] = true;
+                }
+            }
+        }
+        prev_m = Some(m_t);
+
+        state = RunLengthState {
+            p: p_next,
+            cnt: cnt_next,
+            s1: s1_next,
+            s2: s2_next,
+        };
+    }
+
+    let changepoints: Vec<usize> = is_changepoint
+        .iter()
+        .enumerate()
+        .filter_map(|(i, &f)| if f { Some(i) } else { None })
+        .collect();
+
+    Ok(BocpdTrace {
+        sigma_hat,
+        loc,
+        prob,
+        map_run_length,
+        is_changepoint,
+        changepoints,
+    })
+}
+
 /// Result of BOCPD changepoint detection with per-point probabilities.
 /// C++ API compatible structure.
 #[derive(Debug, Clone)]
 pub struct BocpdResult {
-    /// Whether each point is a changepoint (threshold applied)
+    /// Whether each point is a changepoint (MAP run-length reset rule)
     pub is_changepoint: Vec<bool>,
-    /// Changepoint probability for each point [0, 1]
+    /// Changepoint probability for each point [0, 1]: `P(r_t = 1)`, the
+    /// probability that this point opened a new run. Zeroed out entirely
+    /// when `include_probabilities` is false.
     pub changepoint_probability: Vec<f64>,
     /// Indices of detected changepoints
     pub changepoints: Vec<usize>,
 }
 
-/// Bayesian Online Changepoint Detection (BOCPD) with Normal-Gamma conjugate prior.
+/// Bayesian Online Changepoint Detection (BOCPD) with Normal-Gamma conjugate
+/// prior (Adams & MacKay, 2007). Thin wrapper over [`bocpd_trace`] -- see
+/// that function's doc comment for the full algorithm.
 ///
 /// # Arguments
 /// * `values` - Time series values
 /// * `hazard_lambda` - Expected run length between changepoints (default: 250)
-/// * `include_probabilities` - Whether to compute full probability distribution
+/// * `include_probabilities` - Whether to populate `changepoint_probability`
+///   (when false, the vector is all zeros; `is_changepoint`/`changepoints`
+///   are unaffected)
 ///
 /// # Returns
 /// BOCPD result with per-point changepoint flags and probabilities
@@ -200,158 +497,18 @@ pub fn detect_changepoints_bocpd(
     hazard_lambda: f64,
     include_probabilities: bool,
 ) -> Result<BocpdResult> {
-    let n = values.len();
+    let trace = bocpd_trace(values, hazard_lambda)?;
 
-    if n < 3 {
-        return Err(ForecastError::InsufficientData { needed: 3, got: n });
-    }
-
-    // Hazard function: constant rate = 1/hazard_lambda
-    let hazard = 1.0 / hazard_lambda.max(1.0);
-
-    // Normal-Gamma prior parameters
-    // BUG FIX: Use uninformative prior instead of computing from all data
-    // Using the global mean "cheats" by looking at future values
-    let mu0 = 0.0; // Uninformative prior mean
-    let kappa0 = 0.01; // Very weak prior on mean (let data dominate)
-    let alpha0 = 0.01; // Weak prior shape for precision
-    let beta0 = 0.01; // Weak prior rate for precision
-
-    // Run length distribution: R[t][r] = P(run length = r at time t)
-    // For efficiency, we only track the current run length distribution
-    let mut run_length_prob = vec![1.0]; // Start with run length 0
-
-    let mut is_changepoint = vec![false; n];
-    let mut changepoint_prob = vec![0.0; n];
-    let mut changepoints = Vec::new();
-
-    // Sufficient statistics for each run length
-    let mut sum_x = vec![0.0]; // Sum of x for each run length
-    let mut sum_x2 = vec![0.0]; // Sum of x^2 for each run length
-    let mut run_counts = vec![0usize]; // Count for each run length
-
-    // Threshold for detecting changepoints
-    let cp_threshold = 0.5;
-
-    for t in 0..n {
-        let x = values[t];
-        let max_run = run_length_prob.len();
-
-        // Compute predictive probabilities for each run length
-        let mut pred_prob = vec![0.0; max_run];
-
-        for r in 0..max_run {
-            // Normal-Gamma posterior predictive (Student's t-distribution)
-            let kappa_n = kappa0 + run_counts[r] as f64;
-            let alpha_n = alpha0 + run_counts[r] as f64 / 2.0;
-
-            let mu_n = if run_counts[r] > 0 {
-                (kappa0 * mu0 + sum_x[r]) / kappa_n
-            } else {
-                mu0
-            };
-
-            let ss = if run_counts[r] > 0 {
-                sum_x2[r] - sum_x[r].powi(2) / run_counts[r].max(1) as f64
-            } else {
-                0.0
-            };
-
-            let beta_n = beta0
-                + 0.5 * ss.max(0.0)
-                + kappa0 * run_counts[r] as f64 * (mu0 - mu_n).powi(2) / (2.0 * kappa_n);
-
-            // Student's t predictive probability (simplified)
-            let scale = ((beta_n * (kappa_n + 1.0)) / (alpha_n * kappa_n)).sqrt();
-            let z = (x - mu_n) / scale.max(1e-10);
-            let nu = 2.0 * alpha_n;
-
-            // Student's t PDF approximation
-            pred_prob[r] = (1.0 + z.powi(2) / nu).powf(-(nu + 1.0) / 2.0);
-        }
-
-        // Update run length distribution
-        let mut new_run_length_prob = vec![0.0; max_run + 1];
-
-        for r in 0..max_run {
-            let growth_prob = run_length_prob[r] * pred_prob[r] * (1.0 - hazard);
-            let changepoint_contrib = run_length_prob[r] * pred_prob[r] * hazard;
-
-            new_run_length_prob[r + 1] += growth_prob;
-            new_run_length_prob[0] += changepoint_contrib;
-        }
-
-        // Normalize
-        let total: f64 = new_run_length_prob.iter().sum();
-        if total > 1e-300 {
-            for p in &mut new_run_length_prob {
-                *p /= total;
-            }
-        }
-
-        // FIX: P(r=0) is always ~hazard due to normalization math.
-        // P(r=1) indicates "changepoint happened 1 step ago" - this is the actual signal.
-        let cp_detected = *new_run_length_prob.get(1).unwrap_or(&0.0);
-
-        changepoint_prob[t] = cp_detected;
-        is_changepoint[t] = cp_detected > cp_threshold && t > 0;
-
-        if is_changepoint[t] {
-            changepoints.push(t);
-        }
-
-        // Update sufficient statistics
-        // BUG FIX: We need to shift the statistics from old run lengths to new ones
-        // Run length r at time t becomes run length r+1 at time t+1
-        // We need to save old values before modifying
-        let old_sum_x = sum_x.clone();
-        let old_sum_x2 = sum_x2.clone();
-        let old_run_counts = run_counts.clone();
-
-        sum_x.push(0.0);
-        sum_x2.push(0.0);
-        run_counts.push(0);
-
-        for r in 0..new_run_length_prob.len() {
-            if r == 0 {
-                // Run length 0 means "changepoint just happened"
-                // No data in this run yet - sufficient stats should be empty
-                // The NEXT observation will be the first in this new run
-                sum_x[r] = 0.0;
-                sum_x2[r] = 0.0;
-                run_counts[r] = 0;
-            } else if r <= max_run {
-                // Continue from previous run length (r-1 at previous time -> r at current time)
-                // Add current observation to the previous run's statistics
-                sum_x[r] = old_sum_x[r - 1] + x;
-                sum_x2[r] = old_sum_x2[r - 1] + x * x;
-                run_counts[r] = old_run_counts[r - 1] + 1;
-            }
-        }
-
-        run_length_prob = new_run_length_prob;
-
-        // Prune very small probabilities for efficiency
-        let _prune_threshold = 1e-10;
-        let max_keep = 500; // Maximum run lengths to track
-
-        if run_length_prob.len() > max_keep {
-            run_length_prob.truncate(max_keep);
-            sum_x.truncate(max_keep);
-            sum_x2.truncate(max_keep);
-            run_counts.truncate(max_keep);
-        }
-    }
-
-    // If not including probabilities, set to empty
-    if !include_probabilities {
-        changepoint_prob = vec![0.0; n];
-    }
+    let changepoint_probability = if include_probabilities {
+        trace.prob
+    } else {
+        vec![0.0; values.len()]
+    };
 
     Ok(BocpdResult {
-        is_changepoint,
-        changepoint_probability: changepoint_prob,
-        changepoints,
+        is_changepoint: trace.is_changepoint,
+        changepoint_probability,
+        changepoints: trace.changepoints,
     })
 }
 
@@ -406,80 +563,6 @@ mod tests {
         let values = vec![5.0; 100];
         let result = detect_changepoints(&values, 5, None, CostFunction::L2).unwrap();
         assert!(result.changepoints.is_empty() || result.changepoints.len() <= 1);
-    }
-
-    #[test]
-    fn test_detect_changepoints_bocpd() {
-        // Create series with clear changepoint in mean
-        let mut values: Vec<f64> = (0..50).map(|_| 10.0).collect();
-        values.extend((0..50).map(|_| 50.0));
-
-        let result = detect_changepoints_bocpd(&values, 20.0, true).unwrap();
-
-        // Verify output structure is correct
-        assert_eq!(result.is_changepoint.len(), 100);
-        assert_eq!(result.changepoint_probability.len(), 100);
-
-        // Check that probabilities are valid (in range [0, 1])
-        assert!(result
-            .changepoint_probability
-            .iter()
-            .all(|&p| (0.0..=1.0).contains(&p)));
-
-        // The algorithm should produce some probability output
-        // (Detection accuracy depends on parameters and data)
-        let max_prob = result
-            .changepoint_probability
-            .iter()
-            .fold(0.0_f64, |a, &b| a.max(b));
-        assert!(max_prob >= 0.0, "Should compute valid probabilities");
-    }
-
-    #[test]
-    fn test_detect_changepoints_bocpd_step_change() {
-        // GitHub Issue #71: Test that BOCPD detects obvious step changes
-        // Series: 100 for 12 points, then 10 for 12 points (changepoint at index 12)
-        let mut values: Vec<f64> = vec![100.0; 12];
-        values.extend(vec![10.0; 12]);
-
-        let result = detect_changepoints_bocpd(&values, 10.0, true).unwrap();
-
-        // Probabilities should NOT all be constant (the original bug)
-        let first_prob = result.changepoint_probability[0];
-        let all_constant = result
-            .changepoint_probability
-            .iter()
-            .all(|&p| (p - first_prob).abs() < 1e-10);
-        assert!(
-            !all_constant,
-            "BUG: All changepoint probabilities are constant at {}",
-            first_prob
-        );
-
-        // There should be a spike at index 12 (the actual changepoint)
-        let prob_before_cp: f64 = result.changepoint_probability[5..11].iter().sum::<f64>() / 6.0;
-        let prob_at_cp = result.changepoint_probability[12];
-
-        assert!(
-            prob_at_cp > prob_before_cp * 10.0,
-            "Changepoint probability at t=12 ({:.4}) should be much higher than baseline ({:.4})",
-            prob_at_cp,
-            prob_before_cp
-        );
-
-        // Probability at changepoint should be significant (>0.5)
-        assert!(
-            prob_at_cp > 0.5,
-            "Changepoint probability at t=12 should be >0.5, got {:.4}",
-            prob_at_cp
-        );
-    }
-
-    #[test]
-    fn test_detect_changepoints_bocpd_insufficient_data() {
-        let values = vec![1.0, 2.0];
-        let result = detect_changepoints_bocpd(&values, 10.0, false);
-        assert!(result.is_err());
     }
 
     #[test]
@@ -547,5 +630,78 @@ mod tests {
         let result = detect_changepoints_bayesian(&values, 0.01).unwrap();
         // Should return a valid result structure
         assert!(result.cost == 0.0); // Legacy function sets cost to 0
+    }
+
+    #[test]
+    fn test_robust_noise_scale_constant_series_falls_back_to_one() {
+        let values = vec![5.0; 30];
+        assert_eq!(robust_noise_scale(&values), 1.0);
+    }
+
+    #[test]
+    fn test_detect_changepoints_bocpd_step3_flags_100() {
+        // GitHub Issue #71-style anchor (15-RESEARCH.md prototype): a clean
+        // 3-sigma step at index 100 on a 200-point N(0,1) series must be
+        // flagged, and only there.
+        let mut values = vec![0.1; 200];
+        for (i, v) in values.iter_mut().enumerate() {
+            *v = if i < 100 { 0.0 } else { 3.0 };
+        }
+        let result = detect_changepoints_bocpd(&values, 250.0, true).unwrap();
+        assert_eq!(result.changepoints, vec![100]);
+    }
+
+    #[test]
+    fn test_detect_changepoints_bocpd_step_change_issue_71() {
+        // GitHub Issue #71: 100 for 12 points, then 10 for 12 points.
+        let mut values: Vec<f64> = vec![100.0; 12];
+        values.extend(vec![10.0; 12]);
+
+        let result = detect_changepoints_bocpd(&values, 250.0, true).unwrap();
+
+        assert_eq!(result.changepoints, vec![12]);
+        assert!(
+            result.changepoint_probability[12] > 0.5,
+            "prob[12] = {}, expected > 0.5",
+            result.changepoint_probability[12]
+        );
+    }
+
+    #[test]
+    fn test_detect_changepoints_bocpd_insufficient_data() {
+        let values = vec![1.0, 2.0];
+        let result = detect_changepoints_bocpd(&values, 10.0, false);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_detect_changepoints_bocpd_non_finite_input_is_invalid_input() {
+        let values = vec![1.0, f64::NAN, 3.0];
+        let result = detect_changepoints_bocpd(&values, 250.0, false);
+        assert!(matches!(result, Err(ForecastError::InvalidInput(_))));
+    }
+
+    #[test]
+    fn test_detect_changepoints_bocpd_include_probabilities_false_zeroes_vector() {
+        let mut values = vec![0.0; 50];
+        values.extend(vec![10.0; 50]);
+        let result = detect_changepoints_bocpd(&values, 250.0, false).unwrap();
+        assert!(result.changepoint_probability.iter().all(|&p| p == 0.0));
+        // changepoints/is_changepoint are unaffected by include_probabilities.
+        assert!(!result.changepoints.is_empty());
+    }
+
+    #[test]
+    fn test_bocpd_trace_scale_and_shift_invariant() {
+        let mut values = vec![0.0; 100];
+        for (i, v) in values.iter_mut().enumerate() {
+            if i >= 50 {
+                *v = 5.0;
+            }
+        }
+        let base = bocpd_trace(&values, 250.0).unwrap();
+        let scaled: Vec<f64> = values.iter().map(|v| v * 100.0 + 7.0).collect();
+        let scaled_trace = bocpd_trace(&scaled, 250.0).unwrap();
+        assert_eq!(base.changepoints, scaled_trace.changepoints);
     }
 }

@@ -42,7 +42,8 @@ pub use bootstrap::{
 };
 pub use calendar::{detect_step, future_dates, CalendarStep, ONE_DAY_MICROS};
 pub use changepoint::{
-    detect_changepoints, detect_changepoints_bocpd, BocpdResult, ChangepointResult, CostFunction,
+    bocpd_trace, detect_changepoints, detect_changepoints_bocpd, robust_noise_scale, BocpdResult,
+    BocpdTrace, ChangepointResult, CostFunction,
 };
 pub use conformal::{
     // New Learn/Apply API (v2)
