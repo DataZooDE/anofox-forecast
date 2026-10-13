@@ -99,6 +99,7 @@ test without a separate Rust edit.
 | `r_mase` | `accuracy_mase.json` | `r/gen_mase_reference.R` | `mase_abs` (1e-12) | Phase 13 (D-08, STAT-06, 13-04): `anofox_fcst_core::metrics::mase` (Hyndman-Koehler MASE, scaled by the in-sample seasonal-naive MAE at lag `seasonal_period`) -- each case carries BOTH `mase_accuracy` (`forecast::accuracy()`) and `mase_manual` (the formula), which must agree |
 | `tsfresh_features` | `mapping.json`, `white_noise_n200.json`, `random_walk_n200.json`, `seasonal_ar12_n144.json`, `trend_season_n120.json`, `intermittent_n100.json`, `short_n20.json`, `constant_n30.json`, `all_zero_n50.json`, `tiny_n8.json` | `python/gen_tsfresh_features.py` | `abs` (1e-9), `rel` (1e-9) -- see `mapping.json`'s own `tolerance` and per-row overrides | Phase 14 plans 14-01..14-04 (FEAT-01..FEAT-05): `anofox_fcst_core::features::extract_features` -- all 117 `list_features()` names, via `crates/anofox-fcst-core/tests/tsfresh_features_reference.rs` and `test/sql/ts_features_reference.test` |
 | `numpy_detrend` | `polyfit_cases.json` | `python/gen_detrend_reference.py` | `trend_abs` (1e-8), `coef_rel` (1e-8), `coef_abs` (1e-10), `rss_rel` (1e-8) | Phase 15 plan 15-01 (DEP-03, WRAP-01, D-01): `anofox_fcst_core::detrending::{detrend_linear,detrend_polynomial,detrend}` -- fitted trend, ascending-power coefficients (raw 0-based index basis), detrended residuals, and RSS for degree 1/2/3 on 4 seeded series, via `crates/anofox-fcst-core/tests/detrend_reference.rs` and `test/sql/ts_detection_reference.test` |
+| `scipy_peaks` | `cases.json` | `python/gen_scipy_peaks_reference.py` | `prominence_abs` (1e-12), `height_abs` (0.0) | Phase 15 plan 15-02 (DET-01, D-05): `anofox_fcst_core::peaks::{local_maxima,peak_prominences,find_peaks,detect_peaks}` -- `scipy.signal.find_peaks` 1.18.1 plateau-midpoint local maxima and `scipy.signal.peak_prominences` (every case, even without a `prominence` filter), for an audited random walk, a seasonal sine with height/distance/prominence filters (incl. a combined case), plateau/edge/tie/degenerate series, via `crates/anofox-fcst-core/tests/peaks_reference.rs` and `test/sql/ts_detection_reference.test` |
 
 **`tsfresh_features`'s `mapping.json` is a second, hand-maintained fixture** (not
 generator output) alongside the nine series fixtures -- it is the D-01
@@ -161,6 +162,17 @@ fit's true RSS is conceptually 0, and `numpy.polyfit`'s own floating-point
 evaluation of that 0 is not bit-identical to fdars-core's (observed ~1e-29
 vs exactly `0.0`), which a relative-only bound cannot absorb.
 
+**`scipy_peaks` tolerance rationale (Phase 15 plan 15-02):** `prominence_abs`
+(1e-12) is tight because the Rust port's prominences are computed from the
+exact same input doubles with no intermediate fitted model (unlike
+`numpy_detrend`'s SVD-based fits) -- both scipy's `peak_prominences` and the
+Rust `O(n)` monotonic-stack port are simple min/max/subtract chains over the
+input array, so the only expected discrepancy is double-precision summation
+order, well under 1e-12. `height_abs` (0.0) is exact: a peak's height is
+read directly from the input series at an integer index on both sides, with
+no floating-point computation involved -- any non-zero difference would
+mean the port picked the wrong index, not a rounding difference.
+
 ## 5. Tool versions
 
 These are the toolchain versions this phase verified against. **Each fixture's own
@@ -201,6 +213,9 @@ uv run --locked --project validation/reference/python python validation/referenc
 
 # Python family added in Phase 15 plan 15-01:
 uv run --locked --project validation/reference/python python validation/reference/python/gen_detrend_reference.py
+
+# Python family added in Phase 15 plan 15-02:
+uv run --locked --project validation/reference/python python validation/reference/python/gen_scipy_peaks_reference.py
 
 # Determinism check — every generator is seeded and writes no timestamps/hostnames,
 # so regenerating with the same toolchain versions must produce an empty diff:
