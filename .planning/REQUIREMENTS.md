@@ -74,8 +74,8 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 ### Detection & Decomposition
 
 - [ ] **DET-01**: Peak detection follows scipy `find_peaks` semantics (indices, plateaus, prominence) and matches scipy on fixtures [G1].
-- [ ] **DET-02**: BOCPD implements Adams & MacKay correctly (normalised Student-t predictive, correct Normal-Gamma update, truncation keeps mass, changepoint rule detects a 3σ step and stays quiet on stationary noise) [G3–G6].
-- [ ] **DET-03**: PELT penalty is scale-invariant (variance-normalised cost or BIC-style penalty with σ²); normal and L1 costs correct (median for L1); pruning implemented [G7, G8].
+- [x] **DET-02**: BOCPD implements Adams & MacKay correctly (normalised Student-t predictive, correct Normal-Gamma update, truncation keeps mass, changepoint rule detects a 3σ step and stays quiet on stationary noise) [G3–G6].
+- [x] **DET-03**: PELT penalty is scale-invariant (variance-normalised cost or BIC-style penalty with σ²); normal and L1 costs correct (median for L1); pruning implemented [G7, G8].
 - [ ] **DET-04**: MSTL processes periods shortest-first with STL (Loess) components matching R `forecast::mstl`/statsmodels within tolerance; even-window averages correct [G9–G11].
 - [ ] **DET-05**: Period detection is robust: FFT detrends before the periodogram and handles odd n; ACF period allows lag 2 and requires significance; regression-period defaults include integer candidates; Lomb-Scargle validates inputs [G17, G18, G20, G21].
 - [ ] **DET-06**: Seasonal-strength variants detrend before measuring; wavelet strength is fixed (noise ≈ 0) or removed; trend-strength doc matches implementation [G19, G22].
@@ -169,8 +169,8 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 | FEAT-04 | Phase 14 | Complete |
 | FEAT-05 | Phase 14 | Complete |
 | DET-01 | Phase 15 | Pending |
-| DET-02 | Phase 15 | Pending |
-| DET-03 | Phase 15 | Pending |
+| DET-02 | Phase 15 | Complete |
+| DET-03 | Phase 15 | Complete |
 | DET-04 | Phase 15 | Pending |
 | DET-05 | Phase 15 | Pending |
 | DET-06 | Phase 15 | Pending |
