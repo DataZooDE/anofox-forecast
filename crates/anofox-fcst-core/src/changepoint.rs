@@ -72,11 +72,9 @@ pub struct ChangepointResult {
     /// Total cost of segmentation
     pub cost: f64,
     /// Number of segment-cost evaluations performed -- a direct measure of
-    /// how effective pruning was (T-15-11, D-07 Task 2). NOT YET populated
-    /// by real pruning as of this commit (RED phase) -- the pre-fix
-    /// algorithm below counts every `cost()` call it makes, which is close
-    /// to the full unpruned O(n^2) since `r[tau_star]`'s pruning result is
-    /// computed but never consulted (G8).
+    /// how effective pruning was (T-15-11, D-07): the unpruned exact DP
+    /// evaluates O(n^2) segment costs; working pruning keeps this far below
+    /// that.
     pub n_cost_evaluations: usize,
 }
 
@@ -92,65 +90,52 @@ pub enum CostFunction {
     Normal,
 }
 
-/// Calculate segment cost using L2 (variance) cost function.
-fn cost_l2(values: &[f64], start: usize, end: usize) -> f64 {
+/// Calculate segment cost using L2 (variance) cost function on an
+/// already-normalised series `z = x / sigma_hat`.
+fn cost_l2(z: &[f64], start: usize, end: usize) -> f64 {
     if end <= start {
         return 0.0;
     }
-
-    let segment = &values[start..end];
+    let segment = &z[start..end];
     let n = segment.len() as f64;
-
-    if n < 1.0 {
-        return 0.0;
-    }
-
     let mean: f64 = segment.iter().sum::<f64>() / n;
     segment.iter().map(|v| (v - mean).powi(2)).sum()
 }
 
-/// Calculate segment cost using L1 (mean absolute deviation) cost function.
-///
-/// TODO (Phase 15 plan 15-03, G8, D-07): uses the mean, not the median --
-/// scheduled to be fixed to the median-based Laplace-MLE cost in Task 2 of
-/// this plan.
-fn cost_l1(values: &[f64], start: usize, end: usize) -> f64 {
+/// Calculate segment cost using L1 (median absolute deviation) cost
+/// function on `z = x / sigma_hat`. Uses the segment MEDIAN, not the mean
+/// (G8) -- `2*sqrt(2) * sum(|z - median(z)|)` matches the Laplace-MLE
+/// negative log-likelihood up to an additive constant, consistent with
+/// `L2`'s Normal-MLE-based scale.
+fn cost_l1(z: &[f64], start: usize, end: usize) -> f64 {
     if end <= start {
         return 0.0;
     }
-
-    let segment = &values[start..end];
-    let n = segment.len() as f64;
-
-    if n < 1.0 {
-        return 0.0;
-    }
-
-    let mean: f64 = segment.iter().sum::<f64>() / n;
-    segment.iter().map(|v| (v - mean).abs()).sum()
+    let mut segment: Vec<f64> = z[start..end].to_vec();
+    segment.sort_by(|a, b| a.total_cmp(b));
+    let n = segment.len();
+    let med = if n % 2 == 1 {
+        segment[n / 2]
+    } else {
+        (segment[n / 2 - 1] + segment[n / 2]) / 2.0
+    };
+    let sum_abs_dev: f64 = z[start..end].iter().map(|v| (v - med).abs()).sum();
+    2.0 * std::f64::consts::SQRT_2 * sum_abs_dev
 }
 
-/// Calculate segment cost using normal distribution (change in mean and variance).
-fn cost_normal(values: &[f64], start: usize, end: usize) -> f64 {
+/// Calculate segment cost using normal distribution (change in mean and
+/// variance) on `z = x / sigma_hat`. The `+ 1e-8` inside the log keeps the
+/// cost concave (superadditive), which is what makes PELT's pruning exact
+/// even for a zero/near-zero-variance segment.
+fn cost_normal(z: &[f64], start: usize, end: usize) -> f64 {
     if end <= start {
         return 0.0;
     }
-
-    let segment = &values[start..end];
+    let segment = &z[start..end];
     let n = segment.len() as f64;
-
-    if n < 2.0 {
-        return 0.0;
-    }
-
     let mean: f64 = segment.iter().sum::<f64>() / n;
-    let variance: f64 = segment.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n;
-
-    if variance <= f64::EPSILON {
-        return 0.0;
-    }
-
-    n * (1.0 + variance.ln())
+    let var_mle: f64 = segment.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n;
+    n * (1.0 + (var_mle + 1e-8).ln())
 }
 
 /// Get cost function implementation.
@@ -164,9 +149,6 @@ fn get_cost_fn(cost_fn: CostFunction) -> fn(&[f64], usize, usize) -> f64 {
 
 /// Effective minimum segment length: `Normal` needs at least 2 points to
 /// compute a variance; `L1`/`L2` accept `min_size` as given (clamped to >= 1).
-///
-/// NOT YET consulted by `detect_changepoints` as of this commit (RED
-/// phase) -- wired in during GREEN.
 fn effective_min_size(cost_fn: CostFunction, min_size: usize) -> usize {
     let base = min_size.max(1);
     match cost_fn {
@@ -178,9 +160,6 @@ fn effective_min_size(cost_fn: CostFunction, min_size: usize) -> usize {
 /// Default BIC-style penalty: `3 * ln(n)` for `Normal` (one more free
 /// parameter -- the variance -- than `L1`/`L2`), `2 * ln(n)` otherwise,
 /// matching R `changepoint`'s `(diffparam + 1) * log(n)` convention.
-///
-/// NOT YET consulted by `detect_changepoints` as of this commit (RED
-/// phase) -- wired in during GREEN.
 fn default_penalty(cost_fn: CostFunction, n: usize) -> f64 {
     let ln_n = (n as f64).ln();
     match cost_fn {
@@ -189,91 +168,133 @@ fn default_penalty(cost_fn: CostFunction, n: usize) -> f64 {
     }
 }
 
-/// Detect changepoints using the PELT (Pruned Exact Linear Time) algorithm.
+/// Detect changepoints using the PELT (Pruned Exact Linear Time) algorithm
+/// (Killick et al. 2012).
+///
+/// Costs are computed on `z = values / robust_noise_scale(values)` (D-07),
+/// so `detect_changepoints(values, ..)` and
+/// `detect_changepoints(values * k, ..)` (or `values + c`) return identical
+/// changepoints for any `k != 0`/`c` -- the Phase 15 audit found 32 spurious
+/// changepoints on a `values * 100` series before this fix. `L1`'s cost uses
+/// the segment MEDIAN (G8), not the mean. Pruning actually discards
+/// candidates once they can no longer be optimal (`F(tau) + C(tau, t) >
+/// F(t)` at `t`, expiring at `t + min_size`) -- `n_cost_evaluations` on the
+/// returned result lets a caller (and this crate's own tests) measure how
+/// effective that pruning is.
+///
+/// PELT has no SQL surface (see module doc) -- this function is Rust/FFI-only.
 ///
 /// # Arguments
 /// * `values` - The time series values
-/// * `min_size` - Minimum segment size
-/// * `penalty` - Penalty for adding a changepoint (BIC-like)
+/// * `min_size` - Minimum segment size (`Normal` enforces at least 2)
+/// * `penalty` - Penalty for adding a changepoint; `None` uses a BIC-style
+///   default (`2 ln n` for `L1`/`L2`, `3 ln n` for `Normal`). Must be finite
+///   and non-negative if provided.
 /// * `cost_fn` - Cost function to use
 ///
-/// # Returns
-/// Vector of changepoint indices
-///
-/// NOTE (Phase 15 plan 15-03, G7/G8, D-07): this is the pre-fix PELT,
-/// unchanged by Task 1 (BOCPD tracer) -- the cost normalisation, L1 median
-/// fix, and exact-safe pruning land in Task 2 of this plan.
+/// # Errors
+/// `InvalidInput` if any value is non-finite; `InvalidParameter` if
+/// `penalty` is provided but non-finite or negative.
 pub fn detect_changepoints(
     values: &[f64],
     min_size: usize,
     penalty: Option<f64>,
     cost_fn: CostFunction,
 ) -> Result<ChangepointResult> {
-    let n = values.len();
+    if values.iter().any(|v| !v.is_finite()) {
+        return Err(ForecastError::InvalidInput(
+            "detect_changepoints: all values must be finite".to_string(),
+        ));
+    }
+    if let Some(p) = penalty {
+        if !p.is_finite() || p < 0.0 {
+            return Err(ForecastError::InvalidParameter {
+                param: "penalty".to_string(),
+                value: p.to_string(),
+                reason: "must be finite and non-negative".to_string(),
+            });
+        }
+    }
 
-    if n < 2 * min_size {
+    let n = values.len();
+    let m = effective_min_size(cost_fn, min_size);
+    let sigma_hat = robust_noise_scale(values);
+    let z: Vec<f64> = values.iter().map(|v| v / sigma_hat).collect();
+    let cost = get_cost_fn(cost_fn);
+
+    if n < 2 * m {
         return Ok(ChangepointResult {
             changepoints: vec![],
-            cost: 0.0,
-            n_cost_evaluations: 0,
+            cost: if n > 0 { cost(&z, 0, n) } else { 0.0 },
+            n_cost_evaluations: if n > 0 { 1 } else { 0 },
         });
     }
 
-    // Default penalty based on BIC
-    let pen = penalty.unwrap_or_else(|| (n as f64).ln() * 2.0);
+    let pen = penalty.unwrap_or_else(|| default_penalty(cost_fn, n));
 
-    let cost = get_cost_fn(cost_fn);
-
-    // PELT algorithm with pruning
-    let mut f = vec![f64::NEG_INFINITY; n + 1];
-    let mut cp = vec![0usize; n + 1];
-    let mut r = vec![vec![0usize]; n + 1];
-    let mut n_cost_evaluations: usize = 0;
-
+    // f[t] = minimal total cost (segment costs + penalty per changepoint)
+    // of an optimal partition of values[0..t]. back[t] = the optimal last
+    // changepoint before t. `live` is the exact-safe pruned candidate set
+    // of previous changepoints still reachable from future t.
+    let mut f = vec![f64::INFINITY; n + 1];
+    let mut back = vec![0usize; n + 1];
     f[0] = -pen;
 
-    for tau_star in min_size..=n {
-        let candidates: Vec<usize> = (0..=(tau_star.saturating_sub(min_size)))
-            .filter(|&tau| tau + min_size <= tau_star)
-            .filter(|&tau| tau == 0 || tau >= min_size) // Only valid previous changepoints
-            .collect();
+    let mut live: Vec<usize> = vec![0];
+    let mut n_cost_evaluations: usize = 0;
 
+    for t in m..=n {
         let mut best_f = f64::INFINITY;
-        let mut best_tau = 0;
-
-        for &tau in &candidates {
+        let mut best_tau = 0usize;
+        for &tau in &live {
+            // A candidate only becomes admissible once t - tau >= m -- a
+            // candidate pushed onto `live` at some earlier t' = tau sits
+            // there (unevaluated, unpruned) until enough future steps have
+            // passed. Querying it before that would let a too-short
+            // segment compete at all, which is exactly how an
+            // under-filtered `live` set silently corrupts every later f[t].
+            if t - tau < m {
+                continue;
+            }
             n_cost_evaluations += 1;
-            let candidate_cost = f[tau] + cost(values, tau, tau_star) + pen;
-            if candidate_cost < best_f {
-                best_f = candidate_cost;
+            let candidate = f[tau] + cost(&z, tau, t) + pen;
+            if candidate < best_f {
+                best_f = candidate;
                 best_tau = tau;
             }
         }
+        f[t] = best_f;
+        back[t] = best_tau;
 
-        f[tau_star] = best_f;
-        cp[tau_star] = best_tau;
-
-        // Pruning step -- computed but never consulted by the next
-        // iteration's `candidates` (G8): this is what Task 2 fixes.
-        r[tau_star] = candidates
-            .into_iter()
-            .filter(|&tau| f[tau] + cost(values, tau, tau_star) <= f[tau_star])
-            .collect();
-        r[tau_star].push(tau_star);
+        // Exact-safe pruning (Killick et al. 2012, Theorem 3.1): an
+        // admissible candidate tau can no longer be optimal for any future
+        // split point once f[tau] + cost(tau, t) > f[t] -- it is dropped
+        // here. A not-yet-admissible tau (t - tau < m) is left in `live`
+        // untouched -- it has not been evaluated yet, so there is nothing
+        // to prune it on. `t` itself joins the live set once it is an
+        // admissible split point for some future s >= t + m.
+        live.retain(|&tau| {
+            if t - tau < m {
+                true
+            } else {
+                f[tau] + cost(&z, tau, t) <= f[t]
+            }
+        });
+        if t + m <= n {
+            live.push(t);
+        }
     }
 
-    // Backtrack to find changepoints
+    // Backtrack to find changepoints.
     let mut changepoints = Vec::new();
     let mut idx = n;
-
     while idx > 0 {
-        let tau = cp[idx];
+        let tau = back[idx];
         if tau > 0 {
             changepoints.push(tau);
         }
         idx = tau;
     }
-
     changepoints.reverse();
 
     Ok(ChangepointResult {
@@ -631,17 +652,16 @@ mod tests {
         let cost = cost_normal(&values, 0, 5);
         assert!(cost > 0.0, "Normal cost should be positive for varied data");
 
-        // Constant segment has zero variance -> cost = 0
+        // Constant segment: var_mle = 0, so cost = n*(1 + ln(1e-8)) -- the
+        // `+ 1e-8` keeps this finite and concave (G8, D-07) rather than the
+        // old code's special-cased exact 0.0.
         let constant = vec![5.0; 5];
         let constant_cost = cost_normal(&constant, 0, 5);
-        assert_eq!(
-            constant_cost, 0.0,
-            "Constant data should have 0 normal cost"
+        let expected = 5.0 * (1.0 + 1e-8_f64.ln());
+        assert!(
+            (constant_cost - expected).abs() < 1e-9,
+            "constant_cost = {constant_cost}, want {expected}"
         );
-
-        // Short segment
-        let short_cost = cost_normal(&values, 0, 1);
-        assert_eq!(short_cost, 0.0, "Single element should have 0 cost");
     }
 
     #[test]
@@ -772,18 +792,45 @@ mod tests {
 
     /// Test-only unpruned exact DP (the ground truth PELT with pruning
     /// must reproduce exactly): scans EVERY admissible tau, never prunes.
+    /// Only `CostFunction::L2` is supported -- it uses O(1) prefix-sum
+    /// costs (instead of calling the crate's own `cost_l2`, which would
+    /// make this O(n) per candidate and O(n^3) overall) purely so the
+    /// 3000-point performance test runs in a reasonable time; this does
+    /// NOT change which tau values are scanned (still every admissible
+    /// one, no pruning), only how fast each one's cost is computed.
     fn unpruned_exact_dp(
         values: &[f64],
         min_size: usize,
         penalty: Option<f64>,
         cost_fn: CostFunction,
     ) -> (Vec<usize>, usize) {
+        assert!(
+            matches!(cost_fn, CostFunction::L2),
+            "unpruned_exact_dp test helper only supports L2"
+        );
         let n = values.len();
         let m = effective_min_size(cost_fn, min_size);
         let sigma_hat = robust_noise_scale(values);
         let z: Vec<f64> = values.iter().map(|v| v / sigma_hat).collect();
-        let cost = get_cost_fn(cost_fn);
         let pen = penalty.unwrap_or_else(|| default_penalty(cost_fn, n));
+
+        // Prefix sums for O(1) L2 segment cost: sum((z-mean)^2) over [a,b)
+        // = sum_sq - sum^2/len.
+        let mut prefix_sum = vec![0.0; n + 1];
+        let mut prefix_sq = vec![0.0; n + 1];
+        for i in 0..n {
+            prefix_sum[i + 1] = prefix_sum[i] + z[i];
+            prefix_sq[i + 1] = prefix_sq[i] + z[i] * z[i];
+        }
+        let l2_cost = |a: usize, b: usize| -> f64 {
+            if b <= a {
+                return 0.0;
+            }
+            let len = (b - a) as f64;
+            let s = prefix_sum[b] - prefix_sum[a];
+            let sq = prefix_sq[b] - prefix_sq[a];
+            sq - s * s / len
+        };
 
         let mut f = vec![f64::INFINITY; n + 1];
         let mut back = vec![0usize; n + 1];
@@ -798,7 +845,7 @@ mod tests {
             let mut best_tau = 0usize;
             for &tau in &candidates {
                 n_evals += 1;
-                let c = f[tau] + cost(&z, tau, t) + pen;
+                let c = f[tau] + l2_cost(tau, t) + pen;
                 if c < best_f {
                     best_f = c;
                     best_tau = tau;
