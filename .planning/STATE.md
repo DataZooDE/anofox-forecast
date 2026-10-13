@@ -2,21 +2,21 @@
 gsd_state_version: "1.0"
 milestone: v0.10.0
 milestone_name: Statistical Correctness
-current_phase: 15
-current_phase_name: Detection & Decomposition on fdars 0.47
-current_plan: Not started
+current_phase: 16
+current_phase_name: Conformal & Bootstrap Correctness
+current_plan: 1
 status: executing
 stopped_at: Phase 14 complete, ready to plan Phase 11
-last_updated: "2026-10-12T20:20:14.120Z"
+last_updated: "2026-10-13T04:53:53.589Z"
 last_activity: 2026-10-12
-last_activity_desc: Phase 14 complete, transitioned to Phase 11
-state_head: a9dc9dbe04899239aae9ea7dc1af5d3ba5eb64d9
+last_activity_desc: Phase 15 execution started
+state_head: 53767b55cc8390cc667e34d746157d9dc911b4f3
 progress:
   total_phases: 10
   completed_phases: 1
-  total_plans: 45
+  total_plans: 51
   completed_plans: 40
-  percent: 10
+  percent: 0
 ---
 
 # Project State
@@ -26,17 +26,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-08 — started v0.10.0 Statistical Correctness)
 
 **Core value:** Every statistic the extension returns is correct — verified against R / scipy / statsmodels / tsfresh reference values — and is computed in the Rust crates; C++ and SQL only marshal, group, and dispatch.
-**Current focus:** Phase 14 — tsfresh Feature Parity
+**Current focus:** Phase 15 — Detection & Decomposition on fdars 0.47
 
 ## Current Position
 
-Phase: 15 (Detection & Decomposition on fdars 0.47) — READY TO EXECUTE
-Current Plan: Not started
-Total Plans in Phase: 5
+Phase: 16 (Conformal & Bootstrap Correctness) — READY TO EXECUTE
+Current Plan: 1
+Total Plans in Phase: 3
 Status: Ready to execute
-Last activity: 2026-10-12 — Phase 14 complete, transitioned to Phase 11
+Last activity: 2026-10-12 — Phase 15 execution started
 
-Progress: [█░░░░░░░░░] 10%
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
