@@ -2,20 +2,20 @@
 gsd_state_version: "1.0"
 milestone: v0.10.0
 milestone_name: Statistical Correctness
-current_phase: 16
-current_phase_name: Conformal & Bootstrap Correctness
+current_phase: 15
+current_phase_name: Detection & Decomposition on fdars 0.47
 current_plan: 1
 status: executing
 stopped_at: Phase 14 complete, ready to plan Phase 11
-last_updated: "2026-10-13T04:53:53.589Z"
-last_activity: 2026-10-12
+last_updated: "2026-10-13T04:54:05.211Z"
+last_activity: 2026-10-13
 last_activity_desc: Phase 15 execution started
-state_head: 53767b55cc8390cc667e34d746157d9dc911b4f3
+state_head: 8c4d8073f9986d70992a3ca95745c3ff3d36c03f
 progress:
   total_phases: 10
-  completed_phases: 1
+  completed_phases: 0
   total_plans: 51
-  completed_plans: 40
+  completed_plans: 41
   percent: 0
 ---
 
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-10-08 — started v0.10.0 Statistical Co
 
 ## Current Position
 
-Phase: 16 (Conformal & Bootstrap Correctness) — READY TO EXECUTE
+Phase: 15 (Detection & Decomposition on fdars 0.47) — EXECUTING
 Current Plan: 1
-Total Plans in Phase: 3
-Status: Ready to execute
-Last activity: 2026-10-12 — Phase 15 execution started
+Total Plans in Phase: 5
+Status: Executing Phase 15
+Last activity: 2026-10-13 — Phase 15 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
