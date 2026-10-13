@@ -13,14 +13,16 @@ project's environment (confirmed in 15-RESEARCH.md), hence the hand-written
 exact DP rather than either library.
 
 Writes two fixtures under `validation/reference/fixtures/changepoints/`:
-  - `bocpd_cases.json`  (this file, Task 1)
-  - `pelt_cases.json`   (this file, Task 2 -- added in a later commit)
+  - `bocpd_cases.json`  (Task 1)
+  - `pelt_cases.json`   (Task 2, this file's `opt_partition` exact-DP reference)
 
 Run via: uv run --locked --project validation/reference/python python \
   validation/reference/python/gen_changepoint_reference.py
 """
 
 from __future__ import annotations
+
+from typing import Callable
 
 import numpy as np
 from scipy.special import gammaln
@@ -241,8 +243,224 @@ def write_bocpd_fixture() -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# PELT reference: exact optimal partitioning (no pruning) over normalised
+# costs, so PELT itself (with pruning) can be checked for exact agreement.
+# ---------------------------------------------------------------------------
+
+
+def cost_l2(z: np.ndarray, a: int, b: int) -> float:
+    seg = z[a:b]
+    mean = seg.mean()
+    return float(((seg - mean) ** 2).sum())
+
+
+def cost_l1(z: np.ndarray, a: int, b: int) -> float:
+    seg = z[a:b]
+    med = np.median(seg)
+    return float(2.0 * np.sqrt(2.0) * np.abs(seg - med).sum())
+
+
+def cost_normal(z: np.ndarray, a: int, b: int) -> float:
+    seg = z[a:b]
+    n = len(seg)
+    mean = seg.mean()
+    var_mle = float(((seg - mean) ** 2).sum() / n)
+    return float(n * (1.0 + np.log(var_mle + 1e-8)))
+
+
+COST_FNS: dict[str, Callable[[np.ndarray, int, int], float]] = {
+    "L1": cost_l1,
+    "L2": cost_l2,
+    "Normal": cost_normal,
+}
+
+
+def default_penalty(cost: str, n: int) -> float:
+    if cost == "Normal":
+        return 3.0 * np.log(n)
+    return 2.0 * np.log(n)
+
+
+def effective_min_size(cost: str, min_size: int) -> int:
+    base = max(min_size, 1)
+    if cost == "Normal":
+        return max(base, 2)
+    return base
+
+
+def opt_partition(
+    x: np.ndarray, cost: str, min_size: int, penalty: float | None
+) -> dict:
+    """Exact optimal partitioning: F(t) = min over admissible tau < t of
+    F(tau) + C(tau, t) + beta, scanning EVERY admissible tau (no pruning).
+    This is the ground truth PELT (with pruning) must reproduce exactly."""
+    n = len(x)
+    sigma_hat = robust_noise_scale(x)
+    z = x / sigma_hat
+    m = effective_min_size(cost, min_size)
+    cost_fn = COST_FNS[cost]
+
+    if n < 2 * m:
+        return {
+            "sigma_hat": sigma_hat,
+            "changepoints": [],
+            "cost": cost_fn(z, 0, n) if n > 0 else 0.0,
+        }
+
+    beta = default_penalty(cost, n) if penalty is None else penalty
+
+    f = [float("inf")] * (n + 1)
+    back = [0] * (n + 1)
+    f[0] = -beta
+
+    for t in range(m, n + 1):
+        candidates = [tau for tau in range(0, t - m + 1) if tau == 0 or tau >= m]
+        best_f = float("inf")
+        best_tau = 0
+        for tau in candidates:
+            c = f[tau] + cost_fn(z, tau, t) + beta
+            if c < best_f:
+                best_f = c
+                best_tau = tau
+        f[t] = best_f
+        back[t] = best_tau
+
+    changepoints: list[int] = []
+    idx = n
+    while idx > 0:
+        tau = back[idx]
+        if tau > 0:
+            changepoints.append(tau)
+        idx = tau
+    changepoints.reverse()
+
+    return {"sigma_hat": sigma_hat, "changepoints": changepoints, "cost": f[n]}
+
+
+def make_pelt_cases() -> list[dict]:
+    rng_mean3 = np.random.default_rng(15501)
+    mean3 = np.concatenate(
+        [
+            np.zeros(50),
+            np.full(50, 2.5),
+            np.full(50, -1.0),
+        ]
+    ) + rng_mean3.normal(0, 1, 150)
+
+    rng_var2 = np.random.default_rng(15502)
+    var2 = np.concatenate([rng_var2.normal(0, 1, 75), rng_var2.normal(0, 3, 75)])
+
+    noiseless_step = np.concatenate([np.zeros(30), np.full(30, 10.0)])
+
+    rng_noise100 = np.random.default_rng(15503)
+    noise100 = rng_noise100.normal(0, 1, 100)
+
+    constant40 = np.full(40, 3.0)
+
+    rng_outlier = np.random.default_rng(15504)
+    outlier = rng_outlier.normal(0, 1, 80)
+    outlier[20] += 8.0
+    outlier[45] += 8.0
+    outlier[70] += 8.0
+
+    cases: list[dict] = []
+
+    def add_case(name: str, x: np.ndarray, cost: str, min_size: int, penalty):
+        x = np.round(x, 4) + 0.0
+        result = opt_partition(x, cost, min_size, penalty)
+        cases.append(
+            {
+                "name": name,
+                "x": x,
+                "cost": cost,
+                "min_size": min_size,
+                "penalty": penalty,
+                "expected": {
+                    "sigma_hat": result["sigma_hat"],
+                    "changepoints": result["changepoints"],
+                    "cost": result["cost"],
+                },
+            }
+        )
+
+    for cost in ("L1", "L2", "Normal"):
+        for min_size in (1, 5):
+            add_case(f"mean3_n150_{cost}_m{min_size}", mean3, cost, min_size, None)
+
+    add_case("var2_n150_Normal_m2", var2, "Normal", 2, None)
+    add_case("var2_n150_L2_m2", var2, "L2", 2, None)
+
+    add_case("noiseless_step_n60_L2_m1", noiseless_step, "L2", 1, None)
+    add_case("noiseless_step_n60_L2_m5", noiseless_step, "L2", 5, None)
+
+    add_case("noise_n100_L2_m2", noise100, "L2", 2, None)
+
+    for cost in ("L1", "L2", "Normal"):
+        add_case(f"constant_n40_{cost}", constant40, cost, 2, None)
+
+    add_case("outlier_n80_L1", outlier, "L1", 2, None)
+    add_case("outlier_n80_L2", outlier, "L2", 2, None)
+
+    add_case("penalty_15", mean3, "L2", 5, 15.0)
+
+    # Scale/shift invariance base case (the generator asserts it here too;
+    # the Rust test re-asserts via `pelt_is_scale_and_shift_invariant`).
+    base_result = opt_partition(mean3, "L2", 5, None)
+    scaled_result = opt_partition(mean3 * 100.0, "L2", 5, None)
+    shifted_result = opt_partition(mean3 + 1e6, "L2", 5, None)
+    assert scaled_result["changepoints"] == base_result["changepoints"], (
+        "mean3_x100 changepoints differ from mean3_n150 base -- scale "
+        "invariance broken in the numpy reference itself"
+    )
+    assert shifted_result["changepoints"] == base_result["changepoints"], (
+        "mean3_shift changepoints differ from mean3_n150 base -- shift "
+        "invariance broken in the numpy reference itself"
+    )
+    add_case("mean3_x100", mean3 * 100.0, "L2", 5, None)
+    add_case("mean3_shift", mean3 + 1e6, "L2", 5, None)
+
+    cost_cycle = ["L1", "L2", "Normal"]
+    min_size_cycle = [1, 2, 3]
+    for k in range(30):
+        n = 8 + 2 * (k % 27)
+        rng_k = np.random.default_rng(15600 + k)
+        n_segments = 1 + (k % 4)
+        seg_lens = [n // n_segments] * n_segments
+        seg_lens[-1] += n - sum(seg_lens)
+        means = rng_k.uniform(-5, 5, n_segments)
+        series = np.concatenate(
+            [np.full(seg_len, mean) for seg_len, mean in zip(seg_lens, means)]
+        )
+        series = series + rng_k.normal(0, 1, n)
+        add_case(
+            f"random_small_{k:02d}",
+            series,
+            cost_cycle[k % 3],
+            min_size_cycle[k % 3],
+            None,
+        )
+
+    return cases
+
+
+def write_pelt_fixture() -> None:
+    cases = make_pelt_cases()
+    write_fixture(
+        family="changepoints",
+        filename="pelt_cases.json",
+        generator=generator_path(__file__),
+        versions=tool_versions("numpy", "scipy"),
+        payload={
+            "tolerance": {"cost_rel": 1e-9, "sigma_rel": 1e-12},
+            "cases": cases,
+        },
+    )
+
+
 def main() -> None:
     write_bocpd_fixture()
+    write_pelt_fixture()
 
 
 if __name__ == "__main__":

@@ -3,18 +3,23 @@
 //! DET-03, D-06, D-07).
 //!
 //! Fixtures: `changepoints/bocpd_cases.json` (Task 1, this file's
-//! `bocpd_*` tests), `changepoints/pelt_cases.json` (Task 2, added in a
-//! later commit).
+//! `bocpd_*` tests), `changepoints/pelt_cases.json` (Task 2, this file's
+//! `pelt_*` tests).
 //! (`validation/reference/python/gen_changepoint_reference.py`).
 //!
 //! Before this plan, BOCPD used an unnormalised Student-t kernel, a
 //! posterior-mean-based (not sample-mean) update, and dropped probability
 //! mass on run-length truncation without renormalising -- all three
 //! verified live against the pre-fix source in 15-RESEARCH.md (G3-G6).
+//! PELT's cost had no sigma-scale term (G7), L1 used the mean instead of
+//! the median (G8), and its pruning set was computed but never consulted
+//! (G8) -- giving 32 spurious changepoints on a `values * 100` series.
 
 mod common;
 
-use anofox_fcst_core::changepoint::{bocpd_trace, robust_noise_scale};
+use anofox_fcst_core::changepoint::{
+    bocpd_trace, detect_changepoints, robust_noise_scale, CostFunction,
+};
 use common::{assert_close, assert_vec_close, f64_vec, load_fixture, num, tolerance};
 
 #[test]
@@ -123,4 +128,114 @@ fn bocpd_behaviour_anchors() {
         scaled_trace.changepoints, step3_trace.changepoints,
         "scaled == base (scale/shift invariance)"
     );
+}
+
+fn cost_fn_from_str(s: &str) -> CostFunction {
+    match s {
+        "L1" => CostFunction::L1,
+        "L2" => CostFunction::L2,
+        "Normal" => CostFunction::Normal,
+        other => panic!("pelt_cases.json: unknown cost {other:?}"),
+    }
+}
+
+#[test]
+fn pelt_matches_numpy_exact_dp() {
+    let fx = load_fixture("changepoints/pelt_cases.json");
+    let cost_rel = tolerance(&fx, "cost_rel");
+    let sigma_rel = tolerance(&fx, "sigma_rel");
+
+    let cases = fx["cases"]
+        .as_array()
+        .expect("pelt_cases.json: 'cases' is not an array");
+
+    for case in cases {
+        let name = case["name"].as_str().unwrap();
+        let x = f64_vec(&case["x"]);
+        let cost_fn = cost_fn_from_str(case["cost"].as_str().unwrap());
+        let min_size = case["min_size"].as_u64().unwrap() as usize;
+        let penalty = if case["penalty"].is_null() {
+            None
+        } else {
+            Some(num(&case["penalty"]))
+        };
+        let expected = &case["expected"];
+
+        let want_sigma = num(&expected["sigma_hat"]);
+        let want_changepoints: Vec<usize> = expected["changepoints"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_u64().unwrap() as usize)
+            .collect();
+        let want_cost = num(&expected["cost"]);
+
+        let got_sigma = robust_noise_scale(&x);
+        assert_close(
+            got_sigma,
+            want_sigma,
+            0.0,
+            sigma_rel,
+            &format!("{name}: sigma_hat"),
+        );
+
+        let result = detect_changepoints(&x, min_size, penalty, cost_fn)
+            .unwrap_or_else(|e| panic!("{name}: detect_changepoints failed: {e:?}"));
+
+        assert_eq!(
+            result.changepoints, want_changepoints,
+            "{name}: changepoints"
+        );
+        assert_close(
+            result.cost,
+            want_cost,
+            0.0,
+            cost_rel,
+            &format!("{name}: cost"),
+        );
+    }
+}
+
+#[test]
+fn pelt_is_scale_and_shift_invariant() {
+    let fx = load_fixture("changepoints/pelt_cases.json");
+    let cases = fx["cases"].as_array().unwrap();
+    let case = |name: &str| {
+        cases
+            .iter()
+            .find(|c| c["name"] == name)
+            .unwrap_or_else(|| panic!("pelt_cases.json: no case named {name:?}"))
+    };
+
+    let base = case("mean3_n150_L2_m5");
+    let base_x = f64_vec(&base["x"]);
+    let base_result = detect_changepoints(&base_x, 5, None, CostFunction::L2).unwrap();
+
+    let scaled = case("mean3_x100");
+    let scaled_x = f64_vec(&scaled["x"]);
+    let scaled_result = detect_changepoints(&scaled_x, 5, None, CostFunction::L2).unwrap();
+    assert_eq!(
+        scaled_result.changepoints, base_result.changepoints,
+        "mean3_x100 should equal the base mean3_n150 changepoints"
+    );
+
+    let shifted = case("mean3_shift");
+    let shifted_x = f64_vec(&shifted["x"]);
+    let shifted_result = detect_changepoints(&shifted_x, 5, None, CostFunction::L2).unwrap();
+    assert_eq!(
+        shifted_result.changepoints, base_result.changepoints,
+        "mean3_shift should equal the base mean3_n150 changepoints"
+    );
+
+    // Also check against every live x100/x computation directly, not just
+    // the two fixture cases, for every cost function.
+    for cost_fn in [CostFunction::L1, CostFunction::L2, CostFunction::Normal] {
+        let base_live = detect_changepoints(&base_x, 5, None, cost_fn).unwrap();
+        let scaled_live: Vec<f64> = base_x.iter().map(|v| v * 100.0).collect();
+        let scaled_live_result = detect_changepoints(&scaled_live, 5, None, cost_fn).unwrap();
+        assert_eq!(
+            scaled_live_result.changepoints, base_live.changepoints,
+            "{cost_fn:?}: x*100 changepoints should equal base"
+        );
+    }
 }

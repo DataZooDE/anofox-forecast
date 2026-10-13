@@ -71,6 +71,13 @@ pub struct ChangepointResult {
     pub changepoints: Vec<usize>,
     /// Total cost of segmentation
     pub cost: f64,
+    /// Number of segment-cost evaluations performed -- a direct measure of
+    /// how effective pruning was (T-15-11, D-07 Task 2). NOT YET populated
+    /// by real pruning as of this commit (RED phase) -- the pre-fix
+    /// algorithm below counts every `cost()` call it makes, which is close
+    /// to the full unpruned O(n^2) since `r[tau_star]`'s pruning result is
+    /// computed but never consulted (G8).
+    pub n_cost_evaluations: usize,
 }
 
 /// Cost function type for changepoint detection.
@@ -155,6 +162,33 @@ fn get_cost_fn(cost_fn: CostFunction) -> fn(&[f64], usize, usize) -> f64 {
     }
 }
 
+/// Effective minimum segment length: `Normal` needs at least 2 points to
+/// compute a variance; `L1`/`L2` accept `min_size` as given (clamped to >= 1).
+///
+/// NOT YET consulted by `detect_changepoints` as of this commit (RED
+/// phase) -- wired in during GREEN.
+fn effective_min_size(cost_fn: CostFunction, min_size: usize) -> usize {
+    let base = min_size.max(1);
+    match cost_fn {
+        CostFunction::Normal => base.max(2),
+        _ => base,
+    }
+}
+
+/// Default BIC-style penalty: `3 * ln(n)` for `Normal` (one more free
+/// parameter -- the variance -- than `L1`/`L2`), `2 * ln(n)` otherwise,
+/// matching R `changepoint`'s `(diffparam + 1) * log(n)` convention.
+///
+/// NOT YET consulted by `detect_changepoints` as of this commit (RED
+/// phase) -- wired in during GREEN.
+fn default_penalty(cost_fn: CostFunction, n: usize) -> f64 {
+    let ln_n = (n as f64).ln();
+    match cost_fn {
+        CostFunction::Normal => 3.0 * ln_n,
+        _ => 2.0 * ln_n,
+    }
+}
+
 /// Detect changepoints using the PELT (Pruned Exact Linear Time) algorithm.
 ///
 /// # Arguments
@@ -181,6 +215,7 @@ pub fn detect_changepoints(
         return Ok(ChangepointResult {
             changepoints: vec![],
             cost: 0.0,
+            n_cost_evaluations: 0,
         });
     }
 
@@ -193,6 +228,7 @@ pub fn detect_changepoints(
     let mut f = vec![f64::NEG_INFINITY; n + 1];
     let mut cp = vec![0usize; n + 1];
     let mut r = vec![vec![0usize]; n + 1];
+    let mut n_cost_evaluations: usize = 0;
 
     f[0] = -pen;
 
@@ -206,6 +242,7 @@ pub fn detect_changepoints(
         let mut best_tau = 0;
 
         for &tau in &candidates {
+            n_cost_evaluations += 1;
             let candidate_cost = f[tau] + cost(values, tau, tau_star) + pen;
             if candidate_cost < best_f {
                 best_f = candidate_cost;
@@ -216,7 +253,8 @@ pub fn detect_changepoints(
         f[tau_star] = best_f;
         cp[tau_star] = best_tau;
 
-        // Pruning step
+        // Pruning step -- computed but never consulted by the next
+        // iteration's `candidates` (G8): this is what Task 2 fixes.
         r[tau_star] = candidates
             .into_iter()
             .filter(|&tau| f[tau] + cost(values, tau, tau_star) <= f[tau_star])
@@ -241,6 +279,7 @@ pub fn detect_changepoints(
     Ok(ChangepointResult {
         changepoints,
         cost: f[n],
+        n_cost_evaluations,
     })
 }
 
@@ -520,6 +559,7 @@ pub fn detect_changepoints_bayesian(values: &[f64], hazard_rate: f64) -> Result<
     Ok(ChangepointResult {
         changepoints: bocpd_result.changepoints,
         cost: 0.0,
+        n_cost_evaluations: 0,
     })
 }
 
@@ -619,6 +659,202 @@ mod tests {
                 cost_fn
             );
         }
+    }
+
+    // -----------------------------------------------------------------
+    // Phase 15 plan 15-03 Task 2 (DET-03, D-07): PELT sigma normalisation,
+    // L1 median cost, exact-safe pruning, penalty validation.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn test_cost_l1_uses_median_not_mean() {
+        // On an already-normalised z = [1, 2, 3, 100] (median 2.5), the L1
+        // cost should be 2*sqrt(2) * (1.5 + 0.5 + 0.5 + 97.5) =
+        // 2*sqrt(2)*100 = 282.842712474619, not the mean-based value.
+        let z = vec![1.0, 2.0, 3.0, 100.0];
+        let got = cost_l1(&z, 0, 4);
+        assert!(
+            (got - 282.842712474619).abs() < 1e-9,
+            "cost_l1([1,2,3,100]) = {got}, want 282.842712474619 (median-based)"
+        );
+    }
+
+    #[test]
+    fn test_detect_changepoints_scale_invariant_for_every_cost() {
+        let mut values = vec![0.0; 50];
+        values.extend(vec![2.5; 50]);
+        values.extend(vec![-1.0; 50]);
+        let scaled: Vec<f64> = values.iter().map(|v| v * 100.0).collect();
+        let shifted: Vec<f64> = values.iter().map(|v| v + 1e6).collect();
+
+        for cost_fn in [CostFunction::L1, CostFunction::L2, CostFunction::Normal] {
+            let base = detect_changepoints(&values, 5, None, cost_fn).unwrap();
+            let got_scaled = detect_changepoints(&scaled, 5, None, cost_fn).unwrap();
+            let got_shifted = detect_changepoints(&shifted, 5, None, cost_fn).unwrap();
+            assert_eq!(
+                got_scaled.changepoints, base.changepoints,
+                "{cost_fn:?}: x*100 changepoints {:?} != base {:?}",
+                got_scaled.changepoints, base.changepoints
+            );
+            assert_eq!(
+                got_shifted.changepoints, base.changepoints,
+                "{cost_fn:?}: x+1e6 changepoints {:?} != base {:?}",
+                got_shifted.changepoints, base.changepoints
+            );
+        }
+    }
+
+    #[test]
+    fn test_detect_changepoints_rejects_non_finite_or_negative_penalty() {
+        let values = vec![0.0; 20];
+        for bad_penalty in [f64::NAN, -1.0] {
+            let result = detect_changepoints(&values, 2, Some(bad_penalty), CostFunction::L2);
+            assert!(
+                matches!(result, Err(ForecastError::InvalidParameter { .. })),
+                "penalty {bad_penalty} should be rejected as InvalidParameter, got {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_detect_changepoints_short_series_cost_is_whole_series_cost() {
+        // n < 2*min_size -> no changepoints, but cost must be the whole
+        // series's own segment cost, not an unconditional 0.0.
+        let values = vec![1.0, 5.0, 2.0, 8.0];
+        let result = detect_changepoints(&values, 5, None, CostFunction::L2).unwrap();
+        assert!(result.changepoints.is_empty());
+        assert!(
+            result.cost > 0.0,
+            "short-series cost should be the whole-series L2 cost (> 0 for varied data), got {}",
+            result.cost
+        );
+    }
+
+    #[test]
+    fn test_noiseless_step_n60_flags_30() {
+        let mut values = vec![0.0; 30];
+        values.extend(vec![10.0; 30]);
+        let result = detect_changepoints(&values, 1, None, CostFunction::L2).unwrap();
+        assert_eq!(result.changepoints, vec![30]);
+    }
+
+    #[test]
+    fn test_constant_series_zero_changepoints_for_every_cost() {
+        let values = vec![3.0; 40];
+        for cost_fn in [CostFunction::L1, CostFunction::L2, CostFunction::Normal] {
+            let result = detect_changepoints(&values, 2, None, cost_fn).unwrap();
+            assert!(
+                result.changepoints.is_empty(),
+                "{cost_fn:?}: constant series should have no changepoints, got {:?}",
+                result.changepoints
+            );
+        }
+    }
+
+    #[test]
+    fn test_detect_changepoints_rejects_non_finite_input() {
+        let values = vec![1.0, f64::NAN, 3.0, 4.0, 5.0, 6.0];
+        let result = detect_changepoints(&values, 1, None, CostFunction::L2);
+        assert!(matches!(result, Err(ForecastError::InvalidInput(_))));
+    }
+
+    /// Deterministic pseudo-noise (NOT `thread_rng`) for the pruning
+    /// performance/equality test below -- an xorshift-style generator
+    /// seeded on the index, so the test is fully reproducible.
+    fn deterministic_noise(i: usize) -> f64 {
+        let mut x = (i as u64).wrapping_add(0x9E3779B97F4A7C15);
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        let frac = (x.wrapping_mul(0x2545F4914F6CDD1D) >> 11) as f64 / (1u64 << 53) as f64;
+        (frac - 0.5) * 0.2
+    }
+
+    /// Test-only unpruned exact DP (the ground truth PELT with pruning
+    /// must reproduce exactly): scans EVERY admissible tau, never prunes.
+    fn unpruned_exact_dp(
+        values: &[f64],
+        min_size: usize,
+        penalty: Option<f64>,
+        cost_fn: CostFunction,
+    ) -> (Vec<usize>, usize) {
+        let n = values.len();
+        let m = effective_min_size(cost_fn, min_size);
+        let sigma_hat = robust_noise_scale(values);
+        let z: Vec<f64> = values.iter().map(|v| v / sigma_hat).collect();
+        let cost = get_cost_fn(cost_fn);
+        let pen = penalty.unwrap_or_else(|| default_penalty(cost_fn, n));
+
+        let mut f = vec![f64::INFINITY; n + 1];
+        let mut back = vec![0usize; n + 1];
+        f[0] = -pen;
+        let mut n_evals = 0usize;
+
+        for t in m..=n {
+            let candidates: Vec<usize> = (0..=t.saturating_sub(m))
+                .filter(|&tau| tau == 0 || tau >= m)
+                .collect();
+            let mut best_f = f64::INFINITY;
+            let mut best_tau = 0usize;
+            for &tau in &candidates {
+                n_evals += 1;
+                let c = f[tau] + cost(&z, tau, t) + pen;
+                if c < best_f {
+                    best_f = c;
+                    best_tau = tau;
+                }
+            }
+            f[t] = best_f;
+            back[t] = best_tau;
+        }
+
+        let mut changepoints = Vec::new();
+        let mut idx = n;
+        while idx > 0 {
+            let tau = back[idx];
+            if tau > 0 {
+                changepoints.push(tau);
+            }
+            idx = tau;
+        }
+        changepoints.reverse();
+        (changepoints, n_evals)
+    }
+
+    #[test]
+    fn test_pelt_pruning_effective_and_exact_on_long_series() {
+        let n = 3000;
+        let n_segments = 10;
+        let seg_len = n / n_segments;
+        let mut values = Vec::with_capacity(n);
+        for seg in 0..n_segments {
+            let level = (seg as f64) * 5.0;
+            for i in 0..seg_len {
+                values.push(level + deterministic_noise(seg * seg_len + i));
+            }
+        }
+        while values.len() < n {
+            values.push(deterministic_noise(values.len()));
+        }
+
+        let result = detect_changepoints(&values, 5, None, CostFunction::L2).unwrap();
+        let (unpruned_changepoints, unpruned_evals) =
+            unpruned_exact_dp(&values, 5, None, CostFunction::L2);
+
+        assert_eq!(
+            result.changepoints, unpruned_changepoints,
+            "pruned PELT result must equal the unpruned exact DP"
+        );
+
+        let full_n = n as f64;
+        let threshold = 0.2 * full_n * (full_n + 1.0) / 2.0;
+        assert!(
+            (result.n_cost_evaluations as f64) < threshold,
+            "n_cost_evaluations {} should be < 20% of unpruned n(n+1)/2 = {}  (unpruned ran {})",
+            result.n_cost_evaluations,
+            threshold,
+            unpruned_evals
+        );
     }
 
     #[test]
