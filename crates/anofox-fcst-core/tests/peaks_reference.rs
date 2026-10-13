@@ -59,8 +59,8 @@ fn scipy_find_peaks_parity() {
         let want_prominences = f64_vec(&case["expected"]["prominences"]);
 
         let opts = opts_from_params(params);
-        let found = find_peaks(&x, &opts)
-            .unwrap_or_else(|e| panic!("{name}: find_peaks failed: {e:?}"));
+        let found =
+            find_peaks(&x, &opts).unwrap_or_else(|e| panic!("{name}: find_peaks failed: {e:?}"));
 
         let got_peaks: Vec<usize> = found.iter().map(|p| p.index).collect();
         assert_eq!(got_peaks, want_peaks, "{name}: peak indices");
@@ -104,7 +104,10 @@ fn detect_peaks_matches_scipy_on_rw150() {
     assert_eq!(want_peaks.len(), 38, "fixture sanity: rw150 has 38 peaks");
 
     let result = detect_peaks(&x, None, None, false, None).unwrap();
-    assert_eq!(result.n_peaks, 38, "detect_peaks(rw150) should find 38 peaks");
+    assert_eq!(
+        result.n_peaks, 38,
+        "detect_peaks(rw150) should find 38 peaks"
+    );
 
     let got_peaks: Vec<usize> = result.peaks.iter().map(|p| p.index).collect();
     assert_eq!(got_peaks, want_peaks, "detect_peaks(rw150) peak indices");

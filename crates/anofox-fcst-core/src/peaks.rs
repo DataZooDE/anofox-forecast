@@ -13,6 +13,7 @@
 
 use crate::detrending::single_series_matrix;
 use crate::error::{ForecastError, Result};
+use fdars_core::basis::{fourier_fit, select_fourier_nbasis_gcv};
 use fdars_core::seasonal::{
     analyze_peak_timing as fdars_analyze_peak_timing, PeakTimingResult as FdarsPeakTimingResult,
 };
@@ -227,19 +228,115 @@ pub fn peak_prominences(x: &[f64], peaks: &[usize]) -> Vec<f64> {
         .collect()
 }
 
+/// Validate `FindPeaksOptions` the way scipy's own `find_peaks` does:
+/// every set option must be finite, and `distance` must additionally be
+/// `>= 1` (scipy raises `ValueError` for `distance < 1`).
+fn validate_find_peaks_options(opts: &FindPeaksOptions) -> Result<()> {
+    if let Some(h) = opts.height {
+        if !h.is_finite() {
+            return Err(ForecastError::InvalidParameter {
+                param: "height".to_string(),
+                value: h.to_string(),
+                reason: "must be finite".to_string(),
+            });
+        }
+    }
+    if let Some(d) = opts.distance {
+        if !d.is_finite() {
+            return Err(ForecastError::InvalidParameter {
+                param: "distance".to_string(),
+                value: d.to_string(),
+                reason: "must be finite".to_string(),
+            });
+        }
+        if d < 1.0 {
+            return Err(ForecastError::InvalidParameter {
+                param: "distance".to_string(),
+                value: d.to_string(),
+                reason: "must be >= 1".to_string(),
+            });
+        }
+    }
+    if let Some(p) = opts.prominence {
+        if !p.is_finite() {
+            return Err(ForecastError::InvalidParameter {
+                param: "prominence".to_string(),
+                value: p.to_string(),
+                reason: "must be finite".to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// scipy's `_select_by_peak_distance`: a stable ascending sort of `peaks`
+/// by `x[peaks]` (ties keep their original, index-ascending order -- so
+/// among equal heights the rightmost-processed-last-wins, matching numpy's
+/// own stable `argsort`), then suppressing lower-priority neighbours
+/// within `d` samples, processed from the highest priority down.
+fn suppress_by_distance(x: &[f64], peaks: &[usize], d: usize) -> Vec<usize> {
+    let n = peaks.len();
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&a, &b| {
+        x[peaks[a]]
+            .partial_cmp(&x[peaks[b]])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let mut keep = vec![true; n];
+    for &j in order.iter().rev() {
+        if !keep[j] {
+            continue;
+        }
+        if j > 0 {
+            let mut k = j - 1;
+            while peaks[j] - peaks[k] < d {
+                keep[k] = false;
+                if k == 0 {
+                    break;
+                }
+                k -= 1;
+            }
+        }
+        let mut k = j + 1;
+        while k < n && peaks[k] - peaks[j] < d {
+            keep[k] = false;
+            k += 1;
+        }
+    }
+
+    peaks
+        .iter()
+        .zip(keep.iter())
+        .filter(|(_, &k)| k)
+        .map(|(&p, _)| p)
+        .collect()
+}
+
 /// A direct port of `scipy.signal.find_peaks` (`wlen=None`): local maxima
 /// (via [`local_maxima`]) filtered by `height`, `distance`, and
 /// `prominence` in scipy's own order -- local maxima -> height -> distance
-/// -> prominence (computed on the survivors of height+distance).
-///
-/// Task 15-02/1 wires the no-filter path only: height/distance/prominence
-/// filtering and option validation are completed in Task 15-02/2 (TDD).
-/// Every returned peak carries its scipy prominence even when no
-/// `prominence` filter was requested.
-pub fn find_peaks(x: &[f64], _opts: &FindPeaksOptions) -> Result<Vec<FoundPeak>> {
-    let maxima = local_maxima(x);
-    let proms = peak_prominences(x, &maxima);
-    let found: Vec<FoundPeak> = maxima
+/// -> prominence (computed on the survivors of height+distance). Every
+/// returned peak carries its scipy prominence even when no `prominence`
+/// filter was requested.
+pub fn find_peaks(x: &[f64], opts: &FindPeaksOptions) -> Result<Vec<FoundPeak>> {
+    validate_find_peaks_options(opts)?;
+
+    let mut candidates = local_maxima(x);
+
+    if let Some(hmin) = opts.height {
+        candidates.retain(|&idx| x[idx] >= hmin);
+    }
+
+    if let Some(distance) = opts.distance {
+        if candidates.len() > 1 {
+            let d = distance.ceil() as usize;
+            candidates = suppress_by_distance(x, &candidates, d);
+        }
+    }
+
+    let proms = peak_prominences(x, &candidates);
+    let mut found: Vec<FoundPeak> = candidates
         .iter()
         .zip(proms.iter())
         .map(|(&index, &prominence)| FoundPeak {
@@ -248,7 +345,29 @@ pub fn find_peaks(x: &[f64], _opts: &FindPeaksOptions) -> Result<Vec<FoundPeak>>
             prominence,
         })
         .collect();
+
+    if let Some(pmin) = opts.prominence {
+        found.retain(|p| p.prominence >= pmin);
+    }
+
     Ok(found)
+}
+
+/// Smooth `values` with fdars-core's Fourier basis fit, exactly as the
+/// project's pre-scipy-port peak detector did when `smooth_first` was set
+/// (`fdars-core-0.47.0/src/seasonal/peak.rs::smooth_for_peaks`): `nbasis`
+/// defaults to a GCV-selected value in `5..=25` when `smooth_nbasis` is
+/// `None`, and a failed fit silently falls back to the raw values (never
+/// an error -- smoothing is a best-effort pre-step, not a correctness
+/// requirement).
+fn smooth_for_peaks(values: &[f64], smooth_nbasis: Option<usize>) -> Result<Vec<f64>> {
+    let argvals = make_argvals(values.len());
+    let mat = single_series_matrix(values)?;
+    let nbasis = smooth_nbasis.unwrap_or_else(|| select_fourier_nbasis_gcv(&mat, &argvals, 5, 25));
+    match fourier_fit(&mat, &argvals, nbasis) {
+        Ok(result) => Ok(result.fitted.row(0)),
+        Err(_) => Ok(values.to_vec()),
+    }
 }
 
 /// Detect peaks in a time series.
@@ -262,40 +381,51 @@ pub fn find_peaks(x: &[f64], _opts: &FindPeaksOptions) -> Result<Vec<FoundPeak>>
 ///
 /// # Arguments
 /// * `values` - Time series values
-/// * `min_distance` - Minimum distance between peaks (None for auto)
-/// * `min_prominence` - Minimum peak prominence (None for 0)
-/// * `smooth_first` - Whether to smooth the series before peak detection
+/// * `min_distance` - Minimum index distance between peaks. Values `<= 1.0`
+///   (including the `ts_detect_peaks_by` macro's default of `1.0`) apply no
+///   distance filter -- scipy's own distance semantics are already a no-op
+///   at `distance == 1` (no two local maxima are ever index-adjacent), so
+///   this is a description of existing behaviour, not a special case.
+/// * `min_prominence` - Minimum peak prominence. Values `<= 0.0` apply no
+///   prominence filter.
+/// * `smooth_first` - Apply fdars' Fourier-basis smoothing before peak
+///   detection; reported peak values are the smoothed values.
 /// * `smooth_nbasis` - Number of Fourier basis functions for smoothing
+///   (`None` selects one via GCV in `5..=25`).
 ///
 /// # Returns
 /// Peak detection result with peaks and timing information
-///
-/// Task 15-02/1 runs `find_peaks` on the raw values with no filters wired
-/// (`min_distance`/`min_prominence`/`smooth_first`/`smooth_nbasis` are
-/// accepted but not yet applied); Task 15-02/2 (TDD) completes the
-/// `min_distance`/`min_prominence` -> [`FindPeaksOptions`] mapping and the
-/// fdars Fourier-basis smoothing for `smooth_first`.
 pub fn detect_peaks(
     values: &[f64],
-    _min_distance: Option<f64>,
-    _min_prominence: Option<f64>,
-    _smooth_first: bool,
-    _smooth_nbasis: Option<usize>,
+    min_distance: Option<f64>,
+    min_prominence: Option<f64>,
+    smooth_first: bool,
+    smooth_nbasis: Option<usize>,
 ) -> Result<PeakDetectionResult> {
     let n = values.len();
     if n < 3 {
         return Err(ForecastError::InsufficientData { needed: 3, got: n });
     }
 
-    let opts = FindPeaksOptions::default();
-    let found = find_peaks(values, &opts)?;
+    let smoothed = if smooth_first {
+        smooth_for_peaks(values, smooth_nbasis)?
+    } else {
+        values.to_vec()
+    };
+
+    let opts = FindPeaksOptions {
+        height: None,
+        distance: min_distance.filter(|&d| d > 1.0),
+        prominence: min_prominence.filter(|&p| p > 0.0),
+    };
+    let found = find_peaks(&smoothed, &opts)?;
 
     let peaks: Vec<Peak> = found
         .iter()
         .map(|p| Peak {
             index: p.index,
             time: p.index as f64,
-            value: values[p.index],
+            value: smoothed[p.index],
             prominence: p.prominence,
         })
         .collect();
@@ -507,7 +637,10 @@ mod tests {
     fn test_local_maxima_edges_never_peaks() {
         // scipy: the first and last sample are never peaks, and a plateau
         // that touches either end of the series is not a peak.
-        assert_eq!(local_maxima(&[1.0, 1.0, 0.0, 2.0, 2.0]), Vec::<usize>::new());
+        assert_eq!(
+            local_maxima(&[1.0, 1.0, 0.0, 2.0, 2.0]),
+            Vec::<usize>::new()
+        );
         assert_eq!(local_maxima(&[0.0, 1.0, 1.0]), Vec::<usize>::new());
     }
 
@@ -532,7 +665,11 @@ mod tests {
         };
         let found = find_peaks(&x, &opts).unwrap();
         let indices: Vec<usize> = found.iter().map(|p| p.index).collect();
-        assert_eq!(indices, vec![5], "height filter should keep only x[5]=8.0 >= 6.0");
+        assert_eq!(
+            indices,
+            vec![5],
+            "height filter should keep only x[5]=8.0 >= 6.0"
+        );
     }
 
     #[test]
@@ -619,7 +756,10 @@ mod tests {
     fn test_find_peaks_never_panics_on_nan_input() {
         let x = vec![1.0, f64::NAN, 3.0, f64::NAN, 2.0, 5.0, 1.0];
         let result = find_peaks(&x, &FindPeaksOptions::default());
-        assert!(result.is_ok(), "find_peaks must not panic/error on NaN input");
+        assert!(
+            result.is_ok(),
+            "find_peaks must not panic/error on NaN input"
+        );
     }
 
     /// scipy's own linear (`wlen=None`) prominence scan, used only to
@@ -761,11 +901,7 @@ mod tests {
         let smoothed = detect_peaks(&values, None, None, true, None).unwrap();
         let raw = detect_peaks(&values, None, None, false, None).unwrap();
         assert_ne!(
-            smoothed
-                .peaks
-                .iter()
-                .map(|p| p.value)
-                .collect::<Vec<_>>(),
+            smoothed.peaks.iter().map(|p| p.value).collect::<Vec<_>>(),
             raw.peaks.iter().map(|p| p.value).collect::<Vec<_>>(),
             "smooth_first=true should report smoothed values, not raw ones"
         );
