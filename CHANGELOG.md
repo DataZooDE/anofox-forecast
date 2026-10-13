@@ -365,6 +365,35 @@ use the semver numbering this project started with.
   (previously instantaneous, since the swapped-argument bug returned a
   no-op before fdars did any real work) — prefer `'linear'`/`'quadratic'`/
   `'cubic'` over `'loess'`/`'auto'` on long series.
+
+  **Plan 15-02 (DET-01): `ts_detect_peaks`/`ts_detect_peaks_by` are now a
+  direct port of `scipy.signal.find_peaks` 1.18.1**, replacing fdars-core's
+  own derivative zero-crossing peak detector entirely (peak detection no
+  longer calls fdars; `ts_analyze_peak_timing(_by)` is unaffected and still
+  does). The audit found the old detector missed peaks, reported local
+  minima, and gave every plateau prominence `0` (51 found vs scipy's 66 on
+  an audited random walk, only 31 matching). `prominence` is now scipy's
+  own definition (same scale as the input data, `wlen=None`) for every
+  returned peak, not a 0-1-normalised value. `min_distance`/`min_prominence`
+  keep their existing SQL parameter names with scipy's own semantics:
+  `min_distance` is the minimum *index* distance between kept peaks
+  (`ceil`'d; values `<= 1.0`, including the macro default of `1.0`, apply
+  no distance filter); `min_prominence` is an inclusive minimum on the real
+  prominence scale, not 0-1.
+
+  | Function (input) | Before | After | What changed |
+  |---|---|---|---|
+  | `ts_detect_peaks(rw150)` `.n_peaks` | `25` | `38` | matches `scipy.signal.find_peaks`'s count on the audited random walk exactly |
+  | `ts_detect_peaks(rw150)` peak indices matching scipy | `12/38` (31% of scipy's set) | `38/38` | every scipy peak found at the exact scipy index |
+  | `ts_detect_peaks(rw150)` indices that were local minima | `5` (`5, 47, 61, 103, 116`) | `0` | the scipy port's local-maxima scan structurally cannot report a minimum |
+  | `ts_detect_peaks([0,1,1,1,0])` peak | index `1`, `prominence=0.0` | index `2` (plateau midpoint), `prominence=1.0` | plateau midpoint reporting + real (non-normalised) prominence |
+  | `ts_detect_peaks(sine240, 8.0)` (distance filter) | not comparable to scipy (old detector had no scipy-equivalent distance semantics) | exact match to `scipy.signal.find_peaks(sine240, distance=8)` | D-05 |
+  | `ts_detect_peaks(sine240, 0.0, 2.0)` (prominence filter, real scale) | prominence was 0-1-normalised, so `2.0` filtered out every peak | exact match to `scipy.signal.find_peaks(sine240, prominence=2.0)` | prominence is no longer normalised |
+
+  "Before" values for `ts_detect_peaks(rw150)`/`ts_detect_peaks([0,1,1,1,0])`
+  were captured live from the pre-port build (plan 15-02 Task 1 step 1,
+  before any rebuild) — see `.planning/phases/15-detection-decomposition-on-fdars-0-47/15-02-SUMMARY.md`
+  for the exact commands.
 - **Every `ts_features` surface now returns all 117 features, including `autocorrelation_lag10`.**
   `ts_features_by`, `ts_features`, `ts_features_agg`, and `ts_features_table` previously
   derived their output schema from calling the Rust core on a 10-point dummy series —

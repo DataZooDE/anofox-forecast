@@ -250,6 +250,12 @@ Returns flat top-level columns `n_peaks` / `inter_peak_distances` / `mean_period
 `peaks` (the array of individual peak info) — NOT a single nested `peaks` STRUCT wrapping
 everything.
 
+**Algorithm (Phase 15, DET-01):** a direct port of `scipy.signal.find_peaks` 1.18.1
+(`wlen=None`), not a normalised-score heuristic. `prominence` is on the **same scale as the
+input data** (not `0..1`); a plateau reports its midpoint index; `min_distance` <= `1.0`
+(the macro default) applies no distance filter. See `docs/api/05b-peak-detection.md` for the
+full parameter mapping.
+
 ### `ts_analyze_peak_timing_by`
 
 ```sql

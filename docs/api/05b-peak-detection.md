@@ -13,6 +13,49 @@ Peak detection identifies local maxima in time series data, useful for finding s
 - Calculate peak timing variability scores to assess regularity
 - Identify products/series with stable vs variable peak patterns
 
+## Algorithm (Phase 15 plan 15-02, DET-01)
+
+`ts_detect_peaks`/`ts_detect_peaks_by` are a direct port of
+`scipy.signal.find_peaks` 1.18.1 (`wlen=None`), verified against a checked-in
+scipy fixture (`validation/reference/fixtures/scipy_peaks/cases.json`).
+This replaced fdars-core's own derivative-sign-change local-maxima detector,
+which an audit found missed peaks, reported local minima, and gave every
+plateau prominence `0`.
+
+- **Indices are 0-based into the trimmed series** (position 1 of the
+  original `LIST` after leading/trailing `NULL`s are removed — see the NULL
+  handling note below).
+- **A plateau (a run of equal values) reports its midpoint index**
+  `(left_edge + right_edge) / 2`, not its first sample. A plateau touching
+  either end of the series is never a peak, and neither is the first or
+  last sample of the series.
+- **`prominence` is scipy's own definition** — the peak's height minus the
+  higher of its left/right "valley" minima (scanning outward until a
+  strictly higher sample is found, or the series boundary), on the *same
+  scale as the input data*. It is **not** normalised to `0..1`. Every
+  returned peak carries a prominence, even when `min_prominence` is `0`.
+- **`min_distance`** is scipy's `distance`: the minimum *index* distance
+  between kept peaks (rounded up). When two peaks are closer than this,
+  the taller one wins; among equal heights, the rightmost wins. Values
+  `<= 1.0` — including the `ts_detect_peaks_by` macro's default of `1.0` —
+  apply no distance filter at all (no two local maxima are ever
+  index-adjacent, so `distance <= 1` is a no-op by construction).
+- **`min_prominence`** is scipy's `prominence`: an inclusive minimum on the
+  real prominence scale above, applied after any distance filter.
+- **`inter_peak_distances`** are the consecutive differences between kept
+  peak indices; **`mean_period`** is their mean, or SQL `NULL`/NaN when
+  fewer than 2 peaks are detected.
+- **`smooth_first = true`** applies fdars-core's Fourier-basis smoothing to
+  the series *before* peak detection (basis size GCV-selected in `5..25`;
+  the Rust API also accepts an explicit basis size, not exposed in SQL);
+  reported peak values are the smoothed values, not the raw ones.
+
+```sql
+-- Plateau midpoint + real (non-normalised) prominence.
+SELECT ts_detect_peaks([0, 1, 1, 1, 0, 2, 2, 0, 3, 3, 3, 3, 1, 0]::DOUBLE[]);
+-- peaks[0].index = 2, peaks[0].prominence = 1.0 (not 0, not normalised)
+```
+
 **NULL handling (Phase 12, D-03/D-04):** `ts_detect_peaks` and `ts_analyze_peak_timing`
 share the Rust single-series policy: leading/trailing `NULL` (and `NaN`) values inside the
 `LIST(...)` are trimmed before the analysis runs; an interior `NULL` that survives trimming
