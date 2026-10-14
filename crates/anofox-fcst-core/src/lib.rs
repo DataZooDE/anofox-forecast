@@ -48,6 +48,7 @@ pub use changepoint::{
 pub use conformal::{
     // New Learn/Apply API (v2)
     conformal_apply,
+    conformal_apply_score,
     conformal_calibrate,
     conformal_coverage,
     conformal_evaluate,

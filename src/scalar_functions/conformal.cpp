@@ -172,6 +172,73 @@ static void TsConformalIntervalsFunction(DataChunk &args, ExpressionState &state
     }
 }
 
+// ts_conformal_intervals(forecasts[], conformity_score, method, difficulty[]) -> STRUCT(lower[], upper[])
+// (Phase 16 D-08, plan 16-02): the 4-arg overload backs `conformal_apply_score`, applying a
+// single pre-computed score with `method` selecting how (or whether) `difficulty` is used.
+static void TsConformalApplyScoreFunction(DataChunk &args, ExpressionState &state, Vector &result) {
+    auto &forecasts_vec = args.data[0];
+    auto &score_vec = args.data[1];
+    auto &method_vec = args.data[2];
+    auto &difficulty_vec = args.data[3];
+    idx_t count = args.size();
+
+    ListDoubleReader forecasts_reader(forecasts_vec, count);
+    ScalarArgReader<double> score_reader(score_vec, count);
+    ScalarArgReader<string_t> method_reader(method_vec, count);
+    ListDoubleReader difficulty_reader(difficulty_vec, count);
+
+    auto &struct_entries = StructVector::GetEntries(result);
+    auto &lower_vec = *struct_entries[0];
+    auto &upper_vec = *struct_entries[1];
+
+    for (idx_t row_idx = 0; row_idx < count; row_idx++) {
+        if (forecasts_reader.IsNull(row_idx) || score_reader.IsNull(row_idx) ||
+            method_reader.IsNull(row_idx)) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+
+        vector<double> forecasts, difficulty;
+        vector<uint64_t> forecasts_validity, difficulty_validity;
+        forecasts_reader.Read(row_idx, forecasts, forecasts_validity);
+        double conformity_score = score_reader.Get(row_idx);
+        auto method_str = method_reader.Get(row_idx).GetString();
+
+        // difficulty_vec may itself be NULL (no difficulty_col at all) --
+        // distinct from a list whose entries are individually NULL.
+        bool difficulty_present = !difficulty_reader.IsNull(row_idx);
+        if (difficulty_present) {
+            difficulty_reader.Read(row_idx, difficulty, difficulty_validity);
+        }
+
+        double *out_lower = nullptr;
+        double *out_upper = nullptr;
+        AnofoxError error;
+        bool success = anofox_ts_conformal_apply_score(
+            forecasts.data(), forecasts_validity.empty() ? nullptr : forecasts_validity.data(),
+            forecasts.size(), conformity_score, method_str.c_str(),
+            difficulty_present ? difficulty.data() : nullptr,
+            (!difficulty_present || difficulty_validity.empty()) ? nullptr : difficulty_validity.data(),
+            difficulty_present ? difficulty.size() : 0,
+            &out_lower, &out_upper, &error
+        );
+
+        if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_conformal_intervals: %s", error.message);
+            }
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+
+        WriteDoubleListNanAsNull(lower_vec, row_idx, out_lower, forecasts.size());
+        WriteDoubleListNanAsNull(upper_vec, row_idx, out_upper, forecasts.size());
+
+        anofox_free_double_array(out_lower);
+        anofox_free_double_array(out_upper);
+    }
+}
+
 void RegisterTsConformalIntervalsFunction(ExtensionLoader &loader) {
     child_list_t<LogicalType> struct_children;
     struct_children.push_back(make_pair("lower", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
@@ -183,6 +250,12 @@ void RegisterTsConformalIntervalsFunction(ExtensionLoader &loader) {
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         result_type,
         TsConformalIntervalsFunction
+    ));
+    // 4-arg overload (Phase 16 D-08): method + per-row difficulty for 'adaptive'.
+    ts_ci_set.AddFunction(ScalarFunction(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::VARCHAR), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        result_type,
+        TsConformalApplyScoreFunction
     ));
     {
         CreateScalarFunctionInfo info(ts_ci_set);
@@ -204,6 +277,11 @@ void RegisterTsConformalIntervalsFunction(ExtensionLoader &loader) {
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         result_type,
         TsConformalIntervalsFunction
+    ));
+    anofox_set.AddFunction(ScalarFunction(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::VARCHAR), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        result_type,
+        TsConformalApplyScoreFunction
     ));
     {
         CreateScalarFunctionInfo info(anofox_set);
@@ -536,6 +614,8 @@ static const char* StrategyToString(ConformalStrategyFFI strategy) {
 }
 
 static void TsConformalLearnFunction(DataChunk &args, ExpressionState &state, Vector &result) {
+    bool has_difficulty = args.ColumnCount() == 5;
+
     auto &residuals_vec = args.data[0];
     auto &alphas_vec = args.data[1];
     auto &method_vec = args.data[2];
@@ -546,6 +626,11 @@ static void TsConformalLearnFunction(DataChunk &args, ExpressionState &state, Ve
     ListDoubleReader alphas_reader(alphas_vec, count);
     ScalarArgReader<string_t> method_reader(method_vec, count);
     ScalarArgReader<string_t> strategy_reader(strategy_vec, count);
+
+    unique_ptr<ListDoubleReader> difficulty_reader;
+    if (has_difficulty) {
+        difficulty_reader = make_uniq<ListDoubleReader>(args.data[4], count);
+    }
 
     // Result struct fields
     auto &struct_entries = StructVector::GetEntries(result);
@@ -559,15 +644,25 @@ static void TsConformalLearnFunction(DataChunk &args, ExpressionState &state, Ve
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (residuals_reader.IsNull(row_idx) || alphas_reader.IsNull(row_idx) ||
-            method_reader.IsNull(row_idx) || strategy_reader.IsNull(row_idx)) {
+            method_reader.IsNull(row_idx) || strategy_reader.IsNull(row_idx) ||
+            (has_difficulty && difficulty_reader->IsNull(row_idx))) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> residuals, alphas;
-        vector<uint64_t> residuals_validity;
+        vector<double> residuals, alphas, difficulty;
+        vector<uint64_t> residuals_validity, difficulty_validity;
         residuals_reader.Read(row_idx, residuals, residuals_validity);
         alphas_reader.ReadNoNulls(row_idx, alphas, "ts_conformal_learn", "alphas");
+        if (has_difficulty) {
+            difficulty_reader->Read(row_idx, difficulty, difficulty_validity);
+            if (difficulty.size() != residuals.size()) {
+                throw InvalidInputException(
+                    "ts_conformal_learn: residuals and difficulty_col must have the same "
+                    "length: %llu vs %llu",
+                    (unsigned long long)residuals.size(), (unsigned long long)difficulty.size());
+            }
+        }
 
         auto method_str = method_reader.Get(row_idx).GetString();
         auto strategy_str = strategy_reader.Get(row_idx).GetString();
@@ -582,7 +677,8 @@ static void TsConformalLearnFunction(DataChunk &args, ExpressionState &state, Ve
             residuals.size(),
             alphas.data(), alphas.size(),
             method, strategy,
-            nullptr,  // no difficulty scores
+            has_difficulty ? difficulty.data() : nullptr,
+            (!has_difficulty || difficulty_validity.empty()) ? nullptr : difficulty_validity.data(),
             &profile, &error
         );
 
@@ -632,6 +728,13 @@ void RegisterTsConformalLearnFunction(ExtensionLoader &loader) {
         result_type,
         TsConformalLearnFunction
     ));
+    // 5-arg overload (Phase 16 D-08, plan 16-02): per-row calibration
+    // difficulty for method 'adaptive'.
+    ts_cl_set.AddFunction(ScalarFunction(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::VARCHAR), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        result_type,
+        TsConformalLearnFunction
+    ));
     {
         CreateScalarFunctionInfo info(ts_cl_set);
         FunctionDescription desc;
@@ -652,6 +755,11 @@ void RegisterTsConformalLearnFunction(ExtensionLoader &loader) {
     ScalarFunctionSet anofox_set("anofox_fcst_ts_conformal_learn");
     anofox_set.AddFunction(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::VARCHAR)},
+        result_type,
+        TsConformalLearnFunction
+    ));
+    anofox_set.AddFunction(ScalarFunction(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::VARCHAR), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         result_type,
         TsConformalLearnFunction
     ));
@@ -680,6 +788,8 @@ void RegisterTsConformalLearnFunction(ExtensionLoader &loader) {
 // ============================================================================
 
 static void TsConformalApplyFunction(DataChunk &args, ExpressionState &state, Vector &result) {
+    bool has_difficulty = args.ColumnCount() == 3;
+
     auto &forecasts_vec = args.data[0];
     auto &profile_vec = args.data[1];
     idx_t count = args.size();
@@ -690,6 +800,11 @@ static void TsConformalApplyFunction(DataChunk &args, ExpressionState &state, Ve
     profile_vec.Flatten(count);
 
     ListDoubleReader forecasts_reader(forecasts_vec, count);
+
+    unique_ptr<ListDoubleReader> difficulty_reader;
+    if (has_difficulty) {
+        difficulty_reader = make_uniq<ListDoubleReader>(args.data[2], count);
+    }
 
     // Profile struct fields
     auto &profile_entries = StructVector::GetEntries(profile_vec);
@@ -715,7 +830,8 @@ static void TsConformalApplyFunction(DataChunk &args, ExpressionState &state, Ve
     auto &out_method_vec = *out_entries[4];
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (forecasts_reader.IsNull(row_idx) || FlatVector::IsNull(profile_vec, row_idx)) {
+        if (forecasts_reader.IsNull(row_idx) || FlatVector::IsNull(profile_vec, row_idx) ||
+            (has_difficulty && difficulty_reader->IsNull(row_idx))) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -723,6 +839,18 @@ static void TsConformalApplyFunction(DataChunk &args, ExpressionState &state, Ve
         vector<double> forecasts;
         vector<uint64_t> forecasts_validity;
         forecasts_reader.Read(row_idx, forecasts, forecasts_validity);
+
+        vector<double> difficulty;
+        vector<uint64_t> difficulty_validity;
+        if (has_difficulty) {
+            difficulty_reader->Read(row_idx, difficulty, difficulty_validity);
+            if (difficulty.size() != forecasts.size()) {
+                throw InvalidInputException(
+                    "ts_conformal_apply: forecasts and difficulty_col must have the same "
+                    "length: %llu vs %llu",
+                    (unsigned long long)forecasts.size(), (unsigned long long)difficulty.size());
+            }
+        }
 
         // Extract profile fields (flat after profile_vec.Flatten(count) above).
         auto method_str = FlatVector::GetData<string_t>(method_vec)[row_idx].GetString();
@@ -761,7 +889,8 @@ static void TsConformalApplyFunction(DataChunk &args, ExpressionState &state, Ve
             forecasts.data(), forecasts_validity.empty() ? nullptr : forecasts_validity.data(),
             forecasts.size(),
             &profile,
-            nullptr,  // no difficulty scores
+            has_difficulty ? difficulty.data() : nullptr,
+            (!has_difficulty || difficulty_validity.empty()) ? nullptr : difficulty_validity.data(),
             &intervals, &error
         );
 
@@ -816,6 +945,13 @@ void RegisterTsConformalApplyFunction(ExtensionLoader &loader) {
         result_type,
         TsConformalApplyFunction
     ));
+    // 3-arg overload (Phase 16 D-08, plan 16-02): per-row prediction
+    // difficulty for method 'adaptive'.
+    ts_ca_set.AddFunction(ScalarFunction(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), profile_type, LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        result_type,
+        TsConformalApplyFunction
+    ));
     {
         CreateScalarFunctionInfo info(ts_ca_set);
         FunctionDescription desc;
@@ -834,6 +970,11 @@ void RegisterTsConformalApplyFunction(ExtensionLoader &loader) {
     ScalarFunctionSet anofox_set("anofox_fcst_ts_conformal_apply");
     anofox_set.AddFunction(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), profile_type},
+        result_type,
+        TsConformalApplyFunction
+    ));
+    anofox_set.AddFunction(ScalarFunction(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), profile_type, LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         result_type,
         TsConformalApplyFunction
     ));
@@ -1384,14 +1525,22 @@ static void FillNanAtInvalid(vector<double> &values, const vector<uint64_t> &val
 }
 
 // _ts_conformal_from_pairs(cal_actuals[], cal_forecasts[], point_forecasts[], alpha, method)
+//   -- OR, with per-row difficulty (Phase 16 D-08, plan 16-02): --
+// _ts_conformal_from_pairs(cal_actuals[], cal_forecasts[], cal_difficulty[], point_forecasts[], point_difficulty[], alpha, method)
 //   -> STRUCT(point[], lower[], upper[], coverage, nominal_level,
-//             conformity_score, n_calibration, method)
+//             conformity_score, n_calibration, method, calibration_insufficient)
+//
+// Both overloads share this one function body (dispatched on args.size()):
+// difficulty is absent (null pointer, len 0) in the 5-arg form.
 static void TsConformalFromPairsFunction(DataChunk &args, ExpressionState &state, Vector &result) {
+    bool has_difficulty = args.ColumnCount() == 7;
+
     auto &cal_actuals_vec = args.data[0];
     auto &cal_forecasts_vec = args.data[1];
-    auto &point_vec = args.data[2];
-    auto &alpha_vec = args.data[3];
-    auto &method_vec = args.data[4];
+    idx_t difficulty_idx_offset = has_difficulty ? 1 : 0;
+    auto &point_vec = args.data[2 + difficulty_idx_offset];
+    auto &alpha_vec = args.data[3 + 2 * difficulty_idx_offset];
+    auto &method_vec = args.data[4 + 2 * difficulty_idx_offset];
     idx_t count = args.size();
 
     ListDoubleReader cal_actuals_reader(cal_actuals_vec, count);
@@ -1399,6 +1548,13 @@ static void TsConformalFromPairsFunction(DataChunk &args, ExpressionState &state
     ListDoubleReader point_reader(point_vec, count);
     ScalarArgReader<double> alpha_reader(alpha_vec, count);
     ScalarArgReader<string_t> method_reader(method_vec, count);
+
+    unique_ptr<ListDoubleReader> cal_difficulty_reader;
+    unique_ptr<ListDoubleReader> point_difficulty_reader;
+    if (has_difficulty) {
+        cal_difficulty_reader = make_uniq<ListDoubleReader>(args.data[2], count);
+        point_difficulty_reader = make_uniq<ListDoubleReader>(args.data[4], count);
+    }
 
     auto &struct_entries = StructVector::GetEntries(result);
     auto &point_out = *struct_entries[0];
@@ -1414,7 +1570,9 @@ static void TsConformalFromPairsFunction(DataChunk &args, ExpressionState &state
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (cal_actuals_reader.IsNull(row_idx) || cal_forecasts_reader.IsNull(row_idx) ||
             point_reader.IsNull(row_idx) || alpha_reader.IsNull(row_idx) ||
-            method_reader.IsNull(row_idx)) {
+            method_reader.IsNull(row_idx) ||
+            (has_difficulty && (cal_difficulty_reader->IsNull(row_idx) ||
+                                 point_difficulty_reader->IsNull(row_idx)))) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -1427,6 +1585,13 @@ static void TsConformalFromPairsFunction(DataChunk &args, ExpressionState &state
         double alpha = alpha_reader.Get(row_idx);
         auto method_str = method_reader.Get(row_idx).GetString();
 
+        vector<double> cal_difficulty, point_difficulty;
+        vector<uint64_t> cal_difficulty_validity, point_difficulty_validity;
+        if (has_difficulty) {
+            cal_difficulty_reader->Read(row_idx, cal_difficulty, cal_difficulty_validity);
+            point_difficulty_reader->Read(row_idx, point_difficulty, point_difficulty_validity);
+        }
+
         ConformalResultFFI conf_result = {};
         AnofoxError error;
         bool success = anofox_ts_conformal_from_pairs(
@@ -1434,8 +1599,14 @@ static void TsConformalFromPairsFunction(DataChunk &args, ExpressionState &state
             cal_actuals.size(),
             cal_forecasts.data(), cal_forecasts_validity.empty() ? nullptr : cal_forecasts_validity.data(),
             cal_forecasts.size(),
+            has_difficulty ? cal_difficulty.data() : nullptr,
+            (!has_difficulty || cal_difficulty_validity.empty()) ? nullptr : cal_difficulty_validity.data(),
+            has_difficulty ? cal_difficulty.size() : 0,
             point_forecasts.data(), point_validity.empty() ? nullptr : point_validity.data(),
             point_forecasts.size(),
+            has_difficulty ? point_difficulty.data() : nullptr,
+            (!has_difficulty || point_difficulty_validity.empty()) ? nullptr : point_difficulty_validity.data(),
+            has_difficulty ? point_difficulty.size() : 0,
             alpha, method_str.c_str(),
             &conf_result, &error
         );
@@ -1464,17 +1635,26 @@ static void TsConformalFromPairsFunction(DataChunk &args, ExpressionState &state
 
 // _ts_conformal_calibrate(actuals[], forecasts[], alpha, method)
 //   -> STRUCT(method, conformity_score, coverage, nominal_level, n_calibration)
+// _ts_conformal_calibrate(actuals[], forecasts[], difficulty[], alpha, method) (Phase 16
+// D-08, plan 16-02): the 5-arg overload carries a per-row calibration difficulty.
 static void TsConformalCalibrateFromPairsFunction(DataChunk &args, ExpressionState &state, Vector &result) {
+    bool has_difficulty = args.ColumnCount() == 5;
+
     auto &actuals_vec = args.data[0];
     auto &forecasts_vec = args.data[1];
-    auto &alpha_vec = args.data[2];
-    auto &method_vec = args.data[3];
+    auto &alpha_vec = args.data[has_difficulty ? 3 : 2];
+    auto &method_vec = args.data[has_difficulty ? 4 : 3];
     idx_t count = args.size();
 
     ListDoubleReader actuals_reader(actuals_vec, count);
     ListDoubleReader forecasts_reader(forecasts_vec, count);
     ScalarArgReader<double> alpha_reader(alpha_vec, count);
     ScalarArgReader<string_t> method_reader(method_vec, count);
+
+    unique_ptr<ListDoubleReader> difficulty_reader;
+    if (has_difficulty) {
+        difficulty_reader = make_uniq<ListDoubleReader>(args.data[2], count);
+    }
 
     auto &struct_entries = StructVector::GetEntries(result);
     auto &method_out = *struct_entries[0];
@@ -1486,17 +1666,21 @@ static void TsConformalCalibrateFromPairsFunction(DataChunk &args, ExpressionSta
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (actuals_reader.IsNull(row_idx) || forecasts_reader.IsNull(row_idx) ||
-            alpha_reader.IsNull(row_idx) || method_reader.IsNull(row_idx)) {
+            alpha_reader.IsNull(row_idx) || method_reader.IsNull(row_idx) ||
+            (has_difficulty && difficulty_reader->IsNull(row_idx))) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> actuals, forecasts;
-        vector<uint64_t> actuals_validity, forecasts_validity;
+        vector<double> actuals, forecasts, difficulty;
+        vector<uint64_t> actuals_validity, forecasts_validity, difficulty_validity;
         actuals_reader.Read(row_idx, actuals, actuals_validity);
         forecasts_reader.Read(row_idx, forecasts, forecasts_validity);
         double alpha = alpha_reader.Get(row_idx);
         auto method_str = method_reader.Get(row_idx).GetString();
+        if (has_difficulty) {
+            difficulty_reader->Read(row_idx, difficulty, difficulty_validity);
+        }
 
         ConformalCalibrationFFI cal_result = {};
         AnofoxError error;
@@ -1505,6 +1689,9 @@ static void TsConformalCalibrateFromPairsFunction(DataChunk &args, ExpressionSta
             actuals.size(),
             forecasts.data(), forecasts_validity.empty() ? nullptr : forecasts_validity.data(),
             forecasts.size(),
+            has_difficulty ? difficulty.data() : nullptr,
+            (!has_difficulty || difficulty_validity.empty()) ? nullptr : difficulty_validity.data(),
+            has_difficulty ? difficulty.size() : 0,
             alpha, method_str.c_str(),
             &cal_result, &error
         );
@@ -1540,8 +1727,10 @@ void RegisterTsConformalFromPairsFunction(ExtensionLoader &loader) {
         struct_children.push_back(make_pair("calibration_insufficient", LogicalType(LogicalTypeId::BOOLEAN)));
         auto result_type = LogicalType::STRUCT(std::move(struct_children));
 
-        ScalarFunction from_pairs_func(
-            "_ts_conformal_from_pairs",
+        // 5-arg: no difficulty (symmetric/asymmetric). 7-arg (Phase 16
+        // D-08, plan 16-02): cal_difficulty/point_difficulty for 'adaptive'.
+        ScalarFunctionSet from_pairs_set("_ts_conformal_from_pairs");
+        from_pairs_set.AddFunction(ScalarFunction(
             {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
              LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
              LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
@@ -1549,8 +1738,19 @@ void RegisterTsConformalFromPairsFunction(ExtensionLoader &loader) {
              LogicalType(LogicalTypeId::VARCHAR)},
             result_type,
             TsConformalFromPairsFunction
-        );
-        CreateScalarFunctionInfo info(from_pairs_func);
+        ));
+        from_pairs_set.AddFunction(ScalarFunction(
+            {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+             LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+             LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+             LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+             LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+             LogicalType(LogicalTypeId::DOUBLE),
+             LogicalType(LogicalTypeId::VARCHAR)},
+            result_type,
+            TsConformalFromPairsFunction
+        ));
+        CreateScalarFunctionInfo info(from_pairs_set);
         info.internal = true;
         loader.RegisterFunction(info);
     }
@@ -1565,16 +1765,26 @@ void RegisterTsConformalFromPairsFunction(ExtensionLoader &loader) {
         struct_children.push_back(make_pair("calibration_insufficient", LogicalType(LogicalTypeId::BOOLEAN)));
         auto result_type = LogicalType::STRUCT(std::move(struct_children));
 
-        ScalarFunction calibrate_func(
-            "_ts_conformal_calibrate",
+        // 4-arg: no difficulty. 5-arg (Phase 16 D-08): difficulty for 'adaptive'.
+        ScalarFunctionSet calibrate_set("_ts_conformal_calibrate");
+        calibrate_set.AddFunction(ScalarFunction(
             {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
              LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
              LogicalType(LogicalTypeId::DOUBLE),
              LogicalType(LogicalTypeId::VARCHAR)},
             result_type,
             TsConformalCalibrateFromPairsFunction
-        );
-        CreateScalarFunctionInfo info(calibrate_func);
+        ));
+        calibrate_set.AddFunction(ScalarFunction(
+            {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+             LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+             LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+             LogicalType(LogicalTypeId::DOUBLE),
+             LogicalType(LogicalTypeId::VARCHAR)},
+            result_type,
+            TsConformalCalibrateFromPairsFunction
+        ));
+        CreateScalarFunctionInfo info(calibrate_set);
         info.internal = true;
         loader.RegisterFunction(info);
     }

@@ -18,7 +18,8 @@
     "symmetric_normal": 16041,
     "symmetric_lognormal": 16042,
     "asymmetric_normal": 16043,
-    "asymmetric_lognormal": 16044
+    "asymmetric_lognormal": 16044,
+    "adaptive_heteroscedastic": 16103
   },
   "results": {
     "symmetric": {
@@ -82,6 +83,18 @@
             "mean_width": 3.7945113775705694
           },
           "old_over_new_width_ratio": 1.6755425576700853
+        }
+      }
+    },
+    "adaptive": {
+      "heteroscedastic": {
+        "0.1": {
+          "coverage": 0.8999,
+          "mean_width": 5.819650890686497
+        },
+        "0.2": {
+          "coverage": 0.7991,
+          "mean_width": 4.526793013215951
         }
       }
     }

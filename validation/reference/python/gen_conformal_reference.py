@@ -354,6 +354,9 @@ MC_SEEDS = {
     "symmetric_lognormal": 16042,
     "asymmetric_normal": 16043,
     "asymmetric_lognormal": 16044,
+    # Matches the seed Rust's inline SplitMix64 generator uses for its own
+    # independent heteroscedastic simulation (plan 16-02 interfaces block).
+    "adaptive_heteroscedastic": 16103,
 }
 
 
@@ -455,6 +458,9 @@ def build_monte_carlo() -> dict:
         for dist in ["normal", "lognormal"]:
             seed = MC_SEEDS[f"{method}_{dist}"]
             results[method][dist] = monte_carlo_run(method, dist, seed)
+    results["adaptive"] = {
+        "heteroscedastic": monte_carlo_run_adaptive(MC_SEEDS["adaptive_heteroscedastic"])
+    }
     return {
         "params": {
             "trials": MC_TRIALS,
@@ -464,6 +470,123 @@ def build_monte_carlo() -> dict:
         },
         "seeds": MC_SEEDS,
         "results": results,
+    }
+
+
+def adaptive_calibration(residuals: list[float], difficulty: list[float], alpha: float) -> dict:
+    """Phase 16 D-08 (plan 16-02): adaptive scores `s_i = |r_i| / d_i` over
+    complete (finite residual, finite difficulty) pairs; `q` is their
+    finite-sample quantile (same insufficiency rule as every other
+    method). No batch-mean normalisation at prediction time -- callers
+    multiply `q` by the RAW prediction difficulty."""
+    r = np.asarray(residuals, dtype=np.float64)
+    d = np.asarray(difficulty, dtype=np.float64)
+    finite_mask = np.isfinite(r) & np.isfinite(d)
+    scores = np.abs(r[finite_mask]) / d[finite_mask]
+    n = int(scores.shape[0])
+    insufficient = n == 0
+    k = None
+    if not insufficient:
+        k = math.ceil((n + 1) * (1.0 - alpha))
+        insufficient = k > n
+
+    if insufficient:
+        return {
+            "conformity_score": None,
+            "coverage": None,
+            "nominal_level": 1.0 - alpha,
+            "n_calibration": n,
+            "calibration_insufficient": True,
+        }
+
+    level = k / n
+    q = float(np.quantile(scores, level, method="linear"))
+    coverage = float(np.mean(scores <= q))
+    return {
+        "conformity_score": q,
+        "coverage": coverage,
+        "nominal_level": 1.0 - alpha,
+        "n_calibration": n,
+        "calibration_insufficient": False,
+    }
+
+
+def build_adaptive_n20() -> dict:
+    """d_i = 1 + (i % 4); residual_i = (i + 1) * 0.1 * (+1 if i even else
+    -1) * d_i; stored as actual = 100 + residual, forecast = 100. alpha 0.1
+    -> q 1.905, coverage 0.95. Prediction point [10, 10, 10] with d [1, 2,
+    0.5] -> half-widths [1.905, 3.81, 0.9525] (hand-checked by the
+    planner)."""
+    actual = []
+    forecast = []
+    difficulty = []
+    for i in range(20):
+        d = 1 + (i % 4)
+        sign = 1.0 if i % 2 == 0 else -1.0
+        r = (i + 1) * 0.1 * sign * d
+        actual.append(100.0 + r)
+        forecast.append(100.0)
+        difficulty.append(float(d))
+    residuals = [a - f for a, f in zip(actual, forecast)]
+    return {
+        "actual": actual,
+        "forecast": forecast,
+        "difficulty": difficulty,
+        "future_point": [10.0, 10.0, 10.0],
+        "future_difficulty": [1.0, 2.0, 0.5],
+        "alphas": {"0.1": adaptive_calibration(residuals, difficulty, 0.1)},
+    }
+
+
+def build_adaptive_seeded_cases() -> dict:
+    """2 seeded cases from `default_rng(16031)`: d ~ U(0.5, 3), r = d *
+    N(0, 1), n = 99/199, alpha 0.1."""
+    rng = np.random.default_rng(16031)
+    cases = {}
+    for n in (99, 199):
+        d = rng.uniform(0.5, 3.0, size=n)
+        z = rng.standard_normal(n)
+        r = d * z
+        cases[f"seeded_n{n}"] = {
+            "residuals": r.tolist(),
+            "difficulty": d.tolist(),
+            "alpha": 0.1,
+            **adaptive_calibration(r.tolist(), d.tolist(), 0.1),
+        }
+    return cases
+
+
+def monte_carlo_run_adaptive(seed: int) -> dict:
+    """Heteroscedastic Monte Carlo (adaptive only): `r = d * N(0, 1)` with
+    `d ~ U(0.5, 3)` drawn per row at BOTH calibration and test."""
+    rng = np.random.default_rng(seed)
+    acc = {a: {"covered": 0, "total": 0, "widths": []} for a in MC_ALPHAS}
+
+    for _ in range(MC_TRIALS):
+        d_cal = rng.uniform(0.5, 3.0, size=MC_N_CAL)
+        z_cal = rng.standard_normal(MC_N_CAL)
+        r_cal = d_cal * z_cal
+        d_test = rng.uniform(0.5, 3.0, size=MC_M_TEST)
+        z_test = rng.standard_normal(MC_M_TEST)
+        r_test = d_test * z_test
+
+        scores = np.abs(r_cal) / d_cal
+        for alpha in MC_ALPHAS:
+            k = math.ceil((MC_N_CAL + 1) * (1.0 - alpha))
+            level = k / MC_N_CAL
+            q = float(np.quantile(scores, level, method="linear"))
+            margin = q * d_test
+            covered = int(np.sum(np.abs(r_test) <= margin))
+            acc[alpha]["covered"] += covered
+            acc[alpha]["total"] += MC_M_TEST
+            acc[alpha]["widths"].append(float(np.mean(2.0 * margin)))
+
+    return {
+        str(alpha): {
+            "coverage": acc[alpha]["covered"] / acc[alpha]["total"],
+            "mean_width": float(np.mean(acc[alpha]["widths"])),
+        }
+        for alpha in MC_ALPHAS
     }
 
 
@@ -529,6 +652,20 @@ def main() -> None:
         generator=generator_path(__file__),
         versions=tool_versions("numpy"),
         payload=asymmetric_payload,
+    )
+    print(f"Wrote {out_path}")
+
+    adaptive_payload = {
+        "adaptive_n20": build_adaptive_n20(),
+        "seeded": build_adaptive_seeded_cases(),
+        "tolerance": ASYMMETRIC_TOLERANCE,
+    }
+    out_path = write_fixture(
+        family="conformal",
+        filename="adaptive_cases.json",
+        generator=generator_path(__file__),
+        versions=tool_versions("numpy"),
+        payload=adaptive_payload,
     )
     print(f"Wrote {out_path}")
 

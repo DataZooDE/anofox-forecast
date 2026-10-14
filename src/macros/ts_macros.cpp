@@ -1723,9 +1723,12 @@ SELECT * FROM _ts_cv_hydrate_native(
     // params MAP supports (read json-free; CAST, not TRY_CAST, so a malformed value errors):
     //   alpha (DOUBLE) - miscoverage rate (default 0.1 for 90% coverage)
     //   method (VARCHAR) - 'symmetric' (alias 'split'), 'asymmetric', or 'adaptive' (default 'symmetric')
+    // difficulty_col (Phase 16 D-08, plan 16-02): named, default NULL. Carried as `d` in the
+    // same date-ordered STRUCT lists as actual/forecast/point; only method 'adaptive' may use
+    // it (any present value with another method is an SQL error).
     // Returns: group_col, date_col, point, lower, upper, coverage, nominal_level,
-    //          conformity_score, n_calibration, method
-    {"ts_conformal_by", {"backtest_results", "group_col", "date_col", "actual_col", "forecast_col", "point_forecast_col", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
+    //          conformity_score, n_calibration, calibration_insufficient, method
+    {"ts_conformal_by", {"backtest_results", "group_col", "date_col", "actual_col", "forecast_col", "point_forecast_col", nullptr}, {{"params", "MAP{}"}, {"difficulty_col", "NULL"}, {nullptr, nullptr}},
 R"(
 WITH _params AS (
     SELECT
@@ -1735,8 +1738,8 @@ WITH _params AS (
 per_group AS (
     SELECT
         group_col AS _grp,
-        LIST({a: actual_col::DOUBLE, f: forecast_col::DOUBLE} ORDER BY date_col) AS _pairs,
-        LIST({t: date_col, p: point_forecast_col::DOUBLE} ORDER BY date_col)
+        LIST({a: actual_col::DOUBLE, f: forecast_col::DOUBLE, d: difficulty_col::DOUBLE} ORDER BY date_col) AS _pairs,
+        LIST({t: date_col, p: point_forecast_col::DOUBLE, d: difficulty_col::DOUBLE} ORDER BY date_col)
             FILTER (WHERE point_forecast_col IS NOT NULL) AS _points
     FROM query_table(backtest_results::VARCHAR)
     GROUP BY group_col
@@ -1748,7 +1751,9 @@ conformal_calc AS (
         _ts_conformal_from_pairs(
             [pr.a FOR pr IN _pairs],
             [pr.f FOR pr IN _pairs],
+            [pr.d FOR pr IN _pairs],
             [pt.p FOR pt IN _points],
+            [pt.d FOR pt IN _points],
             (SELECT _alpha FROM _params),
             (SELECT _method FROM _params)
         ) AS conf_result
@@ -1790,8 +1795,11 @@ FROM conformal_calc
     //     ts_conformal_by instead)
     //   pooled (BOOLEAN) - false (default): one row per group_col value. true: pool every row
     //     into ONE row with group_col = NULL.
-    // Returns: group_col, method, conformity_score, coverage, nominal_level, n_calibration
-    {"ts_conformal_calibrate", {"backtest_results", "group_col", "actual_col", "forecast_col", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
+    // difficulty_col (Phase 16 D-08, plan 16-02): named, default NULL. Only method 'adaptive'
+    // may use it.
+    // Returns: group_col, method, conformity_score, coverage, nominal_level, n_calibration,
+    //          calibration_insufficient
+    {"ts_conformal_calibrate", {"backtest_results", "group_col", "actual_col", "forecast_col", nullptr}, {{"params", "MAP{}"}, {"difficulty_col", "NULL"}, {nullptr, nullptr}},
 R"(
 WITH _params AS (
     SELECT
@@ -1802,7 +1810,7 @@ WITH _params AS (
 per_key AS (
     SELECT
         CASE WHEN (SELECT _pooled FROM _params) THEN NULL ELSE group_col END AS _grp,
-        LIST({a: actual_col::DOUBLE, f: forecast_col::DOUBLE}) AS _pairs
+        LIST({a: actual_col::DOUBLE, f: forecast_col::DOUBLE, d: difficulty_col::DOUBLE}) AS _pairs
     FROM query_table(backtest_results::VARCHAR)
     GROUP BY CASE WHEN (SELECT _pooled FROM _params) THEN NULL ELSE group_col END
 ),
@@ -1812,6 +1820,7 @@ calibrated AS (
         _ts_conformal_calibrate(
             [pr.a FOR pr IN _pairs],
             [pr.f FOR pr IN _pairs],
+            [pr.d FOR pr IN _pairs],
             (SELECT _alpha FROM _params),
             (SELECT _method FROM _params)
         ) AS cal_result
@@ -1840,8 +1849,12 @@ FROM calibrated
     // whose group_col matches is used if one exists, otherwise the pooled row (group_col IS
     // NULL), otherwise bounds come back NULL for that group's rows. A literal score is applied
     // by wrapping it in a one-row table with group_col = NULL (D-14).
+    // difficulty_col (Phase 16 D-08, plan 16-02): named, default NULL. Bounds are computed via
+    // ts_conformal_intervals(points, conformity_score, method, difficulties) using the matched
+    // calibration row's OWN method, so the method/difficulty strictness rules (difficulty only
+    // for 'adaptive', 'adaptive' requires difficulty) are enforced in Rust, not duplicated here.
     // Returns: group_col, date_col, point, lower, upper, method, conformity_score
-    {"ts_conformal_apply_by", {"forecast_results", "group_col", "date_col", "forecast_col", "calibration", nullptr}, {{nullptr, nullptr}},
+    {"ts_conformal_apply_by", {"forecast_results", "group_col", "date_col", "forecast_col", "calibration", nullptr}, {{"difficulty_col", "NULL"}, {nullptr, nullptr}},
 R"(
 WITH cal AS (
     SELECT * FROM query_table(calibration::VARCHAR)
@@ -1849,7 +1862,7 @@ WITH cal AS (
 per_group AS (
     SELECT
         group_col AS _grp,
-        LIST({t: date_col, p: forecast_col::DOUBLE} ORDER BY date_col)
+        LIST({t: date_col, p: forecast_col::DOUBLE, d: difficulty_col::DOUBLE} ORDER BY date_col)
             FILTER (WHERE forecast_col IS NOT NULL) AS _points
     FROM query_table(forecast_results::VARCHAR)
     GROUP BY group_col
@@ -1870,7 +1883,7 @@ applied AS (
         _points,
         _method,
         _score,
-        ts_conformal_intervals([pt.p FOR pt IN _points], _score) AS _bounds
+        ts_conformal_intervals([pt.p FOR pt IN _points], _score, _method, [pt.d FOR pt IN _points]) AS _bounds
     FROM matched
 )
 SELECT

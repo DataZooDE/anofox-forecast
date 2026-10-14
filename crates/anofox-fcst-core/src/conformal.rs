@@ -359,75 +359,120 @@ pub fn conformal_predict_multi(
     })
 }
 
-/// Computes locally-adaptive conformal intervals using estimated difficulty.
+/// Validates that every PRESENT (non-`NaN`) difficulty value is positive and
+/// finite (Phase 16 D-08). `NaN` is the missing-value sentinel used
+/// elsewhere in this module (Phase 10 D-12 convention) and is intentionally
+/// NOT rejected here -- the caller drops it as a missing calibration pair or
+/// propagates it as a missing prediction, not an error.
 ///
-/// Instead of using a single conformity score for all predictions, this method
-/// scales the intervals based on local difficulty estimates. Points predicted
-/// to be more difficult (higher uncertainty) get wider intervals.
+/// # Errors
+/// `InvalidInput` naming the 1-based position and the offending value for
+/// the first PRESENT value that is `<= 0.0` or infinite.
+fn validate_difficulty_values(difficulty: &[f64]) -> Result<()> {
+    for (i, &d) in difficulty.iter().enumerate() {
+        if d.is_nan() {
+            continue;
+        }
+        if !(d > 0.0 && d.is_finite()) {
+            return Err(ForecastError::InvalidInput(format!(
+                "difficulty value at position {} must be positive and finite, got {}",
+                i + 1,
+                d
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Computes locally-adaptive conformal intervals using an EXPLICIT per-row
+/// difficulty at BOTH calibration and prediction (Phase 16 D-08, CONF-04).
+///
+/// Scores are `s_i = |r_i| / d_i` over complete (finite residual, present
+/// difficulty) pairs; `q` is their finite-sample quantile (via
+/// [`conformal_quantile`] -- insufficient reports an unbounded result, same
+/// convention as every other conformal method). Bounds are `f_j -/+ q *
+/// d_j` using the PREDICTION difficulty exactly as given -- there is NO
+/// batch-mean normalisation, so a forecast's interval does not depend on
+/// which other forecasts happen to be in the same batch (this was the
+/// pre-16-02 bug, G14).
 ///
 /// # Arguments
-/// * `residuals` - Calibration residuals (actual - predicted)
+/// * `residuals` - Calibration residuals (actual - predicted), signed
+/// * `difficulty_cal` - Per-row calibration difficulty, same length as `residuals`
 /// * `forecasts` - Point forecasts to wrap with intervals
-/// * `difficulty` - Estimated difficulty/uncertainty for each forecast (must be positive)
+/// * `difficulty_pred` - Per-row prediction difficulty, same length as `forecasts`. A `NaN` entry
+///   propagates to `NaN` (missing) bounds at that position only, independent of every other row.
 /// * `alpha` - Miscoverage rate (e.g., 0.1 for 90% coverage)
 ///
-/// # Returns
-/// A `ConformalResult` with adaptive intervals
-///
-/// # Note
-/// The difficulty scores should reflect the expected prediction uncertainty.
-/// Common choices include:
-/// - Residual variance estimates from similar training points
-/// - Distance to training data in feature space
-/// - Model uncertainty estimates (e.g., ensemble variance)
+/// # Errors
+/// - length mismatches (`residuals` vs `difficulty_cal`; `forecasts` vs `difficulty_pred`):
+///   `InvalidInput` naming both lengths.
+/// - any PRESENT (non-`NaN`) difficulty value `<= 0.0` or infinite: `InvalidInput` naming the
+///   value and its 1-based position (`validate_difficulty_values`).
 pub fn conformal_predict_adaptive(
     residuals: &[f64],
+    difficulty_cal: &[f64],
     forecasts: &[f64],
-    difficulty: &[f64],
+    difficulty_pred: &[f64],
     alpha: f64,
 ) -> Result<ConformalResult> {
-    if forecasts.len() != difficulty.len() {
+    validate_alpha(alpha)?;
+
+    if residuals.len() != difficulty_cal.len() {
         return Err(ForecastError::InvalidInput(format!(
-            "Forecasts and difficulty must have the same length: {} vs {}",
+            "residuals and difficulty_cal must have the same length: {} vs {}",
+            residuals.len(),
+            difficulty_cal.len()
+        )));
+    }
+    if forecasts.len() != difficulty_pred.len() {
+        return Err(ForecastError::InvalidInput(format!(
+            "forecasts and difficulty_pred must have the same length: {} vs {}",
             forecasts.len(),
-            difficulty.len()
+            difficulty_pred.len()
         )));
     }
 
-    // Validate difficulty scores are positive
-    if difficulty.iter().any(|&d| d <= 0.0) {
-        return Err(ForecastError::InvalidInput(
-            "Difficulty scores must be positive".to_string(),
-        ));
-    }
+    validate_difficulty_values(difficulty_cal)?;
+    validate_difficulty_values(difficulty_pred)?;
 
-    // Compute base conformity score
-    let base_score = conformal_quantile(residuals, alpha)?;
-
-    // Normalize difficulty scores (mean = 1)
-    let mean_difficulty: f64 = difficulty.iter().sum::<f64>() / difficulty.len() as f64;
-    let normalized: Vec<f64> = difficulty.iter().map(|d| d / mean_difficulty).collect();
-
-    // Scale intervals by normalized difficulty
-    let lower: Vec<f64> = forecasts
+    // Phase 16 D-06/G16: a calibration pair whose residual is non-finite
+    // (NaN missing marker, or +/-inf) or whose difficulty is missing (NaN)
+    // is dropped before any quantile.
+    let scores: Vec<f64> = residuals
         .iter()
-        .zip(normalized.iter())
-        .map(|(f, d)| f - base_score * d)
+        .zip(difficulty_cal.iter())
+        .filter(|(r, d)| r.is_finite() && !d.is_nan())
+        .map(|(r, d)| r.abs() / d)
         .collect();
+    let n_calibration = scores.len();
 
-    let upper: Vec<f64> = forecasts
-        .iter()
-        .zip(normalized.iter())
-        .map(|(f, d)| f + base_score * d)
-        .collect();
+    let q = conformal_quantile(&scores, alpha)?;
+    let calibration_insufficient = !q.is_finite();
 
-    // Phase 16 D-02: empirical coverage = fraction of calibration residuals
-    // with |r| <= base_score (the unnormalized base conformity score).
-    let n_calibration = residuals.len();
-    let coverage = if n_calibration == 0 {
-        f64::NAN
+    let (lower, upper, coverage) = if calibration_insufficient {
+        (
+            vec![f64::NEG_INFINITY; forecasts.len()],
+            vec![f64::INFINITY; forecasts.len()],
+            f64::NAN,
+        )
     } else {
-        residuals.iter().filter(|r| r.abs() <= base_score).count() as f64 / n_calibration as f64
+        let lower: Vec<f64> = forecasts
+            .iter()
+            .zip(difficulty_pred.iter())
+            .map(|(f, d)| if d.is_nan() { f64::NAN } else { f - q * d })
+            .collect();
+        let upper: Vec<f64> = forecasts
+            .iter()
+            .zip(difficulty_pred.iter())
+            .map(|(f, d)| if d.is_nan() { f64::NAN } else { f + q * d })
+            .collect();
+        let coverage = if n_calibration == 0 {
+            f64::NAN
+        } else {
+            scores.iter().filter(|&&s| s <= q).count() as f64 / n_calibration as f64
+        };
+        (lower, upper, coverage)
     };
 
     Ok(ConformalResult {
@@ -436,14 +481,116 @@ pub fn conformal_predict_adaptive(
         upper,
         coverage,
         nominal_level: 1.0 - alpha,
-        conformity_score: base_score,
+        conformity_score: q,
         n_calibration,
         method: "adaptive_conformal".to_string(),
-        // Phase 16 D-08 (plan 16-02) reworks adaptive's insufficiency
-        // reporting; this entry point still delegates to the pre-16-02
-        // `conformal_quantile` base score here.
-        calibration_insufficient: !base_score.is_finite(),
+        calibration_insufficient,
     })
+}
+
+/// Applies a single pre-computed conformity `score` to `forecasts`,
+/// optionally scaled by a per-row `difficulty` (Phase 16 D-08, CONF-04).
+///
+/// Backs the SQL `ts_conformal_intervals(forecasts, conformity_score,
+/// method, difficulty)` 4-arg overload: `method` selects how `difficulty`
+/// is (or must not be) used. An infinite `score` (an insufficient
+/// calibration, per the shared convention) propagates to unbounded
+/// (+/-infinity) bounds through ordinary arithmetic -- no special case
+/// needed here.
+///
+/// # Errors
+/// - `method == Asymmetric`: always `InvalidInput` -- a single score cannot express two
+///   (lower, upper) margins; use the `(lower, upper)` STRUCT path instead.
+/// - `method == Symmetric` with any PRESENT (non-`None`) difficulty value: `InvalidInput`
+///   containing "only used by method 'adaptive'".
+/// - `method == Adaptive` with difficulty ALL missing (`None`/empty): `InvalidInput` naming
+///   "difficulty".
+/// - `forecasts.len() != difficulty.len()` (when `difficulty` is non-empty): `InvalidInput`
+///   naming both lengths.
+pub fn conformal_apply_score(
+    forecasts: &[Option<f64>],
+    score: f64,
+    method: ConformalMethod,
+    difficulty: &[Option<f64>],
+) -> Result<(Vec<f64>, Vec<f64>)> {
+    if method == ConformalMethod::Asymmetric {
+        return Err(ForecastError::InvalidInput(
+            "conformal_apply_score: method 'asymmetric' needs two margins (lower, upper), \
+             which a single conformity_score cannot express"
+                .to_string(),
+        ));
+    }
+
+    // Normalize an absent (empty) difficulty list into "all missing", same
+    // length as forecasts, so the rest of this function never special-cases
+    // length-0 vs. all-None.
+    let difficulty: std::borrow::Cow<[Option<f64>]> = if difficulty.is_empty() {
+        std::borrow::Cow::Owned(vec![None; forecasts.len()])
+    } else {
+        std::borrow::Cow::Borrowed(difficulty)
+    };
+
+    if forecasts.len() != difficulty.len() {
+        return Err(ForecastError::InvalidInput(format!(
+            "forecasts and difficulty must have the same length: {} vs {}",
+            forecasts.len(),
+            difficulty.len()
+        )));
+    }
+
+    match method {
+        ConformalMethod::Symmetric => {
+            if difficulty.iter().any(|d| d.is_some()) {
+                return Err(ForecastError::InvalidInput(
+                    "difficulty_col is only used by method 'adaptive'".to_string(),
+                ));
+            }
+        }
+        ConformalMethod::Adaptive => {
+            if difficulty.iter().all(|d| d.is_none()) {
+                return Err(ForecastError::InvalidInput(
+                    "method 'adaptive' requires difficulty values".to_string(),
+                ));
+            }
+        }
+        ConformalMethod::Asymmetric => unreachable!("rejected above"),
+    }
+
+    let (lower, upper): (Vec<f64>, Vec<f64>) = match method {
+        ConformalMethod::Symmetric => {
+            let lower = forecasts
+                .iter()
+                .map(|f| f.map_or(f64::NAN, |v| v - score))
+                .collect();
+            let upper = forecasts
+                .iter()
+                .map(|f| f.map_or(f64::NAN, |v| v + score))
+                .collect();
+            (lower, upper)
+        }
+        ConformalMethod::Adaptive => {
+            let lower = forecasts
+                .iter()
+                .zip(difficulty.iter())
+                .map(|(f, d)| match (f, d) {
+                    (Some(fv), Some(dv)) => fv - score * dv,
+                    _ => f64::NAN,
+                })
+                .collect();
+            let upper = forecasts
+                .iter()
+                .zip(difficulty.iter())
+                .map(|(f, d)| match (f, d) {
+                    (Some(fv), Some(dv)) => fv + score * dv,
+                    _ => f64::NAN,
+                })
+                .collect();
+            (lower, upper)
+        }
+        ConformalMethod::Asymmetric => unreachable!("rejected above"),
+    };
+
+    Ok((lower, upper))
 }
 
 /// Computes asymmetric conformal intervals using the alpha/2 and 1-alpha/2
@@ -545,27 +692,92 @@ pub fn conformal_predict_asymmetric(
 /// empty, and the calibration score/coverage are still computed.
 ///
 /// `result.method` is set to the canonical [`ConformalMethod`] `Display` name
-/// ("symmetric" / "asymmetric"), not the legacy "split_conformal" /
+/// ("symmetric" / "asymmetric" / "adaptive"), not the legacy "split_conformal" /
 /// "asymmetric_conformal" strings `conformal_predict`/`conformal_predict_asymmetric`
 /// use directly.
+///
+/// `cal_difficulty`/`point_difficulty` (Phase 16 D-08, plan 16-02): `None`
+/// means "no difficulty column at all" (same as `Some` of an all-`None`
+/// slice). Only `ConformalMethod::Adaptive` may use them.
 ///
 /// # Errors
 /// - `cal_actuals.len() != cal_forecasts.len()`: `InvalidInput` naming both lengths
 ///   (via `missing::complete_cases`).
-/// - `method == ConformalMethod::Adaptive`: `InvalidInput` -- adaptive conformal
-///   requires per-row difficulty values, not yet reachable through this entry
-///   point (Phase 16 plan 16-02 wires adaptive through `ts_conformal_by`).
+/// - `method != Adaptive` with any PRESENT difficulty value (calibration or
+///   prediction): `InvalidInput` containing "only used by method 'adaptive'".
+/// - `method == Adaptive` with NO present calibration difficulty: `InvalidInput` naming
+///   `difficulty_col`.
 pub fn conformal_from_pairs(
     cal_actuals: &[Option<f64>],
     cal_forecasts: &[Option<f64>],
+    cal_difficulty: Option<&[Option<f64>]>,
     point_forecasts: &[Option<f64>],
+    point_difficulty: Option<&[Option<f64>]>,
     alpha: f64,
     method: ConformalMethod,
 ) -> Result<ConformalResult> {
-    if method == ConformalMethod::Adaptive {
+    let cal_difficulty_present = cal_difficulty.is_some_and(|d| d.iter().any(|v| v.is_some()));
+    let point_difficulty_present = point_difficulty.is_some_and(|d| d.iter().any(|v| v.is_some()));
+
+    if method != ConformalMethod::Adaptive && (cal_difficulty_present || point_difficulty_present) {
         return Err(ForecastError::InvalidInput(
-            "conformal method 'adaptive' requires per-row difficulty values".to_string(),
+            "difficulty_col is only used by method 'adaptive'".to_string(),
         ));
+    }
+
+    if method == ConformalMethod::Adaptive {
+        if !cal_difficulty_present {
+            return Err(ForecastError::InvalidInput(
+                "method 'adaptive' requires difficulty_col".to_string(),
+            ));
+        }
+        let cal_difficulty = cal_difficulty.unwrap();
+        if cal_actuals.len() != cal_difficulty.len() {
+            return Err(ForecastError::InvalidInput(format!(
+                "cal_actuals and difficulty_col must have the same length: {} vs {}",
+                cal_actuals.len(),
+                cal_difficulty.len()
+            )));
+        }
+        if let Some(pd) = point_difficulty {
+            if point_forecasts.len() != pd.len() {
+                return Err(ForecastError::InvalidInput(format!(
+                    "point_forecasts and difficulty_col must have the same length: {} vs {}",
+                    point_forecasts.len(),
+                    pd.len()
+                )));
+            }
+        }
+
+        // Complete (actual, forecast, difficulty) triples -- a row missing
+        // ANY of the three is dropped from calibration (D-02 pattern).
+        let complete = missing::complete_cases(&[cal_actuals, cal_forecasts, cal_difficulty])?;
+        let residuals: Vec<f64> = complete[0]
+            .iter()
+            .zip(complete[1].iter())
+            .map(|(a, f)| a - f)
+            .collect();
+        let difficulty_cal = complete[2].clone();
+
+        let filled_points = missing::fill_missing(point_forecasts, 0.0);
+        let point_diff_filled: Vec<f64> = match point_difficulty {
+            Some(pd) => pd.iter().map(|v| v.unwrap_or(f64::NAN)).collect(),
+            None => vec![f64::NAN; point_forecasts.len()],
+        };
+
+        let mut result = conformal_predict_adaptive(
+            &residuals,
+            &difficulty_cal,
+            &filled_points,
+            &point_diff_filled,
+            alpha,
+        )?;
+
+        missing::propagate_missing(&mut result.point, point_forecasts);
+        missing::propagate_missing(&mut result.lower, point_forecasts);
+        missing::propagate_missing(&mut result.upper, point_forecasts);
+        result.method = method.to_string();
+        return Ok(result);
     }
 
     let complete = missing::complete_cases(&[cal_actuals, cal_forecasts])?;
@@ -583,7 +795,7 @@ pub fn conformal_from_pairs(
             conformal_predict_asymmetric(&residuals, &filled_points, alpha)?
         }
         ConformalMethod::Adaptive => {
-            unreachable!("ConformalMethod::Adaptive rejected above")
+            unreachable!("ConformalMethod::Adaptive handled above")
         }
     };
 
@@ -633,6 +845,7 @@ pub struct ConformalCalibration {
 pub fn conformal_calibrate(
     actuals: &[Option<f64>],
     forecasts: &[Option<f64>],
+    difficulty: Option<&[Option<f64>]>,
     alpha: f64,
     method: ConformalMethod,
 ) -> Result<ConformalCalibration> {
@@ -644,7 +857,7 @@ pub fn conformal_calibrate(
         ));
     }
 
-    let result = conformal_from_pairs(actuals, forecasts, &[], alpha, method)?;
+    let result = conformal_from_pairs(actuals, forecasts, difficulty, &[], None, alpha, method)?;
 
     Ok(ConformalCalibration {
         method,
@@ -962,12 +1175,7 @@ pub fn conformal_learn(
                     residuals.len()
                 )));
             }
-            Some(d) if d.iter().any(|&x| x <= 0.0) => {
-                return Err(ForecastError::InvalidInput(
-                    "Difficulty scores must be positive".to_string(),
-                ));
-            }
-            _ => {}
+            Some(d) => validate_difficulty_values(d)?,
         }
     }
 
@@ -1057,12 +1265,23 @@ pub fn conformal_learn(
                 }
 
                 ConformalMethod::Adaptive => {
-                    // For adaptive, we store the base symmetric scores
-                    // The actual scaling happens at apply time using the forecast difficulty
+                    // Phase 16 D-08: scores_i = |r_i| / d_i over complete
+                    // (finite residual, finite difficulty) pairs -- no
+                    // longer the unweighted symmetric score.
+                    let d = difficulty.expect("validated above: difficulty required for adaptive");
+                    let mut scores: Vec<f64> = residuals
+                        .iter()
+                        .zip(d.iter())
+                        .filter(|(r, dv)| r.is_finite() && dv.is_finite())
+                        .map(|(r, dv)| r.abs() / dv)
+                        .collect();
+                    scores.sort_by(f64::total_cmp);
+                    let n_scores = scores.len();
+
                     for &alpha in alphas {
-                        let score = match finite_sample_level(n_finite, alpha) {
+                        let score = match finite_sample_level(n_scores, alpha) {
                             None => f64::INFINITY,
-                            Some(level) => compute_quantile(&abs_residuals, level),
+                            Some(level) => compute_quantile(&scores, level),
                         };
                         scores_lower.push(score);
                         scores_upper.push(score);
@@ -1135,27 +1354,16 @@ pub fn conformal_apply(
                     forecasts.len()
                 )));
             }
-            Some(d) if d.iter().any(|&x| x <= 0.0) => {
-                return Err(ForecastError::InvalidInput(
-                    "Difficulty scores must be positive".to_string(),
-                ));
-            }
-            _ => {}
+            // Phase 16 D-08: a NaN (missing) prediction difficulty is NOT
+            // an error here -- it propagates to NaN bounds at that position
+            // only (f - score * NaN = NaN), independent of every other row.
+            Some(d) => validate_difficulty_values(d)?,
         }
     }
 
     let n_levels = profile.n_levels();
     let mut lower = Vec::with_capacity(n_levels);
     let mut upper = Vec::with_capacity(n_levels);
-
-    // Normalize difficulty if adaptive
-    let normalized_difficulty: Option<Vec<f64>> = if profile.method == ConformalMethod::Adaptive {
-        let d = difficulty.unwrap();
-        let mean_d: f64 = d.iter().sum::<f64>() / d.len() as f64;
-        Some(d.iter().map(|&x| x / mean_d).collect())
-    } else {
-        None
-    };
 
     // Handle JackknifePlus separately - it computes intervals dynamically from stored residuals
     if profile.is_jackknife_plus() {
@@ -1175,16 +1383,18 @@ pub fn conformal_apply(
             };
 
             // For JackknifePlus with Adaptive method, scale by difficulty
+            // AS GIVEN (Phase 16 D-08: no batch-mean normalisation -- a
+            // forecast's interval is independent of the batch it's in).
             if profile.method == ConformalMethod::Adaptive {
-                let norm_d = normalized_difficulty.as_ref().unwrap();
+                let d = difficulty.unwrap();
                 let level_lower: Vec<f64> = forecasts
                     .iter()
-                    .zip(norm_d.iter())
+                    .zip(d.iter())
                     .map(|(&f, &d)| f - score * d)
                     .collect();
                 let level_upper: Vec<f64> = forecasts
                     .iter()
-                    .zip(norm_d.iter())
+                    .zip(d.iter())
                     .map(|(&f, &d)| f + score * d)
                     .collect();
                 lower.push(level_lower);
@@ -1219,15 +1429,17 @@ pub fn conformal_apply(
                 }
 
                 ConformalMethod::Adaptive => {
-                    let norm_d = normalized_difficulty.as_ref().unwrap();
+                    // Phase 16 D-08: difficulty used AS GIVEN, no batch-mean
+                    // normalisation.
+                    let d = difficulty.unwrap();
                     let level_lower: Vec<f64> = forecasts
                         .iter()
-                        .zip(norm_d.iter())
+                        .zip(d.iter())
                         .map(|(&f, &d)| f - score_lower * d)
                         .collect();
                     let level_upper: Vec<f64> = forecasts
                         .iter()
-                        .zip(norm_d.iter())
+                        .zip(d.iter())
                         .map(|(&f, &d)| f + score_upper * d)
                         .collect();
                     lower.push(level_lower);
@@ -1566,11 +1778,22 @@ mod tests {
 
     #[test]
     fn test_conformal_predict_adaptive() {
+        // Phase 16 D-08: new signature takes calibration AND prediction
+        // difficulty separately. difficulty_cal all 1.0 keeps the scores
+        // numerically identical to the pre-16-02 unweighted case.
         let residuals = vec![0.5, -0.3, 0.8, -0.2, 0.4, -0.6, 0.3, -0.4, 0.7, -0.5];
+        let difficulty_cal = vec![1.0; 10];
         let forecasts = vec![100.0, 105.0, 110.0];
-        let difficulty = vec![1.0, 2.0, 0.5]; // Second point is hardest
+        let difficulty_pred = vec![1.0, 2.0, 0.5]; // Second point is hardest
 
-        let result = conformal_predict_adaptive(&residuals, &forecasts, &difficulty, 0.1).unwrap();
+        let result = conformal_predict_adaptive(
+            &residuals,
+            &difficulty_cal,
+            &forecasts,
+            &difficulty_pred,
+            0.1,
+        )
+        .unwrap();
 
         assert_eq!(result.point, forecasts);
         assert_eq!(result.method, "adaptive_conformal");
@@ -1588,10 +1811,41 @@ mod tests {
     #[test]
     fn test_conformal_predict_adaptive_invalid_difficulty() {
         let residuals = vec![0.5, -0.3, 0.8];
+        let difficulty_cal = vec![1.0, 1.0, 1.0];
         let forecasts = vec![100.0, 105.0, 110.0];
-        let difficulty = vec![1.0, -2.0, 0.5]; // Negative difficulty
+        let difficulty_pred = vec![1.0, -2.0, 0.5]; // Negative difficulty
 
-        assert!(conformal_predict_adaptive(&residuals, &forecasts, &difficulty, 0.1).is_err());
+        assert!(conformal_predict_adaptive(
+            &residuals,
+            &difficulty_cal,
+            &forecasts,
+            &difficulty_pred,
+            0.1
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn test_conformal_predict_adaptive_batch_independence() {
+        // Phase 16 D-08/G14: the prediction difficulty is used AS GIVEN --
+        // a forecast's interval does not depend on which other forecasts
+        // are in the same batch (no batch-mean normalisation).
+        let residuals = vec![0.5, -0.3, 0.8, -0.2, 0.4, -0.6, 0.3, -0.4, 0.7, -0.5];
+        let difficulty_cal = vec![1.0; 10];
+
+        let alone =
+            conformal_predict_adaptive(&residuals, &difficulty_cal, &[100.0], &[2.0], 0.1).unwrap();
+        let with_others = conformal_predict_adaptive(
+            &residuals,
+            &difficulty_cal,
+            &[50.0, 100.0, 9999.0],
+            &[0.5, 2.0, 1000.0],
+            0.1,
+        )
+        .unwrap();
+
+        assert_eq!(alone.lower[0], with_others.lower[1]);
+        assert_eq!(alone.upper[0], with_others.upper[1]);
     }
 
     #[test]
@@ -1718,7 +1972,9 @@ mod tests {
         let result = conformal_from_pairs(
             &actuals,
             &forecasts,
+            None,
             &points,
+            None,
             0.1,
             ConformalMethod::Symmetric,
         )
@@ -1736,7 +1992,9 @@ mod tests {
         let err = conformal_from_pairs(
             &actuals,
             &forecasts,
+            None,
             &points,
+            None,
             0.1,
             ConformalMethod::Symmetric,
         )
@@ -1755,7 +2013,9 @@ mod tests {
         let result = conformal_from_pairs(
             &actuals,
             &forecasts,
+            None,
             &points,
+            None,
             0.1,
             ConformalMethod::Symmetric,
         )
@@ -1774,7 +2034,9 @@ mod tests {
         let result = conformal_from_pairs(
             &actuals,
             &forecasts,
+            None,
             &points,
+            None,
             0.1,
             ConformalMethod::Symmetric,
         )
@@ -1796,12 +2058,90 @@ mod tests {
         let err = conformal_from_pairs(
             &actuals,
             &forecasts,
+            None,
             &points,
+            None,
             0.1,
             ConformalMethod::Adaptive,
         )
         .unwrap_err();
         assert!(err.to_string().contains("difficulty"));
+    }
+
+    #[test]
+    fn test_conformal_from_pairs_symmetric_rejects_present_difficulty() {
+        let actuals: Vec<Option<f64>> = vec![Some(1.0), Some(2.0), Some(3.0)];
+        let forecasts: Vec<Option<f64>> = vec![Some(0.0), Some(0.0), Some(0.0)];
+        let difficulty: Vec<Option<f64>> = vec![Some(1.0), Some(2.0), Some(1.0)];
+        let points: Vec<Option<f64>> = vec![];
+
+        let err = conformal_from_pairs(
+            &actuals,
+            &forecasts,
+            Some(&difficulty),
+            &points,
+            None,
+            0.1,
+            ConformalMethod::Symmetric,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("only used by method 'adaptive'"));
+    }
+
+    #[test]
+    fn test_conformal_from_pairs_adaptive_with_difficulty_matches_predict_adaptive() {
+        let actuals: Vec<Option<f64>> = vec![
+            Some(100.5),
+            Some(99.0),
+            Some(101.0),
+            Some(98.0),
+            Some(102.0),
+        ];
+        let forecasts: Vec<Option<f64>> = vec![Some(100.0); 5];
+        let difficulty: Vec<Option<f64>> =
+            vec![Some(1.0), Some(2.0), Some(1.0), Some(2.0), Some(1.0)];
+        let points: Vec<Option<f64>> = vec![Some(10.0)];
+        let point_difficulty: Vec<Option<f64>> = vec![Some(2.0)];
+
+        let result = conformal_from_pairs(
+            &actuals,
+            &forecasts,
+            Some(&difficulty),
+            &points,
+            Some(&point_difficulty),
+            0.5,
+            ConformalMethod::Adaptive,
+        )
+        .unwrap();
+        assert_eq!(result.method, "adaptive");
+        assert_eq!(result.n_calibration, 5);
+
+        // Direct call with the same (already-complete) data must agree.
+        let residuals = vec![0.5, -1.0, 1.0, -2.0, 2.0];
+        let difficulty_cal = vec![1.0, 2.0, 1.0, 2.0, 1.0];
+        let direct =
+            conformal_predict_adaptive(&residuals, &difficulty_cal, &[10.0], &[2.0], 0.5).unwrap();
+        assert_relative_eq!(result.lower[0], direct.lower[0], epsilon = 1e-9);
+        assert_relative_eq!(result.upper[0], direct.upper[0], epsilon = 1e-9);
+    }
+
+    #[test]
+    fn test_conformal_calibrate_adaptive_with_difficulty() {
+        let actuals: Vec<Option<f64>> = vec![Some(101.0), Some(98.0), Some(103.0), Some(96.0)];
+        let forecasts: Vec<Option<f64>> = vec![Some(100.0); 4];
+        let difficulty: Vec<Option<f64>> = vec![Some(1.0), Some(2.0), Some(1.0), Some(2.0)];
+
+        let cal = conformal_calibrate(
+            &actuals,
+            &forecasts,
+            Some(&difficulty),
+            0.5,
+            ConformalMethod::Adaptive,
+        )
+        .unwrap();
+        assert_eq!(cal.method, ConformalMethod::Adaptive);
+        assert_eq!(cal.n_calibration, 4);
+        assert!(cal.conformity_score > 0.0);
     }
 
     #[test]
@@ -1813,7 +2153,9 @@ mod tests {
         let result = conformal_from_pairs(
             &actuals,
             &forecasts,
+            None,
             &points,
+            None,
             0.1,
             ConformalMethod::Symmetric,
         )
@@ -1823,7 +2165,9 @@ mod tests {
         let result = conformal_from_pairs(
             &actuals,
             &forecasts,
+            None,
             &points,
+            None,
             0.1,
             ConformalMethod::Asymmetric,
         )
@@ -1836,7 +2180,7 @@ mod tests {
         let actuals: Vec<Option<f64>> = vec![Some(1.0), Some(-1.0), Some(2.0)];
         let forecasts: Vec<Option<f64>> = vec![Some(0.0), Some(0.0), Some(0.0)];
 
-        let err = conformal_calibrate(&actuals, &forecasts, 0.1, ConformalMethod::Asymmetric)
+        let err = conformal_calibrate(&actuals, &forecasts, None, 0.1, ConformalMethod::Asymmetric)
             .unwrap_err();
         assert!(err.to_string().contains("supports methods"));
     }
@@ -1858,8 +2202,8 @@ mod tests {
             Some(100.0),
         ];
 
-        let cal =
-            conformal_calibrate(&actuals, &forecasts, 0.1, ConformalMethod::Symmetric).unwrap();
+        let cal = conformal_calibrate(&actuals, &forecasts, None, 0.1, ConformalMethod::Symmetric)
+            .unwrap();
         assert_eq!(cal.n_calibration, 5);
         assert_eq!(cal.method, ConformalMethod::Symmetric);
         assert!(cal.conformity_score > 0.0);
@@ -2225,6 +2569,90 @@ mod tests {
             width_1 > width_2,
             "High difficulty should have wider interval"
         );
+    }
+
+    #[test]
+    fn test_conformal_apply_adaptive_batch_independence() {
+        // Phase 16 D-08/G14: conformal_apply's Adaptive branch no longer
+        // normalises by the batch mean -- a forecast's interval doesn't
+        // depend on which other forecasts are in the same batch.
+        let residuals = vec![0.5, -0.3, 0.8, -0.2, 0.4, -0.6, 0.3, -0.4, 0.7, -0.5];
+        let cal_difficulty = vec![1.0, 2.0, 0.5, 1.5, 1.0, 0.8, 1.2, 0.9, 1.1, 1.0];
+        let profile = conformal_learn(
+            &residuals,
+            &[0.1],
+            ConformalMethod::Adaptive,
+            ConformalStrategy::Split,
+            Some(&cal_difficulty),
+        )
+        .unwrap();
+
+        let alone = conformal_apply(&[105.0], &profile, Some(&[2.0])).unwrap();
+        let with_others =
+            conformal_apply(&[1.0, 105.0, 9999.0], &profile, Some(&[0.1, 2.0, 500.0])).unwrap();
+
+        assert_eq!(alone.lower[0][0], with_others.lower[0][1]);
+        assert_eq!(alone.upper[0][0], with_others.upper[0][1]);
+    }
+
+    #[test]
+    fn test_conformal_apply_score_symmetric() {
+        let forecasts: Vec<Option<f64>> = vec![Some(100.0), None, Some(110.0)];
+        let (lower, upper) =
+            conformal_apply_score(&forecasts, 5.0, ConformalMethod::Symmetric, &[]).unwrap();
+        assert_eq!(lower[0], 95.0);
+        assert_eq!(upper[0], 105.0);
+        assert!(lower[1].is_nan());
+        assert!(upper[1].is_nan());
+        assert_eq!(lower[2], 105.0);
+        assert_eq!(upper[2], 115.0);
+    }
+
+    #[test]
+    fn test_conformal_apply_score_symmetric_rejects_present_difficulty() {
+        let forecasts: Vec<Option<f64>> = vec![Some(100.0)];
+        let difficulty: Vec<Option<f64>> = vec![Some(1.0)];
+        let err = conformal_apply_score(&forecasts, 5.0, ConformalMethod::Symmetric, &difficulty)
+            .unwrap_err();
+        assert!(err.to_string().contains("only used by method 'adaptive'"));
+    }
+
+    #[test]
+    fn test_conformal_apply_score_asymmetric_is_rejected() {
+        let forecasts: Vec<Option<f64>> = vec![Some(100.0)];
+        let err =
+            conformal_apply_score(&forecasts, 5.0, ConformalMethod::Asymmetric, &[]).unwrap_err();
+        assert!(matches!(err, ForecastError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn test_conformal_apply_score_adaptive_requires_difficulty() {
+        let forecasts: Vec<Option<f64>> = vec![Some(100.0)];
+        let err =
+            conformal_apply_score(&forecasts, 5.0, ConformalMethod::Adaptive, &[]).unwrap_err();
+        assert!(err.to_string().contains("difficulty"));
+    }
+
+    #[test]
+    fn test_conformal_apply_score_adaptive_missing_difficulty_at_present_forecast_is_nan() {
+        let forecasts: Vec<Option<f64>> = vec![Some(100.0), Some(105.0)];
+        let difficulty: Vec<Option<f64>> = vec![Some(2.0), None];
+        let (lower, upper) =
+            conformal_apply_score(&forecasts, 3.0, ConformalMethod::Adaptive, &difficulty).unwrap();
+        assert_eq!(lower[0], 94.0);
+        assert_eq!(upper[0], 106.0);
+        assert!(lower[1].is_nan());
+        assert!(upper[1].is_nan());
+    }
+
+    #[test]
+    fn test_conformal_apply_score_infinite_score_is_unbounded() {
+        let forecasts: Vec<Option<f64>> = vec![Some(100.0)];
+        let (lower, upper) =
+            conformal_apply_score(&forecasts, f64::INFINITY, ConformalMethod::Symmetric, &[])
+                .unwrap();
+        assert_eq!(lower[0], f64::NEG_INFINITY);
+        assert_eq!(upper[0], f64::INFINITY);
     }
 
     #[test]

@@ -295,6 +295,95 @@ ORDER BY score;
 -- ============================================================================
 
 -- ============================================================================
+-- SECTION 7: Adaptive Conformal Prediction (Phase 16 D-08)
+-- ============================================================================
+-- Adaptive conformal scales the interval by an explicit per-row DIFFICULTY
+-- column (e.g. a volatility proxy) at BOTH calibration and prediction time:
+-- scores are |residual| / difficulty, and bounds are point +/- q * difficulty
+-- USING THE DIFFICULTY AS GIVEN -- no batch-mean normalisation, so a row's
+-- interval never depends on which other forecasts happen to be in the same
+-- batch.
+
+.print ''
+.print '>>> SECTION 7: Adaptive Conformal Prediction'
+.print '-----------------------------------------------------------------------------'
+
+-- A per-period rolling volatility proxy stands in for a real difficulty
+-- estimate: periods with larger recent swings get a larger difficulty value,
+-- so their prediction interval widens accordingly.
+CREATE OR REPLACE TABLE adaptive_backtest AS
+SELECT
+    product_id,
+    period,
+    actual,
+    forecast,
+    point_forecast,
+    -- difficulty: 1.0 in the calm first half, 3.0 in the volatile second half
+    CASE WHEN period <= 20 THEN 1.0 ELSE 3.0 END AS difficulty
+FROM backtest_with_forecasts
+WHERE product_id = 'Product_A';
+
+.print 'Section 7.1: One-step adaptive conformal via ts_conformal_by'
+SELECT * FROM ts_conformal_by(
+    'adaptive_backtest', product_id, period, actual, forecast, point_forecast,
+    params := {'method': 'adaptive'}, difficulty_col := difficulty
+);
+
+.print ''
+.print 'Section 7.2: Two-step adaptive conformal (calibrate -> apply)'
+CREATE OR REPLACE TABLE adaptive_calibration AS
+SELECT * FROM ts_conformal_calibrate(
+    'adaptive_backtest', product_id, actual, forecast,
+    params := {'method': 'adaptive'}, difficulty_col := difficulty
+);
+
+.print 'Adaptive calibration profile:'
+SELECT * FROM adaptive_calibration;
+
+CREATE OR REPLACE TABLE adaptive_future AS
+SELECT product_id, period, point_forecast,
+    CASE WHEN period <= 42 THEN 1.0 ELSE 3.0 END AS difficulty
+FROM backtest_with_forecasts
+WHERE product_id = 'Product_A' AND point_forecast IS NOT NULL;
+
+SELECT * FROM ts_conformal_apply_by(
+    'adaptive_future', product_id, period, point_forecast, 'adaptive_calibration',
+    difficulty_col := difficulty
+);
+
+-- ============================================================================
+-- SECTION 8: Insufficient Calibration (Phase 16 D-05)
+-- ============================================================================
+-- When ceil((n+1)(1-alpha)) > n, no finite-sample interval exists at this
+-- (n, alpha) -- the macros report NULL bounds/score/coverage plus an
+-- explicit calibration_insufficient = true flag, instead of silently
+-- clamping to the maximum observed residual.
+
+.print ''
+.print '>>> SECTION 8: Insufficient Calibration'
+.print '-----------------------------------------------------------------------------'
+
+CREATE OR REPLACE TABLE tiny_backtest AS
+SELECT * FROM (
+    VALUES
+        ('Tiny_Series', 1, 101.0, 100.0, NULL::DOUBLE),
+        ('Tiny_Series', 2, 102.0, 100.0, NULL::DOUBLE),
+        ('Tiny_Series', 3, 103.0, 100.0, NULL::DOUBLE),
+        ('Tiny_Series', 4, 104.0, 100.0, NULL::DOUBLE),
+        ('Tiny_Series', 5, 105.0, 100.0, NULL::DOUBLE),
+        ('Tiny_Series', 6, NULL, NULL, 10.0)
+) AS t(series_id, period, actual, forecast, point_forecast);
+
+.print 'With only 5 calibration residuals, alpha 0.1 is INSUFFICIENT (ceil(6*0.9)=6 > 5):'
+SELECT * FROM ts_conformal_by('tiny_backtest', series_id, period, actual, forecast, point_forecast,
+    MAP{'alpha': '0.1'});
+
+.print ''
+.print 'The same series at alpha 0.2 is sufficient (ceil(6*0.8)=5 <= 5):'
+SELECT * FROM ts_conformal_by('tiny_backtest', series_id, period, actual, forecast, point_forecast,
+    MAP{'alpha': '0.2'});
+
+-- ============================================================================
 -- CLEANUP
 -- ============================================================================
 
@@ -308,6 +397,10 @@ DROP TABLE IF EXISTS retail_backtest;
 DROP TABLE IF EXISTS future_forecasts;
 DROP TABLE IF EXISTS literal_calibration;
 DROP TABLE IF EXISTS per_series_calibration;
+DROP TABLE IF EXISTS adaptive_backtest;
+DROP TABLE IF EXISTS adaptive_calibration;
+DROP TABLE IF EXISTS adaptive_future;
+DROP TABLE IF EXISTS tiny_backtest;
 
 .print 'All tables cleaned up.'
 .print ''

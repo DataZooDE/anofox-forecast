@@ -19,7 +19,8 @@ mod common;
 
 use anofox_fcst_core::conformal::{
     conformal_apply, conformal_calibrate, conformal_from_pairs, conformal_learn,
-    conformal_predict_asymmetric, conformal_quantile, ConformalMethod, ConformalStrategy,
+    conformal_predict_adaptive, conformal_predict_asymmetric, conformal_quantile, ConformalMethod,
+    ConformalStrategy,
 };
 use approx::assert_relative_eq;
 use common::{f64_vec, load_fixture, tolerance};
@@ -64,7 +65,9 @@ fn conformal_from_pairs_matches_numpy_per_group() {
             let result = conformal_from_pairs(
                 &actual_opt,
                 &forecast_opt,
+                None,
                 &point_opt,
+                None,
                 alpha,
                 ConformalMethod::Symmetric,
             )
@@ -163,6 +166,7 @@ fn conformal_calibrate_pooled_matches_numpy() {
         let cal = conformal_calibrate(
             &pooled_actual,
             &pooled_forecast,
+            None,
             alpha,
             ConformalMethod::Symmetric,
         )
@@ -251,6 +255,7 @@ fn split_insufficiency_cases_match_numpy() {
             let cal = conformal_calibrate(
                 &actual_opt,
                 &forecast_opt,
+                None,
                 alpha,
                 ConformalMethod::Symmetric,
             )
@@ -322,6 +327,7 @@ fn n0_is_always_insufficient_not_an_error() {
         let cal = conformal_calibrate(
             &empty_actual,
             &empty_forecast,
+            None,
             alpha,
             ConformalMethod::Symmetric,
         )
@@ -360,7 +366,9 @@ fn insufficient_n5_from_pairs_end_to_end() {
         let result = conformal_from_pairs(
             &actual_opt,
             &forecast_opt,
+            None,
             &point_opt,
+            None,
             alpha,
             ConformalMethod::Symmetric,
         )
@@ -848,5 +856,243 @@ fn monte_carlo_symmetric_and_asymmetric_coverage_matches_numpy() {
                 "{ctx} mean_width: got {got_width}, want {want_width}, rel_diff {rel_diff}"
             );
         }
+    }
+}
+
+// ============================================================================
+// Phase 16 plan 16-02 Task 3: D-08 adaptive conformal with explicit
+// calibration/prediction difficulty, heteroscedastic Monte Carlo, batch
+// independence.
+// ============================================================================
+
+/// `adaptive_n20`: q 1.905, coverage 0.95 at alpha 0.1; half-widths
+/// [1.905, 3.81, 0.9525] for point 10 with d [1, 2, 0.5] (hand-checked by
+/// the planner).
+#[test]
+fn adaptive_n20_matches_numpy() {
+    let fx = load_fixture("conformal/adaptive_cases.json");
+    let score_abs = tolerance(&fx, "score_abs");
+    let coverage_abs = tolerance(&fx, "coverage_abs");
+    let case = &fx["adaptive_n20"];
+
+    let actual = f64_vec(&case["actual"]);
+    let forecast = f64_vec(&case["forecast"]);
+    let difficulty = f64_vec(&case["difficulty"]);
+    let residuals: Vec<f64> = actual
+        .iter()
+        .zip(forecast.iter())
+        .map(|(a, f)| a - f)
+        .collect();
+
+    let future_point = f64_vec(&case["future_point"]);
+    let future_difficulty = f64_vec(&case["future_difficulty"]);
+
+    let expected = &case["alphas"]["0.1"];
+    let result = conformal_predict_adaptive(
+        &residuals,
+        &difficulty,
+        &future_point,
+        &future_difficulty,
+        0.1,
+    )
+    .unwrap();
+
+    assert!(!result.calibration_insufficient);
+    common::assert_close(
+        result.conformity_score,
+        common::num(&expected["conformity_score"]),
+        score_abs,
+        0.0,
+        "adaptive_n20 conformity_score",
+    );
+    common::assert_close(
+        result.coverage,
+        common::num(&expected["coverage"]),
+        coverage_abs,
+        0.0,
+        "adaptive_n20 coverage",
+    );
+
+    // Half-widths [1.905, 3.81, 0.9525] for d = [1, 2, 0.5].
+    let expected_half_widths = [1.905, 3.81, 0.9525];
+    for (i, &want) in expected_half_widths.iter().enumerate() {
+        let half_width = result.upper[i] - result.point[i];
+        common::assert_close(
+            half_width,
+            want,
+            1e-9,
+            0.0,
+            &format!("adaptive_n20 half_width[{i}]"),
+        );
+    }
+}
+
+/// `seeded.{seeded_n99,seeded_n199}`: numpy-drawn (residuals, difficulty)
+/// pairs reproduced exactly by `conformal_predict_adaptive`.
+#[test]
+fn adaptive_seeded_cases_match_numpy() {
+    let fx = load_fixture("conformal/adaptive_cases.json");
+    let score_abs = tolerance(&fx, "score_abs");
+    let coverage_abs = tolerance(&fx, "coverage_abs");
+
+    let seeded = fx["seeded"]
+        .as_object()
+        .expect("adaptive_seeded_cases_match_numpy: 'seeded' is not an object");
+    assert_eq!(seeded.len(), 2);
+
+    for (name, case) in seeded {
+        let residuals = f64_vec(&case["residuals"]);
+        let difficulty = f64_vec(&case["difficulty"]);
+        let alpha = common::num(&case["alpha"]);
+
+        let result = conformal_predict_adaptive(&residuals, &difficulty, &[10.0], &[1.0], alpha)
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert!(
+            !result.calibration_insufficient,
+            "{name}: unexpectedly insufficient"
+        );
+
+        common::assert_close(
+            result.conformity_score,
+            common::num(&case["conformity_score"]),
+            score_abs,
+            0.0,
+            &format!("{name} conformity_score"),
+        );
+        common::assert_close(
+            result.coverage,
+            common::num(&case["coverage"]),
+            coverage_abs,
+            0.0,
+            &format!("{name} coverage"),
+        );
+    }
+}
+
+/// The d = 2 forecast predicted ALONE, with [1, 0.5] neighbours, and with
+/// [100, 0.01] neighbours returns the IDENTICAL interval (exact equality,
+/// not a tolerance) -- Phase 16 D-08/G14: no batch-mean normalisation.
+#[test]
+fn adaptive_batch_independence_exact_equality() {
+    let fx = load_fixture("conformal/adaptive_cases.json");
+    let case = &fx["adaptive_n20"];
+    let actual = f64_vec(&case["actual"]);
+    let forecast = f64_vec(&case["forecast"]);
+    let difficulty = f64_vec(&case["difficulty"]);
+    let residuals: Vec<f64> = actual
+        .iter()
+        .zip(forecast.iter())
+        .map(|(a, f)| a - f)
+        .collect();
+
+    let alone = conformal_predict_adaptive(&residuals, &difficulty, &[10.0], &[2.0], 0.1).unwrap();
+    let with_small_neighbours = conformal_predict_adaptive(
+        &residuals,
+        &difficulty,
+        &[10.0, 10.0, 10.0],
+        &[1.0, 2.0, 0.5],
+        0.1,
+    )
+    .unwrap();
+    let with_extreme_neighbours = conformal_predict_adaptive(
+        &residuals,
+        &difficulty,
+        &[10.0, 10.0, 10.0],
+        &[100.0, 2.0, 0.01],
+        0.1,
+    )
+    .unwrap();
+
+    assert_eq!(alone.lower[0], with_small_neighbours.lower[1]);
+    assert_eq!(alone.upper[0], with_small_neighbours.upper[1]);
+    assert_eq!(alone.lower[0], with_extreme_neighbours.lower[1]);
+    assert_eq!(alone.upper[0], with_extreme_neighbours.upper[1]);
+}
+
+/// Heteroscedastic Monte Carlo (`r = d * N(0, 1)`, `d ~ U(0.5, 3)`, seed
+/// 16103): Rust's independent SplitMix64 simulation agrees with numpy's
+/// PCG64 simulation within the fixture's tolerance (G14, CONF-04).
+#[test]
+fn adaptive_heteroscedastic_monte_carlo_coverage_matches_numpy() {
+    let fx = load_fixture("conformal/monte_carlo.json");
+    let coverage_abs = tolerance(&fx, "coverage_abs");
+    let mean_width_rel = tolerance(&fx, "mean_width_rel");
+
+    let trials = common::num(&fx["params"]["trials"]) as usize;
+    let n_cal = common::num(&fx["params"]["n_cal"]) as usize;
+    let m_test = common::num(&fx["params"]["m_test"]) as usize;
+    let alphas: Vec<f64> = fx["params"]["alphas"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(common::num)
+        .collect();
+
+    let mut rng = SplitMix64::new(16103);
+    let mut covered: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut total: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut width_sum: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+    for &a in &alphas {
+        covered.insert(format!("{a}"), 0);
+        total.insert(format!("{a}"), 0);
+        width_sum.insert(format!("{a}"), 0.0);
+    }
+
+    for _ in 0..trials {
+        let d_cal: Vec<f64> = (0..n_cal).map(|_| 0.5 + 2.5 * rng.next_open01()).collect();
+        let r_cal: Vec<f64> = d_cal
+            .iter()
+            .map(|&d| d * rng.next_standard_normal())
+            .collect();
+        let d_test: Vec<f64> = (0..m_test).map(|_| 0.5 + 2.5 * rng.next_open01()).collect();
+        let r_test: Vec<f64> = d_test
+            .iter()
+            .map(|&d| d * rng.next_standard_normal())
+            .collect();
+
+        for &alpha in &alphas {
+            let result =
+                conformal_predict_adaptive(&r_cal, &d_cal, &vec![0.0; m_test], &d_test, alpha)
+                    .unwrap();
+
+            let key = format!("{alpha}");
+            let n_covered = r_test
+                .iter()
+                .zip(result.lower.iter())
+                .zip(result.upper.iter())
+                .filter(|((&r, &lo), &up)| r >= lo && r <= up)
+                .count();
+            *covered.get_mut(&key).unwrap() += n_covered;
+            *total.get_mut(&key).unwrap() += m_test;
+            let mean_width: f64 = result
+                .lower
+                .iter()
+                .zip(result.upper.iter())
+                .map(|(&lo, &up)| up - lo)
+                .sum::<f64>()
+                / m_test as f64;
+            *width_sum.get_mut(&key).unwrap() += mean_width;
+        }
+    }
+
+    for &alpha in &alphas {
+        let key = format!("{alpha}");
+        let got_cov = covered[&key] as f64 / total[&key] as f64;
+        let got_width = width_sum[&key] / trials as f64;
+
+        let expected = &fx["results"]["adaptive"]["heteroscedastic"][&key];
+        let want_cov = common::num(&expected["coverage"]);
+        let want_width = common::num(&expected["mean_width"]);
+
+        let ctx = format!("adaptive heteroscedastic alpha {alpha}");
+        assert!(
+            (got_cov - want_cov).abs() <= coverage_abs,
+            "{ctx} coverage: got {got_cov}, want {want_cov}"
+        );
+        let rel_diff = (got_width - want_width).abs() / want_width.abs();
+        assert!(
+            rel_diff <= mean_width_rel,
+            "{ctx} mean_width: got {got_width}, want {want_width}, rel_diff {rel_diff}"
+        );
     }
 }

@@ -3181,9 +3181,15 @@ bool anofox_ts_conformal_from_pairs(const double *cal_actuals,
                                     const double *cal_forecasts,
                                     const uint64_t *cal_forecasts_validity,
                                     size_t cal_forecasts_len,
+                                    const double *cal_difficulty,
+                                    const uint64_t *cal_difficulty_validity,
+                                    size_t cal_difficulty_len,
                                     const double *point_forecasts,
                                     const uint64_t *point_validity,
                                     size_t point_len,
+                                    const double *point_difficulty,
+                                    const uint64_t *point_difficulty_validity,
+                                    size_t point_difficulty_len,
                                     double alpha,
                                     const char *method,
                                     struct ConformalResultFFI *out_result,
@@ -3206,6 +3212,9 @@ bool anofox_ts_conformal_calibrate(const double *actuals,
                                    const double *forecasts,
                                    const uint64_t *forecasts_validity,
                                    size_t forecasts_len,
+                                   const double *difficulty,
+                                   const uint64_t *difficulty_validity,
+                                   size_t difficulty_len,
                                    double alpha,
                                    const char *method,
                                    struct ConformalCalibrationFFI *out_result,
@@ -3240,8 +3249,11 @@ bool anofox_ts_conformal_predict_multi(const double *residuals,
 bool anofox_ts_conformal_predict_adaptive(const double *residuals,
                                           const uint64_t *residuals_validity,
                                           size_t residuals_length,
+                                          const double *difficulty_cal,
+                                          const uint64_t *difficulty_cal_validity,
                                           const double *forecasts,
-                                          const double *difficulty,
+                                          const double *difficulty_pred,
+                                          const uint64_t *difficulty_pred_validity,
                                           size_t forecasts_length,
                                           double alpha,
                                           struct ConformalResultFFI *out_result,
@@ -3305,6 +3317,7 @@ bool anofox_ts_conformal_learn(const double *residuals,
                                enum ConformalMethodFFI method,
                                enum ConformalStrategyFFI strategy,
                                const double *difficulty,
+                               const uint64_t *difficulty_validity,
                                struct CalibrationProfileFFI *out_profile,
                                struct AnofoxError *out_error);
 
@@ -3319,8 +3332,34 @@ bool anofox_ts_conformal_apply(const double *forecasts,
                                size_t n_forecasts,
                                const struct CalibrationProfileFFI *profile,
                                const double *difficulty,
+                               const uint64_t *difficulty_validity,
                                struct PredictionIntervalsFFI *out_intervals,
                                struct AnofoxError *out_error);
+
+/**
+ * Applies a single pre-computed conformity `score` to `forecasts`,
+ * optionally scaled by a per-row `difficulty` (Phase 16 D-08, CONF-04).
+ * Backs the SQL `ts_conformal_intervals(forecasts, conformity_score,
+ * method, difficulty)` 4-arg overload.
+ *
+ * A null `method` pointer means "symmetric". A null `difficulty` pointer
+ * or zero `difficulty_len` means "no difficulty_col at all" (never calls
+ * `from_raw_parts` on a null pointer with nonzero length).
+ *
+ * # Safety
+ * All non-null pointer arguments must be valid.
+ */
+bool anofox_ts_conformal_apply_score(const double *forecasts,
+                                     const uint64_t *forecasts_validity,
+                                     size_t n_forecasts,
+                                     double score,
+                                     const char *method,
+                                     const double *difficulty,
+                                     const uint64_t *difficulty_validity,
+                                     size_t difficulty_len,
+                                     double **out_lower,
+                                     double **out_upper,
+                                     struct AnofoxError *out_error);
 
 /**
  * Compute empirical coverage of prediction intervals.

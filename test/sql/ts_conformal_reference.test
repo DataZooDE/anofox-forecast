@@ -575,3 +575,131 @@ statement error
 SELECT ts_conformal_predict_per_step([1.0, 2.0]::DOUBLE[], [1.0, 2.0]::DOUBLE[], [1.0]::DOUBLE[], 0.0, 1);
 ----
 got 0
+
+# =============================================================================
+# 16-02 adaptive (Task 3)
+# =============================================================================
+#
+# adaptive_n20: d_i = 1 + (i % 4), residual_i = (i + 1) * 0.1 * (+1 if i even
+# else -1) * d_i, actual = 100 + residual, forecast = 100
+# (validation/reference/fixtures/conformal/adaptive_cases.json#adaptive_n20).
+# alpha 0.1 -> q 1.905, coverage 0.95. Prediction point 10 with d 1/2/0.5 ->
+# half-widths 1.905/3.81/0.9525.
+
+statement ok
+CREATE TABLE cad(g VARCHAR, dt INTEGER, a DOUBLE, f DOUBLE, d DOUBLE, p DOUBLE);
+
+statement ok
+INSERT INTO cad VALUES
+  ('g', 0, 100.1, 100.0, 1.0, NULL),
+  ('g', 1, 99.6, 100.0, 2.0, NULL),
+  ('g', 2, 100.9, 100.0, 3.0, NULL),
+  ('g', 3, 98.4, 100.0, 4.0, NULL),
+  ('g', 4, 100.5, 100.0, 1.0, NULL),
+  ('g', 5, 98.8, 100.0, 2.0, NULL),
+  ('g', 6, 102.1, 100.0, 3.0, NULL),
+  ('g', 7, 96.8, 100.0, 4.0, NULL),
+  ('g', 8, 100.9, 100.0, 1.0, NULL),
+  ('g', 9, 98.0, 100.0, 2.0, NULL),
+  ('g', 10, 103.3, 100.0, 3.0, NULL),
+  ('g', 11, 95.2, 100.0, 4.0, NULL),
+  ('g', 12, 101.3, 100.0, 1.0, NULL),
+  ('g', 13, 97.2, 100.0, 2.0, NULL),
+  ('g', 14, 104.5, 100.0, 3.0, NULL),
+  ('g', 15, 93.6, 100.0, 4.0, NULL),
+  ('g', 16, 101.7, 100.0, 1.0, NULL),
+  ('g', 17, 96.4, 100.0, 2.0, NULL),
+  ('g', 18, 105.7, 100.0, 3.0, NULL),
+  ('g', 19, 92.0, 100.0, 4.0, NULL),
+  ('g', 100, NULL, NULL, 1.0, 10.0),
+  ('g', 101, NULL, NULL, 2.0, 10.0),
+  ('g', 102, NULL, NULL, 0.5, 10.0);
+
+# --- ts_conformal_by adaptive: half-widths 1.905/3.81/0.9525 (in date_col
+# order: d=1, d=2, d=0.5), coverage 0.95 on every row ---
+query I
+SELECT STRING_AGG(printf('%.4f', ABS(lower - point)), ',' ORDER BY date_col)
+FROM ts_conformal_by('cad', g, dt, a, f, p, params := {'method': 'adaptive'}, difficulty_col := d);
+----
+1.9050,3.8100,0.9525
+
+query I
+SELECT bool_and(ABS(coverage - 0.95) < 1e-9)
+FROM ts_conformal_by('cad', g, dt, a, f, p, params := {'method': 'adaptive'}, difficulty_col := d);
+----
+true
+
+# --- ts_conformal_calibrate adaptive: q 1.905, method 'adaptive' ---
+statement ok
+CREATE TABLE cal_adaptive AS SELECT * FROM ts_conformal_calibrate('cad', g, a, f, params := {'method': 'adaptive'}, difficulty_col := d);
+
+query I
+SELECT ABS(conformity_score - 1.9050000000000011) < 1e-9 AND method = 'adaptive' AND n_calibration = 20 AND NOT calibration_insufficient
+FROM cal_adaptive;
+----
+true
+
+# --- ts_conformal_apply_by with difficulty_col: (a) full future table, (b) a
+# table holding only the d=2 row -> identical bounds for that row (batch
+# independence through the macro path) ---
+statement ok
+CREATE TABLE cfut_full(g VARCHAR, dt INTEGER, fc DOUBLE, d DOUBLE);
+
+statement ok
+INSERT INTO cfut_full VALUES ('g', 100, 10.0, 1.0), ('g', 101, 10.0, 2.0), ('g', 102, 10.0, 0.5);
+
+statement ok
+CREATE TABLE cfut_d2_only(g VARCHAR, dt INTEGER, fc DOUBLE, d DOUBLE);
+
+statement ok
+INSERT INTO cfut_d2_only VALUES ('g', 101, 10.0, 2.0);
+
+query I
+SELECT
+    (SELECT lower FROM ts_conformal_apply_by('cfut_full', g, dt, fc, 'cal_adaptive', difficulty_col := d) WHERE date_col = 101)
+    = (SELECT lower FROM ts_conformal_apply_by('cfut_d2_only', g, dt, fc, 'cal_adaptive', difficulty_col := d))
+    AND (SELECT upper FROM ts_conformal_apply_by('cfut_full', g, dt, fc, 'cal_adaptive', difficulty_col := d) WHERE date_col = 101)
+    = (SELECT upper FROM ts_conformal_apply_by('cfut_d2_only', g, dt, fc, 'cal_adaptive', difficulty_col := d));
+----
+true
+
+# --- ts_conformal_intervals 4-arg on lists ---
+query I
+SELECT ABS((r).upper[1] - 11.905) < 1e-9 AND ABS((r).upper[2] - 13.81) < 1e-9 AND ABS((r).upper[3] - 10.9525) < 1e-9
+FROM (SELECT ts_conformal_intervals([10.0, 10.0, 10.0]::DOUBLE[], 1.9050000000000011, 'adaptive', [1.0, 2.0, 0.5]::DOUBLE[]) AS r);
+----
+true
+
+# --- ts_conformal_learn / ts_conformal_apply overloads (over the SAME
+# adaptive_n20 residuals/difficulty cad holds) reproduce q 1.905 and the
+# macro's own half-width for d=1 (1.905) ---
+query I
+SELECT ABS((ts_conformal_apply(
+        [10.0]::DOUBLE[],
+        ts_conformal_learn(lst.r, [0.1]::DOUBLE[], 'adaptive', 'split', lst.d),
+        [1.0]::DOUBLE[]
+    )).upper[1] - 11.905) < 1e-9
+FROM (
+    SELECT LIST(a - f ORDER BY dt) AS r, LIST(d ORDER BY dt) AS d
+    FROM cad WHERE a IS NOT NULL
+) lst;
+----
+true
+
+# --- adaptive without difficulty_col errors naming "difficulty" ---
+statement error
+SELECT * FROM ts_conformal_by('cad', g, dt, a, f, p, params := {'method': 'adaptive'});
+----
+difficulty
+
+# --- symmetric with difficulty_col errors "only used by method 'adaptive'" ---
+statement error
+SELECT * FROM ts_conformal_by('cad', g, dt, a, f, p, difficulty_col := d);
+----
+only used by method 'adaptive'
+
+# --- a difficulty of 0 errors naming "difficulty" ---
+statement error
+SELECT ts_conformal_learn([1.0, -2.0]::DOUBLE[], [0.5]::DOUBLE[], 'adaptive', 'split', [0.0, 2.0]::DOUBLE[]);
+----
+difficulty

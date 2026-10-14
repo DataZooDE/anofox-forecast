@@ -5462,9 +5462,15 @@ pub unsafe extern "C" fn anofox_ts_conformal_from_pairs(
     cal_forecasts: *const c_double,
     cal_forecasts_validity: *const u64,
     cal_forecasts_len: size_t,
+    cal_difficulty: *const c_double,
+    cal_difficulty_validity: *const u64,
+    cal_difficulty_len: size_t,
     point_forecasts: *const c_double,
     point_validity: *const u64,
     point_len: size_t,
+    point_difficulty: *const c_double,
+    point_difficulty_validity: *const u64,
+    point_difficulty_len: size_t,
     alpha: c_double,
     method: *const c_char,
     out_result: *mut ConformalResultFFI,
@@ -5488,10 +5494,31 @@ pub unsafe extern "C" fn anofox_ts_conformal_from_pairs(
         } else {
             build_series(cal_forecasts, cal_forecasts_validity, cal_forecasts_len)
         };
+        // Phase 16 D-08: null pointer or zero length = "no difficulty_col at
+        // all" (never calls from_raw_parts on a null pointer with nonzero
+        // length).
+        let cal_difficulty_series = if cal_difficulty.is_null() || cal_difficulty_len == 0 {
+            None
+        } else {
+            Some(build_series(
+                cal_difficulty,
+                cal_difficulty_validity,
+                cal_difficulty_len,
+            ))
+        };
         let point_series = if point_len == 0 {
             Vec::new()
         } else {
             build_series(point_forecasts, point_validity, point_len)
+        };
+        let point_difficulty_series = if point_difficulty.is_null() || point_difficulty_len == 0 {
+            None
+        } else {
+            Some(build_series(
+                point_difficulty,
+                point_difficulty_validity,
+                point_difficulty_len,
+            ))
         };
 
         let method_str = if method.is_null() {
@@ -5511,7 +5538,9 @@ pub unsafe extern "C" fn anofox_ts_conformal_from_pairs(
         anofox_fcst_core::conformal_from_pairs(
             &actuals_series,
             &forecasts_series,
+            cal_difficulty_series.as_deref(),
             &point_series,
+            point_difficulty_series.as_deref(),
             alpha,
             parsed_method,
         )
@@ -5554,6 +5583,9 @@ pub unsafe extern "C" fn anofox_ts_conformal_calibrate(
     forecasts: *const c_double,
     forecasts_validity: *const u64,
     forecasts_len: size_t,
+    difficulty: *const c_double,
+    difficulty_validity: *const u64,
+    difficulty_len: size_t,
     alpha: c_double,
     method: *const c_char,
     out_result: *mut ConformalCalibrationFFI,
@@ -5577,6 +5609,16 @@ pub unsafe extern "C" fn anofox_ts_conformal_calibrate(
         } else {
             build_series(forecasts, forecasts_validity, forecasts_len)
         };
+        // Phase 16 D-08: null pointer or zero length = "no difficulty_col".
+        let difficulty_series = if difficulty.is_null() || difficulty_len == 0 {
+            None
+        } else {
+            Some(build_series(
+                difficulty,
+                difficulty_validity,
+                difficulty_len,
+            ))
+        };
 
         let method_str = if method.is_null() {
             "symmetric"
@@ -5595,6 +5637,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_calibrate(
         anofox_fcst_core::conformal_calibrate(
             &actuals_series,
             &forecasts_series,
+            difficulty_series.as_deref(),
             alpha,
             parsed_method,
         )
@@ -5684,8 +5727,11 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict_adaptive(
     residuals: *const c_double,
     residuals_validity: *const u64,
     residuals_length: size_t,
+    difficulty_cal: *const c_double,
+    difficulty_cal_validity: *const u64,
     forecasts: *const c_double,
-    difficulty: *const c_double,
+    difficulty_pred: *const c_double,
+    difficulty_pred_validity: *const u64,
     forecasts_length: size_t,
     alpha: c_double,
     out_result: *mut ConformalResultFFI,
@@ -5693,20 +5739,31 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict_adaptive(
 ) -> bool {
     init_error(out_error);
 
-    if residuals.is_null() || forecasts.is_null() || difficulty.is_null() || out_result.is_null() {
+    if residuals.is_null()
+        || difficulty_cal.is_null()
+        || forecasts.is_null()
+        || difficulty_pred.is_null()
+        || out_result.is_null()
+    {
         set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
         return false;
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let residual_series = build_series(residuals, residuals_validity, residuals_length);
-        let residual_values: Vec<f64> = residual_series.iter().filter_map(|v| *v).collect();
+        // Phase 16 D-08: NaN-for-NULL (not drop-then-filter) so residuals
+        // and difficulty_cal stay index-aligned -- conformal_predict_adaptive
+        // itself does the complete-case filtering.
+        let residual_values = build_values(residuals, residuals_validity, residuals_length);
+        let difficulty_cal_values =
+            build_values(difficulty_cal, difficulty_cal_validity, residuals_length);
         let forecast_slice = std::slice::from_raw_parts(forecasts, forecasts_length);
-        let difficulty_slice = std::slice::from_raw_parts(difficulty, forecasts_length);
+        let difficulty_pred_values =
+            build_values(difficulty_pred, difficulty_pred_validity, forecasts_length);
         anofox_fcst_core::conformal_predict_adaptive(
             &residual_values,
+            &difficulty_cal_values,
             forecast_slice,
-            difficulty_slice,
+            &difficulty_pred_values,
             alpha,
         )
     }));
@@ -5898,6 +5955,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_learn(
     method: types::ConformalMethodFFI,
     strategy: types::ConformalStrategyFFI,
     difficulty: *const c_double, // Optional, can be null for non-adaptive
+    difficulty_validity: *const u64,
     out_profile: *mut types::CalibrationProfileFFI,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -5910,13 +5968,21 @@ pub unsafe extern "C" fn anofox_ts_conformal_learn(
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let residual_series = build_series(residuals, residuals_validity, residuals_length);
-        let residual_values = anofox_fcst_core::drop_missing(&residual_series);
         let alpha_slice = std::slice::from_raw_parts(alphas, n_alphas);
 
-        let difficulty_opt = if difficulty.is_null() {
-            None
+        // Phase 16 D-08: (residual, difficulty) kept aligned by complete-case
+        // filtering BEFORE any residual is dropped -- dropping residuals
+        // first (the pre-16-02 behaviour) would silently misalign the two
+        // arrays as soon as any residual is missing.
+        let (residual_values, difficulty_opt): (Vec<f64>, Option<Vec<f64>>) = if difficulty
+            .is_null()
+        {
+            (anofox_fcst_core::drop_missing(&residual_series), None)
         } else {
-            Some(std::slice::from_raw_parts(difficulty, residuals_length))
+            let difficulty_series = build_series(difficulty, difficulty_validity, residuals_length);
+            let complete =
+                anofox_fcst_core::complete_cases(&[&residual_series, &difficulty_series])?;
+            (complete[0].clone(), Some(complete[1].clone()))
         };
 
         anofox_fcst_core::conformal_learn(
@@ -5924,7 +5990,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_learn(
             alpha_slice,
             method.into(),
             strategy.into(),
-            difficulty_opt,
+            difficulty_opt.as_deref(),
         )
     }));
 
@@ -5959,6 +6025,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_apply(
     n_forecasts: size_t,
     profile: *const types::CalibrationProfileFFI,
     difficulty: *const c_double, // Optional, can be null for non-adaptive
+    difficulty_validity: *const u64,
     out_intervals: *mut types::PredictionIntervalsFFI,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -5999,14 +6066,20 @@ pub unsafe extern "C" fn anofox_ts_conformal_apply(
             n_residuals: profile_ref.n_residuals,
         };
 
-        let difficulty_opt = if difficulty.is_null() {
+        // Phase 16 D-08: NaN-for-NULL (not drop) -- a missing prediction
+        // difficulty must give NaN bounds at that position only, never
+        // shift or drop other forecasts.
+        let difficulty_opt: Option<Vec<f64>> = if difficulty.is_null() {
             None
         } else {
-            Some(std::slice::from_raw_parts(difficulty, n_forecasts))
+            Some(build_values(difficulty, difficulty_validity, n_forecasts))
         };
 
-        let mut intervals =
-            anofox_fcst_core::conformal_apply(forecast_slice, &core_profile, difficulty_opt)?;
+        let mut intervals = anofox_fcst_core::conformal_apply(
+            forecast_slice,
+            &core_profile,
+            difficulty_opt.as_deref(),
+        )?;
         anofox_fcst_core::propagate_missing(&mut intervals.point, &forecast_series);
         for level_lower in intervals.lower.iter_mut() {
             anofox_fcst_core::propagate_missing(level_lower, &forecast_series);
@@ -6031,6 +6104,107 @@ pub unsafe extern "C" fn anofox_ts_conformal_apply(
                 out_error,
                 ErrorCode::PanicCaught,
                 "Panic in conformal_apply",
+            );
+            false
+        }
+    }
+}
+
+/// Applies a single pre-computed conformity `score` to `forecasts`,
+/// optionally scaled by a per-row `difficulty` (Phase 16 D-08, CONF-04).
+/// Backs the SQL `ts_conformal_intervals(forecasts, conformity_score,
+/// method, difficulty)` 4-arg overload.
+///
+/// A null `method` pointer means "symmetric". A null `difficulty` pointer
+/// or zero `difficulty_len` means "no difficulty_col at all" (never calls
+/// `from_raw_parts` on a null pointer with nonzero length).
+///
+/// # Safety
+/// All non-null pointer arguments must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_conformal_apply_score(
+    forecasts: *const c_double,
+    forecasts_validity: *const u64,
+    n_forecasts: size_t,
+    score: c_double,
+    method: *const c_char,
+    difficulty: *const c_double,
+    difficulty_validity: *const u64,
+    difficulty_len: size_t,
+    out_lower: *mut *mut c_double,
+    out_upper: *mut *mut c_double,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+
+    if forecasts.is_null() || out_lower.is_null() || out_upper.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let forecast_series = build_series(forecasts, forecasts_validity, n_forecasts);
+        let difficulty_series: Vec<Option<f64>> = if difficulty.is_null() || difficulty_len == 0 {
+            Vec::new()
+        } else {
+            build_series(difficulty, difficulty_validity, difficulty_len)
+        };
+
+        let method_str = if method.is_null() {
+            "symmetric"
+        } else {
+            match CStr::from_ptr(method).to_str() {
+                Ok(s) => s,
+                Err(_) => {
+                    return Err(anofox_fcst_core::ForecastError::InvalidInput(
+                        "method is not valid UTF-8".to_string(),
+                    ))
+                }
+            }
+        };
+        let parsed_method: anofox_fcst_core::ConformalMethod = method_str.parse()?;
+
+        anofox_fcst_core::conformal_apply_score(
+            &forecast_series,
+            score,
+            parsed_method,
+            &difficulty_series,
+        )
+    }));
+
+    match result {
+        Ok(Ok((lower, upper))) => {
+            // Non-finite (NaN missing marker, or +/-inf unbounded) bounds
+            // are written as NaN for C++ to turn into SQL NULL.
+            let lower_nan: Vec<f64> = lower.iter().copied().map(nan_if_non_finite).collect();
+            let upper_nan: Vec<f64> = upper.iter().copied().map(nan_if_non_finite).collect();
+
+            let lower_ptr =
+                match alloc_or_error(&lower_nan, out_error, "Failed to allocate lower bounds") {
+                    Ok(ptr) => ptr,
+                    Err(()) => return false,
+                };
+            match alloc_or_error(&upper_nan, out_error, "Failed to allocate upper bounds") {
+                Ok(upper_ptr) => {
+                    *out_lower = lower_ptr;
+                    *out_upper = upper_ptr;
+                    true
+                }
+                Err(()) => {
+                    free_ptr(lower_ptr as *mut core::ffi::c_void);
+                    false
+                }
+            }
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
+            false
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in conformal_apply_score",
             );
             false
         }
