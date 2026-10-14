@@ -414,19 +414,6 @@ static void TsClassifySeasonalityFunction(DataChunk &args, ExpressionState &stat
         }
 
         double period = period_reader.Get(row_idx);
-        // CR-03 (extended, found via regression test): `static_cast<size_t>`
-        // of a NaN/infinite double is undefined behaviour in C++, so this
-        // non-finite check must run BEFORE the `2 * period` cast below, not
-        // after. A non-finite period is an invalid parameter (SQL error per
-        // the documented NULL-vs-error policy), not a too-short-series NULL.
-        if (!std::isfinite(period)) {
-            throw InvalidInputException(
-                "ts_classify_seasonality: Period must be a positive finite number, got %f", period);
-        }
-        if (period <= 0 || values.size() < static_cast<size_t>(2 * period)) {
-            FlatVector::SetNull(result, row_idx, true);
-            continue;
-        }
 
         double strength_threshold = 0.3;  // default
         if (has_strength_threshold && !strength_threshold_reader->IsNull(row_idx)) {
@@ -453,6 +440,23 @@ static void TsClassifySeasonalityFunction(DataChunk &args, ExpressionState &stat
         );
 
         if (!success) {
+            // CR-06/WR-04: delegate period validation to the single source
+            // of truth (crates/anofox-fcst-core/src/seasonality.rs ::
+            // classify_seasonality, which rejects a non-finite or
+            // non-positive period as InvalidParameter before any
+            // `period as usize` cast), mapped to INVALID_INPUT at the FFI
+            // boundary (ffi_error_code, fixed in 86802cc for this same
+            // function's FFI entry point). This removes the local
+            // std::isfinite + static_cast<size_t>(2 * period) UB-prone
+            // pre-check entirely and unifies this function's error wording
+            // with its 8 siblings (ts_seasonal_strength,
+            // ts_decompose_seasonal, etc). Insufficient-data failures
+            // (error.code != INVALID_INPUT) keep returning NULL, matching
+            // every other period-validating function in this file.
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_classify_seasonality: %s",
+                    error.message ? error.message : "invalid input");
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
