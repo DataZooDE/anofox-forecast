@@ -227,7 +227,10 @@ pub fn compute_ts_stats(series: &[Option<f64>], seasonal_period: usize) -> Resul
         unique_bits.insert(v.to_bits());
     }
     let n_unique_values = unique_bits.len();
-    let is_constant = n_unique_values == 1;
+    // Scale-relative constant check (D-13, G25) -- shared with
+    // filter::is_constant and quality::compute_data_quality.
+    // `n_unique_values` itself stays an EXACT bit-identity count.
+    let is_constant = crate::filter::is_constant_slice(&values);
 
     // Count leading zeros (from original series, including NULLs as breaks)
     let n_zeros_start = count_leading_zeros(series);

@@ -316,6 +316,10 @@ static void TsSeasonalStrengthFunction(DataChunk &args, ExpressionState &state, 
         );
 
         if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_seasonal_strength: %s",
+                    error.message ? error.message : "invalid input");
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -341,7 +345,7 @@ void RegisterTsSeasonalStrengthFunction(ExtensionLoader &loader) {
     {
         CreateScalarFunctionInfo info(ts_strength_set);
         FunctionDescription desc;
-        desc.description = "Computes the seasonal strength metric (0-1) indicating how strongly seasonal patterns dominate the time series.";
+        desc.description = "Computes the seasonal strength metric (0-1) indicating how strongly seasonal patterns dominate the time series. The series is linearly detrended first. method is 'variance' (default, alias var) or 'spectral' (alias spec, fft); 'wavelet' is removed (it returned 1.0 even for white noise) and raises an error, as does any other unrecognized method name or a non-positive period.";
         desc.examples = {"ts_seasonal_strength(LIST(value ORDER BY date), 7)"};
         desc.categories = {"time-series", "decomposition", "seasonality"};
         desc.parameter_names = {"values", "period"};
@@ -416,6 +420,10 @@ static void TsSeasonalStrengthWindowedFunction(DataChunk &args, ExpressionState 
         );
 
         if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_seasonal_strength_windowed: %s",
+                    error.message ? error.message : "invalid input");
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -464,7 +472,7 @@ void RegisterTsSeasonalStrengthWindowedFunction(ExtensionLoader &loader) {
     {
         CreateScalarFunctionInfo info(ts_strength_win_set);
         FunctionDescription desc;
-        desc.description = "Computes rolling seasonal strength over a sliding window, returning strength estimates per window position.";
+        desc.description = "Computes rolling seasonal strength over a sliding window, returning strength estimates per window position. Each window is linearly detrended first. method is 'variance' (default, alias var) or 'spectral' (alias spec, fft); 'wavelet' is removed and raises an error, as does any other unrecognized method name or a non-positive period.";
         desc.examples = {"ts_seasonal_strength_windowed(LIST(value ORDER BY date), 7, 52)"};
         desc.categories = {"time-series", "decomposition", "seasonality"};
         desc.parameter_names = {"values", "period", "window_size"};

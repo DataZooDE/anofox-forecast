@@ -85,7 +85,7 @@ pub use error::{ForecastError, Result};
 pub use features::{extract_features, list_features, validate_feature_params};
 pub use filter::{
     diff, diff_aligned, diff_lag, drop_edge_zeros, drop_leading_zeros, drop_trailing_zeros,
-    is_constant, is_short,
+    is_constant, is_constant_slice, is_short,
 };
 pub use forecast::{
     forecast, forecast_explain, forecast_explicit_ensemble, forecast_inspect, forecast_with_exog,
@@ -109,10 +109,11 @@ pub use peaks::{
     Peak, PeakDetectionResult, PeakTimingResult,
 };
 pub use periods::{
-    aic_comparison, autoperiod, cfd_autoperiod, detect_multiple_periods_ts, detect_periods,
-    detect_periods_with_validation, estimate_period_acf_ts, estimate_period_fft_ts,
-    estimate_period_regression_ts, lomb_scargle, matrix_profile_period, sazed_period, ssa_period,
-    stl_period, AicPeriodResult, AutoperiodResult, DetectedPeriod, LombScargleResult,
+    acf, aic_comparison, autoperiod, cfd_autoperiod, detect_multiple_periods_ts, detect_periods,
+    detect_periods_with_validation, detrended_periodogram, estimate_period_acf_ts,
+    estimate_period_fft_ts, estimate_period_regression_ts, lomb_scargle, lomb_scargle_power,
+    matrix_profile_period, regression_period_rss, sazed_period, ssa_period, stl_period,
+    AicPeriodResult, AutoperiodResult, DetectedPeriod, LombScargleResult,
     MatrixProfilePeriodResult, MultiPeriodResult, PeriodMethod, SazedPeriodResult,
     SinglePeriodResult, SsaPeriodResult, StlPeriodResult, DEFAULT_TOLERANCE,
 };
@@ -122,10 +123,10 @@ pub use quality::{
 pub use seasonality::{
     analyze_seasonality, classify_seasonality, detect_amplitude_modulation, detect_seasonality,
     detect_seasonality_changes, instantaneous_period, seasonal_strength,
-    seasonal_strength_spectral, seasonal_strength_variance, seasonal_strength_wavelet,
-    seasonal_strength_windowed, AmplitudeModulationResult, AmplitudeModulationType,
-    ChangeDetectionResult, ChangePointType, InstantaneousPeriodResult, SeasonalType,
-    SeasonalityAnalysis, SeasonalityChangePoint, SeasonalityClassification, StrengthMethod,
+    seasonal_strength_spectral, seasonal_strength_variance, seasonal_strength_windowed,
+    AmplitudeModulationResult, AmplitudeModulationType, ChangeDetectionResult, ChangePointType,
+    InstantaneousPeriodResult, SeasonalType, SeasonalityAnalysis, SeasonalityChangePoint,
+    SeasonalityClassification, StrengthMethod,
 };
 pub use stats::{
     compute_ts_stats, compute_ts_stats_with_dates_and_type, stl_strengths, FrequencyType,

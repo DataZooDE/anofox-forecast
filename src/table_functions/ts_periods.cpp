@@ -1098,6 +1098,10 @@ static void TsLombScargleFunction(DataChunk &args, ExpressionState &state, Vecto
         );
 
         if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_lomb_scargle: %s",
+                    error.message ? error.message : "invalid input");
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -1148,7 +1152,7 @@ void RegisterTsLombScargleFunction(ExtensionLoader &loader) {
     {
         CreateScalarFunctionInfo info(ts_lomb_scargle_set);
         FunctionDescription desc;
-        desc.description = "Estimates the dominant period using the Lomb-Scargle periodogram, suitable for unevenly-sampled time series.";
+        desc.description = "Estimates the dominant period using the Lomb-Scargle periodogram, suitable for unevenly-sampled time series. Raises an error for n_frequencies < 2, a non-positive or non-finite min_period/max_period, or min_period >= max_period; a default-derived range made impossible by a too-short series returns NULL.";
         desc.examples = {"ts_lomb_scargle(LIST(value ORDER BY date))"};
         desc.categories = {"time-series", "period-detection"};
         desc.parameter_names = {"values"};

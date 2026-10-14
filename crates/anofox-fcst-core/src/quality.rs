@@ -139,13 +139,9 @@ pub fn compute_data_quality(
     let n_present = present.len();
     let is_short = n_present < n_short;
 
-    // Check if constant (on present values only)
-    let is_constant = if n_present < 2 {
-        true
-    } else {
-        let first = present[0];
-        present.iter().all(|v| (v - first).abs() < f64::EPSILON)
-    };
+    // Check if constant (on present values only, scale-relative, D-13/G25
+    // -- shared with filter::is_constant and stats::compute_ts_stats).
+    let is_constant = crate::filter::is_constant_slice(&present);
 
     // Gap/temporal scoring via the shared missing-period gap counter (13-01, D-04/D-05).
     let (n_gaps, n_gap_runs, temporal_score) = match dates {

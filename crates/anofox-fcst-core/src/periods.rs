@@ -4,13 +4,14 @@
 //! time series data in DuckDB.
 
 use crate::decomposition::{mstl_decompose, InsufficientDataMode};
-use crate::detrending::single_series_matrix;
+use crate::detrending::detrend_linear;
 use crate::error::{ForecastError, Result};
+use crate::filter::is_constant_slice;
 use fdars_core::seasonal::{
-    detect_multiple_periods as fdars_detect_multiple_periods, estimate_period_acf,
-    estimate_period_fft, estimate_period_regression, DetectedPeriod as FdarsDetectedPeriod,
-    PeriodEstimate,
+    detect_multiple_periods as fdars_detect_multiple_periods, DetectedPeriod as FdarsDetectedPeriod,
 };
+use rustfft::{num_complex::Complex, FftPlanner};
+use std::f64::consts::PI;
 use std::str::FromStr;
 
 /// Method for period detection.
@@ -81,18 +82,6 @@ pub struct SinglePeriodResult {
     pub confidence: f64,
     /// Method used for estimation
     pub method: String,
-}
-
-impl From<(PeriodEstimate, &str)> for SinglePeriodResult {
-    fn from((pe, method): (PeriodEstimate, &str)) -> Self {
-        Self {
-            period: pe.period,
-            frequency: pe.frequency,
-            power: pe.power,
-            confidence: pe.confidence,
-            method: method.to_string(),
-        }
-    }
 }
 
 /// A detected period from multiple period detection.
@@ -263,10 +252,100 @@ fn make_argvals(n: usize) -> Vec<f64> {
     (0..n).map(|i| i as f64).collect()
 }
 
-/// Estimate period using FFT periodogram.
+/// Compute the one-sided power spectrum of an already-detrended series,
+/// equal to `scipy.signal.periodogram(x, fs=1, window='boxcar',
+/// scaling='spectrum')` applied to `x = detrended` (D-11, G18): power for
+/// bins `k = 0..=n/2` (length `n/2 + 1`), `scale = 1/n^2`, every bin doubled
+/// except bin 0 (DC) and, when `n` is even, the Nyquist bin `n/2`.
+fn periodogram_from_detrended(detrended: &[f64]) -> Vec<f64> {
+    let n = detrended.len();
+    let mut buffer: Vec<Complex<f64>> = detrended.iter().map(|&v| Complex::new(v, 0.0)).collect();
+    let mut planner = FftPlanner::<f64>::new();
+    let fft = planner.plan_fft_forward(n);
+    fft.process(&mut buffer);
+
+    let num_bins = n / 2 + 1;
+    let scale = 1.0 / (n as f64 * n as f64);
+    let nyquist = if n.is_multiple_of(2) {
+        Some(n / 2)
+    } else {
+        None
+    };
+    (0..num_bins)
+        .map(|k| {
+            let mag2 = buffer[k].norm_sqr();
+            if k == 0 || Some(k) == nyquist {
+                mag2 * scale
+            } else {
+                2.0 * mag2 * scale
+            }
+        })
+        .collect()
+}
+
+/// Linearly-detrended one-sided periodogram, equal to
+/// `scipy.signal.periodogram(x, fs=1, window='boxcar', detrend='linear',
+/// scaling='spectrum')` (D-11, G18 -- fdars-core 0.47's own FFT period
+/// estimator skips detrending and the odd-`n` doubling rule, so a trend +
+/// seasonal series reports period `n`). Returns power for bins
+/// `k = 0..=n/2` (length `n/2 + 1`); `frequency[k] = k/n`, `period[k] =
+/// n/k`.
+pub fn detrended_periodogram(values: &[f64]) -> Result<Vec<f64>> {
+    let n = values.len();
+    if n < 2 {
+        return Err(ForecastError::InsufficientData { needed: 2, got: n });
+    }
+    let detrended = detrend_linear(values)?.detrended;
+    Ok(periodogram_from_detrended(&detrended))
+}
+
+/// Select the FFT period from an already-detrended series: the strongest
+/// bin `3 <= k <= floor(n/2)` (so the period is never `n` and always
+/// `< n/2`), `confidence = power[k] / mean(power[1..])`. A detrended series
+/// that is constant by the scale-relative rule, or a series too short to
+/// have any candidate bin (`floor(n/2) < 3`), returns NaN period/frequency,
+/// power 0, confidence 0 (D-11, G18).
+fn estimate_period_fft_from_detrended(detrended: &[f64]) -> SinglePeriodResult {
+    let n = detrended.len();
+    let max_k = n / 2;
+    let degenerate = SinglePeriodResult {
+        period: f64::NAN,
+        frequency: f64::NAN,
+        power: 0.0,
+        confidence: 0.0,
+        method: "fft".to_string(),
+    };
+    if max_k < 3 || is_constant_slice(detrended) {
+        return degenerate;
+    }
+
+    let power = periodogram_from_detrended(detrended);
+    let mean_non_dc: f64 = power[1..].iter().sum::<f64>() / (power.len() - 1) as f64;
+    if mean_non_dc <= 0.0 {
+        return degenerate;
+    }
+
+    let (mut best_k, mut best_power) = (3usize, power[3]);
+    for (k, &p) in power.iter().enumerate().take(max_k + 1).skip(4) {
+        if p > best_power {
+            best_power = p;
+            best_k = k;
+        }
+    }
+
+    SinglePeriodResult {
+        period: n as f64 / best_k as f64,
+        frequency: best_k as f64 / n as f64,
+        power: best_power,
+        confidence: best_power / mean_non_dc,
+        method: "fft".to_string(),
+    }
+}
+
+/// Estimate period using a linearly-detrended FFT periodogram.
 ///
-/// Finds the dominant frequency in the periodogram (excluding DC)
-/// and returns the corresponding period.
+/// Finds the strongest bin `3 <= k <= floor(n/2)` in the detrended
+/// one-sided periodogram and returns the corresponding period (D-11, G18).
 ///
 /// # Arguments
 /// * `values` - Time series values
@@ -278,23 +357,46 @@ pub fn estimate_period_fft_ts(values: &[f64]) -> Result<SinglePeriodResult> {
     if m < 4 {
         return Err(ForecastError::InsufficientData { needed: 4, got: m });
     }
-
-    let argvals = make_argvals(m);
-    // fdars 0.47: estimate_period_fft(data: &FdMatrix, argvals) -- (n, m)
-    // now travel inside the matrix, built once as (1, m).
-    let mat = single_series_matrix(values)?;
-    let result = estimate_period_fft(&mat, &argvals);
-
-    Ok((result, "fft").into())
+    let detrended = detrend_linear(values)?.detrended;
+    Ok(estimate_period_fft_from_detrended(&detrended))
 }
 
-/// Estimate period using autocorrelation function.
+/// Autocorrelation function, matching `statsmodels.tsa.stattools.acf(x,
+/// nlags=max_lag, fft=False, adjusted=False)`: `r_k = c_k / c_0` where
+/// `c_k = sum_{t=0}^{n-k-1} (x_t - mean)(x_{t+k} - mean)` (unadjusted, i.e.
+/// NOT divided by `n - k`; the `n` factor cancels in the ratio). Returns a
+/// vector of length `max_lag + 1` (`r[0] == 1.0` except for a constant
+/// series, where `c_0 == 0` and every entry -- including `r[0]` -- is
+/// `NaN`, D-11 G17).
+pub fn acf(values: &[f64], max_lag: usize) -> Vec<f64> {
+    let n = values.len();
+    let mean: f64 = values.iter().sum::<f64>() / n as f64;
+    let c0: f64 = values.iter().map(|v| (v - mean).powi(2)).sum();
+
+    (0..=max_lag)
+        .map(|k| {
+            if k >= n {
+                return f64::NAN;
+            }
+            let ck: f64 = (0..(n - k))
+                .map(|t| (values[t] - mean) * (values[t + k] - mean))
+                .sum();
+            ck / c0
+        })
+        .collect()
+}
+
+/// Estimate period using the autocorrelation function.
 ///
-/// Finds the first significant peak in the ACF after lag 0.
+/// Returns the smallest lag `k >= 2` that is a local maximum (`r_k >
+/// r_{k-1}`, `r_k >= r_{k+1}`) exceeding the `1.96/sqrt(n)` significance
+/// bound; otherwise no period (D-11, G17 -- fdars-core 0.47's estimator
+/// starts its peak search at lag 3, so lag 2 can never be selected, and
+/// applies no significance test).
 ///
 /// # Arguments
 /// * `values` - Time series values
-/// * `max_lag` - Maximum lag to search (None for n/2)
+/// * `max_lag` - Maximum lag to search (None for n/2, capped at n - 1)
 ///
 /// # Returns
 /// Estimated period result with confidence
@@ -302,30 +404,167 @@ pub fn estimate_period_acf_ts(
     values: &[f64],
     max_lag: Option<usize>,
 ) -> Result<SinglePeriodResult> {
-    let m = values.len();
-    if m < 4 {
-        return Err(ForecastError::InsufficientData { needed: 4, got: m });
+    let n = values.len();
+    if n < 4 {
+        return Err(ForecastError::InsufficientData { needed: 4, got: n });
     }
 
-    let argvals = make_argvals(m);
-    let lag = max_lag.unwrap_or(m / 2);
-    // fdars-core expects: data, n_samples, m_timepoints, argvals, max_lag
-    // We have 1 sample (our time series) with m time points
-    let result = estimate_period_acf(values, 1, m, &argvals, lag);
+    let lag = max_lag.unwrap_or(n / 2).min(n - 1);
+    let degenerate = SinglePeriodResult {
+        period: f64::NAN,
+        frequency: f64::NAN,
+        power: 0.0,
+        confidence: 0.0,
+        method: "acf".to_string(),
+    };
+    if lag < 3 {
+        return Ok(degenerate);
+    }
 
-    Ok((result, "acf").into())
+    let r = acf(values, lag);
+    let bound = 1.96 / (n as f64).sqrt();
+
+    for k in 2..lag {
+        let rk = r[k];
+        if rk.is_nan() {
+            continue;
+        }
+        if rk > r[k - 1] && rk >= r[k + 1] && rk > bound {
+            return Ok(SinglePeriodResult {
+                period: k as f64,
+                frequency: 1.0 / k as f64,
+                power: rk,
+                confidence: rk,
+                method: "acf".to_string(),
+            });
+        }
+    }
+
+    Ok(degenerate)
 }
 
-/// Estimate period using Fourier regression grid search.
+/// Build the harmonic-regression design matrix (column-major: one `Vec<f64>`
+/// of length `n` per column) for a candidate `period`: an intercept column,
+/// then for each harmonic `k = 1..=harmonics` with `2k <= period` (D-11,
+/// restricted below Nyquist), a `cos(2*pi*k*t/period)` column, plus a
+/// `sin(2*pi*k*t/period)` column when `2k < period` strictly (the `2k ==
+/// period` Nyquist harmonic has an identically-zero sine term for integer
+/// `t`, so it is omitted rather than included as a dead column).
+fn harmonic_design_matrix(t: &[f64], period: f64, harmonics: usize) -> Vec<Vec<f64>> {
+    let n = t.len();
+    let mut cols: Vec<Vec<f64>> = vec![vec![1.0; n]];
+    for k in 1..=harmonics {
+        let two_k = 2.0 * k as f64;
+        if two_k > period {
+            break;
+        }
+        let angle = |ti: f64| 2.0 * PI * k as f64 * ti / period;
+        cols.push(t.iter().map(|&ti| angle(ti).cos()).collect());
+        if two_k < period {
+            cols.push(t.iter().map(|&ti| angle(ti).sin()).collect());
+        }
+    }
+    cols
+}
+
+fn dot(a: &[f64], b: &[f64]) -> f64 {
+    a.iter().zip(b).map(|(x, y)| x * y).sum()
+}
+
+/// Solve the least-squares problem `design * x ~= y` via modified
+/// Gram-Schmidt QR decomposition -- numerically stable for the small
+/// (`<= 7` column), well-scaled harmonic-regression design built by
+/// [`harmonic_design_matrix`]. A near-zero-norm column (rank deficiency)
+/// maps to a zero row in `Q`/`R`, giving that coefficient `0.0` rather than
+/// dividing by a near-zero pivot.
+fn least_squares_qr(design: &[Vec<f64>], y: &[f64]) -> Vec<f64> {
+    let m = design.len();
+    let n = y.len();
+    let mut q: Vec<Vec<f64>> = Vec::with_capacity(m);
+    let mut r = vec![vec![0.0; m]; m];
+    let mut v: Vec<Vec<f64>> = design.to_vec();
+
+    for j in 0..m {
+        for i in 0..j {
+            let rij = dot(&q[i], &v[j]);
+            r[i][j] = rij;
+            for k in 0..n {
+                v[j][k] -= rij * q[i][k];
+            }
+        }
+        let norm = dot(&v[j], &v[j]).sqrt();
+        r[j][j] = norm;
+        let qj = if norm > 1e-12 {
+            v[j].iter().map(|x| x / norm).collect()
+        } else {
+            vec![0.0; n]
+        };
+        q.push(qj);
+    }
+
+    let qty: Vec<f64> = q.iter().map(|qi| dot(qi, y)).collect();
+    let mut x = vec![0.0; m];
+    for i in (0..m).rev() {
+        let mut s = qty[i];
+        for k in (i + 1)..m {
+            s -= r[i][k] * x[k];
+        }
+        x[i] = if r[i][i].abs() > 1e-12 {
+            s / r[i][i]
+        } else {
+            0.0
+        };
+    }
+    x
+}
+
+/// Residual sum of squares of the harmonic regression fit at each candidate
+/// period, matching `numpy.linalg.lstsq` on the same design matrix within
+/// `1e-9` relative. Exposed for the reference-fixture parity test (D-11).
 ///
-/// Tests multiple candidate periods and selects the one that
-/// minimizes the reconstruction error.
+/// # Arguments
+/// * `values` - Time series values
+/// * `candidates` - Candidate periods to fit
+/// * `harmonics` - Number of Fourier harmonics (restricted below Nyquist per candidate)
+///
+/// # Returns
+/// One RSS value per candidate, same order as `candidates`
+pub fn regression_period_rss(values: &[f64], candidates: &[f64], harmonics: usize) -> Vec<f64> {
+    let n = values.len();
+    let t = make_argvals(n);
+    candidates
+        .iter()
+        .map(|&period| {
+            let design = harmonic_design_matrix(&t, period, harmonics);
+            let coeffs = least_squares_qr(&design, values);
+            (0..n)
+                .map(|row| {
+                    let fitted: f64 = design
+                        .iter()
+                        .zip(coeffs.iter())
+                        .map(|(c, &b)| c[row] * b)
+                        .sum();
+                    (values[row] - fitted).powi(2)
+                })
+                .sum()
+        })
+        .collect()
+}
+
+/// Estimate period using Fourier (harmonic) regression grid search (D-11,
+/// G20 -- fdars-core 0.47's own 50-point linear grid between `period_min`
+/// and `period_max` can skip an exact integer period like 12). When
+/// `n_candidates` is `None` (the default), the grid is every integer
+/// `ceil(period_min)..=floor(period_max)`; an explicit `n_candidates` keeps
+/// the previous evenly-spaced linear grid. The smallest period whose RSS is
+/// within `1e-10 * SST` of the minimum RSS wins (ties broken toward the
+/// smallest period).
 ///
 /// # Arguments
 /// * `values` - Time series values
 /// * `period_min` - Minimum period to search (None for 2)
 /// * `period_max` - Maximum period to search (None for n/2)
-/// * `n_candidates` - Number of candidate periods (None for 50)
+/// * `n_candidates` - Number of candidate periods (None for the default integer grid)
 /// * `n_harmonics` - Number of Fourier harmonics (None for 3)
 ///
 /// # Returns
@@ -342,18 +581,77 @@ pub fn estimate_period_regression_ts(
         return Err(ForecastError::InsufficientData { needed: 8, got: n });
     }
 
-    let argvals = make_argvals(n);
+    if let (Some(mn), Some(mx)) = (period_min, period_max) {
+        if mn >= mx {
+            return Err(ForecastError::InvalidParameter {
+                param: "period_min".to_string(),
+                value: mn.to_string(),
+                reason: "must be less than period_max".to_string(),
+            });
+        }
+    }
+
     let p_min = period_min.unwrap_or(2.0);
     let p_max = period_max.unwrap_or(n as f64 / 2.0);
-    let candidates = n_candidates.unwrap_or(50);
     let harmonics = n_harmonics.unwrap_or(3);
 
-    // fdars-core expects: data, n_samples, m_timepoints, argvals, ...
-    // We have 1 sample (our time series) with n time points
-    let result =
-        estimate_period_regression(values, 1, n, &argvals, p_min, p_max, candidates, harmonics);
+    let degenerate = SinglePeriodResult {
+        period: f64::NAN,
+        frequency: f64::NAN,
+        power: 0.0,
+        confidence: 0.0,
+        method: "regression".to_string(),
+    };
+    if is_constant_slice(values) {
+        return Ok(degenerate);
+    }
 
-    Ok((result, "regression").into())
+    let candidates: Vec<f64> = match n_candidates {
+        Some(k) if k > 1 => (0..k)
+            .map(|i| p_min + (p_max - p_min) * i as f64 / (k - 1) as f64)
+            .collect(),
+        Some(_) => vec![p_min],
+        None => {
+            let lo = p_min.ceil() as i64;
+            let hi = p_max.floor() as i64;
+            (lo..=hi).map(|p| p as f64).collect()
+        }
+    };
+    if candidates.is_empty() {
+        return Ok(degenerate);
+    }
+
+    let rss = regression_period_rss(values, &candidates, harmonics);
+    let mean_rss: f64 = rss.iter().sum::<f64>() / rss.len() as f64;
+    let mean_y: f64 = values.iter().sum::<f64>() / n as f64;
+    let sst: f64 = values.iter().map(|v| (v - mean_y).powi(2)).sum();
+
+    let min_rss = rss.iter().cloned().fold(f64::INFINITY, f64::min);
+    let threshold = min_rss + 1e-10 * sst;
+    let best_idx = rss
+        .iter()
+        .enumerate()
+        .filter(|&(_, &r)| r <= threshold)
+        .min_by(|a, b| candidates[a.0].partial_cmp(&candidates[b.0]).unwrap())
+        .map(|(i, _)| i)
+        .unwrap();
+    let best_period = candidates[best_idx];
+    let best_rss = rss[best_idx];
+
+    let confidence = if best_rss <= 1e-12 * sst {
+        10.0
+    } else {
+        (mean_rss / best_rss).min(10.0)
+    };
+    let power = 1.0 - best_rss / mean_rss;
+
+    Ok(SinglePeriodResult {
+        period: best_period,
+        frequency: 1.0 / best_period,
+        power,
+        confidence,
+        method: "regression".to_string(),
+    })
 }
 
 /// Detect multiple concurrent periodicities.
@@ -481,14 +779,15 @@ pub fn cfd_autoperiod(values: &[f64], acf_threshold: Option<f64>) -> Result<Auto
     // First-difference the series to remove trends
     let differenced: Vec<f64> = values.windows(2).map(|w| w[1] - w[0]).collect();
 
-    // Get FFT period estimate on differenced series
-    let m = differenced.len();
-    let argvals = make_argvals(m);
-    // fdars 0.47: estimate_period_fft(data: &FdMatrix, argvals), built as (1, m).
-    let diff_mat = single_series_matrix(&differenced)?;
-    let fft_est = estimate_period_fft(&diff_mat, &argvals);
+    // Get FFT period estimate on differenced series (D-11: same
+    // detrended-periodogram estimator as estimate_period_fft_ts).
+    let fft_est = estimate_period_fft_ts(&differenced)?;
 
-    let period = fft_est.period.round() as usize;
+    let period = if fft_est.period.is_finite() {
+        fft_est.period.round() as usize
+    } else {
+        0
+    };
 
     // Validate with ACF on original series
     let acf_val = if period > 0 && period < n {
@@ -543,6 +842,48 @@ pub fn lomb_scargle(
         ));
     }
 
+    // D-11, G21: validate user-supplied parameters before touching the
+    // data. A caller-supplied invalid value is the caller's mistake
+    // (InvalidParameter -> SQL error); a DEFAULT-derived impossible range
+    // (e.g. a too-short series making t_span/2 < 2.0) is InsufficientData
+    // -> NULL row, not an error, since the caller supplied nothing wrong.
+    if let Some(nf) = n_frequencies {
+        if nf < 2 {
+            return Err(ForecastError::InvalidParameter {
+                param: "n_frequencies".to_string(),
+                value: nf.to_string(),
+                reason: "must be at least 2".to_string(),
+            });
+        }
+    }
+    if let Some(mp) = min_period {
+        if !mp.is_finite() || mp <= 0.0 {
+            return Err(ForecastError::InvalidParameter {
+                param: "min_period".to_string(),
+                value: mp.to_string(),
+                reason: "must be a positive finite number".to_string(),
+            });
+        }
+    }
+    if let Some(mp) = max_period {
+        if !mp.is_finite() || mp <= 0.0 {
+            return Err(ForecastError::InvalidParameter {
+                param: "max_period".to_string(),
+                value: mp.to_string(),
+                reason: "must be a positive finite number".to_string(),
+            });
+        }
+    }
+    if let (Some(mn), Some(mx)) = (min_period, max_period) {
+        if mn >= mx {
+            return Err(ForecastError::InvalidParameter {
+                param: "min_period".to_string(),
+                value: mn.to_string(),
+                reason: "must be less than max_period".to_string(),
+            });
+        }
+    }
+
     // Compute mean and variance
     let mean: f64 = values.iter().sum::<f64>() / n as f64;
     let variance: f64 = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n as f64;
@@ -557,67 +898,37 @@ pub fn lomb_scargle(
         });
     }
 
-    // Center the data
-    let y: Vec<f64> = values.iter().map(|v| v - mean).collect();
-
     // Frequency range
     let t_span = t[n - 1] - t[0];
     let min_p = min_period.unwrap_or(2.0);
     let max_p = max_period.unwrap_or(t_span / 2.0);
     let n_freq = n_frequencies.unwrap_or(1000);
 
-    // Generate frequency grid (from high to low frequency)
+    if min_p >= max_p {
+        // A default-derived impossible range (the series is too short for
+        // the default min/max to form a valid grid) -- not a caller
+        // mistake, so this is InsufficientData (NULL row at SQL level),
+        // not InvalidParameter (D-11, G21).
+        return Err(ForecastError::InsufficientData {
+            needed: (2.0 * min_p + 2.0).ceil() as usize,
+            got: n,
+        });
+    }
+
+    // Generate frequency grid (from low to high period, i.e. high to low frequency)
     let min_freq = 1.0 / max_p;
     let max_freq = 1.0 / min_p;
     let freq_step = (max_freq - min_freq) / (n_freq - 1) as f64;
+    let freqs: Vec<f64> = (0..n_freq)
+        .map(|i| min_freq + i as f64 * freq_step)
+        .collect();
 
-    let mut best_power = 0.0f64;
-    let mut best_freq = 0.0f64;
-
-    // Compute Lomb-Scargle periodogram
-    for i in 0..n_freq {
-        let freq = min_freq + i as f64 * freq_step;
-        let omega = 2.0 * std::f64::consts::PI * freq;
-
-        // Compute tau (phase offset for orthogonality)
-        let mut sin_2omega_sum = 0.0;
-        let mut cos_2omega_sum = 0.0;
-        for &ti in t.iter() {
-            let arg = 2.0 * omega * ti;
-            sin_2omega_sum += arg.sin();
-            cos_2omega_sum += arg.cos();
-        }
-        let tau = sin_2omega_sum.atan2(cos_2omega_sum) / (2.0 * omega);
-
-        // Compute power at this frequency
-        let mut cos_sum = 0.0;
-        let mut sin_sum = 0.0;
-        let mut cos2_sum = 0.0;
-        let mut sin2_sum = 0.0;
-
-        for (j, &ti) in t.iter().enumerate() {
-            let arg = omega * (ti - tau);
-            let cos_val = arg.cos();
-            let sin_val = arg.sin();
-
-            cos_sum += y[j] * cos_val;
-            sin_sum += y[j] * sin_val;
-            cos2_sum += cos_val * cos_val;
-            sin2_sum += sin_val * sin_val;
-        }
-
-        // Avoid division by zero
-        let power = if cos2_sum.abs() > f64::EPSILON && sin2_sum.abs() > f64::EPSILON {
-            0.5 * (cos_sum.powi(2) / cos2_sum + sin_sum.powi(2) / sin2_sum) / variance
-        } else {
-            0.0
-        };
-
-        if power > best_power {
-            best_power = power;
-            best_freq = freq;
-        }
-    }
+    let powers = lomb_scargle_power(values, t, &freqs);
+    let (best_idx, &best_power) = powers.iter().enumerate().fold(
+        (0usize, &0.0f64),
+        |acc, (i, p)| if p > acc.1 { (i, p) } else { acc },
+    );
+    let best_freq = freqs[best_idx];
 
     // Compute false alarm probability (FAP)
     // Using the approximation: FAP ≈ 1 - (1 - e^(-z))^M
@@ -643,6 +954,75 @@ pub fn lomb_scargle(
         false_alarm_prob: fap.min(1.0),
         method: "lomb_scargle".to_string(),
     })
+}
+
+/// Lomb-Scargle power at each of `freqs`, matching
+/// `scipy.signal.lombscargle(t, y - mean, 2*pi*f, normalize=True) * n/2`
+/// within `1e-9` relative (D-11). `values`/`times` are the RAW (uncentred)
+/// series; centring and the orthogonality phase shift `tau` are computed
+/// internally per frequency (Press & Rybicki). Exposed for the
+/// reference-fixture parity test.
+pub fn lomb_scargle_power(values: &[f64], times: &[f64], freqs: &[f64]) -> Vec<f64> {
+    let n = values.len();
+    let mean: f64 = values.iter().sum::<f64>() / n as f64;
+    let variance: f64 = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n as f64;
+    let y: Vec<f64> = values.iter().map(|v| v - mean).collect();
+
+    freqs
+        .iter()
+        .map(|&freq| {
+            if variance.abs() < f64::EPSILON {
+                return 0.0;
+            }
+            let omega = 2.0 * PI * freq;
+
+            // Compute tau (phase offset for orthogonality)
+            let mut sin_2omega_sum = 0.0;
+            let mut cos_2omega_sum = 0.0;
+            for &ti in times.iter() {
+                let arg = 2.0 * omega * ti;
+                sin_2omega_sum += arg.sin();
+                cos_2omega_sum += arg.cos();
+            }
+            let tau = sin_2omega_sum.atan2(cos_2omega_sum) / (2.0 * omega);
+
+            let mut cos_sum = 0.0;
+            let mut sin_sum = 0.0;
+            let mut cos2_sum = 0.0;
+            let mut sin2_sum = 0.0;
+
+            for (j, &ti) in times.iter().enumerate() {
+                let arg = omega * (ti - tau);
+                let cos_val = arg.cos();
+                let sin_val = arg.sin();
+
+                cos_sum += y[j] * cos_val;
+                sin_sum += y[j] * sin_val;
+                cos2_sum += cos_val * cos_val;
+                sin2_sum += sin_val * sin_val;
+            }
+
+            // A frequency that lands exactly on an integer multiple of the
+            // sampling cadence can make EITHER the cosine or sine basis
+            // identically zero at every sample (e.g. the Nyquist-aligned
+            // frequency on evenly-spaced integer times, where sin(pi*t) ==
+            // 0 for every integer t) -- that basis contributes 0, not an
+            // undefined 0/0 division, which the classic Press & Rybicki
+            // formula treats by DROPPING the degenerate term rather than
+            // zeroing the whole power.
+            let cos_term = if cos2_sum.abs() > f64::EPSILON {
+                cos_sum.powi(2) / cos2_sum
+            } else {
+                0.0
+            };
+            let sin_term = if sin2_sum.abs() > f64::EPSILON {
+                sin_sum.powi(2) / sin2_sum
+            } else {
+                0.0
+            };
+            0.5 * (cos_term + sin_term) / variance
+        })
+        .collect()
 }
 
 /// AIC-based period selection.
@@ -1764,7 +2144,6 @@ fn detect_periods_internal(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::f64::consts::PI;
 
     fn generate_seasonal_series(n: usize, period: f64, amplitude: f64) -> Vec<f64> {
         (0..n)
@@ -1825,22 +2204,19 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // Call-order pins (Task 3, RESEARCH.md Pitfall 1): estimate_period_acf,
-    // estimate_period_regression, and detect_multiple_periods were NOT
-    // migrated to fdars-core 0.47's FdMatrix -- they still take raw
-    // `(data, n_samples, m_timepoints, argvals, ...)` arguments with no
-    // structural protection against the swap that caused B1/B2 elsewhere.
-    // Each test below documents that it fails if `(n, m)` were swapped
-    // back to the wrong order for a single series (should be `(1, len)`).
+    // Call-order pins (originally Task 3, RESEARCH.md Pitfall 1). As of
+    // Phase 15 plan 15-05 (D-11), `estimate_period_acf_ts` and
+    // `estimate_period_regression_ts` no longer call fdars-core at all --
+    // they are now behaviour tests of the new in-crate implementations.
+    // `detect_multiple_periods_ts` still calls fdars-core's own raw
+    // `(data, n_samples, m_timepoints, argvals, ...)` signature with no
+    // FdMatrix structural protection against the B1/B2-style swap; its
+    // test documents that it fails if `(n, m)` were swapped back to the
+    // wrong order for a single series (should be `(1, len)`).
     // ------------------------------------------------------------------
 
     #[test]
     fn test_estimate_period_acf_call_order_pin() {
-        // fdars-core's estimate_period_acf is not FdMatrix-protected: this
-        // crate's call site must keep passing (values, 1, m, argvals, ...)
-        // -- swapping to (values, m, 1, ...) would silently reinterpret a
-        // single m-point series as m one-point samples and this assertion
-        // would fail.
         let values: Vec<f64> = (0..120)
             .map(|i| (2.0 * PI * i as f64 / 12.0).sin())
             .collect();
@@ -1854,8 +2230,6 @@ mod tests {
 
     #[test]
     fn test_estimate_period_regression_call_order_pin() {
-        // Same call-order risk as estimate_period_acf above --
-        // estimate_period_regression is not FdMatrix-protected.
         let values: Vec<f64> = (0..120)
             .map(|i| (2.0 * PI * i as f64 / 12.0).sin())
             .collect();
@@ -1870,8 +2244,7 @@ mod tests {
 
     #[test]
     fn test_detect_multiple_periods_call_order_pin() {
-        // Same call-order risk as estimate_period_acf above --
-        // detect_multiple_periods is not FdMatrix-protected.
+        // fdars-core's detect_multiple_periods is not FdMatrix-protected.
         let values: Vec<f64> = (0..240)
             .map(|i| (2.0 * PI * i as f64 / 12.0).sin())
             .collect();

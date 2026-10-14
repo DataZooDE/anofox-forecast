@@ -609,3 +609,157 @@ period must be >= 1
 # otherwise stays free of per its own header comment) -- not asserted here.
 # See 15-04-SUMMARY.md for the exact shell transcript: MAP{'seasonal_periods':
 # '[7]'} and MAP{'periods': '[7]'} both return periods [7]; MAP{} returns [].
+
+#######################################
+# 15-05 FFT period (DET-05, D-11, G18): detrended_periodogram selects the
+# strongest bin 3 <= k <= floor(n/2) -- period is never n and always < n/2.
+# Before this plan, the undetrended fdars-core 0.47 FFT estimator reported
+# period = n = 121 for the n121 series below.
+#######################################
+
+# trend + seasonal, n 120 -> period 12.0 exactly (even n)
+
+query I
+SELECT (ts_estimate_period_fft(
+    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12))
+)).period;
+----
+12.0
+
+# trend + seasonal, n 121 (odd) -> period 12.1, confidence > 5 (FFT min-confidence default)
+
+query I
+SELECT abs((ts_estimate_period_fft(
+    list_transform(range(121), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12))
+)).period - 12.1) <= 1e-9;
+----
+true
+
+query I
+SELECT (ts_estimate_period_fft(
+    list_transform(range(121), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12))
+)).confidence > 5;
+----
+true
+
+# _ts_detect_periods(..., 'fft') agrees with the scalar function
+
+query I
+SELECT (_ts_detect_periods(
+    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12)),
+    'fft'
+)).primary_period;
+----
+12.0
+
+# a constant series -> NaN period (no candidate bin survives the
+# scale-relative is_constant check on the detrended series)
+
+query I
+SELECT isnan((ts_estimate_period_fft(list_transform(range(30), i -> 4.25))).period);
+----
+true
+
+#######################################
+# 15-05 ACF / regression / Lomb-Scargle / strength (DET-05, DET-06, D-11,
+# D-12, G17/G19/G20/G21).
+#######################################
+
+# ACF: alternating series -> period 2.0 (previously unreachable -- fdars
+# 0.47's own ACF estimator starts its peak search at lag 3)
+
+query I
+SELECT (ts_estimate_period_acf(
+    list_transform(range(40), i -> CASE WHEN i % 2 = 0 THEN 1.0 ELSE -1.0 END)
+)).period;
+----
+2.0
+
+# ACF: a constant series -> NaN period (c_0 == 0, every acf entry is NaN)
+
+query I
+SELECT isnan((ts_estimate_period_acf(list_transform(range(30), i -> 4.25))).period);
+----
+true
+
+# Regression: a noise-free period-12 sine, default integer grid -> 12.0
+# exactly (previously the 50-point linear grid could skip 12 entirely)
+
+query I
+SELECT (_ts_detect_periods(
+    list_transform(range(120), t -> sin(2 * pi() * t / 12)),
+    'regression'
+)).primary_period;
+----
+12.0
+
+# Lomb-Scargle: sine12_n60 fixture series -- period within 1e-9 of the
+# scipy.signal.lombscargle(..., normalize=True) * n/2 reference
+
+query I
+SELECT abs((ts_lomb_scargle([
+    0.1037, 0.7465, 0.9652, 0.6091, 1.1376, 0.6339, -0.1611, -0.3257, -0.7567,
+    -0.9118, -0.8575, -0.336, -0.2209, 0.4511, 0.7214, 1.1797, 0.8779, 0.4123,
+    -0.2346, -0.5772, -0.8636, -1.0827, -0.4778, -0.198, -0.8133, -0.0667,
+    0.8136, 0.8733, 0.9301, 0.5652, 0.6354, -0.8336, -0.9793, -0.3872, -0.672,
+    -0.3011, -0.1542, 0.0056, 0.9163, 1.0327, 0.4978, 0.295, -0.0216, -0.7834,
+    -0.8955, -0.9714, -0.8553, -0.6519, 0.1781, 0.7674, 0.9623, 0.7545,
+    1.0855, 0.3496, 0.2637, -0.8215, -0.5917, -1.006, -1.2407, -0.5942
+]::DOUBLE[])).period - 11.996946875636068) <= 1e-9;
+----
+true
+
+# Lomb-Scargle: n_frequencies < 2 and min_period >= max_period both error
+# (previously division by zero / an inverted frequency grid, G21)
+
+statement error
+SELECT ts_lomb_scargle(list_transform(range(60), t -> sin(2 * pi() * t / 12)), 0.0, 0.0, 1);
+----
+n_frequencies
+
+statement error
+SELECT ts_lomb_scargle(list_transform(range(60), t -> sin(2 * pi() * t / 12)), 24.0, 6.0, 0);
+----
+min_period
+
+# Seasonal strength: linearly detrend FIRST (G19) -- a trend + seasonal
+# series previously measured ~0.003 (variance) / ~0.014 (spectral) on the
+# raw series; detrended, it is >= 0.95 / >= 0.9.
+
+query I
+SELECT ts_seasonal_strength(
+    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12)), 12.0
+) >= 0.95;
+----
+true
+
+query I
+SELECT ts_seasonal_strength(
+    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12)), 12.0, 'spectral'
+) >= 0.9;
+----
+true
+
+# Seasonal strength: 'wavelet' is removed (always 1.0 even for white noise
+# in fdars-core 0.47); any other unknown method name also errors.
+
+statement error
+SELECT ts_seasonal_strength(
+    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12)), 12.0, 'wavelet'
+);
+----
+removed
+
+statement error
+SELECT ts_seasonal_strength(
+    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12)), 12.0, 'foo'
+);
+----
+expected one of
+
+statement error
+SELECT ts_seasonal_strength_windowed(
+    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12)), 12.0, 24.0, 'wavelet'
+);
+----
+removed

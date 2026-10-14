@@ -1850,7 +1850,7 @@ pub unsafe extern "C" fn anofox_ts_lomb_scargle(
         }
         Ok(Err(e)) => {
             if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+                (*out_error).set_error(ffi_error_code(&e), &e.to_string());
             }
             false
         }
@@ -2583,8 +2583,10 @@ pub unsafe extern "C" fn anofox_ts_seasonal_strength(
         } else {
             CStr::from_ptr(method).to_str().unwrap_or("variance")
         };
-        let strength_method: anofox_fcst_core::StrengthMethod =
-            method_str.parse().unwrap_or_default();
+        // D-12: strict parse -- an unknown method (or the removed
+        // "wavelet") now returns an error instead of silently falling
+        // back to Variance.
+        let strength_method: anofox_fcst_core::StrengthMethod = method_str.parse()?;
         anofox_fcst_core::seasonal_strength(&values_vec, period, strength_method)
     }));
 
@@ -2595,7 +2597,7 @@ pub unsafe extern "C" fn anofox_ts_seasonal_strength(
         }
         Ok(Err(e)) => {
             if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+                (*out_error).set_error(ffi_error_code(&e), &e.to_string());
             }
             false
         }
@@ -2648,14 +2650,12 @@ pub unsafe extern "C" fn anofox_ts_seasonal_strength_windowed(
         } else {
             None
         };
-        let method_str = if method.is_null() {
+        let method_str: Option<anofox_fcst_core::StrengthMethod> = if method.is_null() {
             None
         } else {
             let s = CStr::from_ptr(method).to_str().unwrap_or("variance");
-            Some(
-                s.parse::<anofox_fcst_core::StrengthMethod>()
-                    .unwrap_or_default(),
-            )
+            // D-12: strict parse -- see anofox_ts_seasonal_strength above.
+            Some(s.parse::<anofox_fcst_core::StrengthMethod>()?)
         };
         anofox_fcst_core::seasonal_strength_windowed(&values_vec, period, window_opt, method_str)
     }));
@@ -2672,7 +2672,7 @@ pub unsafe extern "C" fn anofox_ts_seasonal_strength_windowed(
         }
         Ok(Err(e)) => {
             if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+                (*out_error).set_error(ffi_error_code(&e), &e.to_string());
             }
             false
         }

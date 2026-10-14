@@ -3,7 +3,7 @@
 //! This module provides functions for detecting and analyzing seasonal patterns
 //! in time series data, wrapping both custom implementations and fdars-core functions.
 
-use crate::detrending::single_series_matrix;
+use crate::detrending::{detrend_linear, single_series_matrix};
 use crate::error::{ForecastError, Result};
 use fdars_core::seasonal::{
     classify_seasonality as fdars_classify_seasonality,
@@ -12,7 +12,6 @@ use fdars_core::seasonal::{
     instantaneous_period as fdars_instantaneous_period,
     seasonal_strength_spectral as fdars_seasonal_strength_spectral,
     seasonal_strength_variance as fdars_seasonal_strength_variance,
-    seasonal_strength_wavelet as fdars_seasonal_strength_wavelet,
     seasonal_strength_windowed as fdars_seasonal_strength_windowed,
     ChangeDetectionResult as FdarsChangeDetectionResult, ChangePoint as FdarsChangePoint,
     ChangeType, InstantaneousPeriod as FdarsInstantaneousPeriod, ModulationType,
@@ -46,19 +45,40 @@ pub enum StrengthMethod {
     Variance,
     /// Spectral: power at seasonal frequencies / total power
     Spectral,
-    /// Wavelet-based strength measurement
-    Wavelet,
 }
 
+/// All strength method names accepted by [`StrengthMethod::from_str`], for
+/// the error message naming every valid choice (D-12).
+const VALID_STRENGTH_METHODS: &str = "variance (alias var), spectral (alias spec, fft)";
+
+/// `seasonal_strength_wavelet` is removed (D-12, G19): it returned 1.0 even
+/// for white noise in fdars-core 0.47 (always-maximal strength regardless
+/// of input), so it is strictly worse than reporting nothing. Requesting it
+/// now raises an error naming the two remaining methods instead of
+/// silently falling back to `variance`.
+const WAVELET_REMOVED_MESSAGE: &str = "removed: seasonal_strength_wavelet returned 1.0 even for white noise in fdars-core 0.47; use 'variance' (default) or 'spectral'";
+
 impl FromStr for StrengthMethod {
-    type Err = std::convert::Infallible;
+    type Err = ForecastError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         Ok(match s.to_lowercase().as_str() {
             "variance" | "var" => Self::Variance,
             "spectral" | "spec" | "fft" => Self::Spectral,
-            "wavelet" | "wav" => Self::Wavelet,
-            _ => Self::Variance,
+            "wavelet" | "wav" => {
+                return Err(ForecastError::InvalidParameter {
+                    param: "method".to_string(),
+                    value: s.to_string(),
+                    reason: WAVELET_REMOVED_MESSAGE.to_string(),
+                })
+            }
+            other => {
+                return Err(ForecastError::InvalidParameter {
+                    param: "method".to_string(),
+                    value: other.to_string(),
+                    reason: format!("expected one of: {VALID_STRENGTH_METHODS}"),
+                })
+            }
         })
     }
 }
@@ -68,7 +88,6 @@ impl From<StrengthMethod> for FdarsStrengthMethod {
         match m {
             StrengthMethod::Variance => FdarsStrengthMethod::Variance,
             StrengthMethod::Spectral => FdarsStrengthMethod::Spectral,
-            StrengthMethod::Wavelet => FdarsStrengthMethod::Variance, // Wavelet handled separately
         }
     }
 }
@@ -442,7 +461,13 @@ pub fn analyze_seasonality(
     })
 }
 
-/// Compute trend strength using linear regression R-squared.
+/// Compute trend strength as `|r|`, the absolute Pearson correlation
+/// between the series and a linear time index (D-12, G22). This is the
+/// SQUARE ROOT of the linear-fit `R^2`, not `R^2` itself -- a prior doc
+/// comment claimed "R-squared" without the square root; the implementation
+/// below is unchanged, only this comment is corrected.
+/// `ts_analyze_seasonality`'s `trend_strength` column documents the same
+/// `|r|` definition.
 fn compute_trend_strength(values: &[f64]) -> f64 {
     if values.len() < 2 {
         return 0.0;
@@ -506,8 +531,13 @@ pub fn seasonal_strength_variance(
     let argvals = make_argvals(n);
     let harmonics = n_harmonics.unwrap_or(3);
 
-    // fdars 0.47: seasonal_strength_variance(data: &FdMatrix, argvals, period, n_harmonics)
-    let mat = single_series_matrix(values)?;
+    // D-12, G19: linearly detrend FIRST -- fdars 0.47's own
+    // seasonal_strength_variance measures variance explained on the RAW
+    // series, so a trend inflates total variance and crushes the
+    // seasonal-share ratio (0.5*t + 2*sin(2*pi*t/12), n=120 measured
+    // 0.00296 instead of ~1.0 for the sine alone).
+    let detrended = detrend_linear(values)?.detrended;
+    let mat = single_series_matrix(&detrended)?;
     Ok(fdars_seasonal_strength_variance(
         &mat, &argvals, period, harmonics,
     ))
@@ -539,40 +569,11 @@ pub fn seasonal_strength_spectral(values: &[f64], period: f64) -> Result<f64> {
 
     let argvals = make_argvals(n);
 
-    // fdars 0.47: seasonal_strength_spectral(data: &FdMatrix, argvals, period)
-    let mat = single_series_matrix(values)?;
+    // D-12, G19: linearly detrend first, same rationale as
+    // seasonal_strength_variance above.
+    let detrended = detrend_linear(values)?.detrended;
+    let mat = single_series_matrix(&detrended)?;
     Ok(fdars_seasonal_strength_spectral(&mat, &argvals, period))
-}
-
-/// Compute seasonal strength using wavelet transform.
-///
-/// Uses Morlet wavelet to measure seasonal strength.
-///
-/// # Arguments
-/// * `values` - Time series values
-/// * `period` - Seasonal period
-///
-/// # Returns
-/// Seasonal strength (0 to 1)
-pub fn seasonal_strength_wavelet(values: &[f64], period: f64) -> Result<f64> {
-    let n = values.len();
-    if n < 4 {
-        return Err(ForecastError::InsufficientData { needed: 4, got: n });
-    }
-
-    if period <= 0.0 {
-        return Err(ForecastError::InvalidParameter {
-            param: "period".to_string(),
-            value: period.to_string(),
-            reason: "Period must be positive".to_string(),
-        });
-    }
-
-    let argvals = make_argvals(n);
-
-    // fdars 0.47: seasonal_strength_wavelet(data: &FdMatrix, argvals, period)
-    let mat = single_series_matrix(values)?;
-    Ok(fdars_seasonal_strength_wavelet(&mat, &argvals, period))
 }
 
 /// Compute seasonal strength using the specified method.
@@ -588,7 +589,6 @@ pub fn seasonal_strength(values: &[f64], period: f64, method: StrengthMethod) ->
     match method {
         StrengthMethod::Variance => seasonal_strength_variance(values, period, None),
         StrengthMethod::Spectral => seasonal_strength_spectral(values, period),
-        StrengthMethod::Wavelet => seasonal_strength_wavelet(values, period),
     }
 }
 
@@ -625,8 +625,10 @@ pub fn seasonal_strength_windowed(
     let win_size = window_size.unwrap_or(2.0 * period);
     let strength_method: FdarsStrengthMethod = method.unwrap_or(StrengthMethod::Variance).into();
 
-    // fdars 0.47: seasonal_strength_windowed(data: &FdMatrix, argvals, period, window_size, method)
-    let mat = single_series_matrix(values)?;
+    // D-12, G19: linearly detrend first, same rationale as
+    // seasonal_strength_variance above.
+    let detrended = detrend_linear(values)?.detrended;
+    let mat = single_series_matrix(&detrended)?;
     Ok(fdars_seasonal_strength_windowed(
         &mat,
         &argvals,
@@ -862,12 +864,50 @@ mod tests {
     }
 
     #[test]
-    fn test_seasonal_strength_wavelet() {
-        let values = generate_seasonal_series(120, 12.0, 5.0);
-        let result = seasonal_strength_wavelet(&values, 12.0);
+    fn test_strength_method_from_str_wavelet_removed() {
+        for s in ["wavelet", "wav", "WAVELET"] {
+            let err = s.parse::<StrengthMethod>().unwrap_err();
+            let msg = err.to_string();
+            assert!(msg.contains("variance"), "{s}: {msg}");
+            assert!(msg.contains("spectral"), "{s}: {msg}");
+        }
+    }
 
-        // Verify function runs without error
-        assert!(result.is_ok());
+    #[test]
+    fn test_strength_method_from_str_unknown_lists_choices() {
+        let err = "foo".parse::<StrengthMethod>().unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("variance"), "{msg}");
+        assert!(msg.contains("spec"), "{msg}");
+    }
+
+    #[test]
+    fn test_strength_method_from_str_accepted_aliases() {
+        for (s, want) in [
+            ("variance", StrengthMethod::Variance),
+            ("var", StrengthMethod::Variance),
+            ("VARIANCE", StrengthMethod::Variance),
+            ("spectral", StrengthMethod::Spectral),
+            ("spec", StrengthMethod::Spectral),
+            ("fft", StrengthMethod::Spectral),
+        ] {
+            assert_eq!(s.parse::<StrengthMethod>().unwrap(), want, "{s}");
+        }
+    }
+
+    #[test]
+    fn test_seasonal_strength_variance_detrends_first() {
+        // D-12, G19: a trend + seasonal series must report a HIGH seasonal
+        // strength once detrended, not the crushed ~0.003 fdars-core 0.47
+        // reports on the raw (undetrended) series.
+        let values: Vec<f64> = (0..120)
+            .map(|i| {
+                let t = i as f64;
+                0.5 * t + 2.0 * (2.0 * PI * t / 12.0).sin()
+            })
+            .collect();
+        let strength = seasonal_strength_variance(&values, 12.0, None).unwrap();
+        assert!(strength >= 0.95, "strength = {strength}");
     }
 
     #[test]

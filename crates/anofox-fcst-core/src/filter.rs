@@ -37,14 +37,44 @@ use crate::error::{ForecastError, Result};
 /// assert!(!is_constant(&[Some(1.0), Some(2.0), Some(3.0)]));
 /// ```
 pub fn is_constant(values: &[Option<f64>]) -> bool {
-    let non_null: Vec<f64> = values.iter().filter_map(|v| *v).collect();
+    // Keep NaN and infinite entries here -- is_constant_slice ignores NaN
+    // but must see an infinity to correctly report "not constant" (D-13).
+    let present: Vec<f64> = values.iter().filter_map(|v| *v).collect();
+    is_constant_slice(&present)
+}
 
-    if non_null.len() < 2 {
+/// Scale-relative constant check shared by [`is_constant`], `quality.rs`'s
+/// `compute_data_quality`, and `stats.rs`'s `compute_ts_stats` (D-13, G25):
+/// `values` is constant if `max - min <= 1e-10 * max(1, max|x|)` over its
+/// present (non-`NaN`) entries, else not constant. Fewer than 2 present
+/// values is constant (vacuously, or trivially for a single value). `NaN`
+/// entries are ignored; an infinite present value makes the range
+/// non-finite, which is never `<=` a finite tolerance, so a series
+/// containing `+-inf` is never constant (even alongside only one other
+/// finite value).
+///
+/// # Example
+/// ```
+/// use anofox_fcst_core::filter::is_constant_slice;
+/// assert!(is_constant_slice(&[1e12, 1e12 + 0.001])); // scale-relative: still constant
+/// assert!(!is_constant_slice(&[1.0, 1.0 + 1e-9])); // tiny but relatively significant at this scale
+/// assert!(!is_constant_slice(&[f64::INFINITY, 1.0]));
+/// ```
+pub fn is_constant_slice(values: &[f64]) -> bool {
+    let present: Vec<f64> = values.iter().copied().filter(|v| !v.is_nan()).collect();
+    if present.len() < 2 {
         return true;
     }
-
-    let first = non_null[0];
-    non_null.iter().all(|v| (v - first).abs() < f64::EPSILON)
+    let min = present.iter().cloned().fold(f64::INFINITY, f64::min);
+    let max = present.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let range = max - min;
+    if !range.is_finite() {
+        // An infinite (or NaN-from-inf-minus-inf) range can never satisfy a
+        // finite tolerance -- treat as "not constant".
+        return false;
+    }
+    let scale = 1.0f64.max(present.iter().fold(0.0f64, |acc, v| acc.max(v.abs())));
+    range <= 1e-10 * scale
 }
 
 /// Checks if a series is too short for analysis.
