@@ -1867,10 +1867,14 @@ WITH cal AS (
     SELECT * FROM query_table(calibration::VARCHAR)
 ),
 cal_dupe_check AS (
+    -- NOTE: `cal.group_col` must stay qualified (never a bare `group_col`)
+    -- here -- a bare `group_col` is textually identical to this macro's own
+    -- `group_col` parameter name and would be substituted with the caller's
+    -- argument (e.g. a plain column name like `g`), breaking the binder.
     SELECT CASE WHEN COUNT(*) > 0 THEN
         error('ts_conformal_apply_by: calibration table has more than one row for the same group_col value (it must hold at most one row per group_col value, including at most one pooled row with group_col = NULL)')
     ELSE NULL END AS _err
-    FROM (SELECT group_col FROM cal GROUP BY group_col HAVING COUNT(*) > 1) _dupes
+    FROM (SELECT cal.group_col FROM cal GROUP BY cal.group_col HAVING COUNT(*) > 1) _dupes
 ),
 cal_pooled_eligible AS (
     SELECT (COUNT(*) = 1) AS _eligible FROM cal
