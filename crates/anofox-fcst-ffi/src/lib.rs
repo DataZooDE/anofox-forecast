@@ -6137,13 +6137,25 @@ pub unsafe extern "C" fn anofox_ts_conformal_apply_score(
 ) -> bool {
     init_error(out_error);
 
-    if forecasts.is_null() || out_lower.is_null() || out_upper.is_null() {
+    if out_lower.is_null() || out_upper.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+    if n_forecasts != 0 && forecasts.is_null() {
         set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
         return false;
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let forecast_series = build_series(forecasts, forecasts_validity, n_forecasts);
+        // Phase 16 WR-01: a non-null, zero-length forecasts list must
+        // produce an empty result, matching every sibling conformal FFI
+        // entry point (`anofox_ts_conformal_from_pairs`,
+        // `anofox_ts_conformal_calibrate`, `anofox_ts_conformal_apply`).
+        let forecast_series = if n_forecasts == 0 {
+            Vec::new()
+        } else {
+            build_series(forecasts, forecasts_validity, n_forecasts)
+        };
         let difficulty_series: Vec<Option<f64>> = if difficulty.is_null() || difficulty_len == 0 {
             Vec::new()
         } else {

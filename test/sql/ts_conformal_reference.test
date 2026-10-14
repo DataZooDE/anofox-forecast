@@ -957,3 +957,21 @@ SELECT ts_conformal_apply(
 );
 ----
 was removed
+
+# =============================================================================
+# WR-01 (review fix): ts_conformal_intervals 4-arg overload on an empty,
+# non-NULL forecasts list returns an empty STRUCT(lower: [], upper: []),
+# not SQL NULL -- matching every sibling conformal FFI entry point's
+# "non-null, zero-length means empty result" convention.
+# =============================================================================
+
+query I
+SELECT (r).lower = []::DOUBLE[] AND (r).upper = []::DOUBLE[]
+FROM (SELECT ts_conformal_intervals([]::DOUBLE[], 1.0, 'symmetric', NULL::DOUBLE[]) AS r);
+----
+true
+
+query I
+SELECT ts_conformal_intervals([]::DOUBLE[], 1.0, 'symmetric', NULL::DOUBLE[]) IS NOT NULL;
+----
+true
