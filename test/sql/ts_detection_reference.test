@@ -440,3 +440,172 @@ FROM (
 );
 ----
 true
+
+#######################################
+# 15-04: R-faithful MSTL -- decomposition::mstl_fit shared by
+# _ts_mstl_decomposition / ts_mstl_decomposition_by and ts_stats'
+# stl_strengths (DET-04, D-09). det84/msts_7_28 are built from the exact R
+# generating formulas in gen_decomposition_reference.R (reproduced in SQL
+# to avoid 84/280-element literals), checked against
+# r_decomposition/cases.json. Before this plan, periods were always
+# ignored (nullptr/0 passed to the FFI) and the moving-average MSTL sorted
+# periods DESCENDING with a broken even-window trend (G10/G11: a constant
+# 1.0 series gave trend 1.05, not 1.0).
+#######################################
+
+statement ok
+CREATE TABLE det84_v AS
+SELECT list_transform(range(1, 85), t -> 10 + 3 * sin(2 * pi() * t / 7) + 0.1 * t + 0.5 * cos(2.1 * t)) AS v;
+
+statement ok
+CREATE TABLE msts_v AS
+SELECT list_transform(range(1, 281), t -> sin(2 * pi() * t / 7) + 0.5 * sin(2 * pi() * t / 28) + 0.3 * cos(1.7 * t)) AS v;
+
+# --- det84, periods [7]: ascending `periods`, trend/seasonal within 1e-8 of R forecast::mstl ---
+
+query I
+SELECT (_ts_mstl_decomposition(v, 'fail', [7])).periods FROM det84_v;
+----
+[7]
+
+query I
+SELECT abs((_ts_mstl_decomposition(v, 'fail', [7])).trend[1] - 10.003793193675527) <= 1e-8
+   AND abs((_ts_mstl_decomposition(v, 'fail', [7])).trend[42] - 14.198867501072765) <= 1e-8
+   AND abs((_ts_mstl_decomposition(v, 'fail', [7])).trend[84] - 18.519253671516182) <= 1e-8
+FROM det84_v;
+----
+true
+
+query I
+SELECT abs((_ts_mstl_decomposition(v, 'fail', [7])).seasonal[1][1] - 2.309707335567605) <= 1e-8
+FROM det84_v;
+----
+true
+
+# --- trend + seasonal + remainder reconstructs the input within 1e-10 ---
+
+statement ok
+CREATE TABLE det84_mstl AS
+SELECT v, r.trend AS trend, r.seasonal AS seasonal, r.remainder AS remainder, r.periods AS periods
+FROM (SELECT v, _ts_mstl_decomposition(v, 'fail', [7]) AS r FROM det84_v) t;
+
+query I
+SELECT max(abs(got - want)) <= 1e-10
+FROM (
+    SELECT unnest(list_transform(range(84), i -> trend[i + 1] + seasonal[1][i + 1] + remainder[i + 1])) AS got,
+           unnest(v) AS want
+    FROM det84_mstl
+);
+----
+true
+
+# --- msts_7_28 requested as [28, 7] -> periods come back ascending [7, 28] ---
+
+query I
+SELECT (_ts_mstl_decomposition(v, 'fail', [28, 7])).periods FROM msts_v;
+----
+[7, 28]
+
+# --- constant 1.0, n 48, requested [12]: trend exactly 1.0 (was 1.05, G11) ---
+
+query I
+SELECT max(abs(t - 1.0)) <= 1e-12
+FROM (SELECT unnest((_ts_mstl_decomposition(list_transform(range(48), i -> 1.0), 'fail', [12])).trend) AS t);
+----
+true
+
+# --- constant 1.0, n 100, no periods: non-seasonal supsmu trend exactly 1.0 ---
+
+query I
+SELECT max(abs(t - 1.0)) <= 1e-12
+FROM (SELECT unnest((_ts_mstl_decomposition(list_transform(range(100), i -> 1.0), 'fail', [])).trend) AS t);
+----
+true
+
+#######################################
+# 15-04: classical decomposition (R stats::decompose, D-10) and MSTL
+# insufficient-data modes. ts_decompose_seasonal gains the
+# classical_additive/classical/classical_multiplicative methods next to
+# the fdars additive/multiplicative methods from plan 15-01.
+#######################################
+
+# --- classical_additive on constant 1.0 (n 48, period 12): NaN edges, exact 1.0 trend, exact 0.0 seasonal ---
+
+query I
+SELECT isnan((ts_decompose_seasonal(list_transform(range(48), i -> 1.0), 12.0, 'classical_additive')).trend[1]);
+----
+true
+
+query I
+SELECT min(t) = 1.0 AND max(t) = 1.0
+FROM (SELECT unnest((ts_decompose_seasonal(list_transform(range(48), i -> 1.0), 12.0, 'classical_additive')).trend[7:42]) AS t);
+----
+true
+
+query I
+SELECT max(abs(s)) <= 1e-12
+FROM (SELECT unnest((ts_decompose_seasonal(list_transform(range(48), i -> 1.0), 12.0, 'classical_additive')).seasonal) AS s);
+----
+true
+
+# --- AirPassengers (144 values, from r_decomposition/cases.json air_p12): classical_additive trend[7], classical_multiplicative seasonal[1] within 1e-10 of R stats::decompose ---
+
+statement ok
+CREATE TABLE air_v AS SELECT [112, 118, 132, 129, 121, 135, 148, 148, 136, 119, 104, 118, 115, 126, 141, 135, 125, 149, 170, 170, 158, 133, 114, 140, 145, 150, 178, 163, 172, 178, 199, 199, 184, 162, 146, 166, 171, 180, 193, 181, 183, 218, 230, 242, 209, 191, 172, 194, 196, 196, 236, 235, 229, 243, 264, 272, 237, 211, 180, 201, 204, 188, 235, 227, 234, 264, 302, 293, 259, 229, 203, 229, 242, 233, 267, 269, 270, 315, 364, 347, 312, 274, 237, 278, 284, 277, 317, 313, 318, 374, 413, 405, 355, 306, 271, 306, 315, 301, 356, 348, 355, 422, 465, 467, 404, 347, 305, 336, 340, 318, 362, 348, 363, 435, 491, 505, 404, 359, 310, 337, 360, 342, 406, 396, 420, 472, 548, 559, 463, 407, 362, 405, 417, 391, 419, 461, 472, 535, 622, 606, 508, 461, 390, 432]::DOUBLE[] AS v;
+
+query I
+SELECT abs((ts_decompose_seasonal(v, 12.0, 'classical_additive')).trend[7] - 126.79166666666667) <= 1e-10
+FROM air_v;
+----
+true
+
+query I
+SELECT abs((ts_decompose_seasonal(v, 12.0, 'classical_multiplicative')).seasonal[1] - 0.910230367372201) <= 1e-10
+FROM air_v;
+----
+true
+
+# --- det84, 'classical' alias, period 7.0: trend[4] within 1e-10 of R stats::decompose ---
+
+query I
+SELECT abs((ts_decompose_seasonal(v, 7.0, 'classical')).trend[4] - 10.362555451945862) <= 1e-10
+FROM det84_v;
+----
+true
+
+# --- errors: non-integer period with 'classical'; a zero in a 'classical_multiplicative' series ---
+
+statement error
+SELECT ts_decompose_seasonal(list_transform(range(84), i -> i::DOUBLE), 12.5, 'classical');
+----
+classical decomposition requires an integer period >= 2
+
+statement error
+SELECT ts_decompose_seasonal(list_transform(range(48), i -> 0.0), 12.0, 'classical_multiplicative');
+----
+multiplicative decomposition requires strictly positive values
+
+# --- _ts_mstl_decomposition insufficient-data modes: n 20, period [12] (needs n > 24) ---
+
+query I
+SELECT (_ts_mstl_decomposition(list_transform(range(20), i -> i::DOUBLE), 'fail', [12])) IS NULL;
+----
+true
+
+query I
+SELECT (_ts_mstl_decomposition(list_transform(range(20), i -> i::DOUBLE), 'trend', [12])).periods = []
+   AND (_ts_mstl_decomposition(list_transform(range(20), i -> i::DOUBLE), 'trend', [12])).trend IS NOT NULL;
+----
+true
+
+statement error
+SELECT _ts_mstl_decomposition(list_transform(range(48), i -> i::DOUBLE), 'fail', [0]);
+----
+period must be >= 1
+
+# ts_mstl_decomposition_by's params.seasonal_periods/periods wiring (D-09) is
+# verified in the interactive shell with `LOAD json;` (the macro expands
+# through json_extract_string/to_json, which this NON-json-gated file
+# otherwise stays free of per its own header comment) -- not asserted here.
+# See 15-04-SUMMARY.md for the exact shell transcript: MAP{'seasonal_periods':
+# '[7]'} and MAP{'periods': '[7]'} both return periods [7]; MAP{} returns [].

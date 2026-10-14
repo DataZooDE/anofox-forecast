@@ -33,6 +33,7 @@ namespace duckdb {
 struct TsMstlDecompositionNativeBindData : public TableFunctionData {
     // Parameters
     int insufficient_data_mode = 0;  // 0=fail, 1=skip, 2=pad
+    vector<int32_t> periods;         // Seasonal periods (empty = none/auto, D-09)
 
     // Type preservation
     LogicalType group_logical_type = LogicalType(LogicalTypeId::VARCHAR);
@@ -93,6 +94,15 @@ static unique_ptr<FunctionData> TsMstlDecompositionNativeBind(
     if (input.inputs.size() >= 2 && !input.inputs[1].IsNull()) {
         string mode = input.inputs[1].GetValue<string>();
         bind_data->insufficient_data_mode = ParseInsufficientDataMode(mode);
+    }
+
+    // Parse seasonal periods (parameter index 2, D-09). NULL -> empty (none/auto).
+    if (input.inputs.size() >= 3 && !input.inputs[2].IsNull()) {
+        for (auto &child : ListValue::GetChildren(input.inputs[2])) {
+            if (!child.IsNull()) {
+                bind_data->periods.push_back(child.GetValue<int32_t>());
+            }
+        }
     }
 
     // Detect column types from input
@@ -293,12 +303,17 @@ static OperatorFinalizeResultType TsMstlDecompositionNativeFinalize(
             bool success = anofox_ts_mstl_decomposition(
                 sorted_values.data(),
                 sorted_values.size(),
-                nullptr,  // periods - auto detect
-                0,
+                bind_data.periods.empty() ? nullptr : bind_data.periods.data(),
+                bind_data.periods.size(),
                 bind_data.insufficient_data_mode,
                 &mstl_result,
                 &error
             );
+
+            if (!success && error.code == INVALID_INPUT) {
+                throw InvalidInputException("_ts_mstl_decomposition_native: %s",
+                    error.message ? error.message : "invalid input");
+            }
 
             DecompositionOutputRow row;
             row.group_value = grp.group_value;
@@ -421,11 +436,11 @@ static OperatorFinalizeResultType TsMstlDecompositionNativeFinalize(
 // ============================================================================
 
 void RegisterTsMstlDecompositionNativeFunction(ExtensionLoader &loader) {
-    // Internal table-in-out function: (TABLE, insufficient_data_mode)
+    // Internal table-in-out function: (TABLE, insufficient_data_mode, seasonal_periods)
     // Input table must have 3 columns: group_col, date_col, value_col
     // Note: This is an internal function (prefixed with _) called by ts_mstl_decomposition_by macro
     TableFunction func("_ts_mstl_decomposition_native",
-        {LogicalType::TABLE, LogicalType::VARCHAR},
+        {LogicalType::TABLE, LogicalType::VARCHAR, LogicalType::LIST(LogicalType::INTEGER)},
         nullptr,  // No execute function - use in_out_function
         TsMstlDecompositionNativeBind,
         TsMstlDecompositionNativeInitGlobal,

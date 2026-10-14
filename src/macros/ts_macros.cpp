@@ -487,11 +487,12 @@ WHERE group_col IN (
 R"(
 SELECT * FROM _ts_mstl_decomposition_native(
     (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
-    COALESCE(json_extract_string(to_json(params), '$.insufficient_data'), 'fail')
+    COALESCE(json_extract_string(to_json(params), '$.insufficient_data'), 'fail'),
+    CAST(COALESCE(json_extract_string(to_json(params), '$.seasonal_periods'), json_extract_string(to_json(params), '$.periods'), '[]') AS INTEGER[])
 )
 )",
-    "Decomposes each group's time series into trend, seasonal, and remainder components using MSTL.",
-    "SELECT * FROM ts_mstl_decomposition_by('sales', product_id, date, qty, '[7,365]')",
+    "Decomposes each group's time series into trend, seasonal, and remainder components using MSTL. params: seasonal_periods (alias periods) is a list of seasonal periods to extract, e.g. '[7, 365]' or [7, 365]; insufficient_data is 'fail' (default), 'trend', or 'none'.",
+    "SELECT * FROM ts_mstl_decomposition_by('sales', product_id, date, qty, MAP{'seasonal_periods': '[7, 365]'})",
     "decomposition"},
 
     // ts_detrend_by: Remove trend from grouped time series

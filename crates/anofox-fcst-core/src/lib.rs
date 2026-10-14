@@ -72,7 +72,10 @@ pub use conformal::{
     ConformalStrategy,
     PredictionIntervals,
 };
-pub use decomposition::{mstl_decompose, InsufficientDataMode, MstlDecomposition};
+pub use decomposition::{
+    classical_decompose, mstl_decompose, mstl_fit, ClassicalDecomposition, ClassicalKind,
+    InsufficientDataMode, MstlDecomposition, MstlFit,
+};
 pub use detrending::{
     decompose, decompose_additive, decompose_multiplicative, detrend, detrend_auto, detrend_diff,
     detrend_linear, detrend_loess, detrend_polynomial, DecomposeMethod, DecomposeResult,

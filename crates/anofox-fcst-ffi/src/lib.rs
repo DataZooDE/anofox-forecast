@@ -3187,7 +3187,7 @@ pub unsafe extern "C" fn anofox_ts_mstl_decomposition(
         }
         Ok(Err(e)) => {
             if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+                (*out_error).set_error(ffi_error_code(&e), &e.to_string());
             }
             false
         }

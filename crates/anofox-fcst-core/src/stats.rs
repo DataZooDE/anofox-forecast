@@ -3,12 +3,11 @@
 //! Provides ts_stats functionality that computes 24 metrics per series.
 
 use crate::calendar::CalendarStep;
+use crate::decomposition::mstl_fit;
 use crate::error::Result;
 use crate::gaps::{gap_counts, resolve_gap_step};
 use crate::missing::trim_edges_reject_interior;
 use crate::seasonality::detect_seasonality;
-use crate::stl::{stl, StlParams};
-use crate::supsmu::supsmu;
 
 /// Frequency type for calendar vs fixed frequencies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -561,70 +560,29 @@ fn seasonal_strength_rule(remainder: &[f64], seasonal: &[f64]) -> Option<f64> {
 pub fn stl_strengths(values: &[f64], periods: &[usize]) -> Result<StlStrengths> {
     let n = values.len();
 
-    let mut usable: Vec<usize> = periods
-        .iter()
-        .copied()
-        .filter(|&p| p >= 2 && n > 2 * p)
-        .collect();
-    usable.sort_unstable();
-    usable.dedup();
+    // D-09 (Phase 15 plan 15-04): the shared `forecast::mstl` fit --
+    // `mstl_fit` applies the identical usable-period filter (ascending,
+    // de-duplicated, `p >= 2 && n > 2*p`), non-seasonal `supsmu` fallback,
+    // and 2-pass iteration this function used to implement inline.
+    let fit = mstl_fit(values, periods)?;
 
-    if usable.is_empty() {
-        let x_idx: Vec<f64> = (1..=n).map(|i| i as f64).collect();
-        let trend = supsmu(&x_idx, values)?;
-        let remainder: Vec<f64> = (0..n).map(|i| values[i] - trend[i]).collect();
-        // deseason = trend + remainder = values exactly (no seasonal component to
-        // remove); pass `values` directly rather than re-deriving it.
-        let trend_strength = trend_strength_rule(values, values, &remainder);
+    if fit.periods.is_empty() {
+        // deseason = trend + remainder = values exactly (no seasonal
+        // component to remove); pass `values` directly rather than
+        // re-deriving it.
+        let trend_strength = trend_strength_rule(values, values, &fit.remainder);
         return Ok(StlStrengths {
             trend_strength: Some(trend_strength),
             seasonality_strength: None,
         });
     }
 
-    if usable.len() == 1 {
-        let period = usable[0];
-        let params = StlParams::r_default(period, 11);
-        let fit = stl(values, &params)?;
-        let deseason: Vec<f64> = (0..n).map(|i| fit.trend[i] + fit.remainder[i]).collect();
-        let trend_strength = trend_strength_rule(values, &deseason, &fit.remainder);
-        let seasonality_strength = seasonal_strength_rule(&fit.remainder, &fit.seasonal);
-        return Ok(StlStrengths {
-            trend_strength: Some(trend_strength),
-            seasonality_strength,
-        });
-    }
-
-    // forecast::mstl iteration: 2 passes over the ascending periods, each
-    // adding back its own previous seasonal estimate before re-fitting.
-    let k = usable.len();
-    let mut seas: Vec<Vec<f64>> = vec![vec![0.0; n]; k];
-    let mut deseas: Vec<f64> = values.to_vec();
-    let mut last_trend: Vec<f64> = vec![0.0; n];
-
-    for _pass in 0..2 {
-        for (pos, &period) in usable.iter().enumerate() {
-            for (d, s) in deseas.iter_mut().zip(seas[pos].iter()) {
-                *d += *s;
-            }
-            let s_window = 7 + 4 * (pos + 1);
-            let params = StlParams::r_default(period, s_window);
-            let fit = stl(&deseas, &params)?;
-            seas[pos] = fit.seasonal;
-            last_trend = fit.trend;
-            for (d, s) in deseas.iter_mut().zip(seas[pos].iter()) {
-                *d -= *s;
-            }
-        }
-    }
-
-    let remainder: Vec<f64> = (0..n).map(|i| deseas[i] - last_trend[i]).collect();
-    let deseason_total: Vec<f64> = (0..n).map(|i| last_trend[i] + remainder[i]).collect();
-    let trend_strength = trend_strength_rule(values, &deseason_total, &remainder);
+    let deseason_total: Vec<f64> = (0..n).map(|i| fit.trend[i] + fit.remainder[i]).collect();
+    let trend_strength = trend_strength_rule(values, &deseason_total, &fit.remainder);
 
     let mut best_fs: Option<f64> = None;
-    for seasonal in &seas {
-        if let Some(fs) = seasonal_strength_rule(&remainder, seasonal) {
+    for seasonal in &fit.seasonals {
+        if let Some(fs) = seasonal_strength_rule(&fit.remainder, seasonal) {
             best_fs = Some(best_fs.map_or(fs, |b| b.max(fs)));
         }
     }

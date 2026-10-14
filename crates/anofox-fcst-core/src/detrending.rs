@@ -3,6 +3,7 @@
 //! This module wraps fdars-core's detrending and decomposition functions
 //! for use with time series data in DuckDB.
 
+use crate::decomposition::{classical_decompose, ClassicalKind};
 use crate::error::{ForecastError, Result};
 use fdars_core::detrend::{
     auto_detrend as fdars_auto_detrend, decompose_additive as fdars_decompose_additive,
@@ -81,16 +82,22 @@ impl FromStr for DetrendMethod {
 /// Decomposition method for seasonal decomposition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DecomposeMethod {
-    /// Additive decomposition: data = trend + seasonal + remainder
+    /// Additive decomposition (fdars LOESS+Fourier): data = trend + seasonal + remainder
     #[default]
     Additive,
-    /// Multiplicative decomposition: data = trend * seasonal * remainder
+    /// Multiplicative decomposition (fdars LOESS+Fourier): data = trend * seasonal * remainder
     Multiplicative,
+    /// Classical additive decomposition (R `stats::decompose`, D-10):
+    /// centred moving-average trend, data = trend + seasonal + remainder
+    ClassicalAdditive,
+    /// Classical multiplicative decomposition (R `stats::decompose`, D-10):
+    /// centred moving-average trend, data = trend * seasonal * remainder
+    ClassicalMultiplicative,
 }
 
 /// All decompose method names accepted by [`DecomposeMethod::from_str`], for
 /// the error message naming every valid choice.
-const VALID_DECOMPOSE_METHODS: &str = "additive (alias add), multiplicative (alias mult, mul)";
+const VALID_DECOMPOSE_METHODS: &str = "additive (alias add), multiplicative (alias mult, mul), classical_additive (alias classical), classical_multiplicative";
 
 impl FromStr for DecomposeMethod {
     type Err = ForecastError;
@@ -99,6 +106,8 @@ impl FromStr for DecomposeMethod {
         Ok(match s.to_lowercase().as_str() {
             "additive" | "add" => Self::Additive,
             "multiplicative" | "mult" | "mul" => Self::Multiplicative,
+            "classical_additive" | "classical" => Self::ClassicalAdditive,
+            "classical_multiplicative" => Self::ClassicalMultiplicative,
             other => {
                 return Err(ForecastError::InvalidParameter {
                     param: "method".to_string(),
@@ -108,6 +117,20 @@ impl FromStr for DecomposeMethod {
             }
         })
     }
+}
+
+/// Validate that a `decompose()` period (`f64`) is an integer `>= 2`, as
+/// classical decomposition requires (D-10). Returns the usize period on
+/// success.
+fn classical_period_as_usize(period: f64) -> Result<usize> {
+    if period < 2.0 || period.fract() != 0.0 {
+        return Err(ForecastError::InvalidParameter {
+            param: "period".to_string(),
+            value: period.to_string(),
+            reason: "classical decomposition requires an integer period >= 2".to_string(),
+        });
+    }
+    Ok(period as usize)
 }
 
 /// Result of detrending operation.
@@ -443,6 +466,28 @@ pub fn decompose(values: &[f64], period: f64, method: DecomposeMethod) -> Result
         DecomposeMethod::Multiplicative => {
             decompose_multiplicative(values, period, None, None, None)
         }
+        DecomposeMethod::ClassicalAdditive => {
+            let p = classical_period_as_usize(period)?;
+            let cd = classical_decompose(values, p, ClassicalKind::Additive)?;
+            Ok(DecomposeResult {
+                trend: cd.trend,
+                seasonal: cd.seasonal,
+                remainder: cd.remainder,
+                period,
+                method: "classical_additive".to_string(),
+            })
+        }
+        DecomposeMethod::ClassicalMultiplicative => {
+            let p = classical_period_as_usize(period)?;
+            let cd = classical_decompose(values, p, ClassicalKind::Multiplicative)?;
+            Ok(DecomposeResult {
+                trend: cd.trend,
+                seasonal: cd.seasonal,
+                remainder: cd.remainder,
+                period,
+                method: "classical_multiplicative".to_string(),
+            })
+        }
     }
 }
 
@@ -639,6 +684,82 @@ mod tests {
             "mul".parse::<DecomposeMethod>().unwrap(),
             DecomposeMethod::Multiplicative
         );
+    }
+
+    // ------------------------------------------------------------------
+    // Classical decomposition dispatch (D-10, Phase 15 plan 15-04)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_decompose_method_classical_accepted_spellings() {
+        assert_eq!(
+            "classical".parse::<DecomposeMethod>().unwrap(),
+            DecomposeMethod::ClassicalAdditive
+        );
+        assert_eq!(
+            "classical_additive".parse::<DecomposeMethod>().unwrap(),
+            DecomposeMethod::ClassicalAdditive
+        );
+        assert_eq!(
+            "classical_multiplicative"
+                .parse::<DecomposeMethod>()
+                .unwrap(),
+            DecomposeMethod::ClassicalMultiplicative
+        );
+    }
+
+    #[test]
+    fn test_decompose_classical_additive_method_string_is_classical_additive() {
+        let values: Vec<f64> = (0..48)
+            .map(|i| 10.0 + 0.1 * i as f64 + 3.0 * (2.0 * PI * i as f64 / 12.0).sin())
+            .collect();
+        let result = decompose(&values, 12.0, DecomposeMethod::ClassicalAdditive).unwrap();
+        assert_eq!(result.method, "classical_additive");
+        assert_eq!(result.period, 12.0);
+    }
+
+    #[test]
+    fn test_decompose_classical_multiplicative_method_string_is_classical_multiplicative() {
+        let values: Vec<f64> = (0..48)
+            .map(|i| {
+                let trend = 10.0 + 0.1 * i as f64;
+                let seasonal = 1.0 + 0.3 * (2.0 * PI * i as f64 / 12.0).sin();
+                trend * seasonal
+            })
+            .collect();
+        let result = decompose(&values, 12.0, DecomposeMethod::ClassicalMultiplicative).unwrap();
+        assert_eq!(result.method, "classical_multiplicative");
+    }
+
+    #[test]
+    fn test_decompose_classical_non_integer_period_is_invalid_parameter() {
+        let values: Vec<f64> = (0..48).map(|i| i as f64).collect();
+        let result = decompose(&values, 12.5, DecomposeMethod::ClassicalAdditive);
+        assert!(matches!(
+            result,
+            Err(ForecastError::InvalidParameter { .. })
+        ));
+    }
+
+    #[test]
+    fn test_decompose_classical_period_one_is_invalid_parameter() {
+        let values: Vec<f64> = (0..48).map(|i| i as f64).collect();
+        let result = decompose(&values, 1.0, DecomposeMethod::ClassicalAdditive);
+        assert!(matches!(
+            result,
+            Err(ForecastError::InvalidParameter { .. })
+        ));
+    }
+
+    #[test]
+    fn test_decompose_classical_multiplicative_nonpositive_value_is_invalid_parameter() {
+        let mut values: Vec<f64> = (1..=48).map(|i| i as f64).collect();
+        values[3] = 0.0;
+        let result = decompose(&values, 12.0, DecomposeMethod::ClassicalMultiplicative);
+        assert!(matches!(
+            result,
+            Err(ForecastError::InvalidParameter { .. })
+        ));
     }
 
     #[test]

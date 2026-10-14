@@ -101,6 +101,7 @@ test without a separate Rust edit.
 | `numpy_detrend` | `polyfit_cases.json` | `python/gen_detrend_reference.py` | `trend_abs` (1e-8), `coef_rel` (1e-8), `coef_abs` (1e-10), `rss_rel` (1e-8) | Phase 15 plan 15-01 (DEP-03, WRAP-01, D-01): `anofox_fcst_core::detrending::{detrend_linear,detrend_polynomial,detrend}` -- fitted trend, ascending-power coefficients (raw 0-based index basis), detrended residuals, and RSS for degree 1/2/3 on 4 seeded series, via `crates/anofox-fcst-core/tests/detrend_reference.rs` and `test/sql/ts_detection_reference.test` |
 | `scipy_peaks` | `cases.json` | `python/gen_scipy_peaks_reference.py` | `prominence_abs` (1e-12), `height_abs` (0.0) | Phase 15 plan 15-02 (DET-01, D-05): `anofox_fcst_core::peaks::{local_maxima,peak_prominences,find_peaks,detect_peaks}` -- `scipy.signal.find_peaks` 1.18.1 plateau-midpoint local maxima and `scipy.signal.peak_prominences` (every case, even without a `prominence` filter), for an audited random walk, a seasonal sine with height/distance/prominence filters (incl. a combined case), plateau/edge/tie/degenerate series, via `crates/anofox-fcst-core/tests/peaks_reference.rs` and `test/sql/ts_detection_reference.test` |
 | `changepoints` | `bocpd_cases.json`, `pelt_cases.json` | `python/gen_changepoint_reference.py` | `prob_abs` (1e-10), `sigma_rel`/`cost_rel` (1e-12/1e-9) | Phase 15 plan 15-03 (DET-02, DET-03, D-06, D-07): `anofox_fcst_core::changepoint::{robust_noise_scale,bocpd_trace,detect_changepoints_bocpd,detect_changepoints}` -- an independent numpy BOCPD (Adams & MacKay 2007: normalised Student-t predictive, sample-mean Normal-Gamma update, truncation-with-renormalisation at run length 500) and an independent numpy exact optimal-partitioning DP (PELT's own ground truth, no pruning), via `crates/anofox-fcst-core/tests/changepoint_reference.rs` and `test/sql/ts_detection_reference.test` (BOCPD only -- PELT has no SQL surface) |
+| `r_decomposition` | `cases.json` | `r/gen_decomposition_reference.R` | `component_abs` (1e-8), `classical_abs` (1e-10) | Phase 15 plan 15-04 (DET-04, D-09, D-10): `anofox_fcst_core::decomposition::{mstl_fit,mstl_decompose,classical_decompose}` -- R `forecast::mstl()` (6 `mstl_cases`: single/multi/dropped-period/non-seasonal/constant) and R `stats::decompose()` (5 `decompose_cases`: additive/multiplicative, odd/even period, short series), via `crates/anofox-fcst-core/tests/mstl_decompose_reference.rs` and `test/sql/ts_detection_reference.test` |
 
 **`tsfresh_features`'s `mapping.json` is a second, hand-maintained fixture** (not
 generator output) alongside the nine series fixtures -- it is the D-01
@@ -187,6 +188,26 @@ total cost sums `O(n)` segment-cost terms (each itself a sum over a
 segment), so floating-point summation-order noise compounds across segments
 more than a single scale computation does.
 
+**`r_decomposition` tolerance rationale (Phase 15 plan 15-04):**
+`component_abs` (1e-8) bounds the `mstl_fit`/`mstl_decompose` trend/seasonal/
+remainder against R `forecast::mstl()` -- `stl.rs`/`supsmu.rs` are 1:1 ports
+of R's own `stats::stl`/`stats::supsmu` C/Fortran sources (Phase 13), so
+only floating-point summation-order noise is expected, matching
+`r_stl_strength`'s own `component_abs`. `classical_abs` (1e-10) is tighter
+for `classical_decompose` against R `stats::decompose()` because the
+centred moving-average filter and per-phase mean are simple sum/divide
+chains with no iterative fit -- the only expected discrepancy is
+double-precision summation order over at most ~150 terms.
+
+**Deliberate `classical_decompose` deviation from R `stats::decompose`
+(Phase 15 plan 15-04, D-10):** R's `type = "multiplicative"` silently
+divides by non-positive values, producing `Inf`/`NaN`/negative results with
+no diagnostic. `classical_decompose` rejects any value `<= 0` for the
+multiplicative kind with `InvalidParameter` instead -- a deliberate,
+documented improvement over R's silent garbage-out behaviour, not a parity
+bug. No fixture case exercises this path (every `decompose_cases` series is
+strictly positive).
+
 **`changepoints` measured false-alarm rate (Phase 15 plan 15-03, not part of
 the fixture itself but measured against the fixed implementation and
 recorded here per D-06's own instruction that BOCPD's real false-alarm
@@ -244,6 +265,9 @@ uv run --locked --project validation/reference/python python validation/referenc
 
 # Python family added in Phase 15 plan 15-03:
 uv run --locked --project validation/reference/python python validation/reference/python/gen_changepoint_reference.py
+
+# R family added in Phase 15 plan 15-04:
+Rscript validation/reference/r/gen_decomposition_reference.R
 
 # Determinism check — every generator is seeded and writes no timestamps/hostnames,
 # so regenerating with the same toolchain versions must produce an empty diff:

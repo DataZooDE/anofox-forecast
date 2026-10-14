@@ -252,8 +252,8 @@ void RegisterTsDecomposeSeasonalFunction(ExtensionLoader &loader) {
     {
         CreateScalarFunctionInfo info(ts_decompose_set);
         FunctionDescription desc;
-        desc.description = "Extracts the seasonal component from a time series, returning seasonal indices or adjusted values.";
-        desc.examples = {"ts_decompose_seasonal(LIST(value ORDER BY date), 7)"};
+        desc.description = "Decomposes a time series into trend, seasonal, and remainder components. method is one of: additive (default, fdars LOESS+Fourier), multiplicative (fdars LOESS+Fourier), classical_additive (alias classical, R stats::decompose centred moving-average trend), classical_multiplicative (R stats::decompose). classical_* requires an integer period >= 2; classical_multiplicative additionally requires every value > 0.";
+        desc.examples = {"ts_decompose_seasonal(LIST(value ORDER BY date), 7)", "ts_decompose_seasonal(LIST(value ORDER BY date), 12, 'classical_additive')"};
         desc.categories = {"time-series", "decomposition"};
         desc.parameter_names = {"values", "period"};
         desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)};
