@@ -389,3 +389,78 @@ SELECT (ts_ljung_box(LIST(v ORDER BY ds), 10)).df
 FROM arma17;
 ----
 10
+
+#######################################
+# 17-02 Ljung-Box edge cases
+#######################################
+
+# df <= 0 at the effective lags is a SQL error naming fitted_params
+statement error
+SELECT (ts_ljung_box(LIST(v ORDER BY ds), 5, 5)).df FROM arma17;
+----
+fitted_params
+
+statement error
+SELECT (ts_ljung_box(LIST(v ORDER BY ds), 5, 7)).df FROM arma17;
+----
+fitted_params
+
+statement error
+SELECT (ts_ljung_box(LIST(v ORDER BY ds), 0)).df FROM arma17;
+----
+fitted_params
+
+# negative fitted_params is a SQL error naming the value
+statement error
+SELECT (ts_ljung_box(LIST(v ORDER BY ds), 5, -1)).df FROM arma17;
+----
+fitted_params must be >= 0
+
+# ts_ljung_box_by(lags := 3, fitted_params := 3) raises the same error
+statement error
+SELECT (ljung_box).df FROM ts_ljung_box_by('arma17', id, ds, v, lags := 3, fitted_params := 3);
+----
+fitted_params
+
+# lags 1000 on a 40-point list clamps to 39, no panic
+query I
+SELECT (ts_ljung_box(list_transform(range(40), i -> sin(i * 0.7)), 1000)).lags
+----
+39
+
+# a 2-point series: isnan(statistic), not a crash
+query I
+SELECT isnan((ts_ljung_box([1.0, 2.0]::DOUBLE[])).statistic)
+----
+true
+
+# diff(rw)[1:30], lag 6, fitted_params 2: df 4, p matches R Box.test(fitdf=2) to 1e-9
+statement ok
+CREATE TABLE diffrw30 AS
+SELECT 'r' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, v
+FROM (SELECT unnest(range(30)) AS i, unnest([
+    0.204612204822171,-1.10794428722294,-0.0840144431342531,0.270266410898387,-0.597176483502718,1.03993296264139,
+    0.741001171800427,0.823222794685663,1.4474871795357,-0.900594281963712,-0.646241044974623,-0.398616137395182,
+    0.490971217436068,0.788357638657052,-0.0371411737745471,-0.746055981153077,-1.477722124961,-1.05972609391119,
+    -0.501791627990959,1.34088739417977,-0.265776376353777,-0.23134580251145,-0.459374134327623,-0.0749376556109413,
+    -0.5324142004701,-0.647679339000215,-1.54517894645899,-0.793756124415868,1.42239957140555,0.252280651926888
+]::DOUBLE[]) AS v);
+
+query I
+SELECT (ts_ljung_box(LIST(v ORDER BY ds), 6, 2)).df
+FROM diffrw30;
+----
+4
+
+query I
+SELECT abs((ts_ljung_box(LIST(v ORDER BY ds), 6, 2)).p_value - 0.0800218644335882) < 1e-9
+FROM diffrw30;
+----
+true
+
+# ts_residual_diagnostics's Ljung-Box gate (fitted_params 0) equals the scalar
+query I
+SELECT abs((ts_residual_diagnostics(LIST(v ORDER BY ds))).lb_p_value - (ts_ljung_box(LIST(v ORDER BY ds))).p_value) < 1e-12
+FROM arma17;
+----
+true

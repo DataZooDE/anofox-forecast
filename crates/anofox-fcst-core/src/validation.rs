@@ -959,6 +959,98 @@ mod tests {
         assert_eq!(r.lags, 8);
     }
 
+    fn assert_fitted_params_err(result: Result<LjungBoxOut, ForecastError>, ctx: &str) {
+        match result {
+            Err(ForecastError::InvalidParameter { param, .. }) => {
+                assert_eq!(param, "fitted_params", "{ctx}: wrong param name");
+            }
+            other => panic!("{ctx}: expected Err(InvalidParameter), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ljung_box_fitted_params_at_or_above_lags_is_err() {
+        let x40 = white_noise(40, 30);
+        assert_fitted_params_err(
+            ljung_box(&x40, Some(5), 5),
+            "lags=5 fitted_params=5 (equal)",
+        );
+        assert_fitted_params_err(
+            ljung_box(&x40, Some(5), 7),
+            "lags=5 fitted_params=7 (above)",
+        );
+        assert_fitted_params_err(
+            ljung_box(&x40, Some(0), 0),
+            "lags=0 fitted_params=0 (equal)",
+        );
+    }
+
+    #[test]
+    fn ljung_box_default_lags_validated_against_fitted_params() {
+        // n = 12 → default lags = min(10, 12/5).max(1) = 2
+        let x12 = white_noise(12, 31);
+        assert_fitted_params_err(
+            ljung_box(&x12, None, 2),
+            "default lags=2 fitted_params=2 (equal)",
+        );
+        let r = ljung_box(&x12, None, 1).expect("fitted_params=1 < default lags=2");
+        assert_eq!(r.df, 1);
+    }
+
+    #[test]
+    fn ljung_box_huge_lags_clamped_no_panic() {
+        let x40 = white_noise(40, 32);
+        let r = ljung_box(&x40, Some(1000), 2).expect("clamped lags=39 > fitted_params=2");
+        assert_eq!(r.lags, 39);
+        assert_eq!(r.df, 37);
+        assert!(r.statistic.is_finite());
+    }
+
+    #[test]
+    fn ljung_box_n_below_3_is_nan_not_err() {
+        let r = ljung_box(&[1.0, 2.0], Some(1), 0).expect("n < 3 never errors");
+        assert!(r.statistic.is_nan());
+        assert!(r.p_value.is_nan());
+    }
+
+    #[test]
+    fn ljung_box_constant_series_statistic_0_p_1() {
+        let constant = vec![5.0; 30];
+        let r = ljung_box(&constant, Some(5), 2).expect("fitted_params=2 < lags=5");
+        assert_eq!(r.statistic, 0.0);
+        assert_eq!(r.p_value, 1.0);
+        assert_eq!(r.df, 3);
+    }
+
+    #[test]
+    fn ljung_box_df_over_30_uses_exact_chi_square_survival_function() {
+        use statrs::distribution::{ChiSquared, ContinuousCDF};
+        let resid = white_noise(100, 33);
+        let r = ljung_box(&resid, Some(40), 2).expect("fitted_params=2 < lags=40");
+        assert_eq!(r.df, 38);
+        let want = ChiSquared::new(38.0).unwrap().sf(r.statistic);
+        assert_eq!(r.p_value, want);
+    }
+
+    #[test]
+    fn residual_diagnostics_no_panic_and_matches_ljung_box_for_degenerate_inputs() {
+        for resid in [vec![1.0, 2.0], vec![5.0; 30]] {
+            let d = residual_diagnostics(&resid, 0.05);
+            let lb = ljung_box(&resid, None, 0).expect("fitted_params 0 never errors");
+            if lb.statistic.is_nan() {
+                assert!(d.lb_statistic.is_nan());
+            } else {
+                assert_eq!(d.lb_statistic, lb.statistic);
+            }
+            if lb.p_value.is_nan() {
+                assert!(d.lb_p_value.is_nan());
+            } else {
+                assert_eq!(d.lb_p_value, lb.p_value);
+            }
+            assert_eq!(d.lb_lags, lb.lags);
+        }
+    }
+
     #[test]
     fn durbin_watson_in_range_and_labeled() {
         let resid = white_noise(100, 22);
