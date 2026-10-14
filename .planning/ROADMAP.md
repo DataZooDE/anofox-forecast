@@ -74,7 +74,7 @@ Phase artifacts (plans, summaries, verification): [milestones/v0.9.0-phases/](mi
 - [x] **Phase 13: Core Statistics, Metrics & Data Quality** - scipy-exact moments, STL F_T/F_S strengths, Hyndman-Koehler MASE, MAPE zero policy, real gap/frequency data quality (completed 2026-10-11)
 - [x] **Phase 14: tsfresh Feature Parity** - All 117 features match tsfresh on reference series or carry a documented deviation (completed 2026-10-12)
 - [x] **Phase 15: Detection & Decomposition on fdars 0.47** - fdars 0.47 bump fixes detrend/seasonality no-ops; scipy peaks, correct BOCPD/PELT, STL-based MSTL, robust period detection (completed 2026-10-14)
-- [ ] **Phase 16: Conformal & Bootstrap Correctness** - Horizon-ordered, per-group conformal surface computed in Rust; correct split/asymmetric/adaptive/jackknife+ and bootstrap sign
+- [x] **Phase 16: Conformal & Bootstrap Correctness** - Horizon-ordered, per-group conformal surface computed in Rust; correct split/asymmetric/adaptive/jackknife+ and bootstrap sign (completed 2026-10-14)
 - [ ] **Phase 17: Upstream Consumption & Diagnostics Parity** - Extension consumes the released upstream fixes; stationarity verdicts, model-aware Ljung-Box and R `forecast` parity verified from SQL
 - [ ] **Phase 18: Correctness Regression Suite, Audit & Docs** - Value-asserting tests everywhere, SQL correctness suite, no-stats-in-C++ audit, docs/skills/CHANGELOG synced
 
@@ -343,15 +343,15 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 16-01-PLAN.md — SQL contract tracer (RUST-04): date-ordered, per-row-paired long-format ts_conformal_by / ts_conformal_apply_by (calibration table) / ts_interval_width_by, per-group ts_conformal_calibrate with pooled opt-out, residuals + empirical coverage in Rust (_ts_conformal_from_pairs), json-free params, numpy split fixture + non-gated SQL test (wave 1)
+- [x] 16-01-PLAN.md — SQL contract tracer (RUST-04): date-ordered, per-row-paired long-format ts_conformal_by / ts_conformal_apply_by (calibration table) / ts_interval_width_by, per-group ts_conformal_calibrate with pooled opt-out, residuals + empirical coverage in Rust (_ts_conformal_from_pairs), json-free params, numpy split fixture + non-gated SQL test (wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 16-02-PLAN.md — split/asymmetric/adaptive core (CONF-02/03/04): unbounded NULL + calibration_insufficient instead of clamping, alpha errors, non-finite filtering (incl. per-step), signed-residual asymmetric with Monte Carlo ±2pp, adaptive |r|/d with difficulty_col and no batch normalisation (wave 2)
+- [x] 16-02-PLAN.md — split/asymmetric/adaptive core (CONF-02/03/04): unbounded NULL + calibration_insufficient instead of clamping, alpha errors, non-finite filtering (incl. per-step), signed-residual asymmetric with Monte Carlo ±2pp, adaptive |r|/d with difficulty_col and no batch normalisation (wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 16-03-PLAN.md — bootstrap residual sign vs numpy simulation (CONF-01), jackknife+ removed with explanatory errors + strict strategy/method parsing (CONF-05), ts_conformal.test migrated (still gated), CHANGELOG before/after table, docs/skills, Phase 16 snippet harness (wave 3)
+- [x] 16-03-PLAN.md — bootstrap residual sign vs numpy simulation (CONF-01), jackknife+ removed with explanatory errors + strict strategy/method parsing (CONF-05), ts_conformal.test migrated (still gated), CHANGELOG before/after table, docs/skills, Phase 16 snippet harness (wave 3)
 
 ### Phase 17: Upstream Consumption & Diagnostics Parity
 
@@ -419,7 +419,7 @@ Phases execute in numeric order: 9 → 10 → 11 → 12 → 13 → 14 → 15 →
 | 13. Core Statistics, Metrics & Data Quality | 4/4 | Complete    | 2026-10-11 |
 | 14. tsfresh Feature Parity | 4/4 | Complete    | 2026-10-12 |
 | 15. Detection & Decomposition on fdars 0.47 | 5/5 | Complete    | 2026-10-14 |
-| 16. Conformal & Bootstrap Correctness | 0/TBD | Not started | - |
+| 16. Conformal & Bootstrap Correctness | 3/3 | Complete    | 2026-10-14 |
 | 17. Upstream Consumption & Diagnostics Parity | 0/TBD | Not started | - |
 | 18. Correctness Regression Suite, Audit & Docs | 0/TBD | Not started | - |
 

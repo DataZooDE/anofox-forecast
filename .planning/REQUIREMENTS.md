@@ -46,7 +46,7 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 - [x] **RUST-01**: All list-taking scalar functions read inputs via `ToUnifiedFormat` (constant/dictionary list arguments give correct per-row results) [D2].
 - [x] **RUST-02**: List NULLs are passed to Rust as validity; Rust owns the policy: paired metrics/conformal use pairwise-complete observations; single-series diagnostics reject or explicitly handle interior NULLs instead of splicing; one shared C++ helper replaces the ~10 copies of `ExtractListAsDouble` [D1].
 - [x] **RUST-03**: `ts_diff_by` computes d-th order differences via Rust `diff` (optionally a separate seasonal-lag parameter) [D3].
-- [ ] **RUST-04**: `ts_conformal_by`, `ts_conformal_apply_by`, `ts_interval_width_by`, `ts_conformal_calibrate` preserve horizon order (date/step column) and pairing; residuals and empirical coverage are computed in Rust; per-group calibration supported [D4–D6].
+- [x] **RUST-04**: `ts_conformal_by`, `ts_conformal_apply_by`, `ts_interval_width_by`, `ts_conformal_calibrate` preserve horizon order (date/step column) and pairing; residuals and empirical coverage are computed in Rust; per-group calibration supported [D4–D6].
 - [x] **RUST-05**: `ts_fill_nulls_mean_by` uses the Rust implementation [D7].
 - [x] **RUST-06**: `ts_backtest_native` either computes metrics per group via the Rust metric functions (unknown metric → error, missing bounds → NULL) or is removed together with stale `ts_backtest_auto_by` references; error sign convention is consistent across surfaces [D8, D16].
 - [x] **RUST-07**: Hierarchy aggregation keeps SQL `SUM` NULL semantics (all-NULL → NULL, no NULL→0 imputation) [D9].
@@ -83,11 +83,11 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 
 ### Conformal & Bootstrap
 
-- [ ] **CONF-01**: Bootstrap paths add residuals with the correct sign; skewed-residual fixture gives correct-side intervals [G2].
-- [ ] **CONF-02**: Split conformal returns infinite/NULL width (or errors) when ⌈(n+1)(1−α)⌉ > n; α ∉ (0,1) rejected; NaN residuals filtered [G12, G16].
-- [ ] **CONF-03**: Asymmetric conformal uses α/2 and 1−α/2 quantiles of signed residuals; simulated coverage within ±2pp of nominal [G13].
-- [ ] **CONF-04**: Adaptive conformal uses normalised scores |r|/d at calibration and d-scaling at prediction, independent of batch composition [G14].
-- [ ] **CONF-05**: "JackknifePlus" either implements jackknife+ or is renamed/removed [G15].
+- [x] **CONF-01**: Bootstrap paths add residuals with the correct sign; skewed-residual fixture gives correct-side intervals [G2].
+- [x] **CONF-02**: Split conformal returns infinite/NULL width (or errors) when ⌈(n+1)(1−α)⌉ > n; α ∉ (0,1) rejected; NaN residuals filtered [G12, G16].
+- [x] **CONF-03**: Asymmetric conformal uses α/2 and 1−α/2 quantiles of signed residuals; simulated coverage within ±2pp of nominal [G13].
+- [x] **CONF-04**: Adaptive conformal uses normalised scores |r|/d at calibration and d-scaling at prediction, independent of batch composition [G14].
+- [x] **CONF-05**: "JackknifePlus" either implements jackknife+ or is renamed/removed [G15].
 
 ### Diagnostics (upstream anofox-forecast + core validation.rs)
 
@@ -150,7 +150,7 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 | RUST-01 | Phase 12 | Complete |
 | RUST-02 | Phase 12 | Complete |
 | RUST-03 | Phase 12 | Complete |
-| RUST-04 | Phase 16 | Pending |
+| RUST-04 | Phase 16 | Complete |
 | RUST-05 | Phase 12 | Complete |
 | RUST-06 | Phase 12 | Complete |
 | RUST-07 | Phase 12 | Complete |
@@ -175,11 +175,11 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 | DET-05 | Phase 15 | Complete |
 | DET-06 | Phase 15 | Complete |
 | DET-07 | Phase 15 | Complete |
-| CONF-01 | Phase 16 | Pending |
-| CONF-02 | Phase 16 | Pending |
-| CONF-03 | Phase 16 | Pending |
-| CONF-04 | Phase 16 | Pending |
-| CONF-05 | Phase 16 | Pending |
+| CONF-01 | Phase 16 | Complete |
+| CONF-02 | Phase 16 | Complete |
+| CONF-03 | Phase 16 | Complete |
+| CONF-04 | Phase 16 | Complete |
+| CONF-05 | Phase 16 | Complete |
 | DIAG-01 | Phase 11 | Pending |
 | DIAG-02 | Phase 11 | Pending |
 | DIAG-03 | Phase 17 | Pending |
