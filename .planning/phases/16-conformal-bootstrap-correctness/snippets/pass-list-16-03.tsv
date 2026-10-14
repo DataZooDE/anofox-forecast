@@ -1,0 +1,52 @@
+docs/api/11-conformal-prediction.md	0	PASS	SELECT ts_conformal_quantile([1.0, 2.0, 3.0, 4.0, 5.0]::DOUBLE[], 0.1);	
+docs/api/11-conformal-prediction.md	1	EXPECTED-ERROR	SELECT ts_conformal_quantile([1.0, 2.0, 3.0]::DOUBLE[], 0.0);	Invalid Input Error: ts_conformal_quantile: Invalid input: alpha must be in (0, 1), got 0
+docs/api/11-conformal-prediction.md	2	PASS	SELECT * FROM ts_conformal_by(	
+docs/api/11-conformal-prediction.md	3	PASS	CREATE TABLE calibration AS	
+docs/api/11-conformal-prediction.md	4	PASS	SELECT r.* FROM (	
+docs/api/11-conformal-prediction.md	5	PASS	SELECT * FROM ts_conformal_by(	
+docs/api/11-conformal-prediction.md	6	PASS	CREATE TABLE calibration AS	
+docs/api/11-conformal-prediction.md	7	PASS	SELECT * FROM ts_conformal_by(	
+docs/api/11-conformal-prediction.md	8	SYNOPSIS	CREATE TABLE model_a_intervals AS ...;	Parser Error: syntax error at or near ".."
+docs/api/11-conformal-prediction.md	9	PASS	WITH series_data AS (	
+docs/api/11-conformal-prediction.md	10	PASS	SELECT * FROM ts_conformal_by(	
+docs/api/11-conformal-prediction.md	11	PASS	SELECT * FROM ts_detect_periods_by('sales', product_id, date, value, MAP{});	
+docs/api/11-conformal-prediction.md	12	SYNOPSIS	ts_conformal_by(backtest_results, group_col, date_col, actual_col, forecast_col,	Parser Error: syntax error at or near "ts_conformal_by"
+docs/api/11-conformal-prediction.md	13	PASS	SELECT * FROM ts_conformal_by(	
+docs/api/11-conformal-prediction.md	14	SYNOPSIS	ts_conformal_calibrate(backtest_results, group_col, actual_col, forecast_col,	Parser Error: syntax error at or near "ts_conformal_calibrate"
+docs/api/11-conformal-prediction.md	15	PASS	SELECT * FROM ts_conformal_calibrate(	
+docs/api/11-conformal-prediction.md	16	SYNOPSIS	ts_conformal_apply_by(forecast_results, group_col, date_col, forecast_col, calibration,	Parser Error: syntax error at or near "ts_conformal_apply_by"
+docs/api/11-conformal-prediction.md	17	PASS	CREATE TABLE literal_calibration AS	
+docs/api/11-conformal-prediction.md	18	PASS	CREATE TABLE calibration AS	
+docs/api/11-conformal-prediction.md	19	SYNOPSIS	ts_interval_width_by(results, group_col, date_col, lower_col, upper_col)	Parser Error: syntax error at or near "ts_interval_width_by"
+docs/api/11-conformal-prediction.md	20	PASS	SELECT * FROM ts_interval_width_by(	
+docs/api/11-conformal-prediction.md	25	PASS	SELECT ts_conformal_quantile(	
+docs/api/11-conformal-prediction.md	26	SYNOPSIS	ts_conformal_intervals(forecasts DOUBLE[], conformity_score DOUBLE)	Parser Error: syntax error at or near "ts_conformal_intervals"
+docs/api/11-conformal-prediction.md	27	PASS	SELECT	
+docs/api/11-conformal-prediction.md	28	SYNOPSIS	ts_conformal_predict(residuals DOUBLE[], forecasts DOUBLE[], alpha DOUBLE)	Parser Error: syntax error at or near "ts_conformal_predict"
+docs/api/11-conformal-prediction.md	29	PASS	WITH backtest_residuals AS (	
+docs/api/11-conformal-prediction.md	30	SYNOPSIS	ts_conformal_predict_asymmetric(residuals DOUBLE[], forecasts DOUBLE[], alpha DOUBLE)	Parser Error: syntax error at or near "ts_conformal_predict_asymmetric"
+docs/api/11-conformal-prediction.md	31	PASS	SELECT r.* FROM (	
+docs/api/11-conformal-prediction.md	37	PASS	SELECT r.* FROM (	
+docs/api/11-conformal-prediction.md	38	SYNOPSIS	ts_conformal_learn(residuals DOUBLE[], alphas DOUBLE[], method VARCHAR, strategy VARCHAR)	Parser Error: syntax error at or near "ts_conformal_learn"
+docs/api/11-conformal-prediction.md	39	EXPECTED-ERROR	SELECT ts_conformal_learn([1.0, -2.0, 3.0]::DOUBLE[], [0.1]::DOUBLE[], 'symmetric', 'jackknife+');	Invalid Input Error: ts_conformal_learn: Invalid input: conformal strategy 'jackknife+' was removed: it computed the same quantile as 'split' (no leave-one-out refits). Use 'split' or 'crossval'.
+docs/api/11-conformal-prediction.md	40	EXPECTED-ERROR	SELECT ts_conformal_learn([1.0, -2.0, 3.0]::DOUBLE[], [0.1]::DOUBLE[], 'bogus', 'typo');	Invalid Input Error: ts_conformal_learn: Invalid input: Unknown conformal method: 'bogus'. Valid: symmetric (alias split, sym), asymmetric (alias asym), adaptive (alias adapt)
+docs/api/11-conformal-prediction.md	41	PASS	CREATE TEMP TABLE _r AS SELECT [1.2, -0.8, 1.5, -1.0, 0.5, 0.9, -1.1, 0.6, -0.4, 1.3]::DOUBLE[] AS r	
+docs/api/11-conformal-prediction.md	42	SYNOPSIS	ts_bootstrap_intervals(residuals DOUBLE[], forecasts DOUBLE[], n_paths INTEGER,	Parser Error: syntax error at or near "ts_bootstrap_intervals"
+docs/api/11-conformal-prediction.md	43	PASS	SELECT (r).lower[1], (r).upper[1]	
+docs/api/11-conformal-prediction.md	44	PASS	CREATE OR REPLACE TABLE ae_series AS	
+docs/api/11-conformal-prediction.md	45	PASS	CREATE OR REPLACE TABLE exp_bt AS	
+examples/conformal_prediction/README.md	0	PASS	SELECT * FROM ts_conformal_by('backtest_data', product_id, date, actual, forecast, point_forecast, M	
+examples/conformal_prediction/README.md	1	PASS	SELECT * FROM ts_conformal_by('backtest_data', product_id, date, actual, forecast, point_forecast,	
+examples/conformal_prediction/README.md	2	PASS	SELECT * FROM ts_conformal_by('backtest_data', product_id, date, actual, forecast, point_forecast,	
+examples/conformal_prediction/README.md	3	PASS	CREATE TABLE literal_score AS SELECT NULL::VARCHAR AS group_col, 'symmetric' AS method, 15.0 AS conf	
+examples/conformal_prediction/README.md	4	PASS	CREATE OR REPLACE TABLE backtest_data AS	
+examples/metrics/README.md	1	PASS	SELECT ts_conformal_coverage(	
+plugins/anofox-forecast/skills/anofox-forecast-backtest/SKILL.md	6	SYNOPSIS	ts_conformal_by(backtest_results VARCHAR, group_col COLUMN, date_col COLUMN,	Parser Error: syntax error at or near "ts_conformal_by"
+plugins/anofox-forecast/skills/anofox-forecast-backtest/SKILL.md	7	SYNOPSIS	CREATE OR REPLACE TABLE conformal_bounds AS	Binder Error: Referenced column "unique_id" not found in FROM clause!
+plugins/anofox-forecast/skills/anofox-forecast-backtest/SKILL.md	8	SYNOPSIS	CREATE OR REPLACE TABLE calib AS	Binder Error: Referenced column "unique_id" not found in FROM clause!
+plugins/anofox-forecast/skills/anofox-forecast-backtest/SKILL.md	9	SYNOPSIS	ts_bootstrap_intervals(residuals DOUBLE[], forecasts DOUBLE[],	Parser Error: syntax error at or near "ts_bootstrap_intervals"
+plugins/anofox-forecast/skills/anofox-forecast-backtest/SKILL.md	10	PASS	SELECT ts_bootstrap_intervals(	
+plugins/anofox-forecast/skills/anofox-forecast-backtest/SKILL.md	11	SYNOPSIS	ts_bootstrap_quantiles(residuals DOUBLE[], forecasts DOUBLE[],	Parser Error: syntax error at or near "ts_bootstrap_quantiles"
+plugins/anofox-forecast/skills/anofox-forecast-backtest/SKILL.md	12	PASS	SELECT ts_bootstrap_quantiles(	
+plugins/anofox-forecast/skills/anofox-forecast-backtest/SKILL.md	14	PASS	CREATE OR REPLACE TABLE folds AS	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	19	PASS	CREATE OR REPLACE TABLE ens_series AS	

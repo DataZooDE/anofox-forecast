@@ -545,6 +545,47 @@ use the semver numbering this project started with.
   117 `list_features()` names unconditionally for any input of length >= 1 (features
   undefined for that input length — e.g. `mean_change` at `n=1`, `fft_coefficient_9_*` at
   `n=8` — are `NULL`/NaN rather than a missing column).
+- **Conformal and bootstrap intervals are horizon-ordered, per-group and keep their
+  nominal coverage (Phase 16).** `ts_conformal_by`/`ts_conformal_apply_by`/
+  `ts_interval_width_by` pair lower/upper/actual by a required date/step column instead
+  of independently value-sorting each side (plan 16-01, D-01/D-04/D-05 audit); residuals
+  and empirical coverage are computed in Rust, never subtracted in SQL; `ts_conformal_
+  calibrate` calibrates per group by default (pooled on explicit request); asymmetric
+  conformal derives both margins from the full signed-residual array instead of a
+  positive/negative subset (plan 16-02, CONF-03); adaptive conformal is reachable from
+  SQL with explicit per-row difficulty at both calibration and prediction, with no
+  batch-mean normalisation (CONF-04); insufficient calibration data is `NULL` +
+  `calibration_insufficient = true`, never silently clamped to the maximum residual
+  (CONF-02); bootstrap prediction intervals put a right-skewed residual's long tail on
+  the correct (upper) side, and `n_paths`/coverage are validated instead of silently
+  adjusted (plan 16-03, CONF-01, D-10); the `'jackknife+'` strategy — which computed the
+  identical quantile to `'split'` with no leave-one-out refits — is removed, and every
+  strategy/method name is parsed strictly, naming the valid choices on a typo (CONF-05,
+  D-09). No compatibility flag restores the old signatures or semantics.
+
+  | Function (input) | Before | After | What changed |
+  |---|---|---|---|
+  | `ts_conformal_by(two_group, ..., alpha=0.1)` output shape | one row per group, `lower`/`upper`/`point` as value-sorted `LIST`s | one row per `(group, date)`, scalar `lower`/`upper`/`point` columns | D-01/D-13: a required `date_col` orders and pairs every row; no more independent per-column sorting |
+  | same, group A's `point` order | `[10.0, 20.0, 30.0]` (value-sorted — destroyed the input order) | `[30.0, 10.0, 20.0]` (the input order, paired by `date_col`) | the single most severe pre-Phase-16 bug: silent mispairing, not just misordering |
+  | same, `.coverage` | `0.9` (the nominal `1 - alpha` literal) | `0.95` (EMPIRICAL fraction of calibration residuals within bound); new `.nominal_level = 0.9` | D-02: `coverage` now reports what was actually achieved, not the request |
+  | `ts_conformal_calibrate(two_group, ..., alpha=0.1)` | 1 pooled row, `conformity_score = 17.075000000000003`, `n_residuals = 40` | per group by default: A `conformity_score = 1.9050000000000056`, B `= 19.05` (each `n_calibration = 20`); pooled only via `params := {'pooled': true}` | D-03: groups with different residual scales get different quantiles; `n_residuals` renamed `n_calibration` |
+  | `ts_conformal_apply_by(forecasts, group_col, forecast_col, 15.0)` | took a literal conformity score; one row per group | takes a calibration TABLE (`ts_conformal_calibrate`'s output), matched per group or pooled fallback; one row per `(group, date)` | D-14: a literal score is applied by wrapping it in a one-row table with `group_col = NULL` |
+  | `ts_interval_width_by(results, group_col, lower_col, upper_col)` | 4 positional args, lower/upper each independently sorted by value | 5 args (adds a required `date_col`); lower/upper read from ONE date-ordered `LIST` of per-row structs | D-01/D-05: pairs by date, never two independently-sorted lists |
+  | `ts_conformal_quantile([1,2,3,4,5]::DOUBLE[], 0.1)` | `5.0` (clamped to the max residual) | `NULL` + would-be `calibration_insufficient = true` on the calibrate/by surfaces | D-05/D-06 (CONF-02): `ceil((n+1)(1-alpha)) > n` (`n=5 < 9`, the alpha=0.1 minimum) is now reported explicitly, never silently clamped |
+  | `ts_conformal_quantile([1,2,3,4,5]::DOUBLE[], 0.0)` / `(..., 1.5)` | `5.0` / `NULL` | SQL error naming the value (`"alpha must be in (0, 1), got 0"` / `"got 1.5"`) on every conformal surface | D-06 |
+  | `ts_conformal_predict_asymmetric(asym_n20, [100.0], 0.2)` margins | lower `1.0`, upper `3.75` (positive/negative RESIDUAL-SUBSET quantiles) | lower `0.81`, upper `3.5125` (alpha/2 and 1-alpha/2 quantiles of the FULL signed-residual array and its negation) | D-07 (CONF-03): the old construction over-covered by 5-6pp and was 1.2x-1.7x wider on a seeded Monte Carlo simulation (normal and log-normal residuals, alpha 0.1/0.2); the new construction hits nominal coverage within ~0.2pp |
+  | adaptive conformal (`method := 'adaptive'`) from SQL | unreachable — no difficulty parameter existed on any macro/scalar | `ts_conformal_by`/`ts_conformal_calibrate`/`ts_conformal_apply_by` take a `difficulty_col`; `ts_conformal_learn`/`ts_conformal_apply`/`ts_conformal_intervals` gain difficulty overloads; a forecast's interval is independent of its batch (exact-equality tested) | D-08 (CONF-04): no batch-mean normalisation (previously would have scaled by the mean difficulty of whichever batch a forecast happened to be computed alongside) |
+  | `ts_conformal_predict_per_step` (2 folds x horizon 3, alpha 0.1) `.half_widths` | `[1.0, 3.0, 1.0]` (clamped to the per-step maximum) | `[NULL, NULL, NULL]` (`ceil(3*0.9)=3 > 2` is insufficient at every step) | D-05 applied per-step |
+  | `ts_bootstrap_intervals([0]*9+[10.0], [100.0], 2000, 0.9, 42)` | lower `90.0`, upper `100.0` (the long tail mirrored onto the LOWER side) | lower `100.0`, upper `110.0` (the long tail correctly on the UPPER side) | D-10 (CONF-01, G2): `BootstrapPredictor.fit` was called with residuals and zeros swapped |
+  | `ts_bootstrap_intervals(residuals, forecasts, n_paths, coverage, seed)` with `coverage=1.5`, `n_paths=5`, or `n_paths * horizon > 10,000,000` | silently clamped (`n_paths` floored to 10) or panicked (bad `coverage`), or allocated unboundedly | SQL error naming the offending value | T-16-17 |
+  | `ts_conformal_learn(residuals, [0.1], 'symmetric', 'jackknife+')` (and `'JackknifePlus'`/`'jackknifeplus'`/`'jackknife_plus'`/`'jk+'`) | silently mapped to the `JackknifePlus` strategy (which computed the identical quantile to `'split'`) | SQL error: `"conformal strategy '...' was removed: it computed the same quantile as 'split' (no leave-one-out refits). Use 'split' or 'crossval'."` | D-09 (CONF-05, G15) |
+  | `ts_conformal_learn(residuals, [0.1], 'bogus', 'typo')` | silently defaulted to method `'symmetric'`, strategy `'split'` | SQL error listing the valid method names / `"unknown conformal strategy '...'; valid: split, crossval (alias cross_val, cv)"` | D-09: strategy/method parsing is strict in Rust everywhere, not just for the removed jackknife+ aliases |
+  | conformal macro `params` argument | read via `json_extract_string` (required `LOAD json`) | read json-free via `params::MAP(VARCHAR, VARCHAR)` with `CAST` (a `{'key': value}` STRUCT literal casts implicitly); malformed values error instead of silently defaulting | plan 16-01 |
+
+  The method strings returned by the from-pairs/calibrate surfaces are the canonical
+  `'symmetric'`/`'asymmetric'`/`'adaptive'` names (never the legacy `'split_conformal'`/
+  `'asymmetric_conformal'` the older `ts_conformal_predict`/`ts_conformal_predict_
+  asymmetric` scalars still return — those two scalars are untouched by Phase 16).
 
 ### Added
 

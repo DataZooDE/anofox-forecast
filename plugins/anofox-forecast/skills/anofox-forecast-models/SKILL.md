@@ -478,8 +478,8 @@ CREATE OR REPLACE TABLE ens_folds AS
 SELECT * FROM ts_cv_folds_by('ens_series', id, ds, y, 3, 5, MAP{});
 
 -- Step 2: forecast per fold with _ts_forecast_scalar (not ts_cv_forecast_by)
--- Step 3: ts_conformal_calibrate on residuals
--- Step 4: ts_forecast_by('AutoEnsemble') + apply calibrated quantile
+-- Step 3: ts_conformal_calibrate(..., id, ...) -- per-series calibration (Phase 16 D-03)
+-- Step 4: ts_forecast_by('AutoEnsemble') + ts_conformal_apply_by(..., id, ds, yhat, 'calib')
 -- See examples/forecasting/ensemble_intervals.sql for the full pipeline.
 ```
 

@@ -48,7 +48,7 @@ A time series forecasting extension for DuckDB with 36 models, statistical diagn
 - **Data Preparation**: 12 macros for cleaning and transformation
 - **Multi-Key Hierarchy**: 4 functions for combining, aggregating, and splitting hierarchical time series (region/store/item)
 - **Cross-Validation & Backtesting**: Time series CV with expanding/fixed/sliding windows, gap, embargo, and variable horizon support
-- **Conformal Prediction**: Distribution-free prediction intervals; coverage is guaranteed only under exchangeability, and the current implementation's horizon ordering/pooling does not fully deliver it (see `docs/api/11-conformal-prediction.md`)
+- **Conformal Prediction**: Distribution-free prediction intervals, horizon-ordered and calibrated per group, plus residual-resampling bootstrap intervals (see `docs/api/11-conformal-prediction.md`)
 - **Evaluation**: 12 metrics including coverage analysis
 - **Seasonality Detection**: Automatic period identification, seasonality classification, and peak detection
 - **Changepoint Detection**: Regime identification with probabilities
