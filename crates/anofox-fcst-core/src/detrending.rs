@@ -378,18 +378,24 @@ pub fn decompose_additive(
     n_harmonics: Option<usize>,
 ) -> Result<DecomposeResult> {
     let n = values.len();
+
+    // CR-03: validate period is a positive finite number BEFORE the
+    // insufficient-data check below -- `period as usize` saturates to
+    // usize::MAX for +infinity, and `2 * usize::MAX` overflows (panics in
+    // debug builds, wraps in release), so this order is load-bearing, not
+    // cosmetic.
+    if !period.is_finite() || period <= 0.0 {
+        return Err(ForecastError::InvalidParameter {
+            param: "period".to_string(),
+            value: period.to_string(),
+            reason: "Period must be a positive finite number".to_string(),
+        });
+    }
+
     if n < 2 * period as usize {
         return Err(ForecastError::InsufficientData {
             needed: 2 * period as usize,
             got: n,
-        });
-    }
-
-    if period <= 0.0 {
-        return Err(ForecastError::InvalidParameter {
-            param: "period".to_string(),
-            value: period.to_string(),
-            reason: "Period must be positive".to_string(),
         });
     }
 
@@ -425,18 +431,22 @@ pub fn decompose_multiplicative(
     n_harmonics: Option<usize>,
 ) -> Result<DecomposeResult> {
     let n = values.len();
+
+    // CR-03: validate period before the insufficient-data check below --
+    // see decompose_additive for why this order is load-bearing (infinity
+    // overflow in `2 * period as usize`).
+    if !period.is_finite() || period <= 0.0 {
+        return Err(ForecastError::InvalidParameter {
+            param: "period".to_string(),
+            value: period.to_string(),
+            reason: "Period must be a positive finite number".to_string(),
+        });
+    }
+
     if n < 2 * period as usize {
         return Err(ForecastError::InsufficientData {
             needed: 2 * period as usize,
             got: n,
-        });
-    }
-
-    if period <= 0.0 {
-        return Err(ForecastError::InvalidParameter {
-            param: "period".to_string(),
-            value: period.to_string(),
-            reason: "Period must be positive".to_string(),
         });
     }
 

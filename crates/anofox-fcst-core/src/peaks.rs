@@ -483,11 +483,11 @@ pub fn analyze_peak_timing(
         return Err(ForecastError::InsufficientData { needed: 3, got: n });
     }
 
-    if period <= 0.0 {
+    if !period.is_finite() || period <= 0.0 {
         return Err(ForecastError::InvalidParameter {
             param: "period".to_string(),
             value: period.to_string(),
-            reason: "Period must be positive".to_string(),
+            reason: "Period must be a positive finite number".to_string(),
         });
     }
 
@@ -605,6 +605,10 @@ mod tests {
         let values = generate_seasonal_series(120, 12.0, 5.0);
         assert!(analyze_peak_timing(&values, 0.0, None).is_err());
         assert!(analyze_peak_timing(&values, -5.0, None).is_err());
+        // CR-03: NaN <= 0.0 is false in IEEE-754, so a naive `period <= 0.0`
+        // guard previously let a NaN period sail through.
+        assert!(analyze_peak_timing(&values, f64::NAN, None).is_err());
+        assert!(analyze_peak_timing(&values, f64::INFINITY, None).is_err());
     }
 
     #[test]

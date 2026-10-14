@@ -7,6 +7,7 @@
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include "duckdb/common/types/vector.hpp"
 #include "ts_list_marshal.hpp"
+#include <cmath>
 
 namespace duckdb {
 
@@ -413,6 +414,15 @@ static void TsClassifySeasonalityFunction(DataChunk &args, ExpressionState &stat
         }
 
         double period = period_reader.Get(row_idx);
+        // CR-03 (extended, found via regression test): `static_cast<size_t>`
+        // of a NaN/infinite double is undefined behaviour in C++, so this
+        // non-finite check must run BEFORE the `2 * period` cast below, not
+        // after. A non-finite period is an invalid parameter (SQL error per
+        // the documented NULL-vs-error policy), not a too-short-series NULL.
+        if (!std::isfinite(period)) {
+            throw InvalidInputException(
+                "ts_classify_seasonality: Period must be a positive finite number, got %f", period);
+        }
         if (period <= 0 || values.size() < static_cast<size_t>(2 * period)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;

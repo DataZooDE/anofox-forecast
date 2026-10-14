@@ -520,11 +520,11 @@ pub fn seasonal_strength_variance(
         return Err(ForecastError::InsufficientData { needed: 4, got: n });
     }
 
-    if period <= 0.0 {
+    if !period.is_finite() || period <= 0.0 {
         return Err(ForecastError::InvalidParameter {
             param: "period".to_string(),
             value: period.to_string(),
-            reason: "Period must be positive".to_string(),
+            reason: "Period must be a positive finite number".to_string(),
         });
     }
 
@@ -559,11 +559,11 @@ pub fn seasonal_strength_spectral(values: &[f64], period: f64) -> Result<f64> {
         return Err(ForecastError::InsufficientData { needed: 4, got: n });
     }
 
-    if period <= 0.0 {
+    if !period.is_finite() || period <= 0.0 {
         return Err(ForecastError::InvalidParameter {
             param: "period".to_string(),
             value: period.to_string(),
-            reason: "Period must be positive".to_string(),
+            reason: "Period must be a positive finite number".to_string(),
         });
     }
 
@@ -613,11 +613,11 @@ pub fn seasonal_strength_windowed(
         return Err(ForecastError::InsufficientData { needed: 4, got: n });
     }
 
-    if period <= 0.0 {
+    if !period.is_finite() || period <= 0.0 {
         return Err(ForecastError::InvalidParameter {
             param: "period".to_string(),
             value: period.to_string(),
-            reason: "Period must be positive".to_string(),
+            reason: "Period must be a positive finite number".to_string(),
         });
     }
 
@@ -658,18 +658,23 @@ pub fn classify_seasonality(
     timing_threshold: Option<f64>,
 ) -> Result<SeasonalityClassification> {
     let n = values.len();
+
+    // CR-03: validate period before the insufficient-data check below --
+    // `period as usize` saturates to usize::MAX for +infinity, and
+    // `2 * usize::MAX` overflows (panics in debug builds, wraps in
+    // release), so this order is load-bearing, not cosmetic.
+    if !period.is_finite() || period <= 0.0 {
+        return Err(ForecastError::InvalidParameter {
+            param: "period".to_string(),
+            value: period.to_string(),
+            reason: "Period must be a positive finite number".to_string(),
+        });
+    }
+
     if n < 2 * period as usize {
         return Err(ForecastError::InsufficientData {
             needed: 2 * period as usize,
             got: n,
-        });
-    }
-
-    if period <= 0.0 {
-        return Err(ForecastError::InvalidParameter {
-            param: "period".to_string(),
-            value: period.to_string(),
-            reason: "Period must be positive".to_string(),
         });
     }
 
@@ -707,18 +712,23 @@ pub fn detect_seasonality_changes(
     min_duration: Option<f64>,
 ) -> Result<ChangeDetectionResult> {
     let n = values.len();
+
+    // CR-03: validate period before the insufficient-data check below --
+    // `period as usize` saturates to usize::MAX for +infinity, and
+    // `2 * usize::MAX` overflows (panics in debug builds, wraps in
+    // release), so this order is load-bearing, not cosmetic.
+    if !period.is_finite() || period <= 0.0 {
+        return Err(ForecastError::InvalidParameter {
+            param: "period".to_string(),
+            value: period.to_string(),
+            reason: "Period must be a positive finite number".to_string(),
+        });
+    }
+
     if n < 2 * period as usize {
         return Err(ForecastError::InsufficientData {
             needed: 2 * period as usize,
             got: n,
-        });
-    }
-
-    if period <= 0.0 {
-        return Err(ForecastError::InvalidParameter {
-            param: "period".to_string(),
-            value: period.to_string(),
-            reason: "Period must be positive".to_string(),
         });
     }
 
@@ -779,18 +789,23 @@ pub fn detect_amplitude_modulation(
     seasonality_threshold: Option<f64>,
 ) -> Result<AmplitudeModulationResult> {
     let n = values.len();
+
+    // CR-03: validate period before the insufficient-data check below --
+    // `period as usize` saturates to usize::MAX for +infinity, and
+    // `2 * usize::MAX` overflows (panics in debug builds, wraps in
+    // release), so this order is load-bearing, not cosmetic.
+    if !period.is_finite() || period <= 0.0 {
+        return Err(ForecastError::InvalidParameter {
+            param: "period".to_string(),
+            value: period.to_string(),
+            reason: "Period must be a positive finite number".to_string(),
+        });
+    }
+
     if n < 2 * period as usize {
         return Err(ForecastError::InsufficientData {
             needed: 2 * period as usize,
             got: n,
-        });
-    }
-
-    if period <= 0.0 {
-        return Err(ForecastError::InvalidParameter {
-            param: "period".to_string(),
-            value: period.to_string(),
-            reason: "Period must be positive".to_string(),
         });
     }
 
@@ -1019,5 +1034,32 @@ mod tests {
 
         assert!(seasonal_strength_variance(&values, 0.0, None).is_err());
         assert!(seasonal_strength_variance(&values, -5.0, None).is_err());
+    }
+
+    #[test]
+    fn test_invalid_period_rejects_non_finite() {
+        // CR-03: NaN <= 0.0 is false in IEEE-754, so a naive `period <= 0.0`
+        // guard previously let a NaN (or infinite) period sail through and
+        // silently produce a wrong (non-error, non-NULL) result instead of
+        // the documented InvalidParameter error.
+        let values = generate_seasonal_series(120, 12.0, 5.0);
+
+        assert!(seasonal_strength_variance(&values, f64::NAN, None).is_err());
+        assert!(seasonal_strength_variance(&values, f64::INFINITY, None).is_err());
+
+        assert!(seasonal_strength_spectral(&values, f64::NAN).is_err());
+        assert!(seasonal_strength_spectral(&values, f64::INFINITY).is_err());
+
+        assert!(seasonal_strength_windowed(&values, f64::NAN, None, None).is_err());
+        assert!(seasonal_strength_windowed(&values, f64::INFINITY, None, None).is_err());
+
+        assert!(classify_seasonality(&values, f64::NAN, None, None).is_err());
+        assert!(classify_seasonality(&values, f64::INFINITY, None, None).is_err());
+
+        assert!(detect_seasonality_changes(&values, f64::NAN, None, None, None).is_err());
+        assert!(detect_seasonality_changes(&values, f64::INFINITY, None, None, None).is_err());
+
+        assert!(detect_amplitude_modulation(&values, f64::NAN, None, None).is_err());
+        assert!(detect_amplitude_modulation(&values, f64::INFINITY, None, None).is_err());
     }
 }
