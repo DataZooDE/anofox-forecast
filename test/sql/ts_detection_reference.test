@@ -242,10 +242,14 @@ SELECT ts_decompose_seasonal([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], 2.0, 'cla
 ----
 expected one of
 
+# WR-03: this used to hit a stale, now-removed FFI-level `period <= 0.0`
+# pre-check ("Period must be positive"); it now falls through to the
+# core-level check and gets the same unified message every other
+# non-finite/non-positive period path produces (CR-03/CR-05).
 statement error
 SELECT ts_decompose_seasonal([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], 0.0);
 ----
-Period must be positive
+Period must be a positive finite number
 
 #######################################
 # 15-02: ts_detect_peaks on scipy_peaks/cases.json rw150 (DET-01, D-05) -- a
@@ -926,3 +930,127 @@ FROM (
 );
 ----
 true
+
+#######################################
+# Iteration 2 (re-review of the --auto fix loop): CR-04, CR-05, WR-03.
+#######################################
+
+# CR-04 regression: ts_mstl_decomposition_by must never silently drop a
+# group. 'long' (n=30) has a usable period 12 (30 > 2*12); 'short' (n=10)
+# does not (10 is not > 2*12=24) -- before the fix, ts_mstl_decomposition_
+# native.cpp's finalize loop `continue`-d past 'short' under BOTH
+# insufficient_data='fail' (the documented default) and 'none', silently
+# dropping its row with no error and no diagnostic. A second, independent
+# bug compounded this: the native function's ParseInsufficientDataMode
+# recognized "fail"/"skip"/"pad" rather than the macro's actual documented
+# values "fail"/"trend"/"none", so passing 'trend' or 'none' was silently
+# treated as 'fail' regardless.
+#
+# Exercised via the internal _ts_mstl_decomposition_native table function
+# directly rather than the public ts_mstl_decomposition_by macro: the
+# macro's expansion unconditionally calls to_json(params) (even for an
+# empty MAP{}), which requires the json extension -- unavailable in this
+# native, non-json-gated build (confirmed: json is skipped, not
+# auto-loaded, for every other "require json" file in this suite). This is
+# a pre-existing, independent gap (ts_mstl_decomposition_by has literally
+# never been exercised by a non-json-gated test -- its only other caller,
+# test/sql/ts_varchar_edge_cases.test, has its own `require json`) --
+# tracked here, not fixed, since CR-04's fix is in
+# _ts_mstl_decomposition_native's finalize loop, which this reaches
+# directly and identically to how the macro would.
+
+statement ok
+CREATE TABLE mstl_mixed_t AS
+SELECT 'long' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, (10 + i % 12)::DOUBLE AS v
+FROM range(30) r(i)
+UNION ALL
+SELECT 'short' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, (5 + i)::DOUBLE AS v
+FROM range(10) r(i);
+
+# insufficient_data = 'fail' (default): a SQL error naming the condition,
+# not a silently-dropped row.
+statement error
+SELECT * FROM _ts_mstl_decomposition_native((SELECT id, ds, v FROM mstl_mixed_t), 'fail', [12]);
+----
+Insufficient data
+
+# insufficient_data = 'trend': row count preserved (one row per input
+# group) -- 'short' gets the non-seasonal (supsmu) trend-only fallback,
+# with empty seasonal/periods, exactly as ts_mstl_decomposition_by's own
+# docs promise.
+query I
+SELECT count(*) FROM _ts_mstl_decomposition_native((SELECT id, ds, v FROM mstl_mixed_t), 'trend', [12]);
+----
+2
+
+query I
+SELECT list(id ORDER BY id) FROM _ts_mstl_decomposition_native((SELECT id, ds, v FROM mstl_mixed_t), 'trend', [12]);
+----
+[long, short]
+
+query III
+SELECT len(trend) > 0, periods, len(seasonal)
+FROM _ts_mstl_decomposition_native((SELECT id, ds, v FROM mstl_mixed_t), 'trend', [12])
+WHERE id = 'short';
+----
+true	[]	0
+
+# insufficient_data = 'none': row count still preserved -- 'short' gets
+# empty trend/seasonal/remainder/periods, the same shape the scalar
+# _ts_mstl_decomposition produces for the identical condition after CR-01
+# (table and scalar surfaces now agree), instead of vanishing from the
+# result set.
+query I
+SELECT count(*) FROM _ts_mstl_decomposition_native((SELECT id, ds, v FROM mstl_mixed_t), 'none', [12]);
+----
+2
+
+query IIII
+SELECT trend, seasonal, remainder, periods
+FROM _ts_mstl_decomposition_native((SELECT id, ds, v FROM mstl_mixed_t), 'none', [12])
+WHERE id = 'short';
+----
+[]	[]	[]	[]
+
+# The already-working 'long' group must stay unaffected by the CR-04 fix in
+# every mode -- it still decomposes normally with its one usable period.
+query I
+SELECT len(periods) FROM _ts_mstl_decomposition_native((SELECT id, ds, v FROM mstl_mixed_t), 'none', [12]) WHERE id = 'long';
+----
+1
+
+# CR-05 / WR-03 regression: ts_detect_seasonality_changes, ts_detect_
+# amplitude_modulation, and ts_analyze_peak_timing were missing the
+# `error.code == INVALID_INPUT -> throw` branch their 6 siblings already
+# had, so a NaN/non-finite/non-positive period silently returned NULL
+# instead of raising the documented SQL error. WR-03 additionally removed a
+# stale, now-redundant `period <= 0.0` FFI-level pre-check on these (and 4
+# other) functions that produced an inconsistent message for -Infinity --
+# all five non-finite/non-positive values below must now raise the SAME
+# "Period must be a positive finite number" message for all three
+# functions.
+
+foreach period nan inf -inf -5.0 0.0
+
+statement error
+SELECT ts_detect_seasonality_changes(
+    list_transform(range(120), lambda i: (10 + 5 * sin(2 * pi() * i / 12))::DOUBLE), '${period}'::DOUBLE
+);
+----
+Period must be a positive finite number
+
+statement error
+SELECT ts_detect_amplitude_modulation(
+    list_transform(range(120), lambda i: (10 + 5 * sin(2 * pi() * i / 12))::DOUBLE), '${period}'::DOUBLE
+);
+----
+Period must be a positive finite number
+
+statement error
+SELECT ts_analyze_peak_timing(
+    list_transform(range(120), lambda i: (10 + 5 * sin(2 * pi() * i / 12))::DOUBLE), '${period}'::DOUBLE
+);
+----
+Period must be a positive finite number
+
+endloop
