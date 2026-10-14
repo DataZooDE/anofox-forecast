@@ -185,7 +185,7 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 | DIAG-03 | Phase 17 | Pending |
 | DIAG-04 | Phase 17 | Pending |
 | DIAG-05 | Phase 17 | Pending |
-| UPST-01 | Phase 11 | Pending |
+| UPST-01 | Phase 17 | Pending |
 | UPST-02 | Phase 11 | Pending |
 | UPST-03 | Phase 11 | Pending |
 | UPST-04 | Phase 11 | Pending |
