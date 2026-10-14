@@ -251,6 +251,49 @@ SELECT ts_decompose_seasonal([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], 0.0);
 ----
 Period must be a positive finite number
 
+# CR-06 / CR-07 / WR-04 regression: ts_classify_seasonality (scalar) raised
+# for a NaN/Infinity period via its own locally-worded isfinite pre-check,
+# but silently returned NULL for an ordinary 0.0/-5.0 period (CR-06) with
+# message wording that diverged from every other period-validating
+# function (WR-04). ts_classify_seasonality_by's aggregate backend
+# (ts_classify_seasonality_agg) had an entirely separate, untouched copy of
+# the same defect class -- not even an isfinite guard, so a NaN period
+# reached a `static_cast<size_t>(2 * period)` UB cast directly (CR-07).
+# Both backends now delete their local pre-checks and delegate to the
+# single core-level check (crates/anofox-fcst-core/src/seasonality.rs ::
+# classify_seasonality), mapped to INVALID_INPUT at the FFI boundary, so
+# nan/inf/-inf/0.0/-5.0 all raise the SAME unified message on both the
+# scalar function and the _by macro -- no static_cast<size_t> of a
+# non-finite/negative double remains on either path.
+
+foreach period nan inf -inf -5.0 0.0
+
+statement error
+SELECT ts_classify_seasonality(
+    list_transform(range(120), lambda i: (10 + 5 * sin(2 * pi() * i / 12))::DOUBLE), '${period}'::DOUBLE
+);
+----
+Period must be a positive finite number
+
+statement error
+SELECT * FROM ts_classify_seasonality_by('sine120', id, ds, v, '${period}'::DOUBLE);
+----
+Period must be a positive finite number
+
+endloop
+
+# --- valid period on each: no regression from the CR-06/CR-07 fix ---
+
+query I
+SELECT (ts_classify_seasonality(list_transform(range(120), lambda i: (10 + 5 * sin(2 * pi() * i / 12))::DOUBLE), 12.0)).is_seasonal;
+----
+true
+
+query I
+SELECT is_seasonal FROM ts_classify_seasonality_by('sine120', id, ds, v, 12.0);
+----
+true
+
 #######################################
 # 15-02: ts_detect_peaks on scipy_peaks/cases.json rw150 (DET-01, D-05) -- a
 # direct port of scipy.signal.find_peaks. Before this plan, fdars-core's own
