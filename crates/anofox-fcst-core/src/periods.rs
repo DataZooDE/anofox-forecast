@@ -869,7 +869,7 @@ pub fn lomb_scargle(
         // billions of f64 elements. Rust's global allocator aborts the whole
         // process on allocation failure -- not a catch_unwind-able panic --
         // so this must be rejected here before any allocation happens.
-        if nf < 2 || nf > 1_000_000 {
+        if !(2..=1_000_000).contains(&nf) {
             return Err(ForecastError::InvalidParameter {
                 param: "n_frequencies".to_string(),
                 value: nf.to_string(),

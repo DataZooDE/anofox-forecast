@@ -205,7 +205,7 @@ SELECT * FROM ts_coverage_by((SELECT product_id, date, actual, lower_90, upper_9
 .print ''
 .print 'Section 4.2: Mean Interval Width'
 
-SELECT * FROM ts_interval_width_by('interval_forecasts', product_id, lower_90, upper_90);
+SELECT * FROM ts_interval_width_by('interval_forecasts', product_id, date, lower_90, upper_90);
 
 -- ============================================================================
 -- SECTION 5: Comparing Multiple Models
