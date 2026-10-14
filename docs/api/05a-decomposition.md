@@ -40,7 +40,7 @@ SELECT ts_detrend([NULL, 1.0, 2.0, 1.5, 2.5, 1.8, NULL]::DOUBLE[], 'linear')
 
 Multiple Seasonal-Trend decomposition using Loess (MSTL).
 
-**Signature (5 args — there is no `seasonal_periods` positional argument):**
+**Signature (5 args — `seasonal_periods` is a key in `params`, not a positional argument):**
 ```sql
 ts_mstl_decomposition_by(source, group_col, date_col, value_col, params)
 ```
@@ -52,30 +52,42 @@ ts_mstl_decomposition_by(source, group_col, date_col, value_col, params)
 | `group_col` | IDENTIFIER | Series grouping column |
 | `date_col` | IDENTIFIER | Date/timestamp column |
 | `value_col` | IDENTIFIER | Value column |
-| `params` | MAP | Only `insufficient_data` is read from `params` today — see Current limitation below |
+| `params` | MAP | `seasonal_periods` (alias `periods`) — a list of seasonal periods, e.g. `'[7, 365]'` (string) or `[7, 365]` (list); `insufficient_data` — `'fail'` (default), `'trend'`, or `'none'` |
 
-**Current limitation:** the underlying native implementation does not currently receive or
-use any seasonal period information at all. `seasonal` and `periods` are returned as
-**empty arrays** on every call — this function currently performs classical moving-average
-trend extraction only, with no seasonal decomposition. `remainder` is simply
-`value - trend`. (fix planned for v0.10.0, Phase 15)
+**Algorithm (Phase 15, D-09):** matches R `forecast::mstl` exactly. Of the requested
+periods, those needing `n/2` or more points are dropped (R's own `msts` warning, silently
+suppressed here); the survivors are sorted ascending and de-duplicated. With `k >= 1`
+usable periods, two passes are made over them in ascending order — each pass adds back the
+period's own previous seasonal estimate, re-fits STL with `s.window = 7 + 4*(position+1)`
+(so `11, 15, 19, ...`), and subtracts the new estimate before the next period; the returned
+`trend` is from the LAST STL fit, `remainder` is the fully-deseasonalised series minus that
+trend. With NO usable period (`seasonal_periods` omitted/empty, or every requested period
+too large for the series), the trend is `stats::supsmu(seq_len(n), x)` — R `forecast::mstl`'s
+own non-seasonal fallback — and `seasonal`/`periods` come back empty, `remainder = value -
+trend`. `insufficient_data` only matters when periods WERE requested and NONE of them is
+usable: `'fail'` raises a SQL error, `'trend'` falls back to the non-seasonal `supsmu` trend,
+`'none'` returns every output column `NULL`.
 
 **Returns:**
 | Column | Type | Description |
 |--------|------|-------------|
 | `<group_col>` | (same as input) | Group identifier |
-| `trend` | DOUBLE[] | Classical moving-average trend component |
-| `seasonal` | DOUBLE[][] | Currently always empty — see Current limitation above |
-| `remainder` | DOUBLE[] | `value - trend` (no seasonal component is subtracted) |
-| `periods` | INTEGER[] | Currently always empty — see Current limitation above |
+| `trend` | DOUBLE[] | Trend component (STL, or `supsmu` when no period is usable) |
+| `seasonal` | DOUBLE[][] | One array per usable period, same order as `periods` |
+| `remainder` | DOUBLE[] | Residual after removing trend and every seasonal component |
+| `periods` | INTEGER[] | The usable periods actually fit, ascending, de-duplicated (empty if none) |
 
 **Example:**
 ```sql
--- Note: there is no seasonal_periods argument to pass today; periods/seasonal come back empty
+-- Weekly + yearly seasonality
 SELECT * FROM ts_mstl_decomposition_by(
     'sales', product_id, date, quantity,
-    MAP{}
+    MAP{'seasonal_periods': '[7, 365]'}
 );
+
+-- No seasonal_periods -> non-seasonal supsmu trend, seasonal/periods come back empty
+SELECT periods FROM ts_mstl_decomposition_by('sales', product_id, date, quantity, MAP{});
+-- []
 ```
 
 ---
@@ -160,15 +172,29 @@ ts_decompose_seasonal(values DOUBLE[], period DOUBLE[, method VARCHAR]) → STRU
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `values` | DOUBLE[] | Time series values, ordered |
-| `period` | DOUBLE | Seasonal period; must be positive, else a SQL error (`Period must be positive`) |
-| `method` | VARCHAR | `'additive'` (alias `'add'`, default) — `data = trend + seasonal + remainder`; or `'multiplicative'` (alias `'mult'`, `'mul'`) — `data = trend * seasonal * remainder`. Any other name is a SQL error naming both choices. |
+| `period` | DOUBLE | Seasonal period; must be positive, else a SQL error (`Period must be positive`). `classical_*` methods additionally require an INTEGER `period >= 2` (a non-integer or `< 2` period is a SQL error) |
+| `method` | VARCHAR | `'additive'` (alias `'add'`, default), `'multiplicative'` (alias `'mult'`, `'mul'`), `'classical_additive'` (alias `'classical'`), or `'classical_multiplicative'`. Any other name is a SQL error naming every choice. |
 
-Both methods extract the trend via fdars-core's LOESS detrending (bandwidth 0.3, local
-degree 2), then fit a 3-harmonic Fourier seasonal model to the detrended/deseasonalised
-residual. A constant series decomposes to `trend = ` the constant and `seasonal ≈ 0`
-everywhere (within 1e-12); for a non-trivial series, `trend + seasonal + remainder`
-reconstructs the input to ~1e-10 (additive) or `trend * seasonal * remainder` reconstructs it
-to ~1e-9 (multiplicative).
+**`'additive'` / `'multiplicative'` (fdars LOESS + Fourier):** extract the trend via
+fdars-core's LOESS detrending (bandwidth 0.3, local degree 2), then fit a 3-harmonic Fourier
+seasonal model to the detrended/deseasonalised residual. `data = trend + seasonal +
+remainder` (additive) or `data = trend * seasonal * remainder` (multiplicative). A constant
+series decomposes to `trend = ` the constant and `seasonal ≈ 0` everywhere (within 1e-12);
+for a non-trivial series, `trend + seasonal + remainder` reconstructs the input to ~1e-10
+(additive) or `trend * seasonal * remainder` reconstructs it to ~1e-9 (multiplicative).
+
+**`'classical_additive'` / `'classical_multiplicative'` (R `stats::decompose`, Phase 15,
+D-10):** a centred moving-average trend — a `2 x period` filter (weights `0.5, 1x(period-1),
+0.5`, divided by `period`) for an even period, or the plain `period`-term mean for an odd
+period — then a per-phase seasonal figure averaged over the detrended series and centred (by
+subtraction for additive, by division for multiplicative). `trend` (and therefore
+`remainder`) is `NaN` (use `isnan(...)`, not `IS NULL`) at the `floor(period/2)` points at
+each end, exactly where R's own filter returns `NA` — this is NOT a bug, it matches R
+exactly. A constant series of 1.0
+(period 12, n >= 24) has an interior trend of exactly `1.0` and `seasonal` exactly `0.0`.
+`'classical_multiplicative'` requires every value `> 0` (R itself would silently divide by a
+non-positive value and produce `Inf`/`NaN`/negative garbage with no diagnostic — this is a
+deliberate improvement, not a parity gap).
 
 **Example:**
 ```sql
@@ -177,6 +203,10 @@ FROM monthly_sales WHERE product_id = 1;
 
 -- Multiplicative, for a series with multiplicative seasonality
 SELECT (ts_decompose_seasonal(LIST(quantity ORDER BY date), 12.0, 'multiplicative')).seasonal[1:5]
+FROM monthly_sales WHERE product_id = 1;
+
+-- Classical (R stats::decompose) additive decomposition -- note the NULL/NaN trend edges
+SELECT (ts_decompose_seasonal(LIST(quantity ORDER BY date), 12.0, 'classical_additive')).trend[1:7]
 FROM monthly_sales WHERE product_id = 1;
 ```
 

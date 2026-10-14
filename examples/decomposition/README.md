@@ -28,10 +28,12 @@ This folder contains runnable SQL examples demonstrating time series decompositi
 
 ## Usage
 
-### Basic Decomposition (Auto-detect Periods)
+### Basic Decomposition (No Periods Requested -> Non-seasonal Trend)
 
 ```sql
--- Decompose all series with automatic period detection
+-- MAP{} requests NO seasonal period at all -- this returns a non-seasonal
+-- supsmu trend (R forecast::mstl's own fallback); seasonal/periods come
+-- back EMPTY. There is no period auto-detection inside this function.
 SELECT * FROM ts_mstl_decomposition_by('sales', product_id, date, value, MAP{});
 ```
 
@@ -40,11 +42,11 @@ SELECT * FROM ts_mstl_decomposition_by('sales', product_id, date, value, MAP{});
 ```sql
 -- Weekly decomposition
 SELECT * FROM ts_mstl_decomposition_by('sales', product_id, date, value,
-    MAP{'periods': '[7]'});
+    MAP{'seasonal_periods': '[7]'});
 
--- Multiple seasonal periods (weekly + monthly)
+-- Multiple seasonal periods (weekly + monthly) -- the alias 'periods' also works
 SELECT * FROM ts_mstl_decomposition_by('sales', product_id, date, value,
-    MAP{'periods': '[7, 30]'});
+    MAP{'seasonal_periods': '[7, 30]'});
 ```
 
 ### Extracting Components
@@ -79,9 +81,13 @@ FROM decomposed;
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `periods` | VARCHAR | auto | JSON array of periods, e.g., `'[7, 30]'` |
+| `seasonal_periods` (alias `periods`) | VARCHAR or LIST | none | JSON array of periods, e.g., `'[7, 30]'` or `[7, 30]` |
+| `insufficient_data` | VARCHAR | `'fail'` | `'fail'`, `'trend'`, or `'none'` — only matters when every requested period is too large for the series |
 
-When `MAP{}` is passed (empty), periods are automatically detected.
+When `MAP{}` is passed (no `seasonal_periods`), no period is requested at all — the result
+is a non-seasonal trend (`stats::supsmu`), `seasonal`/`periods` come back empty. There is no
+automatic period detection inside `ts_mstl_decomposition_by` itself; run
+`ts_detect_periods_by()` first if you need that (see "Related Functions" below).
 
 ---
 
@@ -93,7 +99,7 @@ When `MAP{}` is passed (empty), periods are automatically detected.
 | `trend` | DOUBLE[] | Trend component |
 | `seasonal` | DOUBLE[][] | Seasonal components (one per period) |
 | `remainder` | DOUBLE[] | Residual component |
-| `periods` | INTEGER[] | Periods used/detected |
+| `periods` | INTEGER[] | Periods actually fit, ascending and de-duplicated (empty if none usable) |
 
 ---
 
@@ -124,7 +130,9 @@ For additive decomposition: `value = trend + seasonal + remainder`
 
 ## Tips
 
-1. **Let it auto-detect** - Use `MAP{}` first to see what periods are found automatically.
+1. **`MAP{}` does NOT auto-detect periods** - it requests no seasonal period at all, giving a
+   non-seasonal trend. Pass `seasonal_periods` explicitly, or run `ts_detect_periods_by()`
+   first and feed its result in.
 
 2. **Check remainder** - A good decomposition leaves only noise in the remainder. High remainder std = poor fit.
 

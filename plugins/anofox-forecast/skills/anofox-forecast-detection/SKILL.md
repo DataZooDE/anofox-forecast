@@ -292,29 +292,39 @@ Also: `ts_detect_peaks`, `ts_analyze_peak_timing`, `ts_detect_amplitude_modulati
 ts_mstl_decomposition_by(source, group_col, date_col, value_col, params) → TABLE(group_col, trend, seasonal, remainder, periods)
 ```
 
-**Current limitation:** the underlying native call does not currently receive or use any
-seasonal period information — `MAP{'seasonal_periods': ...}` has **no effect**. `seasonal`
-and `periods` come back as **empty arrays** on every call; this is currently classical
-moving-average trend extraction only, with `remainder = value - trend` and no seasonal
-component. There is no `seasonal_1`/`seasonal_2`-style per-period column naming.
-(fix planned for v0.10.0, Phase 15)
+**Algorithm (Phase 15, D-09):** matches R `forecast::mstl`. `params.seasonal_periods` (alias
+`periods`, a `'[7, 365]'` string or `[7, 365]` list) honours every period that needs fewer
+than `n/2` points — those that don't are silently dropped (R's own behaviour); survivors are
+sorted ascending and fit in two passes (`s.window = 7 + 4*position`-stepped STL, trend from
+the last fit). With `seasonal_periods` omitted or every requested period too large, the trend
+is `stats::supsmu` (non-seasonal fallback) and `seasonal`/`periods` come back empty. There is
+no `seasonal_1`/`seasonal_2`-style per-period column naming — `seasonal` is `DOUBLE[][]`,
+one array per entry of `periods`, same order.
 
 ```sql
--- One row per group with array-valued trend/seasonal/remainder (no per-point date column);
--- seasonal_periods currently has no effect -- seasonal/periods come back empty
-SELECT product_id, trend, seasonal, remainder
-FROM ts_mstl_decomposition_by('sales', product_id, ds, y, MAP{});
+-- One row per group with array-valued trend/seasonal/remainder (no per-point date column)
+SELECT product_id, trend, seasonal, remainder, periods
+FROM ts_mstl_decomposition_by('sales', product_id, ds, y, MAP{'seasonal_periods': '[7, 365]'});
+
+-- No seasonal_periods -> non-seasonal supsmu trend, seasonal/periods come back empty
+SELECT periods FROM ts_mstl_decomposition_by('sales', product_id, ds, y, MAP{});
+-- []
 ```
 
-### `ts_decompose_seasonal` (scalar) — LOESS trend + Fourier-seasonal additive / multiplicative
+### `ts_decompose_seasonal` (scalar) — fdars LOESS+Fourier, or R classical (centred moving-average)
 
 Signature `ts_decompose_seasonal(DOUBLE[] values, DOUBLE period [, VARCHAR method]) → STRUCT(trend DOUBLE[], seasonal DOUBLE[], remainder DOUBLE[], period DOUBLE, method VARCHAR)`.
 `method`: `'additive'` (alias `'add'`, default, `data = trend + seasonal + remainder`) or
-`'multiplicative'` (alias `'mult'`/`'mul'`, `data = trend * seasonal * remainder`) — not
-classical (centred moving-average) decomposition, which `ts_mstl_decomposition_by` /
-plan 15-04 add separately. Trend comes from fdars-core LOESS (bandwidth 0.3, degree 2);
-seasonal is a 3-harmonic Fourier fit to the detrended residual. Any other method name, or a
-non-positive `period`, is a SQL error naming the valid choices.
+`'multiplicative'` (alias `'mult'`/`'mul'`, `data = trend * seasonal * remainder`) — fdars
+LOESS trend (bandwidth 0.3, degree 2) + a 3-harmonic Fourier seasonal fit to the detrended
+residual; or `'classical_additive'` (alias `'classical'`) / `'classical_multiplicative'` — R
+`stats::decompose`'s centred moving-average trend (Phase 15, D-10): a `2 x period` filter for
+an even period, the plain `period`-term mean for an odd period; `trend`/`remainder` are `NaN`
+(check with `isnan(...)`, not `IS NULL`) at the `floor(period/2)` points at each end, matching
+R's own `NA` edges exactly. `classical_*` requires an INTEGER `period >= 2`;
+`classical_multiplicative` additionally requires every value `> 0` (unlike R, which would
+silently divide by a non-positive value). Any other method name, or a non-positive `period`,
+is a SQL error naming the valid choices.
 
 ### `ts_detrend_by`
 
@@ -355,7 +365,7 @@ The array-level primitive behind `ts_detrend_by`. Signature `ts_detrend(DOUBLE[]
 - **Seasonality auto-detection applies uniformly across surfaces.** `AutoETS` / `AutoARIMA` / `AutoTheta` (and other models) via `ts_forecast_by`, `ts_cv_forecast_by`, the scalar paths, and `ts_forecast_agg` all auto-detect when `seasonal_period`/`seasonal_periods` are both omitted (10-10, FCST-06). Run detection first and pass `seasonal_period` explicitly if you want control/reproducibility rather than relying on silent auto-detection.
 - **`ts_detect_periods_by` returns one row per group** with a `periods` STRUCT. Access fields with `primary_period`.
 - **Detection needs sufficient history**: FFT-family methods need ≥ 2 full cycles; ACF-family needs ≥ 3. On short-history panels, `ts_detect_periods` may return `primary_period = 1` (no seasonality) even when a period exists.
-- **`ts_mstl_decomposition_by`'s `seasonal_periods` param currently has no effect at all** — `seasonal`/`periods` always come back empty (fix planned for v0.10.0, Phase 15).
+- **`_ts_mstl_decomposition`/`ts_mstl_decomposition_by` return `periods` ascending, de-duplicated** — if you request `[28, 7]` you get `periods = [7, 28]` back, with `seasonal[1]` corresponding to period 7 and `seasonal[2]` to period 28, not the request order.
 
 ## Canonical detection pipeline
 

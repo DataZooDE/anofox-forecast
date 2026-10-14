@@ -453,6 +453,50 @@ use the semver numbering this project started with.
 
   "Before" values above were captured live from the pre-fix build (`mean3_n150` =
   `[0]*50 ++ [2.5]*50 ++ [-1.0]*50 + N(0,1)` noise, `rng(15501)`) before any rebuild.
+
+  **Plan 15-04 (DET-04): MSTL is now a real R `forecast::mstl` port, and the periods you
+  request are honoured end to end.** Before this plan, `_ts_mstl_decomposition` /
+  `ts_mstl_decomposition_by` ALWAYS passed `nullptr`/`0` for the periods argument to the
+  FFI, regardless of what SQL requested — `seasonal_periods`/`periods` had no effect
+  whatsoever, and MSTL itself was a one-pass classical moving average that sorted
+  requested periods DESCENDING (longest first) with a broken even-window trend formula
+  outside the seasonal path (the "no usable period" fallback summed `2*half_window+1`
+  values but divided by `window`, off by one element). `decomposition::mstl_fit` is now
+  the single shared implementation of R `forecast::mstl` (ascending usable-period filter
+  `p >= 2 && n > 2p`, de-duplicated, two passes with `s.window = 7 + 4*position`, trend
+  from the last STL fit) consumed by BOTH `mstl_decompose` and `ts_stats`'
+  `trend_strength`/`seasonality_strength` (D-09) — `ts_stl_period`'s candidate scoring
+  changes accordingly, since it now scores against real STL instead of the old
+  classical-MA approximation.
+
+  | Function (input) | Before | After | What changed |
+  |---|---|---|---|
+  | `_ts_mstl_decomposition(ones_n100, 'trend', [])` (no periods, non-seasonal fallback) `.trend[50]` | `1.05` | `1.0` | the old fallback trend summed 21 values but divided by a window of 20 (off-by-one); the new `supsmu` fallback gives the exact constant (G11) |
+  | `_ts_mstl_decomposition(det84, 'fail', [7])` `.periods` | `[]` (periods argument was always ignored) | `[7]` | periods now flow from SQL to the FFI; `.trend`/`.seasonal` match R `forecast::mstl` to 1e-8 |
+  | `_ts_mstl_decomposition(msts_7_28, 'fail', [28, 7])` `.periods` | `[]` (ignored) | `[7, 28]` | periods are honoured AND returned ascending, regardless of request order (previously the classical-MA code sorted descending) |
+  | `ts_mstl_decomposition_by(.., MAP{'seasonal_periods': '[7, 365]'})` `.periods` | `[]` (param had no effect at all) | `[7, 365]` (or whichever survive the `n > 2p` usable filter) | the macro now `CAST`s `params.seasonal_periods`/`periods` into the native table function's new third argument |
+
+  "Before" values above (`.trend[50]=1.05`, periods always `[]`) are reproduced from the
+  pre-plan source directly (`crates/anofox-fcst-core/src/decomposition.rs`'s old
+  `(n/5).max(3).min(n)`-windowed fallback and the C++ layer's hardcoded `nullptr, 0`
+  periods argument, both read and removed by this plan) rather than a live pre-rebuild
+  probe, since both are simple closed-form/structural facts, not something that could
+  drift between a probe and the documented formula.
+
+  **`ts_decompose_seasonal` gains classical decomposition (D-10): `'classical_additive'`
+  (alias `'classical'`) / `'classical_multiplicative'`, an R `stats::decompose` port**,
+  next to the existing fdars LOESS+Fourier `'additive'`/`'multiplicative'` methods from
+  plan 15-01. A centred `2 x period` filter (even period) or plain `period`-term mean (odd
+  period) trend, `NaN` at the `floor(period/2)` edges exactly where R returns `NA`, and a
+  centred per-phase seasonal figure. `classical_multiplicative` rejects any value `<= 0`
+  with a SQL error — a deliberate, documented deviation from R, which would silently
+  divide by it and return `Inf`/`NaN`/negative garbage (see
+  `validation/reference/README.md`).
+
+  | Function (input) | Before | After | What changed |
+  |---|---|---|---|
+  | `ts_decompose_seasonal(ones48, 12.0, 'classical_additive')` `.trend[1]`/`.trend[7]` | n/a (method did not exist) | `NaN` / exactly `1.0` | new method; matches R `stats::decompose` NA edges and constant-series exactness (G10/G11) |
+  | `ts_decompose_seasonal(.., 12.5, 'classical')` | n/a | SQL error: `classical decomposition requires an integer period >= 2` | classical methods require an integer period |
 - **Every `ts_features` surface now returns all 117 features, including `autocorrelation_lag10`.**
   `ts_features_by`, `ts_features`, `ts_features_agg`, and `ts_features_table` previously
   derived their output schema from calling the Rust core on a 10-point dummy series —
