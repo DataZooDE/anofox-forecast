@@ -42,6 +42,8 @@ Execution note: planned in parallel with Phases 15/16, but EXECUTES after Phase 
 ### Post-planning decision (user, 2026-10-13)
 - **D-12:** Root-cause the R-parity gaps before accepting them. The planner measured HW / ETS 'AAA' about 21% off R on AirPassengers, 'Holt' 11.5% off, and AutoETS selecting (M,A,M) vs R's (M,Ad,M). 17-03 starts with a diagnosis task: compare the extension wrapper's call path (model mapping, seasonal variant, damping, initialisation, parameter defaults, data handling) against calling anofox-forecast 0.16.0 directly on the same fixture, and both against R. If the cause is extension-side, fix it in 17-03 and tighten the tolerances to what is achieved. If crate-side, file an upstream issue with a minimal reproduction and keep a documented known gap citing the cause. Only gaps with an identified cause may be recorded as known gaps.
 
+- **D-13:** If the 17-03 diagnosis confirms it, the SQL model name 'Holt' is remapped to the crate's ETS(A,A,N), which is the definition of R's `holt()`. Pre-diagnosis this shrinks the gap from 11.5% to 1.7% on AirPassengers. Breaking output change, with CHANGELOG before/after rows. (User, 2026-10-14.)
+
 ### Claude's Discretion
 - Exact tolerance values per model (each justified), the Monte Carlo seed and size, simulated-series parameters, and where the parity test lives (Rust integration test over the core forecast wrapper and/or SQL).
 
