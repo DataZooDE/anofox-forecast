@@ -1777,75 +1777,141 @@ FROM conformal_calc
     // Returns a single row with the calibrated conformity score
     // params MAP supports:
     //   alpha (DOUBLE) - miscoverage rate (default 0.1 for 90% coverage)
-    // Returns: conformity_score, coverage, n_residuals
-    {"ts_conformal_calibrate", {"backtest_results", "actual_col", "forecast_col", "params", nullptr}, {{nullptr, nullptr}},
+    // ts_conformal_calibrate: Calibrate a conformal predictor PER GROUP by default (Phase 16 D-03)
+    // C++ API: ts_conformal_calibrate(backtest_results, group_col, actual_col, forecast_col, params := MAP{})
+    // Residuals are computed in Rust (D-02), never subtracted in SQL. No date column: the split
+    // quantile is order-invariant over calibration pairs (D-01 names only the three macros that
+    // order/pair forecasts; calibration pairing is row-inherent, one STRUCT per row).
+    // params MAP supports (read json-free; CAST, not TRY_CAST):
+    //   alpha (DOUBLE) - miscoverage rate (default 0.1)
+    //   method (VARCHAR) - 'symmetric' (alias 'split') or 'adaptive' (default 'symmetric';
+    //     'asymmetric' errors -- two margins cannot collapse into one conformity_score, use
+    //     ts_conformal_by instead)
+    //   pooled (BOOLEAN) - false (default): one row per group_col value. true: pool every row
+    //     into ONE row with group_col = NULL.
+    // Returns: group_col, method, conformity_score, coverage, nominal_level, n_calibration
+    {"ts_conformal_calibrate", {"backtest_results", "group_col", "actual_col", "forecast_col", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
 R"(
 WITH _params AS (
     SELECT
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.alpha') AS DOUBLE), 0.1) AS _alpha
+        CAST(COALESCE((params::MAP(VARCHAR, VARCHAR))['alpha'], '0.1') AS DOUBLE) AS _alpha,
+        COALESCE((params::MAP(VARCHAR, VARCHAR))['method'], 'symmetric') AS _method,
+        CAST(COALESCE((params::MAP(VARCHAR, VARCHAR))['pooled'], 'false') AS BOOLEAN) AS _pooled
 ),
-residuals AS (
+per_key AS (
     SELECT
-        (actual_col - forecast_col)::DOUBLE AS residual
+        CASE WHEN (SELECT _pooled FROM _params) THEN NULL ELSE group_col END AS _grp,
+        LIST({a: actual_col::DOUBLE, f: forecast_col::DOUBLE}) AS _pairs
     FROM query_table(backtest_results::VARCHAR)
-    WHERE actual_col IS NOT NULL AND forecast_col IS NOT NULL
+    GROUP BY CASE WHEN (SELECT _pooled FROM _params) THEN NULL ELSE group_col END
+),
+calibrated AS (
+    SELECT
+        _grp,
+        _ts_conformal_calibrate(
+            [pr.a FOR pr IN _pairs],
+            [pr.f FOR pr IN _pairs],
+            (SELECT _alpha FROM _params),
+            (SELECT _method FROM _params)
+        ) AS cal_result
+    FROM per_key
 )
 SELECT
-    ts_conformal_quantile(LIST(residual), (SELECT _alpha FROM _params)) AS conformity_score,
-    1.0 - (SELECT _alpha FROM _params) AS coverage,
-    COUNT(*)::BIGINT AS n_residuals
-FROM residuals
+    _grp AS group_col,
+    (cal_result).method AS method,
+    (cal_result).conformity_score AS conformity_score,
+    (cal_result).coverage AS coverage,
+    (cal_result).nominal_level AS nominal_level,
+    (cal_result).n_calibration AS n_calibration
+FROM calibrated
 )",
-    "Calibrates a conformal predictor from backtest residuals and returns the calibration profile for reuse.",
+    "Calibrates a conformal predictor per group (or pooled on request) and returns the calibration profile for reuse.",
     "SELECT * FROM ts_conformal_calibrate('backtest', product_id, actual, forecast)",
     "conformal-prediction"},
 
-    // ts_conformal_apply_by: Apply pre-computed conformity score to forecasts
-    // C++ API: ts_conformal_apply_by(forecast_results, group_col, forecast_col, conformity_score)
-    // forecast_results: Table with point forecasts
-    // conformity_score: Pre-computed score from ts_conformal_calibrate
-    // Returns: group_col, forecast, lower, upper
-    {"ts_conformal_apply_by", {"forecast_results", "group_col", "forecast_col", "conformity_score", nullptr}, {{nullptr, nullptr}},
+    // ts_conformal_apply_by: Apply a calibration TABLE (ts_conformal_calibrate output) to new
+    // forecasts, one row per (group, forecast row) (Phase 16 D-01/D-03/D-14)
+    // C++ API: ts_conformal_apply_by(forecast_results, group_col, date_col, forecast_col, calibration)
+    // `calibration` names a table holding ts_conformal_calibrate's output columns (group_col,
+    // method, conformity_score); it must hold at MOST one row per group_col value, plus
+    // optionally ONE pooled row with group_col = NULL. Per forecast group: the calibration row
+    // whose group_col matches is used if one exists, otherwise the pooled row (group_col IS
+    // NULL), otherwise bounds come back NULL for that group's rows. A literal score is applied
+    // by wrapping it in a one-row table with group_col = NULL (D-14).
+    // Returns: group_col, date_col, point, lower, upper, method, conformity_score
+    {"ts_conformal_apply_by", {"forecast_results", "group_col", "date_col", "forecast_col", "calibration", nullptr}, {{nullptr, nullptr}},
 R"(
-WITH intervals AS (
+WITH cal AS (
+    SELECT * FROM query_table(calibration::VARCHAR)
+),
+per_group AS (
     SELECT
         group_col AS _grp,
-        ts_conformal_intervals(
-            LIST(forecast_col::DOUBLE ORDER BY forecast_col),
-            conformity_score::DOUBLE
-        ) AS interval_result
+        LIST({t: date_col, p: forecast_col::DOUBLE} ORDER BY date_col)
+            FILTER (WHERE forecast_col IS NOT NULL) AS _points
     FROM query_table(forecast_results::VARCHAR)
-    WHERE forecast_col IS NOT NULL
+    GROUP BY group_col
+),
+matched AS (
+    SELECT
+        pg._grp AS _grp,
+        pg._points AS _points,
+        COALESCE(direct.conformity_score, pooled.conformity_score) AS _score,
+        COALESCE(direct.method, pooled.method) AS _method
+    FROM per_group pg
+    LEFT JOIN cal direct ON direct.group_col = pg._grp
+    LEFT JOIN cal pooled ON pooled.group_col IS NULL
+),
+applied AS (
+    SELECT
+        _grp,
+        _points,
+        _method,
+        _score,
+        ts_conformal_intervals([pt.p FOR pt IN _points], _score) AS _bounds
+    FROM matched
+)
+SELECT
+    _grp AS group_col,
+    UNNEST(_points).t AS date_col,
+    UNNEST(_points).p AS point,
+    UNNEST((_bounds).lower) AS lower,
+    UNNEST((_bounds).upper) AS upper,
+    _method AS method,
+    _score AS conformity_score
+FROM applied
+)",
+    "Applies a calibration table (from ts_conformal_calibrate) to new point forecasts, matching each group to its own row or a pooled row.",
+    "SELECT * FROM ts_conformal_apply_by('forecasts', product_id, date, point_forecast, 'calibration_profile')",
+    "conformal-prediction"},
+
+    // ts_interval_width_by: Compute mean interval width for grouped series, pairing lower/upper
+    // by date_col (Phase 16 D-01/D5) -- lower and upper are read from ONE date-ordered LIST of
+    // per-row STRUCTs, never sorted independently, and Rust drops incomplete (lower, upper)
+    // pairs pairwise (ts_mean_interval_width's existing complete_cases behavior).
+    // C++ API: ts_interval_width_by(results, group_col, date_col, lower_col, upper_col)
+    // Returns: group_col, mean_width, n_intervals
+    {"ts_interval_width_by", {"results", "group_col", "date_col", "lower_col", "upper_col", nullptr}, {{nullptr, nullptr}},
+R"(
+WITH per_group AS (
+    SELECT
+        group_col AS _grp,
+        LIST({l: lower_col::DOUBLE, u: upper_col::DOUBLE} ORDER BY date_col) AS _pairs,
+        COUNT(*) FILTER (WHERE lower_col IS NOT NULL AND upper_col IS NOT NULL) AS _n_intervals
+    FROM query_table(results::VARCHAR)
     GROUP BY group_col
 )
 SELECT
     _grp AS group_col,
-    (interval_result).lower AS lower,
-    (interval_result).upper AS upper
-FROM intervals
-)",
-    "Applies a pre-calibrated conformal profile to new point forecasts to generate prediction intervals.",
-    "SELECT * FROM ts_conformal_apply_by('forecasts', product_id, date, point_forecast, calibration_profile)",
-    "conformal-prediction"},
-
-    // ts_interval_width_by: Compute mean interval width for grouped series
-    // C++ API: ts_interval_width_by(results, group_col, lower_col, upper_col)
-    // Returns: group_col, mean_width, n_intervals
-    {"ts_interval_width_by", {"results", "group_col", "lower_col", "upper_col", nullptr}, {{nullptr, nullptr}},
-R"(
-SELECT
-    group_col AS group_col,
     ts_mean_interval_width(
-        LIST(lower_col::DOUBLE ORDER BY lower_col),
-        LIST(upper_col::DOUBLE ORDER BY upper_col)
+        [pr.l FOR pr IN _pairs],
+        [pr.u FOR pr IN _pairs]
     ) AS mean_width,
-    COUNT(*)::BIGINT AS n_intervals
-FROM query_table(results::VARCHAR)
-WHERE lower_col IS NOT NULL AND upper_col IS NOT NULL
-GROUP BY group_col
+    _n_intervals::BIGINT AS n_intervals
+FROM per_group
 )",
-    "Computes the mean width of prediction intervals for each group.",
-    "SELECT * FROM ts_interval_width_by('forecasts', product_id, lower, upper)",
+    "Computes the mean width of prediction intervals for each group, pairing lower/upper by date_col.",
+    "SELECT * FROM ts_interval_width_by('forecasts', product_id, date, lower, upper)",
     "conformal-prediction"},
 
     // ================================================================================

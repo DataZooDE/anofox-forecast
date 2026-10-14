@@ -31,9 +31,9 @@ fn conformal_from_pairs_matches_numpy_per_group() {
     let score_abs = tolerance(&fx, "score_abs");
     let coverage_abs = tolerance(&fx, "coverage_abs");
 
-    let groups = fx["two_group"]["groups"]
-        .as_object()
-        .expect("conformal_from_pairs_matches_numpy_per_group: 'two_group.groups' is not an object");
+    let groups = fx["two_group"]["groups"].as_object().expect(
+        "conformal_from_pairs_matches_numpy_per_group: 'two_group.groups' is not an object",
+    );
     assert!(
         !groups.is_empty(),
         "conformal_from_pairs_matches_numpy_per_group: 'two_group.groups' is empty"
@@ -64,7 +64,9 @@ fn conformal_from_pairs_matches_numpy_per_group() {
                 alpha,
                 ConformalMethod::Symmetric,
             )
-            .unwrap_or_else(|e| panic!("group {group_name} alpha {alpha}: conformal_from_pairs failed: {e}"));
+            .unwrap_or_else(|e| {
+                panic!("group {group_name} alpha {alpha}: conformal_from_pairs failed: {e}")
+            });
 
             let ctx = format!("group {group_name} alpha {alpha}");
 
@@ -98,7 +100,10 @@ fn conformal_from_pairs_matches_numpy_per_group() {
             // Output order equals input point order (D-01: never value-sorted) --
             // this plan's fixture deliberately feeds a non-monotonic point list
             // (30, 10, 20), so a value-sort bug would be caught here.
-            assert_eq!(result.point, future_point, "{ctx} point order must equal input order");
+            assert_eq!(
+                result.point, future_point,
+                "{ctx} point order must equal input order"
+            );
 
             common::assert_vec_close(
                 &result.lower,
@@ -138,9 +143,9 @@ fn conformal_calibrate_pooled_matches_numpy() {
         pooled_forecast.extend(option_vec(&f64_vec(&group["forecast"])));
     }
 
-    let pooled_alphas = fx["two_group"]["pooled"]["alphas"]
-        .as_object()
-        .expect("conformal_calibrate_pooled_matches_numpy: 'two_group.pooled.alphas' is not an object");
+    let pooled_alphas = fx["two_group"]["pooled"]["alphas"].as_object().expect(
+        "conformal_calibrate_pooled_matches_numpy: 'two_group.pooled.alphas' is not an object",
+    );
     assert!(
         !pooled_alphas.is_empty(),
         "conformal_calibrate_pooled_matches_numpy: 'two_group.pooled.alphas' is empty"

@@ -172,3 +172,136 @@ statement error
 SELECT _ts_conformal_from_pairs([1.0, 2.0]::DOUBLE[], [1.0]::DOUBLE[], []::DOUBLE[], 0.1, 'symmetric');
 ----
 same length: 2 vs 1
+
+# =============================================================================
+# 16-01 ts_conformal_calibrate
+# =============================================================================
+#
+# Reuses table `cbt` from the ts_conformal_by section above. Calibration-only
+# rows (point IS NULL, actual/forecast set) and future rows (actual/forecast
+# NULL) coexist in `cbt`; the NULL actual/forecast on future rows is dropped by
+# Rust's complete_cases, so n_calibration stays 20 per group either way.
+
+# --- per group (default): 2 rows, A 1.905, B 19.05 ---
+query I
+SELECT COUNT(*) = 2 AND bool_and(
+    (group_col = 'A' AND ABS(conformity_score - 1.9050000000000056) < 1e-9) OR
+    (group_col = 'B' AND ABS(conformity_score - 19.05) < 1e-9)
+)
+FROM ts_conformal_calibrate('cbt', g, actual, forecast);
+----
+true
+
+# --- pooled STRUCT and MAP forms agree: 1 row, group_col NULL, 17.075 ---
+query I
+SELECT
+    (SELECT conformity_score FROM ts_conformal_calibrate('cbt', g, actual, forecast, params := {'pooled': true})) =
+    (SELECT conformity_score FROM ts_conformal_calibrate('cbt', g, actual, forecast, params := MAP{'pooled': 'true'}))
+    AND ABS((SELECT conformity_score FROM ts_conformal_calibrate('cbt', g, actual, forecast, params := {'pooled': true})) - 17.075000000000003) < 1e-9
+    AND (SELECT group_col IS NULL FROM ts_conformal_calibrate('cbt', g, actual, forecast, params := {'pooled': true}))
+    AND (SELECT COUNT(*) FROM ts_conformal_calibrate('cbt', g, actual, forecast, params := {'pooled': true})) = 1;
+----
+true
+
+# --- DESCRIBE: output column list in order ---
+query I
+SELECT STRING_AGG(column_name, ',') FROM (DESCRIBE SELECT * FROM ts_conformal_calibrate('cbt', g, actual, forecast) LIMIT 0);
+----
+group_col,method,conformity_score,coverage,nominal_level,n_calibration
+
+# --- asymmetric is rejected: two margins cannot collapse into one score ---
+statement error
+SELECT * FROM ts_conformal_calibrate('cbt', g, actual, forecast, params := {'method': 'asymmetric'});
+----
+supports methods
+
+# =============================================================================
+# 16-01 ts_conformal_apply_by
+# =============================================================================
+
+statement ok
+CREATE TABLE cfut AS SELECT g, ds, point AS fc FROM cbt WHERE point IS NOT NULL;
+
+statement ok
+CREATE TABLE cal_by_group AS SELECT * FROM ts_conformal_calibrate('cbt', g, actual, forecast);
+
+statement ok
+CREATE TABLE cal_pooled AS SELECT * FROM ts_conformal_calibrate('cbt', g, actual, forecast, params := {'pooled': true});
+
+# --- row count equals the number of non-NULL forecast rows (no row
+# multiplication): 6 forecast rows in cfut, 6 rows out ---
+query I
+SELECT COUNT(*) FROM ts_conformal_apply_by('cfut', g, ds, fc, 'cal_by_group');
+----
+6
+
+# --- per-group table: A 2024-02-01 -> [28.095, 31.905] ---
+query I
+SELECT ABS(lower - 28.094999999999995) < 1e-9 AND ABS(upper - 31.905000000000005) < 1e-9
+FROM ts_conformal_apply_by('cfut', g, ds, fc, 'cal_by_group')
+WHERE group_col = 'A' AND date_col = DATE '2024-02-01';
+----
+true
+
+# --- pooled table: A 2024-02-01 -> [12.925, 47.075] (two-group pooled score) ---
+query I
+SELECT ABS(lower - 12.925) < 1e-9 AND ABS(upper - 47.075) < 1e-9
+FROM ts_conformal_apply_by('cfut', g, ds, fc, 'cal_pooled')
+WHERE group_col = 'A' AND date_col = DATE '2024-02-01';
+----
+true
+
+# --- a forecast group absent from a per-group calibration table keeps its
+# rows, with NULL bounds (no row dropped) ---
+statement ok
+CREATE TABLE cfut_extra AS SELECT * FROM cfut UNION ALL SELECT 'C', DATE '2024-02-01', 7.0;
+
+query I
+SELECT point IS NOT NULL AND lower IS NULL AND upper IS NULL
+FROM ts_conformal_apply_by('cfut_extra', g, ds, fc, 'cal_by_group')
+WHERE group_col = 'C';
+----
+true
+
+# --- DESCRIBE: output column list in order ---
+query I
+SELECT STRING_AGG(column_name, ',') FROM (DESCRIBE SELECT * FROM ts_conformal_apply_by('cfut', g, ds, fc, 'cal_by_group') LIMIT 0);
+----
+group_col,date_col,point,lower,upper,method,conformity_score
+
+# =============================================================================
+# 16-01 ts_interval_width_by
+# =============================================================================
+
+statement ok
+CREATE TABLE iw(grp VARCHAR, ds DATE, lo DOUBLE, up DOUBLE);
+
+statement ok
+INSERT INTO iw VALUES
+  ('g1', DATE '2024-03-01', 1.0, NULL),
+  ('g1', DATE '2024-03-02', NULL, 5.0),
+  ('g1', DATE '2024-03-03', 2.0, 4.0),
+  ('g1', DATE '2024-03-04', 3.0, 9.0);
+
+# --- full 4-row case: mean_width 4.0, n_intervals 2 (pairwise-complete) ---
+query I
+SELECT ABS(mean_width - 4.0) < 1e-12 AND n_intervals = 2
+FROM ts_interval_width_by('iw', grp, ds, lo, up);
+----
+true
+
+# --- first three rows only: mean_width 2.0, n_intervals 1 ---
+statement ok
+CREATE TABLE iw3 AS SELECT * FROM iw WHERE ds <= DATE '2024-03-03';
+
+query I
+SELECT ABS(mean_width - 2.0) < 1e-12 AND n_intervals = 1
+FROM ts_interval_width_by('iw3', grp, ds, lo, up);
+----
+true
+
+# --- DESCRIBE: output column list in order ---
+query I
+SELECT STRING_AGG(column_name, ',') FROM (DESCRIBE SELECT * FROM ts_interval_width_by('iw', grp, ds, lo, up) LIMIT 0);
+----
+group_col,mean_width,n_intervals
