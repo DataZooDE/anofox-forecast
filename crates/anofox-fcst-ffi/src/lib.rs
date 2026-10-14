@@ -2310,13 +2310,14 @@ pub unsafe extern "C" fn anofox_ts_analyze_peak_timing(
         return false;
     }
 
-    if period <= 0.0 {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::InvalidInput, "Period must be positive");
-        }
-        return false;
-    }
-
+    // WR-03: the stale duplicate `period <= 0.0` pre-check that used to live
+    // here was removed. It never rejected NaN (`nan <= 0.0` is false) and
+    // rejected -Infinity with the old "Period must be positive" wording
+    // instead of the core-level check's "Period must be a positive finite
+    // number" -- a second source of truth that could desync from the
+    // core-level `!period.is_finite() || period <= 0.0` check (CR-03) this
+    // call falls through to below. The core-level check is strictly a
+    // superset, so there is now exactly one source of truth.
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
         anofox_fcst_core::analyze_peak_timing(&values_vec, period, None)
@@ -2346,8 +2347,16 @@ pub unsafe extern "C" fn anofox_ts_analyze_peak_timing(
             true
         }
         Ok(Err(e)) => {
+            // CR-05: this used to hardcode ErrorCode::ComputationError
+            // regardless of the underlying error, so the C++ wrapper's
+            // `error.code == INVALID_INPUT` check (added to fix CR-05) could
+            // never see INVALID_INPUT here and always fell through to a
+            // silent NULL instead of raising the CR-03 InvalidParameter
+            // error (e.g. a NaN/non-finite/non-positive period) as a SQL
+            // error. Use the same ffi_error_code mapping every other
+            // period-validating function in this file already uses.
             if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+                (*out_error).set_error(ffi_error_code(&e), &e.to_string());
             }
             false
         }
@@ -2485,13 +2494,14 @@ pub unsafe extern "C" fn anofox_ts_decompose(
         return false;
     }
 
-    if period <= 0.0 {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::InvalidInput, "Period must be positive");
-        }
-        return false;
-    }
-
+    // WR-03: the stale duplicate `period <= 0.0` pre-check that used to live
+    // here was removed. It never rejected NaN (`nan <= 0.0` is false) and
+    // rejected -Infinity with the old "Period must be positive" wording
+    // instead of the core-level check's "Period must be a positive finite
+    // number" -- a second source of truth that could desync from the
+    // core-level `!period.is_finite() || period <= 0.0` check (CR-03) this
+    // call falls through to below. The core-level check is strictly a
+    // superset, so there is now exactly one source of truth.
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
         // D-02 (Phase 15, Task 3): strict method-name parsing, same
@@ -2569,13 +2579,14 @@ pub unsafe extern "C" fn anofox_ts_seasonal_strength(
         return false;
     }
 
-    if period <= 0.0 {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::InvalidInput, "Period must be positive");
-        }
-        return false;
-    }
-
+    // WR-03: the stale duplicate `period <= 0.0` pre-check that used to live
+    // here was removed. It never rejected NaN (`nan <= 0.0` is false) and
+    // rejected -Infinity with the old "Period must be positive" wording
+    // instead of the core-level check's "Period must be a positive finite
+    // number" -- a second source of truth that could desync from the
+    // core-level `!period.is_finite() || period <= 0.0` check (CR-03) this
+    // call falls through to below. The core-level check is strictly a
+    // superset, so there is now exactly one source of truth.
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
         let method_str = if method.is_null() {
@@ -2636,13 +2647,14 @@ pub unsafe extern "C" fn anofox_ts_seasonal_strength_windowed(
         return false;
     }
 
-    if period <= 0.0 {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::InvalidInput, "Period must be positive");
-        }
-        return false;
-    }
-
+    // WR-03: the stale duplicate `period <= 0.0` pre-check that used to live
+    // here was removed. It never rejected NaN (`nan <= 0.0` is false) and
+    // rejected -Infinity with the old "Period must be positive" wording
+    // instead of the core-level check's "Period must be a positive finite
+    // number" -- a second source of truth that could desync from the
+    // core-level `!period.is_finite() || period <= 0.0` check (CR-03) this
+    // call falls through to below. The core-level check is strictly a
+    // superset, so there is now exactly one source of truth.
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
         let window_opt = if window_size > 0.0 {
@@ -2710,13 +2722,14 @@ pub unsafe extern "C" fn anofox_ts_classify_seasonality(
         return false;
     }
 
-    if period <= 0.0 {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::InvalidInput, "Period must be positive");
-        }
-        return false;
-    }
-
+    // WR-03: the stale duplicate `period <= 0.0` pre-check that used to live
+    // here was removed. It never rejected NaN (`nan <= 0.0` is false) and
+    // rejected -Infinity with the old "Period must be positive" wording
+    // instead of the core-level check's "Period must be a positive finite
+    // number" -- a second source of truth that could desync from the
+    // core-level `!period.is_finite() || period <= 0.0` check (CR-03) this
+    // call falls through to below. The core-level check is strictly a
+    // superset, so there is now exactly one source of truth.
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
         let strength_opt = if strength_threshold > 0.0 {
@@ -2769,7 +2782,7 @@ pub unsafe extern "C" fn anofox_ts_classify_seasonality(
         }
         Ok(Err(e)) => {
             if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+                (*out_error).set_error(ffi_error_code(&e), &e.to_string());
             }
             false
         }
@@ -2808,13 +2821,14 @@ pub unsafe extern "C" fn anofox_ts_detect_seasonality_changes(
         return false;
     }
 
-    if period <= 0.0 {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::InvalidInput, "Period must be positive");
-        }
-        return false;
-    }
-
+    // WR-03: the stale duplicate `period <= 0.0` pre-check that used to live
+    // here was removed. It never rejected NaN (`nan <= 0.0` is false) and
+    // rejected -Infinity with the old "Period must be positive" wording
+    // instead of the core-level check's "Period must be a positive finite
+    // number" -- a second source of truth that could desync from the
+    // core-level `!period.is_finite() || period <= 0.0` check (CR-03) this
+    // call falls through to below. The core-level check is strictly a
+    // superset, so there is now exactly one source of truth.
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
         let threshold_opt = if threshold > 0.0 {
@@ -2877,8 +2891,16 @@ pub unsafe extern "C" fn anofox_ts_detect_seasonality_changes(
             true
         }
         Ok(Err(e)) => {
+            // CR-05: this used to hardcode ErrorCode::ComputationError
+            // regardless of the underlying error, so the C++ wrapper's
+            // `error.code == INVALID_INPUT` check (added to fix CR-05) could
+            // never see INVALID_INPUT here and always fell through to a
+            // silent NULL instead of raising the CR-03 InvalidParameter
+            // error (e.g. a NaN/non-finite/non-positive period) as a SQL
+            // error. Use the same ffi_error_code mapping every other
+            // period-validating function in this file already uses.
             if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+                (*out_error).set_error(ffi_error_code(&e), &e.to_string());
             }
             false
         }
@@ -2975,13 +2997,14 @@ pub unsafe extern "C" fn anofox_ts_detect_amplitude_modulation(
         return false;
     }
 
-    if period <= 0.0 {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::InvalidInput, "Period must be positive");
-        }
-        return false;
-    }
-
+    // WR-03: the stale duplicate `period <= 0.0` pre-check that used to live
+    // here was removed. It never rejected NaN (`nan <= 0.0` is false) and
+    // rejected -Infinity with the old "Period must be positive" wording
+    // instead of the core-level check's "Period must be a positive finite
+    // number" -- a second source of truth that could desync from the
+    // core-level `!period.is_finite() || period <= 0.0` check (CR-03) this
+    // call falls through to below. The core-level check is strictly a
+    // superset, so there is now exactly one source of truth.
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
         let mod_thresh = if modulation_threshold > 0.0 {
@@ -3023,8 +3046,16 @@ pub unsafe extern "C" fn anofox_ts_detect_amplitude_modulation(
             true
         }
         Ok(Err(e)) => {
+            // CR-05: this used to hardcode ErrorCode::ComputationError
+            // regardless of the underlying error, so the C++ wrapper's
+            // `error.code == INVALID_INPUT` check (added to fix CR-05) could
+            // never see INVALID_INPUT here and always fell through to a
+            // silent NULL instead of raising the CR-03 InvalidParameter
+            // error (e.g. a NaN/non-finite/non-positive period) as a SQL
+            // error. Use the same ffi_error_code mapping every other
+            // period-validating function in this file already uses.
             if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+                (*out_error).set_error(ffi_error_code(&e), &e.to_string());
             }
             false
         }
