@@ -234,6 +234,10 @@ static void TsAnalyzePeakTimingFunction(DataChunk &args, ExpressionState &state,
         );
 
         if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_analyze_peak_timing: %s",
+                    error.message ? error.message : "invalid input");
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }

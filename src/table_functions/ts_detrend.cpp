@@ -560,6 +560,10 @@ static void TsDetectSeasonalityChangesFunction(DataChunk &args, ExpressionState 
         );
 
         if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_detect_seasonality_changes: %s",
+                    error.message ? error.message : "invalid input");
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -821,6 +825,10 @@ static void TsDetectAmplitudeModulationFunction(DataChunk &args, ExpressionState
         );
 
         if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_detect_amplitude_modulation: %s",
+                    error.message ? error.message : "invalid input");
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
