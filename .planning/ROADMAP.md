@@ -393,7 +393,24 @@ Plans:
   4. `docs/` and `plugins/anofox-forecast/skills/` (bodies and frontmatter descriptions) describe the corrected definitions — interval source, MASE, strengths, features, diagnostics, conformal variants — with every changed SQL snippet executed against the built extension.
   5. CHANGELOG / release notes contain a breaking-change section listing every behaviour change that alters numerical output.
 
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 18-01-PLAN.md — Phase 17 start guard, json statically linked into the test/release build (D-01, OpenSSL + WASM LINKED_LIBS untouched), the 50 json-gated SQL test files run and are repaired with an attributed ledger (stale API, DATE+BIGINT, cascades, Phase 9-17 numeric shifts), assertion-count jump (TEST-03 prerequisite) (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 18-02-PLAN.md — D-08 fixes after a live metric `_by` matrix (WR-05 n_unassessed; metric source contract), nine non-json-gated `test/sql/correctness/*.test` files pinned from reference fixtures + CHANGELOG inventory gate, D-03 length-only Rust test sweep script with every flagged test upgraded (TEST-02, TEST-03) (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 18-03-PLAN.md — `scripts/audit_no_stats_in_cpp.py` (C++ + macro SQL, self-test, probe) with a line-level justified allow-list, least-privilege `.github/workflows/audit.yml` and `make audit` also running the length-only sweep (RUST-10) (wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 18-04-PLAN.md — permanent `scripts/check_doc_snippets.py` + `make check-docs`, docs/skills sweep to 0 FAIL with corrected definitions and frontmatter, CHANGELOG "Breaking changes in v0.10.0" tables, release notes, final milestone DoD (DOCS-01, DOCS-02) (wave 4)
 
 ## Execution Notes
 
