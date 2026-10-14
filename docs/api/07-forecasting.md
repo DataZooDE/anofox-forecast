@@ -567,10 +567,11 @@ for the same input.
   1 during training) is dropped before fitting — it gets a 0 effect by construction, and the
   reported `model_name` carries NO `" with regressors"` suffix (the forecast is identical to
   calling the model with no regressors at all).
-- Interior/edge `NULL`/`NaN` historical regressor values are linearly interpolated; an
-  all-`NULL` historical regressor is a hard error. Any `NULL` in a FUTURE regressor value is
-  a hard error naming the regressor index and horizon step — future regressor values must be
-  fully known.
+- `NULL`/`NaN` historical regressor values: **interior** gaps are linearly interpolated;
+  **leading/trailing (edge)** gaps are filled with the NEAREST observed value (constant edge
+  extension, never extrapolated — D-14, G26). An all-`NULL` historical regressor is a hard
+  error. Any `NULL` in a FUTURE regressor value is a hard error naming the regressor index and
+  horizon step — future regressor values must be fully known.
 - `confidence_level` defaults to **0.90** on the exog surface too (not the old 0.95).
 - Every `ts_forecast_by` option (`seasonal_period`, `ets_spec`, `garch_p`/`garch_q`,
   `kalman_model`, `arima_order`/`seasonal_order`, …) is honoured identically via the same
@@ -653,7 +654,7 @@ ts_forecast_panel_by(
 
 Series with different lengths or start dates are automatically handled:
 1. A shared date grid is built as the **union of all dates** across the panel, at the declared `frequency`.
-2. Each series is aligned to the shared grid; gaps are filled with NaN and then imputed via linear interpolation.
+2. Each series is aligned to the shared grid; gaps are filled with NaN and then imputed — interior gaps via linear interpolation, leading/trailing gaps via the nearest observed value (constant edge extension, D-14, G26).
 3. Series with **fewer than 10 valid observations** after alignment are **dropped** and emitted as `DROPPED: too_short` rows (not as errors).
 4. At least **3 series** must survive the drop step for the global fit to proceed.
 

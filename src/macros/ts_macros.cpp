@@ -210,8 +210,9 @@ WHERE group_col IN (
 )
 )",
     "Removes groups whose time series classify as constant under the Rust is_constant tolerance "
-    "(current f64::EPSILON absolute tolerance): fewer than two non-NULL values (including an "
-    "all-NULL group) or all non-NULL values within epsilon of each other.",
+    "(scale-relative: max - min <= 1e-10 * max(1, max|x|) over non-NULL/non-NaN values, D-13): "
+    "fewer than two present values (including an all-NULL group), or all present values within "
+    "that scale-relative tolerance of each other.",
     "SELECT * FROM ts_drop_constant_by('sales', product_id, date, qty)",
     "data-preparation"},
 

@@ -71,13 +71,20 @@ Table macros. Signatures:
 
 | Function | Signature |
 |---|---|
-| `ts_fill_nulls_forward_by(source, group_col, date_col, value_col)` | Last observation carried forward |
-| `ts_fill_nulls_backward_by(source, group_col, date_col, value_col)` | Next observation carried backward |
+| `ts_fill_nulls_forward_by(source, group_col, date_col, value_col)` | Last observation carried forward (LOCF) — **one-directional**: a leading NULL run stays NULL |
+| `ts_fill_nulls_backward_by(source, group_col, date_col, value_col)` | Next observation carried backward (NOCB) — mirrors forward: a trailing NULL run stays NULL |
 | `ts_fill_nulls_mean_by(source, group_col, date_col, value_col)` | Per-group mean, computed in Rust (NaN counts as missing too; all-missing group stays NULL) |
 | `ts_fill_nulls_const_by(source, group_col, date_col, value_col, fill_value)` | Constant (e.g. 0.0 for retail counts) |
 | `ts_fill_forward_by(...)` | Streaming per-group forward fill; also `ts_fill_forward_operator` for windowed variants |
 | `ts_mark_unknown_by` | Marks values matching a sentinel as unknown |
 | `ts_fill_unknown_by` | Fills previously-marked unknowns |
+
+**There is no SQL linear-interpolation function (D-14, G26).** `ts_fill_nulls_forward_by`/
+`ts_fill_nulls_backward_by` fill in ONE direction only — chain both (forward then backward, or
+vice versa) if you need every NULL filled regardless of position. Internally, where the
+extension interpolates (historical exogenous regressors, the panel forecasting grid), interior
+gaps are linear but leading/trailing gaps take the NEAREST observed value (constant edge
+extension, never extrapolated) — this is documented, unchanged behaviour, not a bug.
 
 ```sql
 -- Retail: zero-fill absent-day rows produced by ts_fill_gaps_by
@@ -89,7 +96,7 @@ SELECT * FROM ts_fill_nulls_const_by('gaps_filled', product_id, ds, y, 0.0);
 
 | Function | Drops when |
 |---|---|
-| `ts_drop_constant_by` | Rust `is_constant`: all values equal, or **fewer than two non-NULL values (incl. all-NULL groups)** |
+| `ts_drop_constant_by` | Rust `is_constant`, SCALE-RELATIVE (D-13, G25): `max - min <= 1e-10 * max(1, max\|x\|)` over present values, or **fewer than two present values (incl. all-NULL groups)** — e.g. `[1e12, 1e12 + 0.001]` IS constant at that scale |
 | `ts_drop_short_by(source, group_col, min_length)` | Series length < min |
 | `ts_drop_gappy_by(source, group_col, value_col, max_gap_ratio)` | Gap ratio exceeds threshold (0.1 = 10 %) |
 | `ts_drop_zeros_by` | All zero values |

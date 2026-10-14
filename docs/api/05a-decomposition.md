@@ -295,4 +295,48 @@ FROM ts_classify_seasonality('daily_sales', date, amount, 7.0);
 
 ---
 
+### ts_seasonal_strength / ts_seasonal_strength_windowed
+
+Measure how strongly a seasonal pattern dominates a series, at a single period
+(`ts_seasonal_strength`) or over a sliding window (`ts_seasonal_strength_windowed`).
+
+**Signatures:**
+```sql
+ts_seasonal_strength(values LIST(DOUBLE), period DOUBLE[, method VARCHAR]) → DOUBLE
+ts_seasonal_strength_windowed(values LIST(DOUBLE), period DOUBLE[, window_size DOUBLE[, method VARCHAR]]) → DOUBLE[]
+```
+
+**`method` (DET-06, D-12):**
+| Method | Aliases | Description |
+|--------|---------|--------------|
+| `'variance'` (default) | `'var'` | Variance explained by the seasonal component |
+| `'spectral'` | `'spec'`, `'fft'` | Power at seasonal frequencies / total power |
+
+Both methods **linearly detrend the series first**, then measure strength on the residual.
+Before this plan (G19), the strength was measured on the RAW series: a trend + seasonal
+series (`0.5*t + 2*sin(2*pi*t/12)`, `n=120`) measured `variance` strength `~0.003` instead of
+the `>= 0.95` a seasonal signal that strong should report, because the trend dominated total
+variance. `'wavelet'` is **removed** — it returned `1.0` even for white noise in fdars-core
+0.47 (always-maximal strength regardless of input) — and now raises an error naming the two
+remaining methods; any other unrecognized method name, or a non-positive `period`, also
+raises an error (previously an unrecognized name silently fell back to `'variance'`).
+
+**Example:**
+```sql
+-- Strength on the DETRENDED residual (method defaults to 'variance')
+SELECT ts_seasonal_strength(list_transform(range(28), i -> sin(2 * pi() * i / 7)), 7.0);
+
+-- Spectral method
+SELECT ts_seasonal_strength(list_transform(range(28), i -> sin(2 * pi() * i / 7)), 7.0, 'spectral');
+
+-- Rolling strength over 3 periods
+SELECT ts_seasonal_strength_windowed(list_transform(range(28), i -> sin(2 * pi() * i / 7)), 7.0, 21.0);
+```
+
+**`ts_analyze_seasonality`'s `trend_strength` column** is `|r|` — the absolute Pearson
+correlation between the series and a linear time index (the square root of the linear-fit
+`R^2`, not `R^2` itself).
+
+---
+
 *See also: [Period Detection](05-period-detection.md) | [Peak Detection](05b-peak-detection.md)*

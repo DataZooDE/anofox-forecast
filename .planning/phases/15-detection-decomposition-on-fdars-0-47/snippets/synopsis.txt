@@ -78,3 +78,4 @@ docs/api/04-data-preparation.md	ts_diff_by(source VARCHAR, group_col COLUMN, dat
 docs/api/03-statistics.md	ts_stats_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, frequency VARCHAR,
 plugins/anofox-forecast/skills/anofox-forecast-eda/SKILL.md	ts_stats(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN,
 docs/api/05a-decomposition.md	ts_decompose_seasonal(values DOUBLE[], period DOUBLE[, method VARCHAR]) → STRUCT(trend DOUBLE[], seasonal DOUBLE[], remainder DOUBLE[], period DOUBLE, method VARCHAR)
+docs/api/05a-decomposition.md	ts_seasonal_strength(values LIST(DOUBLE), period DOUBLE[, method VARCHAR]) → DOUBLE

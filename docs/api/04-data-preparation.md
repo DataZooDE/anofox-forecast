@@ -8,7 +8,10 @@ Data preparation functions help clean and transform time series data before fore
 
 **Use this document to:**
 - Fill gaps in irregular time series to ensure regular intervals
-- Impute NULL values using constants, forward-fill, or interpolation
+- Impute NULL values using a constant, forward-fill (LOCF), backward-fill (NOCB), or the series
+  mean (there is no SQL-level linear-interpolation function; linear interpolation is used
+  internally only for historical exogenous regressors and the panel forecasting grid — see
+  [Edge NULLs](#edge-nulls-d-14-g26))
 - Drop problematic series (constant, too short, too many NaNs/nulls)
 - Differencing to remove trends before modeling
 - Build data cleaning pipelines for production forecasting
@@ -20,7 +23,7 @@ Data preparation functions help clean and transform time series data before fore
 - [Quick Start](#quick-start)
 - [Series Filtering](#series-filtering) — `ts_drop_constant_by`, `ts_drop_short_by`, `ts_drop_gappy_by`, `ts_drop_zeros_by`
 - [Edge Cleaning](#edge-cleaning) — `ts_drop_leading_zeros_by`, `ts_drop_trailing_zeros_by`, `ts_drop_edge_zeros_by`
-- [Missing Value Imputation](#missing-value-imputation) — `ts_fill_nulls_const_by`, `ts_fill_nulls_forward_by`, `ts_fill_nulls_backward_by`, `ts_fill_nulls_mean_by`
+- [Missing Value Imputation](#missing-value-imputation) — `ts_fill_nulls_const_by`, `ts_fill_nulls_forward_by`, `ts_fill_nulls_backward_by`, `ts_fill_nulls_mean_by`, [Edge NULLs](#edge-nulls-d-14-g26)
 - [Gap Filling](#gap-filling) — `ts_fill_gaps_by`, `ts_fill_forward_by`
 - [Differencing](#differencing) — `ts_diff_by`
 - [Advanced: Native Gap Filling](#advanced-native-gap-filling) — Supported frequency formats
@@ -85,10 +88,13 @@ SELECT * FROM ts_drop_short_by('nulls_filled', product_id, 20);
 
 ### ts_drop_constant_by
 
-Filters out series that classify as constant under the Rust `is_constant` check (Phase 12 D-09):
-fewer than two non-NULL values (**including an all-NULL group** — a breaking change from the
-old `MIN(value)=MAX(value)` SQL rule, which kept all-NULL groups), or all non-NULL values within
-`f64::EPSILON` absolute tolerance of each other.
+Filters out series that classify as constant under the Rust `is_constant` check: fewer than
+two present (non-NULL, non-NaN) values (**including an all-NULL group** — a breaking change
+from the old `MIN(value)=MAX(value)` SQL rule, which kept all-NULL groups), or all present
+values within a **scale-relative** tolerance of each other (`max - min <= 1e-10 *
+max(1, max|x|)`, Phase 15 D-13, G25 — previously an absolute `f64::EPSILON` tolerance, under
+which `[1e12, 1e12 + 0.001]` was NOT constant even though a 0.001 wiggle on a 1e12-scale
+series is immaterial).
 
 **Signature:**
 ```sql
@@ -209,7 +215,7 @@ SELECT * FROM ts_fill_nulls_const_by('sales', product_id, date, quantity, 0.0);
 
 ### ts_fill_nulls_forward_by
 
-Forward fills NULL values (last observation carried forward).
+Forward fills NULL values (last observation carried forward, LOCF).
 
 **Signature:**
 ```sql
@@ -225,12 +231,36 @@ SELECT * FROM ts_fill_nulls_forward_by('sales', product_id, date, quantity);
 
 ### ts_fill_nulls_backward_by
 
-Backward fills NULL values.
+Backward fills NULL values (next observation carried backward, NOCB).
 
 **Signature:**
 ```sql
 ts_fill_nulls_backward_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
 ```
+
+---
+
+### Edge NULLs (D-14, G26)
+
+`ts_fill_nulls_forward_by`/`ts_fill_nulls_backward_by` are **one-directional** — this is
+documented behaviour, not a bug, and it is unchanged by Phase 15:
+
+- `ts_fill_nulls_forward_by` (LOCF) leaves a **leading** NULL run as NULL (there is no prior
+  value to carry forward) and fills every other NULL with the last observed value.
+- `ts_fill_nulls_backward_by` (NOCB) mirrors it: a **trailing** NULL run stays NULL, every
+  other NULL is filled with the next observed value.
+
+```sql
+-- [NULL, 1, NULL, 3, NULL] -> forward: [NULL, 1, 1, 3, 3]; backward: [1, 1, 3, 3, NULL]
+```
+
+**There is no SQL linear-interpolation function.** Where the extension interpolates
+internally — historical exogenous regressors passed to `ts_forecast_exog_by`/`_ts_forecast_exog`,
+and the panel forecasting grid — interior gaps are filled by LINEAR interpolation, but
+**leading/trailing gaps are extended with the nearest observed value** (constant edge
+extension, never extrapolated past the first/last observed point). A regressor whose history
+has a NULL at either edge gets exactly the same forecast as the same regressor with that edge
+replaced by the nearest observed value.
 
 ---
 

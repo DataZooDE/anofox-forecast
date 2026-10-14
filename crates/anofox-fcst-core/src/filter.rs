@@ -269,6 +269,39 @@ mod tests {
         assert!(is_constant(&[Some(1.0), None, Some(1.0)]));
     }
 
+    /// D-13, G25: scale-relative is_constant. [1e12, 1e12 + 0.001] is NOW
+    /// constant (previously not, absolute f64::EPSILON); [1.0, 1.0 + 1e-9]
+    /// is NOT constant at that much smaller scale.
+    #[test]
+    fn test_is_constant_scale_relative() {
+        assert!(is_constant_slice(&[1e12, 1e12 + 0.001]));
+        assert!(!is_constant_slice(&[1.0, 1.0 + 1e-9]));
+        assert!(is_constant_slice(&[5.0, 5.0]));
+        assert!(!is_constant_slice(&[1.0, 2.0, 3.0]));
+    }
+
+    #[test]
+    fn test_is_constant_nan_null_ignored() {
+        assert!(is_constant(&[Some(5.0), None, Some(5.0), Some(f64::NAN)]));
+        assert!(is_constant_slice(&[5.0, f64::NAN, 5.0]));
+    }
+
+    #[test]
+    fn test_is_constant_edge_cases() {
+        assert!(is_constant(&[Some(1.0)]));
+        assert!(is_constant_slice(&[1.0]));
+        assert!(is_constant(&[]));
+        assert!(is_constant_slice(&[]));
+    }
+
+    /// An infinite value makes the range non-finite -- never constant,
+    /// even alongside a single other finite value.
+    #[test]
+    fn test_is_constant_infinite_is_not_constant() {
+        assert!(!is_constant(&[Some(f64::INFINITY), Some(1.0)]));
+        assert!(!is_constant_slice(&[f64::INFINITY, 1.0]));
+    }
+
     #[test]
     fn test_drop_leading_zeros() {
         let values = vec![Some(0.0), Some(0.0), Some(1.0), Some(2.0), Some(0.0)];

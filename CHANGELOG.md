@@ -497,6 +497,45 @@ use the semver numbering this project started with.
   |---|---|---|---|
   | `ts_decompose_seasonal(ones48, 12.0, 'classical_additive')` `.trend[1]`/`.trend[7]` | n/a (method did not exist) | `NaN` / exactly `1.0` | new method; matches R `stats::decompose` NA edges and constant-series exactness (G10/G11) |
   | `ts_decompose_seasonal(.., 12.5, 'classical')` | n/a | SQL error: `classical decomposition requires an integer period >= 2` | classical methods require an integer period |
+
+  **Plan 15-05 (DET-05, DET-06, DET-07): period detection is now scipy/statsmodels-faithful,
+  seasonal strength detrends first, wavelet strength is removed, and `is_constant` is
+  scale-relative everywhere.** fdars-core 0.47's own FFT/ACF/regression period estimators and
+  `seasonal_strength_wavelet` remained broken after the 15-01 bump (D-04); they are replaced
+  or fixed in this project's own wrapper code (D-11, D-12), with no upstream fdars-core change.
+
+  | Function (input) | Before | After | What changed |
+  |---|---|---|---|
+  | `ts_estimate_period_fft(0.5*t + 2*sin(2*pi*t/12), n=121)` `.period` | `121` (= `n`) | `12.1` | the undetrended periodogram's strongest bin was the trend's own near-zero frequency; now linearly detrended first, candidates restricted to `3 <= k <= floor(n/2)` (G18) |
+  | `ts_estimate_period_fft(.., n=121)` `.confidence` | n/a (period was wrong) | `58.246...` | peak / mean(non-DC power) on the detrended periodogram |
+  | `ts_estimate_period_acf([1,-1]*20)` `.period` | not reachable (search started at lag 3, no significance test) | `2.0` | smallest significant local-max lag `>= 2`, bound `1.96/sqrt(n)` (G17) |
+  | `_ts_detect_periods(shape12_n144, 'regression')` `.primary_period` | could miss an exact period like `12` (50-point linear grid) | `12.0` | default grid is now every integer `2..floor(n/2)` (G20) |
+  | `ts_lomb_scargle(.., 0.0, 0.0, 1)` (n_frequencies=1) | division by zero (`n_freq - 1 == 0`), garbage power | SQL error: `n_frequencies must be at least 2` | G21 |
+  | `ts_lomb_scargle(.., 24.0, 6.0, 0)` (min > max) | an inverted frequency grid, garbage power | SQL error: `min_period must be less than max_period` | G21 |
+  | `ts_seasonal_strength(0.5*t + 2*sin(2*pi*t/12), 12.0)` (`'variance'`) | `0.002963899897805402` | `>= 0.95` | detrends LINEARLY first, then measures strength on the residual (G19) |
+  | `ts_seasonal_strength(.., 12.0, 'spectral')` | `0.0142` | `>= 0.9` | same detrend-first fix |
+  | `ts_seasonal_strength(white_noise, .., 'wavelet')` | `1.0000` (always maximal, regardless of input) | SQL error: `removed: ... use 'variance' (default) or 'spectral'` | `'wavelet'` is removed entirely, not fixed — it was structurally unable to discriminate signal from noise |
+  | `ts_seasonal_strength(.., 'foo')` (unknown method) | silently became `'variance'`, no error | SQL error: `expected one of: variance (alias var), spectral (alias spec, fft)` | strict parsing, no silent fallback |
+  | `ts_seasonal_strength(.., 0.0)` / `ts_seasonal_strength_windowed(.., 0.0)` (non-positive period) | returned a `NULL` row | SQL error: `Period must be positive` | the FFI's existing `period <= 0` pre-check already reported `INVALID_INPUT`; the C++ layer now raises on it instead of swallowing it into a `NULL` row |
+  | `_ts_is_constant([1e12, 1e12 + 0.001])` / `ts_stats`/`ts_data_quality`'s `is_constant` on the same values | `false` (absolute `f64::EPSILON` tolerance: `0.001 > f64::EPSILON`) | `true` | SCALE-RELATIVE tolerance `max - min <= 1e-10 * max(1, max\|x\|)`, now shared by `filter::is_constant`, `ts_stats`, `ts_data_quality`, and `ts_drop_constant_by` (G25); at the `1e12` scale a `0.001` wiggle is immaterial |
+  | `_ts_is_constant([1.0, 1.0 + 1e-9])` | `false` | `false` (unchanged) | NOT a behaviour change — shown for contrast with the row above: at the much smaller `1.0` scale, the same relative rule still correctly reports "not constant" for a `1e-9` difference |
+
+  **Edge-NULL interpolation behaviour is unchanged (D-14, revised after research) and now
+  documented and pinned in SQL:** `ts_fill_nulls_forward_by`/`ts_fill_nulls_backward_by` fill
+  one direction only (a leading NULL stays NULL under forward fill, a trailing NULL stays
+  NULL under backward fill); internal exog/panel-grid interpolation fills interior gaps
+  linearly and leading/trailing gaps with the nearest observed value (constant edge
+  extension, never extrapolated, G26). See `docs/api/04-data-preparation.md`'s new "Edge
+  NULLs" subsection.
+
+  "Before" values above are reproduced from this plan's own planning-time probes (the
+  planner's `0.5*t + 2*sin(2*pi*t/12)` / wavelet-on-white-noise measurements against the
+  pre-15-05 build, recorded in `15-05-PLAN.md`'s `<interfaces>` block and `15-RESEARCH.md`)
+  and from closed-form facts read directly from the old `periods.rs`/`seasonality.rs`/
+  `filter.rs`/`quality.rs`/`stats.rs` source this plan replaced (the division-by-zero/
+  inverted-grid/absolute-epsilon behaviours), not a fresh live re-run of the pre-15-05
+  binary — the binary had already been rebuilt with this plan's fix by the time this table
+  was written.
 - **Every `ts_features` surface now returns all 117 features, including `autocorrelation_lag10`.**
   `ts_features_by`, `ts_features`, `ts_features_agg`, and `ts_features_table` previously
   derived their output schema from calling the Rust core on a 10-point dummy series —

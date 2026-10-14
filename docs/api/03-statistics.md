@@ -61,7 +61,7 @@ ts_stats_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN,
 | `n_positive` | UBIGINT | Number of positive values |
 | `n_negative` | UBIGINT | Number of negative values |
 | `n_unique_values` | UBIGINT | Count of distinct values |
-| `is_constant` | BOOLEAN | Whether series has only one unique value |
+| `is_constant` | BOOLEAN | Whether series is constant under the scale-relative tolerance `max - min <= 1e-10 * max(1, max\|x\|)` over present values (D-13, G25) — NOT the same thing as `n_unique_values == 1`, which stays an exact bit-identity count |
 | `n_zeros_start` | UBIGINT | Count of leading zeros |
 | `n_zeros_end` | UBIGINT | Count of trailing zeros |
 | `plateau_size` | UBIGINT | Longest run of constant values |
@@ -181,7 +181,7 @@ ts_data_quality_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col 
 | `n_gaps` | UBIGINT | Number of **missing periods**: expected timestamps absent under the declared/detected frequency between the series' first and last date (same meaning as `ts_stats`'s `n_gaps`) |
 | `n_gap_runs` | UBIGINT | Number of gap **occurrences** (contiguous runs of missing periods) — the pre-v0.10.0 meaning of `n_gaps` |
 | `n_missing` | UBIGINT | Number of missing values (`NULL` or `NaN`) |
-| `is_constant` | BOOLEAN | Whether series is constant (no variation among present values) |
+| `is_constant` | BOOLEAN | Whether series is constant among present values, under the SAME scale-relative tolerance `max - min <= 1e-10 * max(1, max\|x\|)` as `ts_stats`'s `is_constant` (D-13, G25) |
 | `is_short` | BOOLEAN | Whether the present-value count is below `n_short` |
 
 > **Breaking change (v0.10.0, D-05):** before this release, `temporal_score`

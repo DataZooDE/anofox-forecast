@@ -37,7 +37,11 @@ uses the SAS small-sample formula; `entropy` is now Pincus (1991) approximate en
 previously a 10-bin Shannon entropy; `n_gaps` is now the number of **missing periods**
 (previously gap *occurrences*) — the old occurrence count is the new `n_gap_runs` column.
 `trend_strength`/`seasonality_strength` are now STL-based (`F_T`/`F_S`, Wang/Hyndman) via a
-new `seasonal_period` parameter (see "Strength thresholds" below).
+new `seasonal_period` parameter (see "Strength thresholds" below). `is_constant` (here and in
+`ts_data_quality`) is SCALE-RELATIVE (D-13, G25): `max - min <= 1e-10 * max(1, max|x|)` over
+present (non-NULL, non-NaN) values — NOT the same thing as `n_unique_values == 1`, which stays
+an exact bit-identity count. `[1e12, 1e12 + 0.001]` is now constant; `[1.0, 1.0 + 1e-9]` is
+not (the absolute-epsilon tolerance before this plan was the inverse on both).
 
 ```sql
 -- Every stat for every series

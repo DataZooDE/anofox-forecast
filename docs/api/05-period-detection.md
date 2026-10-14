@@ -21,6 +21,34 @@ Period detection identifies recurring patterns in time series data. Use detected
 | `'autoperiod'` | FFT with ACF validation | General purpose, robust |
 | `'auto'` | Auto-select best method | Unknown characteristics |
 
+**Algorithm details (`'fft'`, `'acf'`, `'regression'`, Lomb-Scargle):**
+
+- **`'fft'` (`ts_estimate_period_fft`):** linearly detrends the series first (least squares), then
+  computes a one-sided periodogram equal to `scipy.signal.periodogram(x, fs=1,
+  window='boxcar', detrend='linear', scaling='spectrum')`. The period is the strongest bin
+  `3 <= k <= floor(n/2)`, so it is never `n` and always `< n/2` — e.g. `0.5*t +
+  2*sin(2*pi*t/12)` reports period `12.0` for `n=120` and `12.1` for odd `n=121` (before this,
+  the undetrended estimator reported period `= n`). Confidence is
+  `power[k] / mean(power[1:])` (peak-to-mean-non-DC-power ratio). A constant or purely linear
+  series (after detrending it is scale-relative constant) returns no period.
+- **`'acf'` (`ts_estimate_period_acf`):** `statsmodels`-definition autocorrelation
+  (`acf(x, fft=False, adjusted=False)`). The period is the SMALLEST lag `k >= 2` that is a
+  local maximum (`r_k > r_{k-1}`, `r_k >= r_{k+1}`) exceeding the `1.96/sqrt(n)` significance
+  bound — e.g. an alternating series reports period `2` (previously lag 2 was unreachable: the
+  search started at lag 3 with no significance test). A series whose ACF never clears the
+  bound returns no period.
+- `'regression'` (`_ts_detect_periods(..., 'regression')`): fits a harmonic (Fourier)
+  regression — intercept plus `cos`/`sin` harmonics below Nyquist — at every INTEGER candidate
+  period in `2..floor(n/2)` by default, and picks the smallest period whose residual sum of
+  squares is within `1e-10 * SST` of the minimum (ties broken toward the smaller period). A
+  period-12 shape reports exactly `12` (previously a 50-point linear grid could skip 12
+  entirely).
+- **Lomb-Scargle (`ts_lomb_scargle`):** raises an error for `n_frequencies < 2`, a non-positive
+  or non-finite `min_period`/`max_period`, or `min_period >= max_period` (previously these
+  caused a division by zero or an inverted frequency grid). A default-derived range made
+  impossible by a too-short series returns `NULL` rather than erroring. Power is normalised to
+  match `scipy.signal.lombscargle(..., normalize=True) * n/2`.
+
 **NULL handling:** every period estimator (`_ts_detect_periods` / `ts_estimate_period_fft` /
 `ts_estimate_period_acf` / `ts_detect_multiple_periods` / `ts_autoperiod` / `ts_cfd_autoperiod` /
 `ts_lomb_scargle` / `ts_aic_period` / `ts_ssa_period` / `ts_stl_period` / `ts_matrix_profile_period` /
@@ -121,9 +149,10 @@ The `confidence` field measures how reliably the period was detected. Its interp
 
 | Method | Confidence Meaning | Good Value |
 |--------|-------------------|------------|
-| `'fft'` | Peak-to-mean power ratio in periodogram | > 5.0 |
+| `'fft'` | Peak-to-mean-non-DC-power ratio in the detrended periodogram | > 5.0 |
 | `'acf'` | Autocorrelation value at the detected lag | > 0.3 |
 | `'autoperiod'` | FFT confidence (ACF validation in separate field) | > 5.0 |
+| `'regression'` | `min(mean_RSS / best_RSS, 10)` across candidate periods | higher is better, capped at 10 |
 
 **Interpreting ACF Confidence:**
 - **0.0 - 0.2**: Weak or no periodicity (may be noise)

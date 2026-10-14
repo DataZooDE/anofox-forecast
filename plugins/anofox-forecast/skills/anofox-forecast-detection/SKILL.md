@@ -97,8 +97,8 @@ FROM sea GROUP BY id;
 
 | Method string | Underlying algorithm | Best for |
 |---|---|---|
-| `'fft'` | FFT periodogram | Clean signals, fast (default) |
-| `'acf'` | Autocorrelation | Noisy signals, cyclical |
+| `'fft'` | FFT periodogram, linearly detrended first (D-11); picks the strongest bin `3 <= k <= floor(n/2)`, so period is never `n` | Clean signals, fast (default) |
+| `'acf'` | `statsmodels`-definition autocorrelation; smallest significant local-max lag `>= 2` (D-11) | Noisy signals, cyclical |
 | `'autoperiod'` | FFT + ACF cross-check | General purpose, robust |
 | `'aic'` | AIC criterion | Model-selection style |
 | `'lomb_scargle'` | Lomb-Scargle | Irregularly sampled data |
@@ -252,6 +252,14 @@ Scalar variants: `ts_classify_seasonality`, `ts_classify_seasonality_agg`.
 
 Numeric measures over `LIST(y ORDER BY ds)`. `windowed` variant tracks strength changes across the series.
 
+`method` is `'variance'` (default, alias `var`) or `'spectral'` (alias `spec`, `fft`). Both
+LINEARLY DETREND the series first (D-12) — a trend + seasonal series previously measured
+`variance` strength `~0.003` on the raw series; detrended it reports `>= 0.95`. `'wavelet'` is
+**removed** (it returned `1.0` even for white noise in fdars-core 0.47) and now raises an
+error naming the two remaining methods; any other unrecognized method name, or a non-positive
+`period`, also raises. `ts_analyze_seasonality`'s `trend_strength` is `|r|` (absolute
+correlation with time, the square root of the linear-fit `R^2`).
+
 ### `ts_detect_seasonality`, `ts_detect_seasonality_changes`
 
 Detect the presence and any regime shifts in the seasonal pattern.
@@ -366,6 +374,16 @@ The array-level primitive behind `ts_detrend_by`. Signature `ts_detrend(DOUBLE[]
 - **`ts_detect_periods_by` returns one row per group** with a `periods` STRUCT. Access fields with `primary_period`.
 - **Detection needs sufficient history**: FFT-family methods need ≥ 2 full cycles; ACF-family needs ≥ 3. On short-history panels, `ts_detect_periods` may return `primary_period = 1` (no seasonality) even when a period exists.
 - **`_ts_mstl_decomposition`/`ts_mstl_decomposition_by` return `periods` ascending, de-duplicated** — if you request `[28, 7]` you get `periods = [7, 28]` back, with `seasonal[1]` corresponding to period 7 and `seasonal[2]` to period 28, not the request order.
+- **FFT/ACF/regression period estimators and seasonal-strength methods were fixed in Phase 15
+  (D-11, D-12):** `ts_estimate_period_fft` now linearly detrends first and never returns
+  `period = n` or `>= n/2` (previously a trend + seasonal series reported period `= n`);
+  `ts_estimate_period_acf` can now return lag 2 and requires statistical significance
+  (previously the search started at lag 3 with no significance test); `_ts_detect_periods(...,
+  'regression')`'s default grid is every integer, so an exact period like 12 is never skipped.
+  `ts_seasonal_strength`/`ts_seasonal_strength_windowed` now detrend first — a trend-dominated
+  series that is ALSO strongly seasonal now correctly reports a high strength instead of a
+  near-zero one. `'wavelet'` as a strength method is **removed** (always returned `1.0`,
+  even for white noise); use `'variance'` (default) or `'spectral'`.
 
 ## Canonical detection pipeline
 

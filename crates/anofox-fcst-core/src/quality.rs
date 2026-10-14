@@ -484,6 +484,17 @@ mod tests {
         assert!(quality.is_constant);
     }
 
+    /// D-13, G25: compute_data_quality's is_constant uses the SAME
+    /// scale-relative tolerance as filter::is_constant_slice -- a large
+    /// value plus a tiny absolute wiggle is now constant.
+    #[test]
+    fn test_constant_series_scale_relative() {
+        let values: Vec<Option<f64>> = vec![Some(1e12), Some(1e12 + 0.001)];
+        let quality = compute_data_quality(&values, None, 0, FrequencyType::Fixed, 1, 1).unwrap();
+        assert!(quality.is_constant);
+        assert!(crate::filter::is_constant_slice(&[1e12, 1e12 + 0.001]));
+    }
+
     #[test]
     fn test_structural_score() {
         // Complete, not-short series

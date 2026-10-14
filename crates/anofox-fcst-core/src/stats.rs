@@ -965,6 +965,23 @@ mod tests {
         assert!(!stats.is_constant);
     }
 
+    /// D-13, G25: is_constant is scale-relative (shared with
+    /// filter::is_constant_slice), but n_unique_values stays an EXACT
+    /// bit-identity count -- 2 distinct f64 bit patterns that are
+    /// scale-relatively "constant".
+    #[test]
+    fn test_is_constant_scale_relative_but_n_unique_exact() {
+        let series: Vec<Option<f64>> = vec![Some(1e12), Some(1e12 + 0.001)];
+        let stats = compute_ts_stats(&series, 0).unwrap();
+        assert_eq!(stats.n_unique_values, 2);
+        assert!(stats.is_constant);
+
+        let series: Vec<Option<f64>> = vec![Some(1.0), Some(1.0 + 1e-9)];
+        let stats = compute_ts_stats(&series, 0).unwrap();
+        assert_eq!(stats.n_unique_values, 2);
+        assert!(!stats.is_constant);
+    }
+
     #[test]
     fn test_leading_trailing_zeros() {
         let series: Vec<Option<f64>> = vec![

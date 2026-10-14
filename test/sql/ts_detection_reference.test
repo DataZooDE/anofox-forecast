@@ -763,3 +763,105 @@ SELECT ts_seasonal_strength_windowed(
 );
 ----
 removed
+
+#######################################
+# 15-05 is_constant and edge-NULL policy (DET-07, D-13, D-14, G25, G26).
+# is_constant is scale-relative everywhere: fixed here for _ts_is_constant /
+# ts_drop_constant_by; edge-NULL interpolation behaviour is DOCUMENTED, not
+# changed -- LOCF/NOCB fill one direction only, and internal exog
+# interpolation extends the nearest observed value at the edges (no
+# extrapolation).
+#######################################
+
+# _ts_is_constant: scale-relative tolerance (previously absolute f64::EPSILON)
+
+query I
+SELECT _ts_is_constant([1e12, 1e12 + 0.001]::DOUBLE[]);
+----
+true
+
+query I
+SELECT _ts_is_constant([1.0, 1.0 + 1e-9]::DOUBLE[]);
+----
+false
+
+query I
+SELECT _ts_is_constant([5.0, NULL, 5.0, 'NaN'::DOUBLE]::DOUBLE[]);
+----
+true
+
+# ts_drop_constant_by: a two-group table where one group is "constant at
+# the 1e12 scale" (a tiny wiggle well under the scale-relative tolerance)
+# and one is a real (non-constant) series -- only the real series survives.
+
+statement ok
+CREATE TABLE const_scale_t AS
+SELECT 'const_at_scale' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds,
+       (1e12 + (i % 2) * 0.0001)::DOUBLE AS v
+FROM range(10) r(i)
+UNION ALL
+SELECT 'real_series' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, i::DOUBLE AS v
+FROM range(10) r(i);
+
+query I
+SELECT list(DISTINCT id ORDER BY id) FROM ts_drop_constant_by('const_scale_t', id, v);
+----
+[real_series]
+
+# ts_fill_nulls_forward_by (LOCF) / ts_fill_nulls_backward_by (NOCB):
+# leading/trailing NULLs are NOT filled by the opposite direction -- a
+# leading NULL stays NULL under forward fill, a trailing NULL stays NULL
+# under backward fill (D-14, revised: current behaviour documented, not
+# changed).
+
+statement ok
+CREATE TABLE edge_null_t AS
+SELECT 'a' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, v
+FROM (SELECT unnest(range(5)) AS i, unnest([NULL, 1.0, NULL, 3.0, NULL]) AS v);
+
+query I
+SELECT list(filled_value ORDER BY ds) FROM ts_fill_nulls_forward_by('edge_null_t', id, ds, v);
+----
+[NULL, 1.0, 1.0, 3.0, 3.0]
+
+query I
+SELECT list(filled_value ORDER BY ds) FROM ts_fill_nulls_backward_by('edge_null_t', id, ds, v);
+----
+[1.0, 1.0, 3.0, 3.0, NULL]
+
+# _ts_forecast_exog: a NULL edge on the historical regressor (positions 1,
+# 2, and 120 of a 1-based 120-row series) gives point forecasts within
+# 1e-9 of the run where those positions are replaced by the NEAREST
+# observed value (constant edge extension, not extrapolation) -- pinning
+# forecast.rs::prepare_exog_regressors's existing behaviour (G26).
+
+query I
+SELECT max(abs(a - b)) < 1e-9
+FROM (
+    WITH gen AS (
+        SELECT i,
+               50.0 + 3.0 * sin(i * 0.37) + (i % 5)::DOUBLE AS y,
+               CASE WHEN i IN (1, 2, 120) THEN NULL ELSE sin(i * 0.37) END AS x1_null_edges,
+               CASE WHEN i IN (1, 2) THEN sin(3 * 0.37)
+                    WHEN i = 120 THEN sin(119 * 0.37)
+                    ELSE sin(i * 0.37) END AS x1_nearest_filled
+        FROM range(1, 121) AS t(i)
+    ), fut AS (
+        SELECT sin((120 + i) * 0.37) AS x1 FROM range(6) AS t(i)
+    )
+    SELECT
+        unnest((SELECT _ts_forecast_exog(
+            (SELECT list(y ORDER BY i) FROM gen),
+            [(SELECT list(x1_null_edges ORDER BY i) FROM gen)],
+            [(SELECT list(x1) FROM fut)],
+            6, 'OptimizedTheta'
+        )).point) AS a,
+        unnest((SELECT _ts_forecast_exog(
+            (SELECT list(y ORDER BY i) FROM gen),
+            [(SELECT list(x1_nearest_filled ORDER BY i) FROM gen)],
+            [(SELECT list(x1) FROM fut)],
+            6, 'OptimizedTheta'
+        )).point) AS b
+);
+----
+true

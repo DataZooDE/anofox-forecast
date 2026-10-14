@@ -102,6 +102,7 @@ test without a separate Rust edit.
 | `scipy_peaks` | `cases.json` | `python/gen_scipy_peaks_reference.py` | `prominence_abs` (1e-12), `height_abs` (0.0) | Phase 15 plan 15-02 (DET-01, D-05): `anofox_fcst_core::peaks::{local_maxima,peak_prominences,find_peaks,detect_peaks}` -- `scipy.signal.find_peaks` 1.18.1 plateau-midpoint local maxima and `scipy.signal.peak_prominences` (every case, even without a `prominence` filter), for an audited random walk, a seasonal sine with height/distance/prominence filters (incl. a combined case), plateau/edge/tie/degenerate series, via `crates/anofox-fcst-core/tests/peaks_reference.rs` and `test/sql/ts_detection_reference.test` |
 | `changepoints` | `bocpd_cases.json`, `pelt_cases.json` | `python/gen_changepoint_reference.py` | `prob_abs` (1e-10), `sigma_rel`/`cost_rel` (1e-12/1e-9) | Phase 15 plan 15-03 (DET-02, DET-03, D-06, D-07): `anofox_fcst_core::changepoint::{robust_noise_scale,bocpd_trace,detect_changepoints_bocpd,detect_changepoints}` -- an independent numpy BOCPD (Adams & MacKay 2007: normalised Student-t predictive, sample-mean Normal-Gamma update, truncation-with-renormalisation at run length 500) and an independent numpy exact optimal-partitioning DP (PELT's own ground truth, no pruning), via `crates/anofox-fcst-core/tests/changepoint_reference.rs` and `test/sql/ts_detection_reference.test` (BOCPD only -- PELT has no SQL surface) |
 | `r_decomposition` | `cases.json` | `r/gen_decomposition_reference.R` | `component_abs` (1e-8), `classical_abs` (1e-10) | Phase 15 plan 15-04 (DET-04, D-09, D-10): `anofox_fcst_core::decomposition::{mstl_fit,mstl_decompose,classical_decompose}` -- R `forecast::mstl()` (6 `mstl_cases`: single/multi/dropped-period/non-seasonal/constant) and R `stats::decompose()` (5 `decompose_cases`: additive/multiplicative, odd/even period, short series), via `crates/anofox-fcst-core/tests/mstl_decompose_reference.rs` and `test/sql/ts_detection_reference.test` |
+| `period_detection` | `cases.json` | `python/gen_period_detection_reference.py` | `power_rel` (1e-9), `power_abs` (1e-12), `acf_abs` (1e-12), `rss_rel` (1e-9), `rss_abs` (1e-20), `ls_rel` (1e-9), `detrend_abs` (1e-10) | Phase 15 plan 15-05 (DET-05, DET-06, D-11, D-12): `anofox_fcst_core::periods::{detrended_periodogram,estimate_period_fft_ts,acf,estimate_period_acf_ts,regression_period_rss,estimate_period_regression_ts,lomb_scargle_power,lomb_scargle}` and `seasonality`'s detrend-first strength functions -- `scipy.signal.periodogram`/`lombscargle`/`detrend`, `statsmodels.tsa.stattools.acf`, and `numpy.linalg.lstsq` RSS across five case groups (periodogram, acf, regression, lombscargle, strength), via `crates/anofox-fcst-core/tests/period_detection_reference.rs` and `test/sql/ts_detection_reference.test` |
 
 **`tsfresh_features`'s `mapping.json` is a second, hand-maintained fixture** (not
 generator output) alongside the nine series fixtures -- it is the D-01
@@ -219,6 +220,24 @@ index 100, seeds `17000..17099`), the step is flagged within 3 samples of
 the true changepoint (index 100-103) in 94/100 series at every one of
 those three hazard values.
 
+**`period_detection` tolerance rationale (Phase 15 plan 15-05):** `power_rel`/`power_abs`
+bound `detrended_periodogram` against scipy's own `periodogram(detrend='linear',
+scaling='spectrum')` -- both FFTs are unnormalised `O(n log n)` transforms of the same
+linearly-detrended input, so only floating-point summation-order noise is expected. `acf_abs`
+(1e-12) is tight for the same reason: both implementations are a direct `sum/sum` ratio with
+no iterative fit. `rss_rel` (1e-9) bounds `regression_period_rss` against `numpy.linalg
+.lstsq` in relative terms; `rss_abs` (1e-20) is an additional absolute floor for the
+near-perfect-fit case (`pure_sine12_n120` at its true period), where both `numpy.linalg
+.lstsq` (SVD-based) and the Rust modified-Gram-Schmidt QR solver evaluate a conceptual `0`
+RSS to ~1e-28 but not bit-identically -- a relative-only bound cannot absorb that (same
+rationale as `numpy_detrend`'s `trend_abs`, above). `ls_rel` (1e-9) bounds
+`lomb_scargle_power` against `scipy.signal.lombscargle(..., normalize=True) * n/2` over the
+EXACT frequency grid the Rust implementation itself builds (not scipy's own, since
+`lombscargle` takes no period/frequency range argument -- the generator reproduces the grid
+construction formula). `detrend_abs` (1e-10) bounds the `detrend_linear` residual fed to the
+seasonal-strength functions against `scipy.signal.detrend(type='linear')`, matching
+`numpy_detrend`'s own `trend_abs` for the same least-squares-fit reason.
+
 ## 5. Tool versions
 
 These are the toolchain versions this phase verified against. **Each fixture's own
@@ -268,6 +287,9 @@ uv run --locked --project validation/reference/python python validation/referenc
 
 # R family added in Phase 15 plan 15-04:
 Rscript validation/reference/r/gen_decomposition_reference.R
+
+# Python family added in Phase 15 plan 15-05:
+uv run --locked --project validation/reference/python python validation/reference/python/gen_period_detection_reference.py
 
 # Determinism check — every generator is seeded and writes no timestamps/hostnames,
 # so regenerating with the same toolchain versions must produce an empty diff:
