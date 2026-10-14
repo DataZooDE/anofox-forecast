@@ -142,16 +142,22 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
             auto &list_child = ListVector::GetEntry(trend_list);
             auto current_size = ListVector::GetListSize(trend_list);
 
-            list_data[row_idx].offset = current_size;
-            list_data[row_idx].length = mstl_result.n_observations;
+            // CR-01: trend is a null pointer when decomposition was not applied
+            // (insufficient_data_mode = 'none' with no usable period); n_observations
+            // still reflects the full input length in that case. Emit an empty list
+            // rather than exposing uninitialized/stale ListVector buffer memory.
+            idx_t trend_len = mstl_result.trend ? mstl_result.n_observations : 0;
 
-            ListVector::Reserve(trend_list, current_size + mstl_result.n_observations);
-            ListVector::SetListSize(trend_list, current_size + mstl_result.n_observations);
+            list_data[row_idx].offset = current_size;
+            list_data[row_idx].length = trend_len;
+
+            ListVector::Reserve(trend_list, current_size + trend_len);
+            ListVector::SetListSize(trend_list, current_size + trend_len);
 
             auto child_data = FlatVector::GetData<double>(list_child);
             if (mstl_result.trend) {
                 memcpy(child_data + current_size, mstl_result.trend,
-                       mstl_result.n_observations * sizeof(double));
+                       trend_len * sizeof(double));
             }
         }
 
@@ -194,16 +200,21 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
             auto &list_child = ListVector::GetEntry(remainder_list);
             auto current_size = ListVector::GetListSize(remainder_list);
 
-            list_data[row_idx].offset = current_size;
-            list_data[row_idx].length = mstl_result.n_observations;
+            // CR-01: mirror the trend guard above -- remainder is null when
+            // decomposition was not applied, so emit an empty list instead of
+            // reading uninitialized ListVector buffer memory.
+            idx_t remainder_len = mstl_result.remainder ? mstl_result.n_observations : 0;
 
-            ListVector::Reserve(remainder_list, current_size + mstl_result.n_observations);
-            ListVector::SetListSize(remainder_list, current_size + mstl_result.n_observations);
+            list_data[row_idx].offset = current_size;
+            list_data[row_idx].length = remainder_len;
+
+            ListVector::Reserve(remainder_list, current_size + remainder_len);
+            ListVector::SetListSize(remainder_list, current_size + remainder_len);
 
             auto child_data = FlatVector::GetData<double>(list_child);
             if (mstl_result.remainder) {
                 memcpy(child_data + current_size, mstl_result.remainder,
-                       mstl_result.n_observations * sizeof(double));
+                       remainder_len * sizeof(double));
             }
         }
 

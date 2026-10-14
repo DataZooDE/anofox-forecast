@@ -598,6 +598,24 @@ SELECT (_ts_mstl_decomposition(list_transform(range(20), i -> i::DOUBLE), 'trend
 ----
 true
 
+# CR-01 regression: insufficient_data='none' with a requested period that is
+# never usable (needs n > 2*1000+1) must return a non-NULL struct with EMPTY
+# trend/remainder lists, never a trend/remainder list of length n backed by
+# uninitialized ListVector buffer memory (the row is a legitimate "no
+# decomposition applied" result, not a NULL row and not garbage data).
+
+query I
+SELECT (_ts_mstl_decomposition(list_transform(range(20), i -> i::DOUBLE), 'none', [1000])) IS NOT NULL;
+----
+true
+
+query I
+SELECT len((_ts_mstl_decomposition(list_transform(range(20), i -> i::DOUBLE), 'none', [1000])).trend) = 0
+   AND len((_ts_mstl_decomposition(list_transform(range(20), i -> i::DOUBLE), 'none', [1000])).remainder) = 0
+   AND (_ts_mstl_decomposition(list_transform(range(20), i -> i::DOUBLE), 'none', [1000])).periods = [];
+----
+true
+
 statement error
 SELECT _ts_mstl_decomposition(list_transform(range(48), i -> i::DOUBLE), 'fail', [0]);
 ----
