@@ -3239,27 +3239,6 @@ bool anofox_ts_conformal_predict_multi(const double *residuals,
                                        struct AnofoxError *out_error);
 
 /**
- * Perform locally-adaptive conformal prediction.
- *
- * Scales intervals based on local difficulty estimates.
- *
- * # Safety
- * All pointer arguments must be valid and non-null.
- */
-bool anofox_ts_conformal_predict_adaptive(const double *residuals,
-                                          const uint64_t *residuals_validity,
-                                          size_t residuals_length,
-                                          const double *difficulty_cal,
-                                          const uint64_t *difficulty_cal_validity,
-                                          const double *forecasts,
-                                          const double *difficulty_pred,
-                                          const uint64_t *difficulty_pred_validity,
-                                          size_t forecasts_length,
-                                          double alpha,
-                                          struct ConformalResultFFI *out_result,
-                                          struct AnofoxError *out_error);
-
-/**
  * Perform asymmetric conformal prediction.
  *
  * Uses separate quantiles for positive and negative residuals.
