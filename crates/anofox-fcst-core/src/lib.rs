@@ -143,5 +143,5 @@ pub use supsmu::supsmu;
 pub use validation::{
     adf, classify_stationarity, durbin_watson, jarque_bera, kpss, ljung_box, residual_diagnostics,
     stationarity, CombinedStationarityOut, DurbinWatsonOut, JarqueBeraOut, LjungBoxOut,
-    ResidualDiagnosticsOut, StationarityOut,
+    ResidualDiagnosticsOut, StationarityOut, StationarityRegression,
 };

@@ -1911,19 +1911,28 @@ pub struct ConformalEvaluationFFI {
 ///   statistic, p_value, lags, is_stationary, cv_1pct, cv_5pct, cv_10pct
 #[repr(C)]
 pub struct AnofoxStationarityResult {
-    /// ADF t-statistic (negative; more negative → stronger evidence of stationarity)
+    /// ADF t-statistic (negative; more negative → stronger evidence of
+    /// stationarity) or KPSS statistic (positive; larger → stronger evidence
+    /// AGAINST stationarity). `NaN` when the input is degenerate (too short,
+    /// or an exactly-collinear regression) — see `cv_1pct` below.
     pub statistic: c_double,
-    /// Approximate p-value (MacKinnon 9-point lookup table)
+    /// p-value from MacKinnon (1994) (ADF) or the `tseries` table (KPSS),
+    /// clamped to `[0.01, 0.10]` for KPSS. `NaN` iff `statistic` is `NaN`.
     pub p_value: c_double,
-    /// Number of lags used (AIC-selected or override)
+    /// Number of lags used (AIC-selected or override, ADF) or the Bartlett
+    /// bandwidth (KPSS).
     pub lags: size_t,
-    /// `true` if series is stationary at the 5% level (`statistic < cv_5pct`)
+    /// `true` if series is stationary at the 5% level (`statistic < cv_5pct`
+    /// for ADF and KPSS alike); forced `false` whenever `statistic` is `NaN`.
     pub is_stationary: bool,
-    /// Critical value at 1% significance (constant regression: -3.43)
+    /// Critical value at 1% significance. Depends on the `regression`
+    /// ("c" / "ct") and, for ADF, the effective sample size (MacKinnon
+    /// finite-sample surface) — never a single hardcoded constant. `NaN`
+    /// when `statistic` is `NaN` (never the crate's raw `0.0` default).
     pub cv_1pct: c_double,
-    /// Critical value at 5% significance (constant regression: -2.86)
+    /// Critical value at 5% significance. See `cv_1pct`.
     pub cv_5pct: c_double,
-    /// Critical value at 10% significance (constant regression: -2.57)
+    /// Critical value at 10% significance. See `cv_1pct`.
     pub cv_10pct: c_double,
 }
 

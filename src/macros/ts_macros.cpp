@@ -2512,19 +2512,19 @@ SELECT * FROM _ts_quantile_loss_native(source, date_col, actual_col, forecast_co
     // ================================================================================
 
     // ts_adf_by: ADF stationarity test per group (STAT-01)
-    // C++ API: ts_adf_by(source, group_col, date_col, value_col [, max_lags:=-1])
+    // C++ API: ts_adf_by(source, group_col, date_col, value_col [, max_lags:=-1] [, regression:='c'])
     // Returns: TABLE(group_col, adf STRUCT(statistic, p_value, lags, is_stationary, cv_1pct, cv_5pct, cv_10pct))
     {"ts_adf_by", {"source", "group_col", "date_col", "value_col", nullptr},
-     {{"max_lags", "-1"}, {nullptr, nullptr}},
+     {{"max_lags", "-1"}, {"regression", "'c'"}, {nullptr, nullptr}},
 R"(
-SELECT group_col, ts_adf(LIST(value_col::DOUBLE ORDER BY date_col), max_lags::INTEGER) AS adf
+SELECT group_col, ts_adf(LIST(value_col::DOUBLE ORDER BY date_col), max_lags::INTEGER, regression::VARCHAR) AS adf
 FROM query_table(source::VARCHAR)
 GROUP BY group_col
 )",
     "ADF stationarity test per group. Returns STRUCT(statistic, p_value, lags, is_stationary, cv_1pct, cv_5pct, cv_10pct) per group. "
-    "Uses constant-only ('c') regression and AIC lag selection. "
-    "Pass max_lags:=N to override automatic lag selection.",
-    "SELECT group_col, (adf).statistic, (adf).p_value FROM ts_adf_by('sales', product_id, ds, y)",
+    "AIC lag selection; pass max_lags:=N to override automatic lag selection. "
+    "regression:='c' (constant, default) or regression:='ct' (constant + trend).",
+    "SELECT group_col, (adf).statistic, (adf).p_value FROM ts_adf_by('sales', product_id, ds, y, regression := 'ct')",
     "diagnostics"},
 
     // ts_kpss_by: KPSS stationarity test per group (STAT-02)

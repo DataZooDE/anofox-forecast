@@ -2389,6 +2389,30 @@ fn ffi_error_code(e: &anofox_fcst_core::ForecastError) -> ErrorCode {
     }
 }
 
+/// Parse an optional `regression` C string into a `StationarityRegression`
+/// (D-05): `anofox_ts_adf` / `anofox_ts_kpss` / `anofox_ts_stationarity`
+/// call this OUTSIDE their `catch_unwind` closure so an invalid value is
+/// reported as `ErrorCode::InvalidInput` (via [`ffi_error_code`]) rather
+/// than caught as a panic. A null pointer means the default (`Constant`,
+/// "c"); invalid UTF-8 is `ForecastError::InvalidInput`; any other value is
+/// delegated to `StationarityRegression::from_str`'s strict, case-insensitive
+/// parsing (`InvalidParameter`, message "expected one of: c, ct").
+///
+/// # Safety
+///
+/// `ptr` must be either null or a valid NUL-terminated C string.
+unsafe fn parse_regression(
+    ptr: *const c_char,
+) -> Result<anofox_fcst_core::StationarityRegression, anofox_fcst_core::ForecastError> {
+    if ptr.is_null() {
+        return Ok(anofox_fcst_core::StationarityRegression::Constant);
+    }
+    let s = CStr::from_ptr(ptr).to_str().map_err(|_| {
+        anofox_fcst_core::ForecastError::InvalidInput("regression is not valid UTF-8".to_string())
+    })?;
+    s.parse()
+}
+
 /// Detrend time series using specified method.
 ///
 /// # Safety
@@ -7579,7 +7603,12 @@ pub unsafe extern "C" fn anofox_free_prediction_intervals(
 ///                  NULL entries become `NaN` in the series passed to the crate.
 /// * `length`     — Number of elements in `values`.
 /// * `max_lags`   — Maximum lag count for AIC selection. Pass `-1` for automatic
-///                  selection (`floor((n-1)^(1/3))`). Clamped to `[0, n/2-1]` by the crate.
+///                  selection (`floor((n-1)^(1/3))`). Clamped the way statsmodels
+///                  does by the crate.
+/// * `regression` — Optional NUL-terminated C string, `"c"` or `"ct"`
+///                  (case-insensitive). `null` means `"c"` (D-05). Any other
+///                  value is `ErrorCode::InvalidInput` with message
+///                  "expected one of: c, ct".
 /// * `out_result` — Pointer to caller-allocated `AnofoxStationarityResult`.
 ///                  Initialised to `Default` before the computation so that
 ///                  partial results are never exposed on error.
@@ -7590,13 +7619,15 @@ pub unsafe extern "C" fn anofox_free_prediction_intervals(
 /// # Safety
 ///
 /// `values` and `out_result` must be non-null. `validity` may be null (meaning all valid).
-/// `length` must equal the number of valid `f64` elements at `values`.
+/// `length` must equal the number of valid `f64` elements at `values`. `regression`
+/// must be either null or a valid NUL-terminated C string.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_adf(
     values: *const c_double,
     validity: *const u64,
     length: size_t,
     max_lags: c_int,
+    regression: *const c_char,
     out_result: *mut AnofoxStationarityResult,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -7619,6 +7650,16 @@ pub unsafe extern "C" fn anofox_ts_adf(
         return true;
     }
 
+    // D-05/T-17-03: parse `regression` OUTSIDE catch_unwind so an invalid
+    // value is reported as InvalidInput, not caught as a panic.
+    let regression = match parse_regression(regression) {
+        Ok(r) => r,
+        Err(e) => {
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
+            return false;
+        }
+    };
+
     // Threat T-01-04: clamp max_lags; negative → auto (None)
     let max_lags_opt: Option<usize> = if max_lags < 0 {
         None
@@ -7630,7 +7671,7 @@ pub unsafe extern "C" fn anofox_ts_adf(
     let result = catch_unwind(AssertUnwindSafe(|| {
         // Use build_values: NULLs become NaN (consistent with crate NaN-propagation behaviour)
         let series = build_values(values, validity, length);
-        anofox_fcst_core::adf(&series, max_lags_opt)
+        anofox_fcst_core::adf(&series, max_lags_opt, regression)
     }));
 
     match result {

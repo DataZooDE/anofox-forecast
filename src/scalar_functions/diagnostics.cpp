@@ -1,7 +1,7 @@
 /// Statistical diagnostic scalar functions for the anofox-forecast DuckDB extension.
 ///
 /// This file implements:
-///   - ts_adf(series LIST(DOUBLE) [, max_lags INTEGER]) → STRUCT(...)
+///   - ts_adf(series LIST(DOUBLE) [, max_lags INTEGER [, regression VARCHAR]]) → STRUCT(...)
 ///   - RegisterTsAdfFunction(ExtensionLoader&)
 ///
 /// It follows the STRUCT-return pattern established in bootstrap.cpp and
@@ -36,6 +36,7 @@ namespace duckdb {
 // ts_adf(series LIST(DOUBLE)) → STRUCT(statistic, p_value, lags, is_stationary,
 //                                      cv_1pct, cv_5pct, cv_10pct)
 // ts_adf(series LIST(DOUBLE), max_lags INTEGER) → same STRUCT
+// ts_adf(series LIST(DOUBLE), max_lags INTEGER, regression VARCHAR) → same STRUCT (D-05)
 //
 // The STRUCT field order must match RegisterTsAdfFunction's child_list_t order
 // and the AnofoxStationarityResult field layout in anofox_fcst_ffi.h.
@@ -52,6 +53,13 @@ static void TsAdfFunction(DataChunk &args, ExpressionState &state, Vector &resul
     unique_ptr<ScalarArgReader<int32_t>> max_lags_reader;
     if (has_max_lags) {
         max_lags_reader = make_uniq<ScalarArgReader<int32_t>>(args.data[1], count);
+    }
+
+    // Optional third argument: regression VARCHAR ('c' default, or 'ct') (D-05)
+    bool has_regression = (args.ColumnCount() >= 3);
+    unique_ptr<ScalarArgReader<string_t>> regression_reader;
+    if (has_regression) {
+        regression_reader = make_uniq<ScalarArgReader<string_t>>(args.data[2], count);
     }
 
     // Get STRUCT output entry vectors (order matches child_list_t in RegisterTsAdfFunction)
@@ -89,6 +97,14 @@ static void TsAdfFunction(DataChunk &args, ExpressionState &state, Vector &resul
             max_lags_val = max_lags_reader->Get(row_idx);
         }
 
+        // Resolve regression for this row (NULL/absent -> nullptr -> 'c')
+        std::string regression_owned;
+        const char *regression_str = nullptr;
+        if (has_regression && !regression_reader->IsNull(row_idx)) {
+            regression_owned = regression_reader->Get(row_idx).GetString();
+            regression_str = regression_owned.c_str();
+        }
+
         AnofoxStationarityResult r = {};
         AnofoxError err = {};
         bool ok = anofox_ts_adf(
@@ -96,10 +112,14 @@ static void TsAdfFunction(DataChunk &args, ExpressionState &state, Vector &resul
             /* validity= */ nullptr,   // NULL-free after the Rust series gate
             series.size(),
             static_cast<int>(max_lags_val),
+            regression_str,
             &r, &err
         );
 
         if (!ok) {
+            if (err.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_adf: %s", err.message ? err.message : "invalid input");
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -137,32 +157,53 @@ void RegisterTsAdfFunction(ExtensionLoader &loader) {
         result_type,
         TsAdfFunction
     ));
-    // 2-arg overload: ts_adf(series, max_lags)
-    adf_set.AddFunction(ScalarFunction(
+    // 2-arg overload: ts_adf(series, max_lags). SPECIAL_HANDLING: a NULL
+    // max_lags argument is a documented valid "auto" call, not a reason to
+    // short-circuit the whole row to SQL NULL before TsAdfFunction runs
+    // (mirrors conformal.cpp's ts_conformal_intervals fix).
+    ScalarFunction adf_2arg(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType(LogicalTypeId::INTEGER)},
         result_type,
         TsAdfFunction
-    ));
+    );
+    adf_2arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    adf_set.AddFunction(adf_2arg);
+    // 3-arg overload: ts_adf(series, max_lags, regression) (D-05). Same
+    // SPECIAL_HANDLING reason: a NULL regression means 'c', not SQL NULL.
+    ScalarFunction adf_3arg(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+         LogicalType(LogicalTypeId::INTEGER),
+         LogicalType(LogicalTypeId::VARCHAR)},
+        result_type,
+        TsAdfFunction
+    );
+    adf_3arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    adf_set.AddFunction(adf_3arg);
     {
         CreateScalarFunctionInfo info(adf_set);
         FunctionDescription desc;
         desc.description =
-            "Augmented Dickey-Fuller (ADF) unit-root test. "
-            "Returns STRUCT(statistic DOUBLE, p_value DOUBLE, lags BIGINT, "
-            "is_stationary BOOLEAN, cv_1pct DOUBLE, cv_5pct DOUBLE, cv_10pct DOUBLE). "
-            "Uses constant-only ('c') regression and AIC lag selection. "
-            "p-values are approximate (MacKinnon 9-point lookup table). "
-            "Returns NaN for series shorter than 4 observations.";
+            "Augmented Dickey-Fuller (ADF) unit-root test, matching statsmodels "
+            "adfuller(autolag='AIC'). Returns STRUCT(statistic DOUBLE, p_value DOUBLE, "
+            "lags BIGINT, is_stationary BOOLEAN, cv_1pct DOUBLE, cv_5pct DOUBLE, "
+            "cv_10pct DOUBLE). AIC lag selection over 0..max_lags; default "
+            "max_lags = floor((n-1)^(1/3)). regression is 'c' (constant, default) or "
+            "'ct' (constant + trend); NULL means 'c'. p-values are MacKinnon (1994) "
+            "and critical values are MacKinnon (2010) finite-sample surfaces. "
+            "Returns NaN statistic/p_value/critical values for series shorter than "
+            "4 observations or an exactly-collinear regression.";
         desc.examples = {
             "ts_adf(LIST(y ORDER BY ds))",
-            "ts_adf(LIST(y ORDER BY ds), 3)"
+            "ts_adf(LIST(y ORDER BY ds), 3)",
+            "ts_adf(LIST(y ORDER BY ds), -1, 'ct')"
         };
         desc.categories = {"time-series", "diagnostics"};
-        desc.parameter_names = {"series", "max_lags"};
+        desc.parameter_names = {"series", "max_lags", "regression"};
         desc.parameter_types = {
             LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
-            LogicalType(LogicalTypeId::INTEGER)
+            LogicalType(LogicalTypeId::INTEGER),
+            LogicalType(LogicalTypeId::VARCHAR)
         };
         info.descriptions.push_back(std::move(desc));
         loader.RegisterFunction(std::move(info));
@@ -185,12 +226,23 @@ void RegisterTsAdfFunction(ExtensionLoader &loader) {
         result_type2,
         TsAdfFunction
     ));
-    anofox_set.AddFunction(ScalarFunction(
+    ScalarFunction anofox_adf_2arg(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType(LogicalTypeId::INTEGER)},
         result_type2,
         TsAdfFunction
-    ));
+    );
+    anofox_adf_2arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    anofox_set.AddFunction(anofox_adf_2arg);
+    ScalarFunction anofox_adf_3arg(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+         LogicalType(LogicalTypeId::INTEGER),
+         LogicalType(LogicalTypeId::VARCHAR)},
+        result_type2,
+        TsAdfFunction
+    );
+    anofox_adf_3arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    anofox_set.AddFunction(anofox_adf_3arg);
     {
         CreateScalarFunctionInfo info(anofox_set);
         info.alias_of = "ts_adf";

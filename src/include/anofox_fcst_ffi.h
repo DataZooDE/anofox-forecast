@@ -1771,31 +1771,40 @@ typedef struct ConformalPerStepResultFFI {
  */
 typedef struct AnofoxStationarityResult {
     /**
-     * ADF t-statistic (negative; more negative → stronger evidence of stationarity)
+     * ADF t-statistic (negative; more negative → stronger evidence of
+     * stationarity) or KPSS statistic (positive; larger → stronger evidence
+     * AGAINST stationarity). `NaN` when the input is degenerate (too short,
+     * or an exactly-collinear regression) — see `cv_1pct` below.
      */
     double statistic;
     /**
-     * Approximate p-value (MacKinnon 9-point lookup table)
+     * p-value from MacKinnon (1994) (ADF) or the `tseries` table (KPSS),
+     * clamped to `[0.01, 0.10]` for KPSS. `NaN` iff `statistic` is `NaN`.
      */
     double p_value;
     /**
-     * Number of lags used (AIC-selected or override)
+     * Number of lags used (AIC-selected or override, ADF) or the Bartlett
+     * bandwidth (KPSS).
      */
     size_t lags;
     /**
-     * `true` if series is stationary at the 5% level (`statistic < cv_5pct`)
+     * `true` if series is stationary at the 5% level (`statistic < cv_5pct`
+     * for ADF and KPSS alike); forced `false` whenever `statistic` is `NaN`.
      */
     bool is_stationary;
     /**
-     * Critical value at 1% significance (constant regression: -3.43)
+     * Critical value at 1% significance. Depends on the `regression`
+     * ("c" / "ct") and, for ADF, the effective sample size (MacKinnon
+     * finite-sample surface) — never a single hardcoded constant. `NaN`
+     * when `statistic` is `NaN` (never the crate's raw `0.0` default).
      */
     double cv_1pct;
     /**
-     * Critical value at 5% significance (constant regression: -2.86)
+     * Critical value at 5% significance. See `cv_1pct`.
      */
     double cv_5pct;
     /**
-     * Critical value at 10% significance (constant regression: -2.57)
+     * Critical value at 10% significance. See `cv_1pct`.
      */
     double cv_10pct;
 } AnofoxStationarityResult;
@@ -3707,7 +3716,12 @@ void anofox_free_prediction_intervals(struct PredictionIntervalsFFI *result);
  *                  NULL entries become `NaN` in the series passed to the crate.
  * * `length`     — Number of elements in `values`.
  * * `max_lags`   — Maximum lag count for AIC selection. Pass `-1` for automatic
- *                  selection (`floor((n-1)^(1/3))`). Clamped to `[0, n/2-1]` by the crate.
+ *                  selection (`floor((n-1)^(1/3))`). Clamped the way statsmodels
+ *                  does by the crate.
+ * * `regression` — Optional NUL-terminated C string, `"c"` or `"ct"`
+ *                  (case-insensitive). `null` means `"c"` (D-05). Any other
+ *                  value is `ErrorCode::InvalidInput` with message
+ *                  "expected one of: c, ct".
  * * `out_result` — Pointer to caller-allocated `AnofoxStationarityResult`.
  *                  Initialised to `Default` before the computation so that
  *                  partial results are never exposed on error.
@@ -3718,12 +3732,14 @@ void anofox_free_prediction_intervals(struct PredictionIntervalsFFI *result);
  * # Safety
  *
  * `values` and `out_result` must be non-null. `validity` may be null (meaning all valid).
- * `length` must equal the number of valid `f64` elements at `values`.
+ * `length` must equal the number of valid `f64` elements at `values`. `regression`
+ * must be either null or a valid NUL-terminated C string.
  */
 bool anofox_ts_adf(const double *values,
                    const uint64_t *validity,
                    size_t length,
                    int max_lags,
+                   const char *regression,
                    struct AnofoxStationarityResult *out_result,
                    struct AnofoxError *out_error);
 

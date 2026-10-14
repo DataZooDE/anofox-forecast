@@ -6,15 +6,61 @@
 //! # Example
 //!
 //! ```no_run
-//! use anofox_fcst_core::validation::{adf, StationarityOut};
+//! use anofox_fcst_core::validation::{adf, StationarityOut, StationarityRegression};
 //!
 //! let series: Vec<f64> = (0..50).map(|i| i as f64 + 0.1 * (i as f64 % 7.0)).collect();
-//! let result = adf(&series, None);
+//! let result = adf(&series, None, StationarityRegression::Constant);
 //! println!("ADF statistic: {}", result.statistic);
 //! println!("p-value: {}", result.p_value);
 //! ```
 
+use crate::error::ForecastError;
 use anofox_forecast::validation;
+use anofox_forecast::validation::AdfRegression;
+use std::str::FromStr;
+
+/// Deterministic regression used by [`adf`], [`kpss`] and [`stationarity`]
+/// (D-05). `Constant` ("c", the default) tests around a constant mean;
+/// `ConstantTrend` ("ct") tests around a constant + linear time trend —
+/// the only way to observe the `trend_stationary` / `stationary` verdicts
+/// of the D-04 four-way mapping under a deterministic trend.
+///
+/// Parses case-insensitively from the strings `"c"` / `"ct"` via [`FromStr`];
+/// any other input is `ForecastError::InvalidParameter` with
+/// `reason: "expected one of: c, ct"`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StationarityRegression {
+    /// Constant-only regression (statsmodels/urca "c"). Default.
+    #[default]
+    Constant,
+    /// Constant + linear trend regression (statsmodels/urca "ct").
+    ConstantTrend,
+}
+
+impl FromStr for StationarityRegression {
+    type Err = ForecastError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "c" => Ok(StationarityRegression::Constant),
+            "ct" => Ok(StationarityRegression::ConstantTrend),
+            _ => Err(ForecastError::InvalidParameter {
+                param: "regression".to_string(),
+                value: s.to_string(),
+                reason: "expected one of: c, ct".to_string(),
+            }),
+        }
+    }
+}
+
+impl From<StationarityRegression> for AdfRegression {
+    fn from(r: StationarityRegression) -> Self {
+        match r {
+            StationarityRegression::Constant => AdfRegression::Constant,
+            StationarityRegression::ConstantTrend => AdfRegression::ConstantTrend,
+        }
+    }
+}
 
 /// Flat, owned result from an ADF or KPSS stationarity test.
 ///
@@ -38,9 +84,33 @@ pub struct StationarityOut {
     pub cv_10pct: f64,
 }
 
+/// Normalise degenerate stationarity results in one place, used by every
+/// `StationarityOut` conversion: a `NaN` statistic (the crate's signal for
+/// "undefined on this input" — too-short series, a singular/exactly-collinear
+/// regression, or a zero long-run variance) yields `NaN` for `p_value` and
+/// every critical value and forces `is_stationary` to `false`. The crate
+/// itself returns `0.0` critical values (`CriticalValues::default()`) and,
+/// for KPSS zero-variance, `is_stationary: true` — both misleading alongside
+/// an undefined statistic, so this wrapper corrects them before they ever
+/// reach SQL (D-04/T-17-04).
+fn normalize_degenerate(out: StationarityOut) -> StationarityOut {
+    if out.statistic.is_nan() {
+        StationarityOut {
+            p_value: f64::NAN,
+            cv_1pct: f64::NAN,
+            cv_5pct: f64::NAN,
+            cv_10pct: f64::NAN,
+            is_stationary: false,
+            ..out
+        }
+    } else {
+        out
+    }
+}
+
 impl From<validation::StationarityResult> for StationarityOut {
     fn from(r: validation::StationarityResult) -> Self {
-        Self {
+        let out = Self {
             statistic: r.statistic,
             p_value: r.p_value,
             lags: r.lags,
@@ -48,46 +118,67 @@ impl From<validation::StationarityResult> for StationarityOut {
             cv_1pct: r.critical_values.cv_1pct,
             cv_5pct: r.critical_values.cv_5pct,
             cv_10pct: r.critical_values.cv_10pct,
-        }
+        };
+        normalize_degenerate(out)
     }
 }
 
-/// Run the Augmented Dickey-Fuller (ADF) test for unit-root stationarity.
+/// Run the Augmented Dickey-Fuller (ADF) test for unit-root stationarity,
+/// matching `statsmodels.tsa.stattools.adfuller` (AIC lag selection,
+/// MacKinnon (1994/2010) p-values and finite-sample critical values) to
+/// numerical tolerance (D-05).
 ///
 /// # Arguments
 ///
 /// * `series` — Time series values (must be non-empty for meaningful results;
-///   returns NaN statistic for n < 4)
+///   returns NaN statistic for n < 4 or a singular/exactly-collinear
+///   regression under `regression`)
 /// * `max_lags` — Maximum number of lags for AIC selection.
-///   `None` → automatic: `floor((n-1)^(1/3))`, clamped to `min(max_lags, n/2-1).max(1)`.
+///   `None` → automatic: `floor((n-1)^(1/3))`, clamped the way statsmodels
+///   does (`min(requested, n/2 - ntrend - 1)`, floored at 0).
+/// * `regression` — Deterministic regression: `Constant` ("c", the default)
+///   or `ConstantTrend` ("ct").
 ///
 /// # Notes
 ///
-/// The underlying crate uses a constant-only (`'c'`) regression. The `'ct'`
-/// (constant + trend) and `'n'` (no constant) modes are not available in
-/// `anofox-forecast` v0.15.3.
-///
-/// p-values are approximate (9-point MacKinnon lookup table).
-pub fn adf(series: &[f64], max_lags: Option<usize>) -> StationarityOut {
-    validation::adf_test(series, max_lags).into()
+/// A `NaN` statistic (too-short series, or an exactly-collinear regression —
+/// e.g. `ConstantTrend` on an exactly-linear series) normalises `p_value` and
+/// every critical value to `NaN` and `is_stationary` to `false`
+/// ([`normalize_degenerate`]).
+pub fn adf(
+    series: &[f64],
+    max_lags: Option<usize>,
+    regression: StationarityRegression,
+) -> StationarityOut {
+    let mut options = validation::AdfOptions {
+        regression: regression.into(),
+        ..Default::default()
+    };
+    if let Some(m) = max_lags {
+        options = options.with_max_lags(m);
+    }
+    validation::adf_test_with_options(series, &options).into()
 }
 
-/// Run the KPSS test for (level) stationarity.
+/// Run the KPSS test for (level) stationarity, matching `tseries::kpss.test`
+/// (`null = "Level"`, `lshort = TRUE`) to numerical tolerance.
 ///
 /// # Arguments
 ///
 /// * `series` — Time series values.
-/// * `lags` — Bandwidth (number of lags) for the long-run variance estimator.
-///   `None` → automatic Schwert/Newey-West rule.
+/// * `lags` — Bandwidth (number of lags) for the Bartlett long-run variance
+///   estimator. `None` → automatic `floor(4*(n/100)^0.25)`, clamped
+///   `.min(n/2).max(1)`.
 ///
 /// # Notes
 ///
-/// KPSS reverses the ADF null hypothesis: H0 = the series *is* level-stationary.
-/// `is_stationary` is `true` when the statistic fails to reject that null
-/// (statistic below the 5% critical value). The crate uses a level ('c')
-/// specification; the trend ('ct') specification is not exposed in v0.15.3.
-/// p-values are approximate (piecewise-linear interpolation of the KPSS table,
-/// clamped to [0.01, 0.10]).
+/// KPSS reverses the ADF null hypothesis: H0 = the series *is*
+/// level-stationary. `is_stationary` is `true` when the statistic fails to
+/// reject that null (statistic below the 5% critical value). p-values are
+/// approximate (piecewise-linear interpolation of the KPSS table, clamped to
+/// `[0.01, 0.10]`, matching `tseries::kpss.test` exactly). The `'ct'` (trend)
+/// specification is added in [`kpss_trend`] (D-05a) via the 3-argument
+/// `kpss(series, lags, regression)` wrapper.
 pub fn kpss(series: &[f64], lags: Option<usize>) -> StationarityOut {
     validation::kpss_test(series, lags).into()
 }
@@ -132,7 +223,7 @@ pub fn classify_stationarity(adf_is_stationary: bool, kpss_is_stationary: bool) 
 
 /// Run both ADF and KPSS and derive the combined four-way verdict.
 pub fn stationarity(series: &[f64]) -> CombinedStationarityOut {
-    let adf_r = adf(series, None);
+    let adf_r = adf(series, None, StationarityRegression::Constant);
     let kpss_r = kpss(series, None);
     let verdict = classify_stationarity(adf_r.is_stationary, kpss_r.is_stationary);
     CombinedStationarityOut {
@@ -309,7 +400,7 @@ mod tests {
     #[test]
     fn adf_returns_finite_statistic_and_nonneg_lags() {
         let series = random_walk(50, 42);
-        let result = adf(&series, None);
+        let result = adf(&series, None, StationarityRegression::Constant);
         assert!(
             result.statistic.is_finite(),
             "statistic should be finite for n=50"
@@ -326,8 +417,8 @@ mod tests {
         // Run with the same seed so the noise pattern is comparable
         let rw = random_walk(80, 99);
         let ar = ar1_stationary(80, 99);
-        let rw_result = adf(&rw, None);
-        let ar_result = adf(&ar, None);
+        let rw_result = adf(&rw, None, StationarityRegression::Constant);
+        let ar_result = adf(&ar, None, StationarityRegression::Constant);
         // Stationary series (AR(1) with |phi|=0.3) should have a more negative ADF statistic
         assert!(
             ar_result.statistic < rw_result.statistic,
@@ -340,7 +431,7 @@ mod tests {
     #[test]
     fn adf_short_series_returns_nan_without_panicking() {
         let short = vec![1.0, 2.0, 3.0]; // n = 3 < 4
-        let result = adf(&short, None);
+        let result = adf(&short, None, StationarityRegression::Constant);
         assert!(
             result.statistic.is_nan(),
             "series shorter than 4 should return NaN statistic, got {}",
@@ -351,7 +442,7 @@ mod tests {
     #[test]
     fn adf_max_lags_override_one() {
         let series = random_walk(50, 7);
-        let result_1 = adf(&series, Some(1));
+        let result_1 = adf(&series, Some(1), StationarityRegression::Constant);
         // With max_lags=1, the used lag should be at most 1
         assert!(
             result_1.lags <= 1,
@@ -361,13 +452,90 @@ mod tests {
     }
 
     #[test]
-    fn adf_critical_values_match_known_constants() {
-        // For constant-only regression, the ADF critical values are hardcoded MacKinnon constants
+    fn adf_critical_values_match_mackinnon_wrapper() {
+        // The wrapper's critical values are exactly the crate's own MacKinnon
+        // finite-sample surface at this result's effective sample size
+        // (n - lags - 1), not hardcoded asymptotic constants (D-01/D-14).
         let series = random_walk(50, 1);
-        let result = adf(&series, None);
-        assert_relative_eq!(result.cv_1pct, -3.43, epsilon = 0.1);
-        assert_relative_eq!(result.cv_5pct, -2.86, epsilon = 0.1);
-        assert_relative_eq!(result.cv_10pct, -2.57, epsilon = 0.1);
+        let result = adf(&series, None, StationarityRegression::Constant);
+        let nobs = series.len() - result.lags - 1;
+        let expected = anofox_forecast::validation::mackinnon_critical_values(
+            anofox_forecast::validation::AdfRegression::Constant,
+            nobs,
+        );
+        assert_relative_eq!(result.cv_1pct, expected.cv_1pct);
+        assert_relative_eq!(result.cv_5pct, expected.cv_5pct);
+        assert_relative_eq!(result.cv_10pct, expected.cv_10pct);
+        assert!(result.cv_1pct < result.cv_5pct);
+        assert!(result.cv_5pct < result.cv_10pct);
+        assert!(result.cv_10pct < 0.0);
+    }
+
+    #[test]
+    fn stationarity_regression_parses_every_accepted_spelling() {
+        for s in ["c", "C", "ct", "CT", "Ct", "cT"] {
+            let r: StationarityRegression = s.parse().unwrap_or_else(|e| {
+                panic!("expected {s:?} to parse as a StationarityRegression, got {e:?}")
+            });
+            assert_eq!(
+                r,
+                if s.to_ascii_lowercase() == "c" {
+                    StationarityRegression::Constant
+                } else {
+                    StationarityRegression::ConstantTrend
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn stationarity_regression_rejects_unknown_spellings() {
+        for s in ["n", "trend", ""] {
+            let err = s
+                .parse::<StationarityRegression>()
+                .expect_err("expected an InvalidParameter error");
+            assert!(
+                err.to_string().contains("expected one of: c, ct"),
+                "error message {err} should contain 'expected one of: c, ct'"
+            );
+        }
+    }
+
+    #[test]
+    fn adf_n3_gives_nan_critical_values_and_not_stationary() {
+        let short = vec![1.0, 2.0, 3.0]; // n = 3 < 4
+        let result = adf(&short, None, StationarityRegression::Constant);
+        assert!(result.statistic.is_nan());
+        assert!(result.p_value.is_nan());
+        assert!(result.cv_1pct.is_nan());
+        assert!(result.cv_5pct.is_nan());
+        assert!(result.cv_10pct.is_nan());
+        assert!(!result.is_stationary);
+    }
+
+    #[test]
+    fn adf_ct_on_short_and_exactly_linear_series_returns_nan_without_panicking() {
+        // n = 4: too short for a 2-regressor (constant + trend) design
+        let n4 = vec![1.0, 2.0, 3.0, 4.0];
+        let result = adf(&n4, None, StationarityRegression::ConstantTrend);
+        assert!(result.statistic.is_nan());
+
+        // Exactly linear series: the constant+trend regression is singular
+        let linear: Vec<f64> = (0..30).map(|i| 2.0 + 0.5 * i as f64).collect();
+        let result = adf(&linear, None, StationarityRegression::ConstantTrend);
+        assert!(result.statistic.is_nan());
+        assert!(!result.is_stationary);
+    }
+
+    #[test]
+    fn adf_max_lags_1000_on_n100_ct_is_clamped() {
+        let series = random_walk(100, 3);
+        let result = adf(&series, Some(1000), StationarityRegression::ConstantTrend);
+        assert!(
+            result.lags <= 47,
+            "lags ({}) should be clamped to <= 47 for n=100 'ct'",
+            result.lags
+        );
     }
 
     #[test]
@@ -421,7 +589,10 @@ mod tests {
             combined.verdict
         );
         // The combined statistics must match the individual test outputs.
-        assert_relative_eq!(combined.adf_statistic, adf(&series, None).statistic);
+        assert_relative_eq!(
+            combined.adf_statistic,
+            adf(&series, None, StationarityRegression::Constant).statistic
+        );
         assert_relative_eq!(combined.kpss_statistic, kpss(&series, None).statistic);
     }
 
