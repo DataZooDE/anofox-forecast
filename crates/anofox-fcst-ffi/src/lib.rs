@@ -6211,6 +6211,113 @@ pub unsafe extern "C" fn anofox_ts_conformal_apply_score(
     }
 }
 
+/// Parse a conformal strategy name, matching
+/// `anofox_fcst_core::ConformalStrategy::from_str` exactly -- including the
+/// D-09/G15 explanatory error for every removed `jackknife+` alias and the
+/// "unknown conformal strategy" error for anything else. C++'s
+/// `ParseConformalStrategy` wraps this instead of re-implementing the
+/// parse/default logic, so there is exactly one place that recognizes a
+/// strategy name.
+///
+/// # Safety
+/// `name` and `out_strategy` must be valid, non-null pointers; `name` must
+/// point to a NUL-terminated C string.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_conformal_parse_strategy(
+    name: *const c_char,
+    out_strategy: *mut types::ConformalStrategyFFI,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+    if name.is_null() || out_strategy.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let name_str = match CStr::from_ptr(name).to_str() {
+            Ok(s) => s,
+            Err(_) => {
+                return Err(anofox_fcst_core::ForecastError::InvalidInput(
+                    "strategy name is not valid UTF-8".to_string(),
+                ))
+            }
+        };
+        name_str.parse::<anofox_fcst_core::ConformalStrategy>()
+    }));
+
+    match result {
+        Ok(Ok(strategy)) => {
+            *out_strategy = strategy.into();
+            true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
+            false
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in conformal_parse_strategy",
+            );
+            false
+        }
+    }
+}
+
+/// Parse a conformal method name, matching
+/// `anofox_fcst_core::ConformalMethod::from_str` exactly. C++'s
+/// `ParseConformalMethod` wraps this instead of re-implementing the
+/// parse/default logic.
+///
+/// # Safety
+/// `name` and `out_method` must be valid, non-null pointers; `name` must
+/// point to a NUL-terminated C string.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_conformal_parse_method(
+    name: *const c_char,
+    out_method: *mut types::ConformalMethodFFI,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+    if name.is_null() || out_method.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let name_str = match CStr::from_ptr(name).to_str() {
+            Ok(s) => s,
+            Err(_) => {
+                return Err(anofox_fcst_core::ForecastError::InvalidInput(
+                    "method name is not valid UTF-8".to_string(),
+                ))
+            }
+        };
+        name_str.parse::<anofox_fcst_core::ConformalMethod>()
+    }));
+
+    match result {
+        Ok(Ok(method)) => {
+            *out_method = method.into();
+            true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
+            false
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in conformal_parse_method",
+            );
+            false
+        }
+    }
+}
+
 /// Compute empirical coverage of prediction intervals.
 ///
 /// # Safety

@@ -32,6 +32,12 @@ typedef enum ConformalMethodFFI {
  * Conformal strategy enumeration for FFI.
  *
  * The strategy determines how residuals are used for calibration.
+ *
+ * D-09/G15 (Phase 16): a `JackknifePlus` enumerator existed here before
+ * Phase 16 but is removed outright, not kept as a permanently-unreachable
+ * slot -- `anofox_ts_conformal_parse_strategy` is the only path C++ uses to
+ * produce a `ConformalStrategyFFI` from a string, and it never returns this
+ * type for a jackknife+ alias (it reports an error instead).
  */
 typedef enum ConformalStrategyFFI {
     /**
@@ -42,10 +48,6 @@ typedef enum ConformalStrategyFFI {
      * Cross-validation conformal - uses CV residuals
      */
     CROSS_VAL = 1,
-    /**
-     * Jackknife+ conformal - stores full residual distribution
-     */
-    JACKKNIFE_PLUS = 2,
 } ConformalStrategyFFI;
 
 /**
@@ -1582,7 +1584,7 @@ typedef struct CalibrationProfileFFI {
      */
     enum ConformalMethodFFI method;
     /**
-     * Strategy used (split, crossval, jackknife+)
+     * Strategy used (split, crossval)
      */
     enum ConformalStrategyFFI strategy;
     /**
@@ -1590,9 +1592,7 @@ typedef struct CalibrationProfileFFI {
      */
     double *alphas;
     /**
-     * State vector (strategy-specific):
-     * - Split/CrossVal: [lower_q1, ..., upper_q1, ...]
-     * - JackknifePlus: sorted absolute residuals
+     * State vector: [lower_q1, ..., upper_q1, ...]
      */
     double *state_vector;
     /**
@@ -3360,6 +3360,37 @@ bool anofox_ts_conformal_apply_score(const double *forecasts,
                                      double **out_lower,
                                      double **out_upper,
                                      struct AnofoxError *out_error);
+
+/**
+ * Parse a conformal strategy name, matching
+ * `anofox_fcst_core::ConformalStrategy::from_str` exactly -- including the
+ * D-09/G15 explanatory error for every removed `jackknife+` alias and the
+ * "unknown conformal strategy" error for anything else. C++'s
+ * `ParseConformalStrategy` wraps this instead of re-implementing the
+ * parse/default logic, so there is exactly one place that recognizes a
+ * strategy name.
+ *
+ * # Safety
+ * `name` and `out_strategy` must be valid, non-null pointers; `name` must
+ * point to a NUL-terminated C string.
+ */
+bool anofox_ts_conformal_parse_strategy(const char *name,
+                                        enum ConformalStrategyFFI *out_strategy,
+                                        struct AnofoxError *out_error);
+
+/**
+ * Parse a conformal method name, matching
+ * `anofox_fcst_core::ConformalMethod::from_str` exactly. C++'s
+ * `ParseConformalMethod` wraps this instead of re-implementing the
+ * parse/default logic.
+ *
+ * # Safety
+ * `name` and `out_method` must be valid, non-null pointers; `name` must
+ * point to a NUL-terminated C string.
+ */
+bool anofox_ts_conformal_parse_method(const char *name,
+                                      enum ConformalMethodFFI *out_method,
+                                      struct AnofoxError *out_error);
 
 /**
  * Compute empirical coverage of prediction intervals.

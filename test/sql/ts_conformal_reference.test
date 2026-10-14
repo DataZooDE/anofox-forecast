@@ -878,3 +878,82 @@ FROM bs_right AS br, (
 ----
 true
 
+# =============================================================================
+# 16-03 strategies (Task 2)
+# =============================================================================
+
+# --- D-09/G15: every removed jackknife+ alias errors with "was removed",
+# naming 'split' and 'crossval' (case-insensitive) ---
+statement error
+SELECT ts_conformal_learn([1.0, -2.0, 3.0, -1.5, 2.5]::DOUBLE[], [0.2]::DOUBLE[], 'symmetric', 'jackknife+');
+----
+was removed
+
+statement error
+SELECT ts_conformal_learn([1.0, -2.0, 3.0, -1.5, 2.5]::DOUBLE[], [0.2]::DOUBLE[], 'symmetric', 'JackknifePlus');
+----
+was removed
+
+statement error
+SELECT ts_conformal_learn([1.0, -2.0, 3.0, -1.5, 2.5]::DOUBLE[], [0.2]::DOUBLE[], 'symmetric', 'jackknifeplus');
+----
+was removed
+
+statement error
+SELECT ts_conformal_learn([1.0, -2.0, 3.0, -1.5, 2.5]::DOUBLE[], [0.2]::DOUBLE[], 'symmetric', 'jk+');
+----
+was removed
+
+# --- the error names both replacements ---
+statement error
+SELECT ts_conformal_learn([1.0, -2.0, 3.0, -1.5, 2.5]::DOUBLE[], [0.2]::DOUBLE[], 'symmetric', 'jackknife+');
+----
+split
+
+statement error
+SELECT ts_conformal_learn([1.0, -2.0, 3.0, -1.5, 2.5]::DOUBLE[], [0.2]::DOUBLE[], 'symmetric', 'jackknife+');
+----
+crossval
+
+# --- an unknown strategy (not an old jackknife+ alias) errors
+# "unknown conformal strategy" listing split/crossval ---
+statement error
+SELECT ts_conformal_learn([1.0, -2.0, 3.0, -1.5, 2.5]::DOUBLE[], [0.2]::DOUBLE[], 'symmetric', 'typo');
+----
+unknown conformal strategy
+
+# --- an unknown method errors naming the valid methods ---
+statement error
+SELECT ts_conformal_learn([1.0, -2.0, 3.0, -1.5, 2.5]::DOUBLE[], [0.2]::DOUBLE[], 'bogus', 'split');
+----
+Unknown conformal method
+
+# --- 'split', 'crossval' and 'cv' all compute the SAME scores (CrossVal
+# assumes residuals already come from CV folds -- same quantile machinery) ---
+query I
+SELECT
+    (ts_conformal_learn([1.0, -2.0, 3.0, -1.5, 2.5]::DOUBLE[], [0.2]::DOUBLE[], 'symmetric', 'split')).scores_lower
+    = (ts_conformal_learn([1.0, -2.0, 3.0, -1.5, 2.5]::DOUBLE[], [0.2]::DOUBLE[], 'symmetric', 'crossval')).scores_lower
+    AND (ts_conformal_learn([1.0, -2.0, 3.0, -1.5, 2.5]::DOUBLE[], [0.2]::DOUBLE[], 'symmetric', 'split')).scores_lower
+    = (ts_conformal_learn([1.0, -2.0, 3.0, -1.5, 2.5]::DOUBLE[], [0.2]::DOUBLE[], 'symmetric', 'cv')).scores_lower;
+----
+true
+
+# --- ts_conformal_apply with a profile whose strategy string is a removed
+# alias (simulating a pre-Phase-16 stored profile) errors, not a silent
+# default to 'split' ---
+statement error
+SELECT ts_conformal_apply(
+    [10.0]::DOUBLE[],
+    {
+        'method': 'symmetric',
+        'strategy': 'jackknife_plus',
+        'alphas': [0.2]::DOUBLE[],
+        'state_vector': [1.0, 1.0]::DOUBLE[],
+        'scores_lower': [1.0]::DOUBLE[],
+        'scores_upper': [1.0]::DOUBLE[],
+        'n_residuals': 5::BIGINT
+    }
+);
+----
+was removed

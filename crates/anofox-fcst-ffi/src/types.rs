@@ -1775,6 +1775,12 @@ impl From<ConformalMethodFFI> for anofox_fcst_core::ConformalMethod {
 /// Conformal strategy enumeration for FFI.
 ///
 /// The strategy determines how residuals are used for calibration.
+///
+/// D-09/G15 (Phase 16): a `JackknifePlus` enumerator existed here before
+/// Phase 16 but is removed outright, not kept as a permanently-unreachable
+/// slot -- `anofox_ts_conformal_parse_strategy` is the only path C++ uses to
+/// produce a `ConformalStrategyFFI` from a string, and it never returns this
+/// type for a jackknife+ alias (it reports an error instead).
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ConformalStrategyFFI {
@@ -1783,8 +1789,6 @@ pub enum ConformalStrategyFFI {
     Split = 0,
     /// Cross-validation conformal - uses CV residuals
     CrossVal = 1,
-    /// Jackknife+ conformal - stores full residual distribution
-    JackknifePlus = 2,
 }
 
 impl From<anofox_fcst_core::ConformalStrategy> for ConformalStrategyFFI {
@@ -1792,7 +1796,6 @@ impl From<anofox_fcst_core::ConformalStrategy> for ConformalStrategyFFI {
         match strategy {
             anofox_fcst_core::ConformalStrategy::Split => Self::Split,
             anofox_fcst_core::ConformalStrategy::CrossVal => Self::CrossVal,
-            anofox_fcst_core::ConformalStrategy::JackknifePlus => Self::JackknifePlus,
         }
     }
 }
@@ -1802,7 +1805,6 @@ impl From<ConformalStrategyFFI> for anofox_fcst_core::ConformalStrategy {
         match strategy {
             ConformalStrategyFFI::Split => Self::Split,
             ConformalStrategyFFI::CrossVal => Self::CrossVal,
-            ConformalStrategyFFI::JackknifePlus => Self::JackknifePlus,
         }
     }
 }
@@ -1814,13 +1816,11 @@ impl From<ConformalStrategyFFI> for anofox_fcst_core::ConformalStrategy {
 pub struct CalibrationProfileFFI {
     /// Method used (symmetric, asymmetric, adaptive)
     pub method: ConformalMethodFFI,
-    /// Strategy used (split, crossval, jackknife+)
+    /// Strategy used (split, crossval)
     pub strategy: ConformalStrategyFFI,
     /// Alpha values (miscoverage rates)
     pub alphas: *mut c_double,
-    /// State vector (strategy-specific):
-    /// - Split/CrossVal: [lower_q1, ..., upper_q1, ...]
-    /// - JackknifePlus: sorted absolute residuals
+    /// State vector: [lower_q1, ..., upper_q1, ...]
     pub state_vector: *mut c_double,
     /// Length of state_vector
     pub state_vector_len: size_t,

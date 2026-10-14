@@ -929,7 +929,14 @@ pub enum ConformalMethod {
 /// The strategy determines how calibration residuals are processed and stored:
 /// - **Split**: Simple holdout - use calibration residuals directly
 /// - **CrossVal**: Cross-validation - combines CV folds for more calibration data
-/// - **JackknifePlus**: Leave-one-out - stores full residual distribution for inference
+///
+/// A `jackknife+` strategy existed before Phase 16 (D-09/G15) but was removed:
+/// it computed the same quantile as `Split` (no leave-one-out refits), so it
+/// gave none of the tighter-interval benefit a real jackknife+ promises while
+/// implying it did. A true jackknife+ needs a leave-one-out REFIT per
+/// calibration point, which this crate's GROUP BY-oriented architecture
+/// cannot provide; `FromStr` below still recognizes every old alias so it can
+/// explain the removal instead of silently defaulting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ConformalStrategy {
     /// Split conformal - uses calibration residuals directly to compute quantiles.
@@ -939,10 +946,6 @@ pub enum ConformalStrategy {
     /// Cross-validation conformal - uses CV residuals for better calibration.
     /// Each residual comes from a model that didn't see that observation.
     CrossVal,
-    /// Jackknife+ conformal - stores full residual distribution.
-    /// At inference, computes intervals using min/max across LOO predictions.
-    /// Provides tighter intervals but requires storing all residuals.
-    JackknifePlus,
 }
 
 impl std::fmt::Display for ConformalStrategy {
@@ -950,7 +953,6 @@ impl std::fmt::Display for ConformalStrategy {
         match self {
             Self::Split => write!(f, "split"),
             Self::CrossVal => write!(f, "crossval"),
-            Self::JackknifePlus => write!(f, "jackknife+"),
         }
     }
 }
@@ -962,9 +964,17 @@ impl std::str::FromStr for ConformalStrategy {
         match s.to_lowercase().as_str() {
             "split" => Ok(Self::Split),
             "crossval" | "cross_val" | "cv" => Ok(Self::CrossVal),
-            "jackknife+" | "jackknifeplus" | "jackknife_plus" | "jk+" => Ok(Self::JackknifePlus),
+            // D-09/G15: every removed jackknife+ alias gets an explanatory
+            // error naming its replacements, never a silent default.
+            "jackknife+" | "jackknifeplus" | "jackknife_plus" | "jk+" => {
+                Err(ForecastError::InvalidInput(format!(
+                    "conformal strategy '{}' was removed: it computed the same quantile as \
+                     'split' (no leave-one-out refits). Use 'split' or 'crossval'.",
+                    s
+                )))
+            }
             _ => Err(ForecastError::InvalidInput(format!(
-                "Unknown conformal strategy: '{}'. Valid: split, crossval, jackknife+",
+                "unknown conformal strategy '{}'; valid: split, crossval (alias cross_val, cv)",
                 s
             ))),
         }
@@ -1007,19 +1017,17 @@ impl std::str::FromStr for ConformalMethod {
 ///
 /// # Storage Strategy
 ///
-/// The `state_vector` stores different data based on strategy:
-/// - **Split/CrossVal**: `[lower_q1, lower_q2, ..., upper_q1, upper_q2, ...]` (2 * n_alphas elements)
-/// - **JackknifePlus**: Full sorted absolute residuals (n_residuals elements)
-///
-/// The `strategy` field determines how to interpret the state_vector at apply time.
+/// The `state_vector` stores `[lower_q1, lower_q2, ..., upper_q1, upper_q2, ...]`
+/// (2 * n_alphas elements) for both strategies (Split and CrossVal use the
+/// identical quantile computation).
 ///
 /// # Fields
 /// - `method`: The conformal method used (symmetric, asymmetric, adaptive)
-/// - `strategy`: The calibration strategy (split, crossval, jackknife+)
+/// - `strategy`: The calibration strategy (split, crossval)
 /// - `alphas`: Coverage levels (e.g., [0.1, 0.05] for 90%, 95%)
-/// - `state_vector`: Strategy-specific stored state
-/// - `scores_lower`: Lower quantiles (one per alpha) - computed from state_vector for Split/CrossVal
-/// - `scores_upper`: Upper quantiles (one per alpha) - computed from state_vector for Split/CrossVal
+/// - `state_vector`: quantiles [lower_q1, ..., lower_qn, upper_q1, ..., upper_qn]
+/// - `scores_lower`: Lower quantiles (one per alpha) - computed from state_vector
+/// - `scores_upper`: Upper quantiles (one per alpha) - computed from state_vector
 #[derive(Debug, Clone)]
 pub struct CalibrationProfile {
     /// The conformal method used (how intervals are calculated)
@@ -1028,9 +1036,7 @@ pub struct CalibrationProfile {
     pub strategy: ConformalStrategy,
     /// Coverage levels (alpha values, e.g., [0.1, 0.05])
     pub alphas: Vec<f64>,
-    /// Strategy-specific state vector:
-    /// - Split/CrossVal: quantiles [lower_q1, ..., lower_qn, upper_q1, ..., upper_qn]
-    /// - JackknifePlus: sorted absolute residuals [r1, r2, ..., rn]
+    /// Quantiles [lower_q1, ..., lower_qn, upper_q1, ..., upper_qn]
     pub state_vector: Vec<f64>,
     /// Lower quantiles (one per alpha) - for direct access
     pub scores_lower: Vec<f64>,
@@ -1049,21 +1055,6 @@ impl CalibrationProfile {
     /// Get the number of coverage levels.
     pub fn n_levels(&self) -> usize {
         self.alphas.len()
-    }
-
-    /// Check if this profile uses JackknifePlus strategy.
-    pub fn is_jackknife_plus(&self) -> bool {
-        self.strategy == ConformalStrategy::JackknifePlus
-    }
-
-    /// Get the sorted residuals for JackknifePlus strategy.
-    /// Returns None if not JackknifePlus.
-    pub fn jackknife_residuals(&self) -> Option<&[f64]> {
-        if self.is_jackknife_plus() {
-            Some(&self.state_vector)
-        } else {
-            None
-        }
     }
 }
 
@@ -1122,7 +1113,7 @@ pub struct ConformalEvaluation {
 /// * `residuals` - Calibration residuals (actual - predicted)
 /// * `alphas` - Miscoverage rates (e.g., [0.1, 0.05] for 90%, 95% coverage)
 /// * `method` - Conformal method to use (symmetric, asymmetric, adaptive)
-/// * `strategy` - Calibration strategy to use (split, crossval, jackknife+)
+/// * `strategy` - Calibration strategy to use (split, crossval)
 /// * `difficulty` - Optional difficulty scores for adaptive method (must match residuals length)
 ///
 /// # Returns
@@ -1179,13 +1170,6 @@ pub fn conformal_learn(
         }
     }
 
-    // Validate JackknifePlus restrictions
-    if strategy == ConformalStrategy::JackknifePlus && method == ConformalMethod::Asymmetric {
-        return Err(ForecastError::InvalidInput(
-            "JackknifePlus strategy does not support asymmetric method".to_string(),
-        ));
-    }
-
     let n_residuals = residuals.len();
     let mut scores_lower = Vec::with_capacity(alphas.len());
     let mut scores_upper = Vec::with_capacity(alphas.len());
@@ -1200,20 +1184,12 @@ pub fn conformal_learn(
     let mut abs_residuals: Vec<f64> = finite_residuals.iter().map(|r| r.abs()).collect();
     abs_residuals.sort_by(f64::total_cmp);
 
-    // For JackknifePlus, we store the full sorted residual distribution
-    // For Split/CrossVal, we compute quantiles and store them in state_vector
-    let state_vector: Vec<f64>;
-
-    match strategy {
-        ConformalStrategy::JackknifePlus => {
-            // Store full sorted residual distribution for inference-time computation
-            state_vector = abs_residuals.clone();
-
-            // For JackknifePlus, scores are computed at apply time
-            // but we pre-compute them here for convenience access
+    // Split and CrossVal use the identical quantile computation (CrossVal
+    // assumes residuals already come from CV folds); D-09 removed the
+    // JackknifePlus strategy that used to branch here.
+    match method {
+        ConformalMethod::Symmetric => {
             for &alpha in alphas {
-                // Phase 16 D-05/G12: insufficient -> unbounded (infinite)
-                // score, never clamped into the max residual.
                 let score = match finite_sample_level(n_finite, alpha) {
                     None => f64::INFINITY,
                     Some(level) => compute_quantile(&abs_residuals, level),
@@ -1223,76 +1199,58 @@ pub fn conformal_learn(
             }
         }
 
-        ConformalStrategy::Split | ConformalStrategy::CrossVal => {
-            // Split and CrossVal use the same quantile computation
-            // (CrossVal assumes residuals already come from CV folds)
-            match method {
-                ConformalMethod::Symmetric => {
-                    for &alpha in alphas {
-                        let score = match finite_sample_level(n_finite, alpha) {
-                            None => f64::INFINITY,
-                            Some(level) => compute_quantile(&abs_residuals, level),
-                        };
-                        scores_lower.push(score);
-                        scores_upper.push(score);
-                    }
-                }
+        ConformalMethod::Asymmetric => {
+            // Phase 16 D-07: upper margin = quantile of the signed
+            // residuals; lower margin = quantile of the negated
+            // signed residuals, both over the FULL finite count
+            // (matches conformal_predict_asymmetric exactly).
+            let mut sorted_r: Vec<f64> = finite_residuals.clone();
+            sorted_r.sort_by(f64::total_cmp);
+            let mut sorted_neg_r: Vec<f64> = finite_residuals.iter().map(|r| -r).collect();
+            sorted_neg_r.sort_by(f64::total_cmp);
 
-                ConformalMethod::Asymmetric => {
-                    // Phase 16 D-07: upper margin = quantile of the signed
-                    // residuals; lower margin = quantile of the negated
-                    // signed residuals, both over the FULL finite count
-                    // (matches conformal_predict_asymmetric exactly).
-                    let mut sorted_r: Vec<f64> = finite_residuals.clone();
-                    sorted_r.sort_by(f64::total_cmp);
-                    let mut sorted_neg_r: Vec<f64> = finite_residuals.iter().map(|r| -r).collect();
-                    sorted_neg_r.sort_by(f64::total_cmp);
+            for &alpha in alphas {
+                let half_alpha = alpha / 2.0;
+                let (lower_margin, upper_margin) = match finite_sample_level(n_finite, half_alpha) {
+                    None => (f64::INFINITY, f64::INFINITY),
+                    Some(level) => (
+                        compute_quantile(&sorted_neg_r, level),
+                        compute_quantile(&sorted_r, level),
+                    ),
+                };
 
-                    for &alpha in alphas {
-                        let half_alpha = alpha / 2.0;
-                        let (lower_margin, upper_margin) =
-                            match finite_sample_level(n_finite, half_alpha) {
-                                None => (f64::INFINITY, f64::INFINITY),
-                                Some(level) => (
-                                    compute_quantile(&sorted_neg_r, level),
-                                    compute_quantile(&sorted_r, level),
-                                ),
-                            };
-
-                        scores_lower.push(lower_margin);
-                        scores_upper.push(upper_margin);
-                    }
-                }
-
-                ConformalMethod::Adaptive => {
-                    // Phase 16 D-08: scores_i = |r_i| / d_i over complete
-                    // (finite residual, finite difficulty) pairs -- no
-                    // longer the unweighted symmetric score.
-                    let d = difficulty.expect("validated above: difficulty required for adaptive");
-                    let mut scores: Vec<f64> = residuals
-                        .iter()
-                        .zip(d.iter())
-                        .filter(|(r, dv)| r.is_finite() && dv.is_finite())
-                        .map(|(r, dv)| r.abs() / dv)
-                        .collect();
-                    scores.sort_by(f64::total_cmp);
-                    let n_scores = scores.len();
-
-                    for &alpha in alphas {
-                        let score = match finite_sample_level(n_scores, alpha) {
-                            None => f64::INFINITY,
-                            Some(level) => compute_quantile(&scores, level),
-                        };
-                        scores_lower.push(score);
-                        scores_upper.push(score);
-                    }
-                }
+                scores_lower.push(lower_margin);
+                scores_upper.push(upper_margin);
             }
+        }
 
-            // For Split/CrossVal, state_vector stores quantiles: [lower_q1, ..., upper_q1, ...]
-            state_vector = [scores_lower.clone(), scores_upper.clone()].concat();
+        ConformalMethod::Adaptive => {
+            // Phase 16 D-08: scores_i = |r_i| / d_i over complete
+            // (finite residual, finite difficulty) pairs -- no
+            // longer the unweighted symmetric score.
+            let d = difficulty.expect("validated above: difficulty required for adaptive");
+            let mut scores: Vec<f64> = residuals
+                .iter()
+                .zip(d.iter())
+                .filter(|(r, dv)| r.is_finite() && dv.is_finite())
+                .map(|(r, dv)| r.abs() / dv)
+                .collect();
+            scores.sort_by(f64::total_cmp);
+            let n_scores = scores.len();
+
+            for &alpha in alphas {
+                let score = match finite_sample_level(n_scores, alpha) {
+                    None => f64::INFINITY,
+                    Some(level) => compute_quantile(&scores, level),
+                };
+                scores_lower.push(score);
+                scores_upper.push(score);
+            }
         }
     }
+
+    // state_vector stores quantiles: [lower_q1, ..., upper_q1, ...]
+    let state_vector: Vec<f64> = [scores_lower.clone(), scores_upper.clone()].concat();
 
     Ok(CalibrationProfile {
         method,
@@ -1365,86 +1323,36 @@ pub fn conformal_apply(
     let mut lower = Vec::with_capacity(n_levels);
     let mut upper = Vec::with_capacity(n_levels);
 
-    // Handle JackknifePlus separately - it computes intervals dynamically from stored residuals
-    if profile.is_jackknife_plus() {
-        let residuals = profile.jackknife_residuals().ok_or_else(|| {
-            ForecastError::InvalidInput("JackknifePlus profile missing residuals".to_string())
-        })?;
+    // D-09 removed the JackknifePlus strategy's dynamic-residual branch;
+    // Split and CrossVal both apply the pre-computed scores directly.
+    for level_idx in 0..n_levels {
+        let score_lower = profile.scores_lower[level_idx];
+        let score_upper = profile.scores_upper[level_idx];
 
-        for (level_idx, &alpha) in profile.alphas.iter().enumerate() {
-            // For JackknifePlus, we compute intervals using the full residual distribution
-            // This allows dynamic quantile computation and potentially tighter intervals.
-            // Phase 16 D-05/G12: insufficient -> unbounded (infinite) score,
-            // never clamped. Residuals are already sorted (ascending, finite,
-            // non-negative), so we can compute the quantile directly.
-            let score = match finite_sample_level(residuals.len(), alpha) {
-                None => f64::INFINITY,
-                Some(level) => compute_quantile(residuals, level),
-            };
-
-            // For JackknifePlus with Adaptive method, scale by difficulty
-            // AS GIVEN (Phase 16 D-08: no batch-mean normalisation -- a
-            // forecast's interval is independent of the batch it's in).
-            if profile.method == ConformalMethod::Adaptive {
-                let d = difficulty.unwrap();
-                let level_lower: Vec<f64> = forecasts
-                    .iter()
-                    .zip(d.iter())
-                    .map(|(&f, &d)| f - score * d)
-                    .collect();
-                let level_upper: Vec<f64> = forecasts
-                    .iter()
-                    .zip(d.iter())
-                    .map(|(&f, &d)| f + score * d)
-                    .collect();
-                lower.push(level_lower);
-                upper.push(level_upper);
-            } else {
-                // Symmetric case (JackknifePlus doesn't support Asymmetric)
-                let level_lower: Vec<f64> = forecasts.iter().map(|&f| f - score).collect();
-                let level_upper: Vec<f64> = forecasts.iter().map(|&f| f + score).collect();
+        match profile.method {
+            ConformalMethod::Symmetric | ConformalMethod::Asymmetric => {
+                let level_lower: Vec<f64> = forecasts.iter().map(|&f| f - score_lower).collect();
+                let level_upper: Vec<f64> = forecasts.iter().map(|&f| f + score_upper).collect();
                 lower.push(level_lower);
                 upper.push(level_upper);
             }
 
-            // Update pre-computed scores for consistency (optional but helpful for debugging)
-            // Note: We don't modify profile here since it's borrowed immutably
-            // The scores_lower/scores_upper should already match from conformal_learn
-            let _ = level_idx; // Suppress unused warning
-        }
-    } else {
-        // Standard Split/CrossVal apply logic
-        for level_idx in 0..n_levels {
-            let score_lower = profile.scores_lower[level_idx];
-            let score_upper = profile.scores_upper[level_idx];
-
-            match profile.method {
-                ConformalMethod::Symmetric | ConformalMethod::Asymmetric => {
-                    let level_lower: Vec<f64> =
-                        forecasts.iter().map(|&f| f - score_lower).collect();
-                    let level_upper: Vec<f64> =
-                        forecasts.iter().map(|&f| f + score_upper).collect();
-                    lower.push(level_lower);
-                    upper.push(level_upper);
-                }
-
-                ConformalMethod::Adaptive => {
-                    // Phase 16 D-08: difficulty used AS GIVEN, no batch-mean
-                    // normalisation.
-                    let d = difficulty.unwrap();
-                    let level_lower: Vec<f64> = forecasts
-                        .iter()
-                        .zip(d.iter())
-                        .map(|(&f, &d)| f - score_lower * d)
-                        .collect();
-                    let level_upper: Vec<f64> = forecasts
-                        .iter()
-                        .zip(d.iter())
-                        .map(|(&f, &d)| f + score_upper * d)
-                        .collect();
-                    lower.push(level_lower);
-                    upper.push(level_upper);
-                }
+            ConformalMethod::Adaptive => {
+                // Phase 16 D-08: difficulty used AS GIVEN, no batch-mean
+                // normalisation.
+                let d = difficulty.unwrap();
+                let level_lower: Vec<f64> = forecasts
+                    .iter()
+                    .zip(d.iter())
+                    .map(|(&f, &d)| f - score_lower * d)
+                    .collect();
+                let level_upper: Vec<f64> = forecasts
+                    .iter()
+                    .zip(d.iter())
+                    .map(|(&f, &d)| f + score_upper * d)
+                    .collect();
+                lower.push(level_lower);
+                upper.push(level_upper);
             }
         }
     }
@@ -2232,20 +2140,6 @@ mod tests {
             ConformalStrategy::CrossVal
         );
 
-        // JackknifePlus variants
-        assert_eq!(
-            "jackknife+".parse::<ConformalStrategy>().unwrap(),
-            ConformalStrategy::JackknifePlus
-        );
-        assert_eq!(
-            "jk+".parse::<ConformalStrategy>().unwrap(),
-            ConformalStrategy::JackknifePlus
-        );
-        assert_eq!(
-            "jackknifeplus".parse::<ConformalStrategy>().unwrap(),
-            ConformalStrategy::JackknifePlus
-        );
-
         // Invalid
         assert!("invalid".parse::<ConformalStrategy>().is_err());
     }
@@ -2254,7 +2148,81 @@ mod tests {
     fn test_conformal_strategy_display() {
         assert_eq!(ConformalStrategy::Split.to_string(), "split");
         assert_eq!(ConformalStrategy::CrossVal.to_string(), "crossval");
-        assert_eq!(ConformalStrategy::JackknifePlus.to_string(), "jackknife+");
+    }
+
+    // =========================================================================
+    // D-09/G15: every removed jackknife+ alias raises an explanatory error
+    // naming 'split' and 'crossval'; an otherwise-unknown strategy/method
+    // string lists the valid names.
+    // =========================================================================
+
+    #[test]
+    fn test_jackknife_plus_aliases_removed_with_explanatory_error() {
+        for alias in [
+            "jackknife+",
+            "JackknifePlus",
+            "jackknifeplus",
+            "jackknife_plus",
+            "JK+",
+        ] {
+            let err = alias.parse::<ConformalStrategy>().unwrap_err().to_string();
+            assert!(
+                err.contains("was removed"),
+                "{alias}: error {err:?} does not mention removal"
+            );
+            assert!(
+                err.contains("'split'"),
+                "{alias}: error {err:?} does not name 'split'"
+            );
+            assert!(
+                err.contains("'crossval'"),
+                "{alias}: error {err:?} does not name 'crossval'"
+            );
+            assert!(err.len() < 255, "{alias}: error {err:?} is >= 255 bytes");
+        }
+    }
+
+    #[test]
+    fn test_unknown_conformal_strategy_lists_valid_names() {
+        let err = "typo".parse::<ConformalStrategy>().unwrap_err().to_string();
+        assert!(err.contains("split"), "error {err:?} does not list 'split'");
+        assert!(
+            err.contains("crossval"),
+            "error {err:?} does not list 'crossval'"
+        );
+    }
+
+    #[test]
+    fn test_unknown_conformal_method_lists_valid_names() {
+        let err = "bogus".parse::<ConformalMethod>().unwrap_err().to_string();
+        assert!(
+            err.contains("symmetric"),
+            "error {err:?} does not list 'symmetric'"
+        );
+        assert!(
+            err.contains("asymmetric"),
+            "error {err:?} does not list 'asymmetric'"
+        );
+        assert!(
+            err.contains("adaptive"),
+            "error {err:?} does not list 'adaptive'"
+        );
+    }
+
+    #[test]
+    fn test_split_crossval_cv_strategies_still_parse() {
+        assert_eq!(
+            "split".parse::<ConformalStrategy>().unwrap(),
+            ConformalStrategy::Split
+        );
+        assert_eq!(
+            "crossval".parse::<ConformalStrategy>().unwrap(),
+            ConformalStrategy::CrossVal
+        );
+        assert_eq!(
+            "cv".parse::<ConformalStrategy>().unwrap(),
+            ConformalStrategy::CrossVal
+        );
     }
 
     #[test]
@@ -2355,121 +2323,6 @@ mod tests {
             None,
         );
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_conformal_learn_jackknife_plus() {
-        let residuals = vec![0.5, -0.3, 0.8, -0.2, 0.4, -0.6, 0.3, -0.4, 0.7, -0.5];
-        let alphas = vec![0.1];
-
-        let profile = conformal_learn(
-            &residuals,
-            &alphas,
-            ConformalMethod::Symmetric,
-            ConformalStrategy::JackknifePlus,
-            None,
-        )
-        .unwrap();
-
-        assert_eq!(profile.strategy, ConformalStrategy::JackknifePlus);
-        assert!(profile.is_jackknife_plus());
-
-        // State vector should contain all sorted residuals
-        assert_eq!(profile.state_vector.len(), 10);
-
-        // Residuals should be sorted
-        let residuals_from_profile = profile.jackknife_residuals().unwrap();
-        for i in 1..residuals_from_profile.len() {
-            assert!(residuals_from_profile[i] >= residuals_from_profile[i - 1]);
-        }
-    }
-
-    #[test]
-    fn test_jackknife_plus_rejects_asymmetric() {
-        let residuals = vec![0.5, -0.3, 0.8, -0.2, 0.4];
-        let alphas = vec![0.1];
-
-        // JackknifePlus with Asymmetric should fail
-        let result = conformal_learn(
-            &residuals,
-            &alphas,
-            ConformalMethod::Asymmetric,
-            ConformalStrategy::JackknifePlus,
-            None,
-        );
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_conformal_apply_jackknife_plus() {
-        let residuals = vec![0.5, -0.3, 0.8, -0.2, 0.4, -0.6, 0.3, -0.4, 0.7, -0.5];
-        let profile = conformal_learn(
-            &residuals,
-            &[0.1, 0.05],
-            ConformalMethod::Symmetric,
-            ConformalStrategy::JackknifePlus,
-            None,
-        )
-        .unwrap();
-
-        let forecasts = vec![100.0, 105.0, 110.0];
-        let intervals = conformal_apply(&forecasts, &profile, None).unwrap();
-
-        assert_eq!(intervals.n_forecasts(), 3);
-        assert_eq!(intervals.n_levels(), 2);
-
-        // Intervals should be symmetric around point forecasts
-        for (i, forecast) in forecasts.iter().enumerate() {
-            let lower_diff = forecast - intervals.lower[0][i];
-            let upper_diff = intervals.upper[0][i] - forecast;
-            assert_relative_eq!(lower_diff, upper_diff, epsilon = 0.001);
-        }
-
-        // Higher coverage (alpha=0.05) should have wider intervals than lower coverage (alpha=0.1)
-        let width_90 = intervals.upper[0][0] - intervals.lower[0][0];
-        let width_95 = intervals.upper[1][0] - intervals.lower[1][0];
-        assert!(width_95 >= width_90);
-    }
-
-    #[test]
-    fn test_jackknife_plus_equals_split_for_same_residuals() {
-        // With the same residuals, JackknifePlus and Split should produce identical results
-        let residuals = vec![0.5, -0.3, 0.8, -0.2, 0.4, -0.6, 0.3, -0.4, 0.7, -0.5];
-        let alphas = vec![0.1];
-
-        let profile_split = conformal_learn(
-            &residuals,
-            &alphas,
-            ConformalMethod::Symmetric,
-            ConformalStrategy::Split,
-            None,
-        )
-        .unwrap();
-
-        let profile_jk = conformal_learn(
-            &residuals,
-            &alphas,
-            ConformalMethod::Symmetric,
-            ConformalStrategy::JackknifePlus,
-            None,
-        )
-        .unwrap();
-
-        let forecasts = vec![100.0];
-        let intervals_split = conformal_apply(&forecasts, &profile_split, None).unwrap();
-        let intervals_jk = conformal_apply(&forecasts, &profile_jk, None).unwrap();
-
-        // Lower and upper bounds should be identical
-        assert_relative_eq!(
-            intervals_split.lower[0][0],
-            intervals_jk.lower[0][0],
-            epsilon = 0.001
-        );
-        assert_relative_eq!(
-            intervals_split.upper[0][0],
-            intervals_jk.upper[0][0],
-            epsilon = 0.001
-        );
     }
 
     #[test]
@@ -2850,7 +2703,7 @@ pub(crate) fn conformal_predict_per_step(
 }
 
 /// Compute the conformal quantile the same way `ConformalPredictor`'s private
-/// `compute_quantile` does for the `Split`/`JackknifePlus` methods: sorted
+/// `compute_quantile` does for the `Split`/`CrossVal` methods: sorted
 /// scores, adjusted level `((n+1) * coverage / n).min(1.0)`, index
 /// `ceil(n * adjusted_level) - 1` clamped into `[0, n-1]`. Used so a per-step
 /// quantile computed over a FULL (no missing pairs) step is bitwise identical

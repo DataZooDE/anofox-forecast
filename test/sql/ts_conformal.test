@@ -1,5 +1,10 @@
 # name: test/sql/ts_conformal.test
-# description: Tests for conformal prediction functions
+# description: Tests for conformal prediction functions (Phase 16 contract: D-01 date-paired
+#   output, D-02 empirical coverage + nominal_level, D-03 per-group calibration, D-05/D-06
+#   finite-sample insufficiency, D-08 difficulty_col, D-09 split/crossval only, D-13/D-14
+#   one-row-per-(group,date) output + calibration-table apply). Still json-gated (D-11); the
+#   non-gated test/sql/ts_conformal_reference.test holds the numpy-pinned value assertions --
+#   un-gating this file is Phase 18.
 # group: [sql]
 
 require anofox_forecast
@@ -10,14 +15,14 @@ require json
 # ts_conformal_quantile - Basic quantile computation
 #######################################
 
-# Basic quantile calculation (90% coverage, alpha=0.1)
-# For residuals [1,2,3,4,5], the 90th percentile should be around 4.6
+# Basic quantile calculation (90% coverage, alpha=0.1): n=20 is well above the
+# alpha=0.1 finite-sample minimum of 9 (D-05) -- a smaller n is now insufficient (NULL)
 query I
-SELECT ABS(ts_conformal_quantile([1.0, 2.0, 3.0, 4.0, 5.0], 0.1) - 4.6) < 0.5;
+SELECT ABS(ts_conformal_quantile([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0], 0.1) - 19.05) < 0.01;
 ----
 true
 
-# Higher coverage (95%) should give larger quantile (need enough samples to distinguish)
+# Higher coverage (lower alpha) should give a larger quantile
 query I
 SELECT ts_conformal_quantile(
     [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0], 0.05
@@ -29,13 +34,13 @@ true
 
 # 50% coverage
 query I
-SELECT ABS(ts_conformal_quantile([1.0, 2.0, 3.0, 4.0, 5.0], 0.5) - 3.0) < 0.5;
+SELECT ABS(ts_conformal_quantile([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0], 0.5) - 5.444444444444445) < 0.001;
 ----
 true
 
 # Alias test
 query I
-SELECT ABS(anofox_fcst_ts_conformal_quantile([1.0, 2.0, 3.0], 0.1) - ts_conformal_quantile([1.0, 2.0, 3.0], 0.1)) < 0.001;
+SELECT ABS(anofox_fcst_ts_conformal_quantile([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0], 0.5) - ts_conformal_quantile([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0], 0.5)) < 0.001;
 ----
 true
 
@@ -78,36 +83,38 @@ true
 # ts_conformal_predict - Full conformal prediction
 #######################################
 
-# Basic conformal prediction with symmetric residuals
-# residuals = [-2, -1, 0, 1, 2]
-# point_forecasts = [100, 200]
-# With 90% coverage, quantile should cover most residuals
+# Basic conformal prediction with symmetric residuals (n=20, well above the
+# alpha=0.1 finite-sample minimum of 9, D-05): nominal_level reports the
+# REQUESTED coverage; `coverage` is now the EMPIRICAL fraction of residuals
+# within the computed bound (D-02), which need not equal nominal_level
+# exactly on a finite sample.
 query I
 SELECT
-    (ts_conformal_predict([-2.0, -1.0, 0.0, 1.0, 2.0], [100.0, 200.0], 0.1)).coverage = 0.9;
+    (ts_conformal_predict([-2.0,-1.0,0.0,1.0,2.0,-2.0,-1.0,0.0,1.0,2.0,-2.0,-1.0,0.0,1.0,2.0,-2.0,-1.0,0.0,1.0,2.0], [100.0, 200.0], 0.1)).nominal_level = 0.9
+    AND NOT (ts_conformal_predict([-2.0,-1.0,0.0,1.0,2.0,-2.0,-1.0,0.0,1.0,2.0,-2.0,-1.0,0.0,1.0,2.0,-2.0,-1.0,0.0,1.0,2.0], [100.0, 200.0], 0.1)).calibration_insufficient;
 ----
 true
 
 # Verify point forecasts are preserved
 query II
 SELECT
-    (ts_conformal_predict([-2.0, -1.0, 0.0, 1.0, 2.0], [100.0, 200.0], 0.1)).point[1],
-    (ts_conformal_predict([-2.0, -1.0, 0.0, 1.0, 2.0], [100.0, 200.0], 0.1)).point[2];
+    (ts_conformal_predict([-2.0,-1.0,0.0,1.0,2.0,-2.0,-1.0,0.0,1.0,2.0,-2.0,-1.0,0.0,1.0,2.0,-2.0,-1.0,0.0,1.0,2.0], [100.0, 200.0], 0.1)).point[1],
+    (ts_conformal_predict([-2.0,-1.0,0.0,1.0,2.0,-2.0,-1.0,0.0,1.0,2.0,-2.0,-1.0,0.0,1.0,2.0,-2.0,-1.0,0.0,1.0,2.0], [100.0, 200.0], 0.1)).point[2];
 ----
 100.0
 200.0
 
-# Verify method is 'split_conformal'
+# Verify method is 'split_conformal' (legacy scalar name, unchanged by Phase 16)
 query I
-SELECT (ts_conformal_predict([1.0, 2.0, 3.0], [50.0], 0.1)).method;
+SELECT (ts_conformal_predict([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0], [50.0], 0.1)).method;
 ----
 split_conformal
 
 # Lower bound should be less than upper bound
 query I
 SELECT
-    (ts_conformal_predict([1.0, 2.0, 3.0, 4.0, 5.0], [10.0], 0.1)).lower[1] <
-    (ts_conformal_predict([1.0, 2.0, 3.0, 4.0, 5.0], [10.0], 0.1)).upper[1];
+    (ts_conformal_predict([1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0,11.0,12.0,13.0,14.0,15.0,16.0,17.0,18.0,19.0,20.0], [10.0], 0.1)).lower[1] <
+    (ts_conformal_predict([1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0,11.0,12.0,13.0,14.0,15.0,16.0,17.0,18.0,19.0,20.0], [10.0], 0.1)).upper[1];
 ----
 true
 
@@ -115,16 +122,17 @@ true
 # ts_conformal_predict_asymmetric - Asymmetric intervals
 #######################################
 
-# Asymmetric residuals should produce asymmetric intervals
-# residuals = [-1, -1, 0, 2, 4] - skewed positive
+# Asymmetric residuals (n=20; asymmetric needs n>=19 at alpha=0.1 because it
+# halves alpha to 0.05 per tail, D-07) should produce asymmetric intervals
+# residuals skewed positive
 query I
-SELECT (ts_conformal_predict_asymmetric([-1.0, -1.0, 0.0, 2.0, 4.0], [100.0], 0.1)).method;
+SELECT (ts_conformal_predict_asymmetric([-1.0,-1.0,-0.8,-0.6,-0.4,-0.2,0.0,0.2,0.4,0.6,0.8,1.0,1.2,1.4,1.6,1.8,2.0,3.0,4.0,5.0], [100.0], 0.1)).method;
 ----
 asymmetric_conformal
 
-# Coverage should still match requested coverage
+# nominal_level should report the requested coverage exactly
 query I
-SELECT (ts_conformal_predict_asymmetric([1.0, 2.0, 3.0], [50.0], 0.1)).coverage = 0.9;
+SELECT (ts_conformal_predict_asymmetric([1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0,11.0,12.0,13.0,14.0,15.0,16.0,17.0,18.0,19.0], [50.0], 0.1)).nominal_level = 0.9;
 ----
 true
 
@@ -162,22 +170,26 @@ SELECT anofox_fcst_ts_mean_interval_width([0.0, 5.0], [10.0, 15.0]);
 # Edge cases
 #######################################
 
-# Small number of residuals
+# Small number of residuals: D-05 reports this as explicitly insufficient
+# (NULL conformity score/bounds), never a value clamped from an
+# under-powered sample
 query I
-SELECT ts_conformal_quantile([1.0], 0.1) IS NOT NULL;
+SELECT ts_conformal_quantile([1.0], 0.1) IS NULL;
 ----
 true
 
-# Very tight coverage (99%)
+# Very tight coverage (alpha 0.05, n=20): the quantile sits near the maximum
+# residual
 query I
-SELECT ts_conformal_quantile([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 0.01) > 9.0;
+SELECT ts_conformal_quantile([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0], 0.05) > 15.0;
 ----
 true
 
-# Coverage bounds from prediction
+# Coverage bounds from prediction: nominal_level reports the requested level
+# exactly (n=9 is sufficient for alpha=0.2, D-05 minimum n=4)
 query I
 SELECT
-    (ts_conformal_predict([1.0, 2.0, 3.0], [100.0], 0.2)).coverage = 0.8;
+    (ts_conformal_predict([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0], [100.0], 0.2)).nominal_level = 0.8;
 ----
 true
 
@@ -185,14 +197,16 @@ true
 # Integration Tests - Table Macros
 #######################################
 
-# Setup test data for integration tests
+# Setup test data for integration tests (D-01: a required date_col; the
+# residual noise below is deterministic modulo arithmetic, not RANDOM(), so
+# the exact assertions throughout this section are reproducible)
 statement ok
 CREATE TABLE conformal_backtest AS
 SELECT
     series_id,
     '2024-01-01'::DATE + (i * INTERVAL '1 day') AS date,
     100.0 + i + (CASE WHEN series_id = 'A' THEN 10 ELSE 0 END) AS actual,
-    100.0 + i + (CASE WHEN series_id = 'A' THEN 10 ELSE 0 END) + (RANDOM() - 0.5) * 5 AS forecast
+    100.0 + i + (CASE WHEN series_id = 'A' THEN 10 ELSE 0 END) + (((i * 7 + 3) % 11) * 0.5 - 2.5) AS forecast
 FROM generate_series(0, 29) AS t(i)
 CROSS JOIN (SELECT UNNEST(['A', 'B']) AS series_id) s;
 
@@ -207,84 +221,98 @@ FROM generate_series(0, 6) AS t(i)
 CROSS JOIN (SELECT UNNEST(['A', 'B']) AS series_id) s;
 
 #######################################
-# ts_conformal_calibrate - Calibrate from backtest
+# ts_conformal_calibrate - Calibrate from backtest (D-03: per-group by default)
 #######################################
 
-# Test calibration returns expected columns
+# Test calibration returns the expected columns: group_col, method,
+# conformity_score, coverage, nominal_level, n_calibration,
+# calibration_insufficient (7, not the pre-Phase-16 3)
 query I
 SELECT COUNT(*) FROM (
     DESCRIBE SELECT * FROM ts_conformal_calibrate(
-        'conformal_backtest', actual, forecast, MAP{'alpha': 0.1}
+        'conformal_backtest', series_id, actual, forecast, params := {'alpha': 0.1}
     )
 );
 ----
-3
+7
 
-# Calibration should return positive conformity score
+# Calibration should return a positive conformity score for EVERY group
+# (one row per group_col value by default, D-03)
 query I
-SELECT conformity_score > 0 FROM ts_conformal_calibrate(
-    'conformal_backtest', actual, forecast, MAP{'alpha': 0.1}
+SELECT bool_and(conformity_score > 0) FROM ts_conformal_calibrate(
+    'conformal_backtest', series_id, actual, forecast, params := {'alpha': 0.1}
 );
 ----
 true
 
-# Calibration should return correct coverage
+# Calibration should report the requested nominal_level for every group
 query I
-SELECT coverage = 0.9 FROM ts_conformal_calibrate(
-    'conformal_backtest', actual, forecast, MAP{'alpha': 0.1}
+SELECT bool_and(nominal_level = 0.9) FROM ts_conformal_calibrate(
+    'conformal_backtest', series_id, actual, forecast, params := {'alpha': 0.1}
 );
 ----
 true
 
-# Calibration should count all residuals
+# Pooled calibration (params := {'pooled': true}) should count ALL residuals
+# across both groups: n_calibration renamed from the pre-Phase-16 n_residuals
 query I
-SELECT n_residuals = 60 FROM ts_conformal_calibrate(
-    'conformal_backtest', actual, forecast, MAP{'alpha': 0.1}
+SELECT n_calibration = 60 FROM ts_conformal_calibrate(
+    'conformal_backtest', series_id, actual, forecast, params := {'alpha': 0.1, 'pooled': true}
 );
 ----
 true
 
-# Higher alpha (lower coverage) should give smaller conformity score
+# Higher alpha (lower coverage) should give a smaller conformity score
 query I
 SELECT
-    (SELECT conformity_score FROM ts_conformal_calibrate('conformal_backtest', actual, forecast, MAP{'alpha': 0.2}))
+    (SELECT conformity_score FROM ts_conformal_calibrate('conformal_backtest', series_id, actual, forecast, params := {'alpha': 0.2, 'pooled': true}))
     <
-    (SELECT conformity_score FROM ts_conformal_calibrate('conformal_backtest', actual, forecast, MAP{'alpha': 0.1}));
+    (SELECT conformity_score FROM ts_conformal_calibrate('conformal_backtest', series_id, actual, forecast, params := {'alpha': 0.1, 'pooled': true}));
 ----
 true
 
 #######################################
-# ts_conformal_apply - Apply score to forecasts
+# ts_conformal_apply_by - Apply a calibration TABLE to forecasts (D-14: a
+# literal score is no longer accepted directly -- the calibration argument
+# names a TABLE holding ts_conformal_calibrate's output columns)
 #######################################
 
-# Test apply returns expected number of rows (one per group)
+statement ok
+CREATE TABLE conformal_calibration AS
+SELECT * FROM ts_conformal_calibrate('conformal_backtest', series_id, actual, forecast, params := {'pooled': true});
+
+# Test apply returns one row per (group, date) -- 2 groups x 7 future dates
+# (D-13: no longer one row per group with LIST columns)
 query I
 SELECT COUNT(*) FROM ts_conformal_apply_by(
-    'conformal_forecasts', series_id, point_forecast, 5.0
+    'conformal_forecasts', series_id, date, point_forecast, 'conformal_calibration'
 );
 ----
-2
+14
 
 # Test apply returns both groups
 query I
 SELECT COUNT(DISTINCT group_col) FROM ts_conformal_apply_by(
-    'conformal_forecasts', series_id, point_forecast, 5.0
+    'conformal_forecasts', series_id, date, point_forecast, 'conformal_calibration'
 );
 ----
 2
 
-# Lower bounds should be less than upper bounds
+# Lower bounds should be less than upper bounds (scalar columns now, D-13 --
+# no `[1]` list indexing)
 query I
 SELECT
-    MIN(lower[1]) < MIN(upper[1])
+    MIN(lower) < MIN(upper)
 FROM ts_conformal_apply_by(
-    'conformal_forecasts', series_id, point_forecast, 5.0
+    'conformal_forecasts', series_id, date, point_forecast, 'conformal_calibration'
 );
 ----
 true
 
 #######################################
-# ts_interval_width - Compute interval widths
+# ts_interval_width_by - Compute interval widths (D-01: a required date_col
+# pairs lower_col/upper_col via one date-ordered LIST, never two
+# independently-sorted lists)
 #######################################
 
 # Create intervals table for testing
@@ -301,7 +329,7 @@ CROSS JOIN (SELECT UNNEST(['A', 'B']) AS series_id) s;
 # Test interval_width returns one row per group
 query I
 SELECT COUNT(*) FROM ts_interval_width_by(
-    'test_intervals', series_id, lower_bound, upper_bound
+    'test_intervals', series_id, idx, lower_bound, upper_bound
 );
 ----
 2
@@ -311,7 +339,7 @@ SELECT COUNT(*) FROM ts_interval_width_by(
 # Series B: width = 10 (upper - lower = 110 - 100 = 10)
 query II
 SELECT group_col, mean_width FROM ts_interval_width_by(
-    'test_intervals', series_id, lower_bound, upper_bound
+    'test_intervals', series_id, idx, lower_bound, upper_bound
 ) ORDER BY group_col;
 ----
 A	15.0
@@ -320,7 +348,7 @@ B	10.0
 # Test n_intervals count
 query II
 SELECT group_col, n_intervals FROM ts_interval_width_by(
-    'test_intervals', series_id, lower_bound, upper_bound
+    'test_intervals', series_id, idx, lower_bound, upper_bound
 ) ORDER BY group_col;
 ----
 A	5
@@ -330,24 +358,12 @@ B	5
 # End-to-End Integration Test
 #######################################
 
-# Full workflow: calibrate → apply → evaluate
-# 1. Calibrate conformity score from backtest
-# 2. Apply to future forecasts
-# 3. Verify intervals are reasonable
-
+# Full workflow: calibrate per group -> store as a calibration TABLE (D-14)
+# -> apply to future forecasts -> verify every interval is non-NULL
 query I
-WITH calibration AS (
-    SELECT conformity_score FROM ts_conformal_calibrate(
-        'conformal_backtest', actual, forecast, MAP{'alpha': 0.1}
-    )
-),
-intervals AS (
-    SELECT * FROM ts_conformal_apply_by(
-        'conformal_forecasts', series_id, point_forecast,
-        (SELECT conformity_score FROM calibration)
-    )
-)
-SELECT COUNT(*) > 0 FROM intervals WHERE lower IS NOT NULL AND upper IS NOT NULL;
+SELECT COUNT(*) > 0 FROM ts_conformal_apply_by(
+    'conformal_forecasts', series_id, date, point_forecast, 'conformal_calibration'
+) WHERE lower IS NOT NULL AND upper IS NOT NULL;
 ----
 true
 
@@ -357,6 +373,9 @@ DROP TABLE conformal_backtest;
 
 statement ok
 DROP TABLE conformal_forecasts;
+
+statement ok
+DROP TABLE conformal_calibration;
 
 statement ok
 DROP TABLE test_intervals;
@@ -389,7 +408,7 @@ true
 
 # Test ts_conformal_evaluate returns all expected fields
 query IIIII
-SELECT 
+SELECT
     (result).coverage IS NOT NULL,
     (result).violation_rate IS NOT NULL,
     (result).mean_width IS NOT NULL,
@@ -402,28 +421,30 @@ FROM (
 true	true	true	true	true
 
 #######################################
-# ts_conformal - Table Macro Wrapper
+# ts_conformal_by - Table Macro Wrapper (D-01: a required date_col)
 #######################################
 
-# Create backtest results for ts_conformal test
+# Create backtest results for ts_conformal_by test
 statement ok
 CREATE TABLE conformal_test_backtest AS
-SELECT 
+SELECT
     'product_' || (i % 2 + 1) AS group_col,
+    '2024-01-01'::DATE + (i * INTERVAL '1 day') AS dt,
     100.0 + i AS actual,
     100.0 + i + (CASE WHEN i % 3 = 0 THEN 2.0 ELSE -1.0 END) AS forecast,
     100.0 + i AS point_forecast
 FROM range(1, 21) t(i);
 
-# Test ts_conformal returns results
+# Test ts_conformal_by returns results
 query I
 SELECT COUNT(*) > 0 FROM ts_conformal_by(
     'conformal_test_backtest',
     group_col,
+    dt,
     actual,
     forecast,
     point_forecast,
-    MAP{'alpha': '0.1'}
+    params := {'alpha': 0.1}
 );
 ----
 true

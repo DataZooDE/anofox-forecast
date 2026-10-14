@@ -573,26 +573,31 @@ void RegisterTsConformalPredictAsymmetricFunction(ExtensionLoader &loader) {
 // ts_conformal_learn(residuals[], alphas[], method, strategy) -> STRUCT
 // ============================================================================
 
-static ConformalMethodFFI ParseConformalMethod(const string &method_str) {
-    if (method_str == "symmetric" || method_str == "Symmetric") {
-        return SYMMETRIC;
-    } else if (method_str == "asymmetric" || method_str == "Asymmetric") {
-        return ASYMMETRIC;
-    } else if (method_str == "adaptive" || method_str == "Adaptive") {
-        return ADAPTIVE;
+// Phase 16 D-09/G15: strategy/method names are parsed strictly in Rust
+// (anofox_ts_conformal_parse_method / _strategy, wrapping
+// ConformalMethod::FromStr / ConformalStrategy::FromStr) instead of being
+// re-implemented here with a silent default for anything unrecognized --
+// that silent default is exactly how the removed 'jackknife+' strategy and
+// any typo'd method/strategy string used to go unnoticed. `caller` names the
+// calling SQL function in the thrown exception.
+static ConformalMethodFFI ParseConformalMethod(const string &method_str, const char *caller) {
+    ConformalMethodFFI method = SYMMETRIC;
+    AnofoxError error;
+    bool success = anofox_ts_conformal_parse_method(method_str.c_str(), &method, &error);
+    if (!success) {
+        throw InvalidInputException("%s: %s", caller, error.message);
     }
-    return SYMMETRIC;  // default
+    return method;
 }
 
-static ConformalStrategyFFI ParseConformalStrategy(const string &strategy_str) {
-    if (strategy_str == "split" || strategy_str == "Split") {
-        return SPLIT;
-    } else if (strategy_str == "crossval" || strategy_str == "CrossVal" || strategy_str == "cross_val") {
-        return CROSS_VAL;
-    } else if (strategy_str == "jackknife_plus" || strategy_str == "JackknifePlus" || strategy_str == "jackknife+") {
-        return JACKKNIFE_PLUS;
+static ConformalStrategyFFI ParseConformalStrategy(const string &strategy_str, const char *caller) {
+    ConformalStrategyFFI strategy = SPLIT;
+    AnofoxError error;
+    bool success = anofox_ts_conformal_parse_strategy(strategy_str.c_str(), &strategy, &error);
+    if (!success) {
+        throw InvalidInputException("%s: %s", caller, error.message);
     }
-    return SPLIT;  // default
+    return strategy;
 }
 
 static const char* MethodToString(ConformalMethodFFI method) {
@@ -608,7 +613,6 @@ static const char* StrategyToString(ConformalStrategyFFI strategy) {
     switch (strategy) {
         case SPLIT: return "split";
         case CROSS_VAL: return "crossval";
-        case JACKKNIFE_PLUS: return "jackknife_plus";
     }
     return "split";
 }
@@ -667,8 +671,8 @@ static void TsConformalLearnFunction(DataChunk &args, ExpressionState &state, Ve
         auto method_str = method_reader.Get(row_idx).GetString();
         auto strategy_str = strategy_reader.Get(row_idx).GetString();
 
-        ConformalMethodFFI method = ParseConformalMethod(method_str);
-        ConformalStrategyFFI strategy = ParseConformalStrategy(strategy_str);
+        ConformalMethodFFI method = ParseConformalMethod(method_str, "ts_conformal_learn");
+        ConformalStrategyFFI strategy = ParseConformalStrategy(strategy_str, "ts_conformal_learn");
 
         CalibrationProfileFFI profile = {};
         AnofoxError error;
@@ -738,8 +742,8 @@ void RegisterTsConformalLearnFunction(ExtensionLoader &loader) {
     {
         CreateScalarFunctionInfo info(ts_cl_set);
         FunctionDescription desc;
-        desc.description = "Calibrates a conformal predictor from calibration set actuals and forecasts. Returns conformal quantile for reuse.";
-        desc.examples = {"ts_conformal_learn(LIST(actual ORDER BY date), LIST(forecast ORDER BY date), 0.1)"};
+        desc.description = "Learns a conformal calibration profile from residuals. Strategies: 'split', 'crossval' (alias cross_val, cv) -- 'jackknife+' was removed in Phase 16 (it computed the same quantile as 'split').";
+        desc.examples = {"ts_conformal_learn(residuals, [0.1], 'symmetric', 'split')"};
         desc.categories = {"time-series", "uncertainty", "conformal-prediction"};
         desc.parameter_names = {"residuals", "alphas", "method", "strategy"};
         desc.parameter_types = {
@@ -767,8 +771,8 @@ void RegisterTsConformalLearnFunction(ExtensionLoader &loader) {
         CreateScalarFunctionInfo info(anofox_set);
         info.alias_of = "ts_conformal_learn";
         FunctionDescription desc;
-        desc.description = "Calibrates a conformal predictor from calibration set actuals and forecasts. Returns conformal quantile for reuse.";
-        desc.examples = {"ts_conformal_learn(LIST(actual ORDER BY date), LIST(forecast ORDER BY date), 0.1)"};
+        desc.description = "Learns a conformal calibration profile from residuals. Strategies: 'split', 'crossval' (alias cross_val, cv) -- 'jackknife+' was removed in Phase 16 (it computed the same quantile as 'split').";
+        desc.examples = {"ts_conformal_learn(residuals, [0.1], 'symmetric', 'split')"};
         desc.categories = {"time-series", "uncertainty", "conformal-prediction"};
         desc.parameter_names = {"residuals", "alphas", "method", "strategy"};
         desc.parameter_types = {
@@ -873,8 +877,8 @@ static void TsConformalApplyFunction(DataChunk &args, ExpressionState &state, Ve
 
         // Build CalibrationProfileFFI from the struct
         CalibrationProfileFFI profile = {};
-        profile.method = ParseConformalMethod(method_str);
-        profile.strategy = ParseConformalStrategy(strategy_str);
+        profile.method = ParseConformalMethod(method_str, "ts_conformal_apply");
+        profile.strategy = ParseConformalStrategy(strategy_str, "ts_conformal_apply");
         profile.alphas = alphas.data();
         profile.state_vector = state_vector.data();
         profile.state_vector_len = state_vector.size();
