@@ -5297,11 +5297,14 @@ pub unsafe extern "C" fn anofox_ts_conformal_quantile(
 
     match result {
         Ok(Ok(quantile)) => {
-            *out_result = quantile;
+            // Phase 16 D-05: an insufficient calibration set reports an
+            // infinite quantile from the core; the FFI boundary writes it
+            // as NaN so the C++ caller can turn it into SQL NULL.
+            *out_result = nan_if_non_finite(quantile);
             true
         }
         Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
@@ -5426,7 +5429,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict(
             true
         }
         Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
@@ -5775,7 +5778,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict_asymmetric(
             true
         }
         Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
@@ -6551,18 +6554,45 @@ unsafe fn fill_prediction_intervals(
 }
 
 /// Helper function to fill a ConformalResultFFI from a core ConformalResult.
+/// Maps a non-finite value to NaN, leaving a finite value untouched (Phase
+/// 16: the core represents "unbounded" with +/-inf; the FFI boundary writes
+/// non-finite score/coverage/bounds as NaN so C++ can turn them into SQL
+/// NULL via its existing NaN-as-NULL writers).
+#[inline]
+fn nan_if_non_finite(v: f64) -> f64 {
+    if v.is_finite() {
+        v
+    } else {
+        f64::NAN
+    }
+}
+
 unsafe fn fill_conformal_result(
     out: *mut ConformalResultFFI,
     result: &anofox_fcst_core::ConformalResult,
 ) {
+    let lower_nan: Vec<f64> = result
+        .lower
+        .iter()
+        .copied()
+        .map(nan_if_non_finite)
+        .collect();
+    let upper_nan: Vec<f64> = result
+        .upper
+        .iter()
+        .copied()
+        .map(nan_if_non_finite)
+        .collect();
+
     (*out).point = vec_to_c_double_array(&result.point);
-    (*out).lower = vec_to_c_double_array(&result.lower);
-    (*out).upper = vec_to_c_double_array(&result.upper);
+    (*out).lower = vec_to_c_double_array(&lower_nan);
+    (*out).upper = vec_to_c_double_array(&upper_nan);
     (*out).n_forecasts = result.point.len();
-    (*out).coverage = result.coverage;
+    (*out).coverage = result.coverage; // already NaN when insufficient
     (*out).nominal_level = result.nominal_level;
-    (*out).conformity_score = result.conformity_score;
+    (*out).conformity_score = nan_if_non_finite(result.conformity_score);
     (*out).n_calibration = result.n_calibration;
+    (*out).calibration_insufficient = result.calibration_insufficient;
 
     // Copy method name
     let method_bytes = result.method.as_bytes();
@@ -6578,10 +6608,11 @@ unsafe fn fill_conformal_calibration(
     out: *mut ConformalCalibrationFFI,
     result: &anofox_fcst_core::ConformalCalibration,
 ) {
-    (*out).coverage = result.coverage;
+    (*out).coverage = result.coverage; // already NaN when insufficient
     (*out).nominal_level = result.nominal_level;
-    (*out).conformity_score = result.conformity_score;
+    (*out).conformity_score = nan_if_non_finite(result.conformity_score);
     (*out).n_calibration = result.n_calibration;
+    (*out).calibration_insufficient = result.calibration_insufficient;
 
     let method_str = result.method.to_string();
     let method_bytes = method_str.as_bytes();

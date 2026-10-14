@@ -207,7 +207,7 @@ true
 query I
 SELECT STRING_AGG(column_name, ',') FROM (DESCRIBE SELECT * FROM ts_conformal_calibrate('cbt', g, actual, forecast) LIMIT 0);
 ----
-group_col,method,conformity_score,coverage,nominal_level,n_calibration
+group_col,method,conformity_score,coverage,nominal_level,n_calibration,calibration_insufficient
 
 # --- asymmetric is rejected: two margins cannot collapse into one score ---
 statement error
@@ -305,3 +305,147 @@ query I
 SELECT STRING_AGG(column_name, ',') FROM (DESCRIBE SELECT * FROM ts_interval_width_by('iw', grp, ds, lo, up) LIMIT 0);
 ----
 group_col,mean_width,n_intervals
+
+# =============================================================================
+# 16-02 split insufficiency / alpha / non-finite (Task 1 tracer)
+# =============================================================================
+#
+# Literals copied from validation/reference/fixtures/conformal/split_cases.json via:
+#   python3 -c "import json; d=json.load(open('validation/reference/fixtures/conformal/split_cases.json')); print(d['insufficient_n5'])"
+#   python3 -c "import json; d=json.load(open('validation/reference/fixtures/conformal/split_cases.json')); print(d['nan_filtered'])"
+
+statement ok
+CREATE TABLE c5(g VARCHAR, d INTEGER, a DOUBLE, f DOUBLE, p DOUBLE);
+
+statement ok
+INSERT INTO c5 VALUES
+  ('g', 0, 101.0, 100.0, NULL),
+  ('g', 1, 102.0, 100.0, NULL),
+  ('g', 2, 103.0, 100.0, NULL),
+  ('g', 3, 104.0, 100.0, NULL),
+  ('g', 4, 105.0, 100.0, NULL),
+  ('g', 9, NULL, NULL, 10.0);
+
+# --- alpha 0.1 (default): ceil(6*0.9)=6 > 5 -> insufficient. NULL bounds,
+# NULL conformity_score/coverage, calibration_insufficient true, n_calibration
+# 5, point is STILL returned (not NULL) ---
+query I
+SELECT point = 10.0 AND lower IS NULL AND upper IS NULL AND conformity_score IS NULL AND coverage IS NULL
+    AND calibration_insufficient AND n_calibration = 5
+FROM ts_conformal_by('c5', g, d, a, f, p);
+----
+true
+
+# --- alpha 0.2: ceil(6*0.8)=5 <= 5 -> sufficient, conformity_score 5.0
+# (previously the clamped maximum; now the same value but via the unclamped
+# formula), coverage 1.0, flag false ---
+query I
+SELECT ABS(conformity_score - 5.0) < 1e-9 AND ABS(coverage - 1.0) < 1e-9 AND NOT calibration_insufficient
+FROM ts_conformal_by('c5', g, d, a, f, p, params := {'alpha': 0.2});
+----
+true
+
+# --- the same two cases through ts_conformal_calibrate ---
+query I
+SELECT conformity_score IS NULL AND coverage IS NULL AND calibration_insufficient AND n_calibration = 5
+FROM ts_conformal_calibrate('c5', g, a, f);
+----
+true
+
+query I
+SELECT ABS(conformity_score - 5.0) < 1e-9 AND ABS(coverage - 1.0) < 1e-9 AND NOT calibration_insufficient
+FROM ts_conformal_calibrate('c5', g, a, f, params := {'alpha': 0.2});
+----
+true
+
+# --- ts_conformal_quantile: insufficient -> NULL (not the old clamped max) ---
+query I
+SELECT ts_conformal_quantile([1.0, 2.0, 3.0, 4.0, 5.0]::DOUBLE[], 0.1) IS NULL;
+----
+true
+
+# --- ts_conformal_quantile: n=1, alpha=0.5 is sufficient (ceil(2*0.5)=1<=1) -> 2.5 ---
+query I
+SELECT ts_conformal_quantile([2.5]::DOUBLE[], 0.5);
+----
+2.5
+
+# --- alpha outside (0, 1) is an SQL error naming the value, from every surface ---
+statement error
+SELECT * FROM ts_conformal_by('c5', g, d, a, f, p, params := {'alpha': 0});
+----
+alpha must be in (0, 1), got
+
+statement error
+SELECT ts_conformal_quantile([1.0, 2.0, 3.0]::DOUBLE[], 0.0);
+----
+alpha must be in (0, 1), got
+
+statement error
+SELECT ts_conformal_quantile([1.0, 2.0, 3.0]::DOUBLE[], 1.0);
+----
+alpha must be in (0, 1), got
+
+statement error
+SELECT ts_conformal_quantile([1.0, 2.0, 3.0]::DOUBLE[], 1.5);
+----
+alpha must be in (0, 1), got
+
+# --- non-finite residuals are filtered before any quantile (nan_filtered:
+# two_group A's 20 pairs with actual[3] NULL and forecast[7] infinite ->
+# n_calibration 18, conformity_score 2.0 at alpha 0.1) ---
+statement ok
+CREATE TABLE cnan(g VARCHAR, d INTEGER, a DOUBLE, f DOUBLE, p DOUBLE);
+
+statement ok
+INSERT INTO cnan VALUES
+  ('g', 0, 100.1, 100.0, NULL),
+  ('g', 1, 99.8, 100.0, NULL),
+  ('g', 2, 100.3, 100.0, NULL),
+  ('g', 3, NULL, 100.0, NULL),
+  ('g', 4, 100.5, 100.0, NULL),
+  ('g', 5, 99.4, 100.0, NULL),
+  ('g', 6, 100.7, 100.0, NULL),
+  ('g', 7, 99.2, 'Infinity'::DOUBLE, NULL),
+  ('g', 8, 100.9, 100.0, NULL),
+  ('g', 9, 99.0, 100.0, NULL),
+  ('g', 10, 101.1, 100.0, NULL),
+  ('g', 11, 98.8, 100.0, NULL),
+  ('g', 12, 101.3, 100.0, NULL),
+  ('g', 13, 98.6, 100.0, NULL),
+  ('g', 14, 101.5, 100.0, NULL),
+  ('g', 15, 98.4, 100.0, NULL),
+  ('g', 16, 101.7, 100.0, NULL),
+  ('g', 17, 98.2, 100.0, NULL),
+  ('g', 18, 101.9, 100.0, NULL),
+  ('g', 19, 98.0, 100.0, NULL),
+  ('g', 99, NULL, NULL, 10.0);
+
+query I
+SELECT n_calibration = 18 AND ABS(conformity_score - 2.0) < 1e-9
+FROM ts_conformal_by('cnan', g, d, a, f, p);
+----
+true
+
+# --- all_nan through ts_conformal_calibrate: n_calibration 0, insufficient,
+# conformity_score NULL ---
+statement ok
+CREATE TABLE call_nan(g VARCHAR, a DOUBLE, f DOUBLE);
+
+statement ok
+INSERT INTO call_nan VALUES ('g', NULL, 100.0), ('g', NULL, 100.0), ('g', NULL, 100.0), ('g', NULL, 100.0);
+
+query I
+SELECT n_calibration = 0 AND calibration_insufficient AND conformity_score IS NULL
+FROM ts_conformal_calibrate('call_nan', g, a, f);
+----
+true
+
+# --- a residual list containing 'Infinity' gives the same ts_conformal_quantile
+# as the list without it (non-finite filtered, never panics) ---
+query I
+SELECT
+    ts_conformal_quantile([1.0, 2.0, 3.0]::DOUBLE[], 0.5) =
+    ts_conformal_quantile([1.0, 2.0, 3.0, 'Infinity'::DOUBLE]::DOUBLE[], 0.5);
+----
+true

@@ -1765,6 +1765,7 @@ SELECT
     (conf_result).nominal_level AS nominal_level,
     (conf_result).conformity_score AS conformity_score,
     (conf_result).n_calibration AS n_calibration,
+    (conf_result).calibration_insufficient AS calibration_insufficient,
     (conf_result).method AS method
 FROM conformal_calc
 )",
@@ -1822,7 +1823,8 @@ SELECT
     (cal_result).conformity_score AS conformity_score,
     (cal_result).coverage AS coverage,
     (cal_result).nominal_level AS nominal_level,
-    (cal_result).n_calibration AS n_calibration
+    (cal_result).n_calibration AS n_calibration,
+    (cal_result).calibration_insufficient AS calibration_insufficient
 FROM calibrated
 )",
     "Calibrates a conformal predictor per group (or pooled on request) and returns the calibration profile for reuse.",

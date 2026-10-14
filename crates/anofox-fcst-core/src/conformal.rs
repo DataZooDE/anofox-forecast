@@ -51,6 +51,45 @@
 use crate::error::{ForecastError, Result};
 use crate::missing;
 
+/// Validates that `alpha` is strictly inside `(0, 1)` (Phase 16 D-06).
+///
+/// `NaN` fails (`NaN > 0.0` is `false`, so the range check alone rejects it
+/// without a separate `is_nan()` branch). Used on every conformal surface
+/// that takes a miscoverage rate, so an out-of-range alpha is always an
+/// `InvalidInput` error naming the value, never a silent clamp or NULL.
+pub(crate) fn validate_alpha(alpha: f64) -> Result<()> {
+    if alpha > 0.0 && alpha < 1.0 {
+        Ok(())
+    } else {
+        Err(ForecastError::InvalidInput(format!(
+            "alpha must be in (0, 1), got {}",
+            alpha
+        )))
+    }
+}
+
+/// The finite-sample split-conformal quantile LEVEL for `n` calibration
+/// residuals at miscoverage rate `alpha` (Phase 16 D-05/G12).
+///
+/// `k = ceil((n + 1) * (1 - alpha))` computed in `f64` in exactly that
+/// order (matches numpy's equivalent expression in the reference fixture).
+/// Returns `None` when `n == 0` or `k > n` -- no finite-sample interval
+/// exists at this `(n, alpha)`, so the caller must report an unbounded
+/// (infinite) conformity score instead of clamping the level into `[0, 1]`.
+/// Otherwise returns `Some(k / n)`.
+fn finite_sample_level(n: usize, alpha: f64) -> Option<f64> {
+    if n == 0 {
+        return None;
+    }
+    let nf = n as f64;
+    let k = ((nf + 1.0) * (1.0 - alpha)).ceil();
+    if k > nf {
+        None
+    } else {
+        Some(k / nf)
+    }
+}
+
 /// Result of conformal prediction containing intervals and metadata.
 #[derive(Debug, Clone)]
 pub struct ConformalResult {
@@ -71,10 +110,15 @@ pub struct ConformalResult {
     /// The computed conformity score (quantile threshold)
     pub conformity_score: f64,
     /// Number of calibration residuals actually used (after dropping
-    /// missing/incomplete pairs).
+    /// missing/incomplete pairs AND non-finite residuals, Phase 16 D-06).
     pub n_calibration: usize,
     /// Method used for conformal prediction
     pub method: String,
+    /// `true` when no finite-sample interval exists at this `(n_calibration,
+    /// alpha)` -- `ceil((n+1)(1-alpha)) > n` (Phase 16 D-05/G12). When set,
+    /// `conformity_score` is `f64::INFINITY`, `lower`/`upper` are
+    /// `f64::NEG_INFINITY`/`f64::INFINITY`, and `coverage` is `f64::NAN`.
+    pub calibration_insufficient: bool,
 }
 
 /// Result of conformal prediction with multiple coverage levels.
@@ -126,34 +170,28 @@ pub struct ConformalInterval {
 /// assert!(q > 0.0);
 /// ```
 pub fn conformal_quantile(residuals: &[f64], alpha: f64) -> Result<f64> {
-    if residuals.is_empty() {
-        return Err(ForecastError::InsufficientData { needed: 1, got: 0 });
+    validate_alpha(alpha)?;
+
+    // Phase 16 D-06/G16: non-finite residuals (NaN, +/-inf) are filtered
+    // before any quantile is taken -- never sorted with an unwrapped
+    // `partial_cmp`, which would panic on NaN.
+    let mut abs_residuals: Vec<f64> = residuals
+        .iter()
+        .copied()
+        .filter(|r| r.is_finite())
+        .map(|r| r.abs())
+        .collect();
+    abs_residuals.sort_by(f64::total_cmp);
+
+    // Phase 16 D-05/G12: when ceil((n+1)(1-alpha)) > n, no finite-sample
+    // interval exists at this (n, alpha) -- report an unbounded (infinite)
+    // conformity score instead of clamping the quantile level into [0, 1].
+    // An empty (or all-non-finite) residual pool is `n == 0`, always
+    // insufficient, and no longer an error.
+    match finite_sample_level(abs_residuals.len(), alpha) {
+        None => Ok(f64::INFINITY),
+        Some(level) => Ok(compute_quantile(&abs_residuals, level)),
     }
-
-    if !(0.0..1.0).contains(&alpha) {
-        return Err(ForecastError::InvalidInput(
-            "Alpha must be between 0 and 1 (exclusive)".to_string(),
-        ));
-    }
-
-    // Compute absolute residuals (conformity scores)
-    let mut abs_residuals: Vec<f64> = residuals.iter().map(|r| r.abs()).collect();
-
-    // Sort for quantile computation
-    abs_residuals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-
-    // Compute the quantile index using the finite-sample correction
-    // q = ceil((n+1)(1-alpha)) / n
-    let n = abs_residuals.len() as f64;
-    let quantile_level = ((n + 1.0) * (1.0 - alpha)).ceil() / n;
-
-    // Clamp to valid range [0, 1]
-    let quantile_level = quantile_level.clamp(0.0, 1.0);
-
-    // Compute quantile using linear interpolation
-    let quantile = compute_quantile(&abs_residuals, quantile_level);
-
-    Ok(quantile)
 }
 
 /// Applies a conformity score to point forecasts to create prediction intervals.
@@ -217,20 +255,37 @@ pub fn conformal_predict(
     alpha: f64,
 ) -> Result<ConformalResult> {
     let conformity_score = conformal_quantile(residuals, alpha)?;
-    let (lower, upper) = conformal_intervals(forecasts, conformity_score);
 
-    // Phase 16 D-02: `coverage` is the EMPIRICAL coverage on the calibration
-    // residuals themselves (fraction of |residual| <= conformity_score), not
-    // the requested level. The requested level is `nominal_level`.
-    let n_calibration = residuals.len();
-    let coverage = if n_calibration == 0 {
-        f64::NAN
+    // Phase 16 D-06: `n_calibration` is the count of FINITE residuals --
+    // the same population `conformal_quantile` computed its level over.
+    let n_calibration = residuals.iter().filter(|r| r.is_finite()).count();
+    let calibration_insufficient = !conformity_score.is_finite();
+
+    let (lower, upper, coverage) = if calibration_insufficient {
+        // Phase 16 D-05/G12: no finite-sample interval exists -- unbounded,
+        // never clamped to the max residual.
+        (
+            vec![f64::NEG_INFINITY; forecasts.len()],
+            vec![f64::INFINITY; forecasts.len()],
+            f64::NAN,
+        )
     } else {
-        residuals
-            .iter()
-            .filter(|r| r.abs() <= conformity_score)
-            .count() as f64
-            / n_calibration as f64
+        let (lower, upper) = conformal_intervals(forecasts, conformity_score);
+        // Phase 16 D-02: `coverage` is the EMPIRICAL coverage on the
+        // calibration residuals themselves (fraction of |residual| <=
+        // conformity_score), not the requested level. The requested level
+        // is `nominal_level`.
+        let coverage = if n_calibration == 0 {
+            f64::NAN
+        } else {
+            residuals
+                .iter()
+                .filter(|r| r.is_finite())
+                .filter(|r| r.abs() <= conformity_score)
+                .count() as f64
+                / n_calibration as f64
+        };
+        (lower, upper, coverage)
     };
 
     Ok(ConformalResult {
@@ -242,6 +297,7 @@ pub fn conformal_predict(
         conformity_score,
         n_calibration,
         method: "split_conformal".to_string(),
+        calibration_insufficient,
     })
 }
 
@@ -383,6 +439,10 @@ pub fn conformal_predict_adaptive(
         conformity_score: base_score,
         n_calibration,
         method: "adaptive_conformal".to_string(),
+        // Phase 16 D-08 (plan 16-02) reworks adaptive's insufficiency
+        // reporting; this entry point still delegates to the pre-16-02
+        // `conformal_quantile` base score here.
+        calibration_insufficient: !base_score.is_finite(),
     })
 }
 
@@ -474,6 +534,9 @@ pub fn conformal_predict_asymmetric(
         conformity_score: avg_margin,
         n_calibration,
         method: "asymmetric_conformal".to_string(),
+        // Phase 16 D-07 (plan 16-02) reworks asymmetric's margin
+        // construction and insufficiency reporting.
+        calibration_insufficient: false,
     })
 }
 
@@ -560,6 +623,10 @@ pub struct ConformalCalibration {
     /// Number of calibration residuals actually used (after dropping
     /// incomplete/missing pairs).
     pub n_calibration: usize,
+    /// `true` when no finite-sample interval exists at this
+    /// `(n_calibration, alpha)` (Phase 16 D-05/G12); see
+    /// `ConformalResult::calibration_insufficient`.
+    pub calibration_insufficient: bool,
 }
 
 /// Calibrates a conformal predictor from per-row `(actual, forecast)` pairs,
@@ -597,6 +664,7 @@ pub fn conformal_calibrate(
         coverage: result.coverage,
         nominal_level: result.nominal_level,
         n_calibration: result.n_calibration,
+        calibration_insufficient: result.calibration_insufficient,
     })
 }
 
@@ -1390,9 +1458,80 @@ mod tests {
     }
 
     #[test]
-    fn test_conformal_quantile_empty() {
+    fn test_validate_alpha_rejects_boundary_and_nan() {
+        for bad in [0.0, 1.0, -0.1, 1.5, f64::NAN] {
+            let err = validate_alpha(bad).unwrap_err();
+            assert!(
+                err.to_string().contains("alpha must be in (0, 1), got"),
+                "alpha={bad}: {err}"
+            );
+        }
+        assert!(validate_alpha(0.1).is_ok());
+        assert!(validate_alpha(0.5).is_ok());
+    }
+
+    #[test]
+    fn test_conformal_quantile_rejects_alpha_zero_naming_value() {
+        let residuals = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let err = conformal_quantile(&residuals, 0.0).unwrap_err();
+        assert!(err.to_string().contains("alpha must be in (0, 1), got 0"));
+    }
+
+    #[test]
+    fn test_conformal_quantile_insufficient_n5_alpha_0_1() {
+        // ceil(6 * 0.9) = 6 > 5 -> insufficient.
+        let residuals = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let q = conformal_quantile(&residuals, 0.1).unwrap();
+        assert!(q.is_infinite());
+    }
+
+    #[test]
+    fn test_conformal_quantile_sufficient_n5_alpha_0_2() {
+        // ceil(6 * 0.8) = 5 <= 5 -> sufficient, level = 1.0 -> max residual.
+        let residuals = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let q = conformal_quantile(&residuals, 0.2).unwrap();
+        assert_relative_eq!(q, 5.0, epsilon = 1e-9);
+    }
+
+    #[test]
+    fn test_conformal_quantile_filters_non_finite_without_panicking() {
+        let residuals = vec![1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 2.0, 3.0];
+        // Only [1.0, 2.0, 3.0] are finite -> same as calling with just those.
+        let with_non_finite = conformal_quantile(&residuals, 0.5).unwrap();
+        let finite_only = conformal_quantile(&[1.0, 2.0, 3.0], 0.5).unwrap();
+        assert_relative_eq!(with_non_finite, finite_only, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn test_conformal_predict_insufficient_reports_unbounded() {
+        let residuals = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let forecasts = vec![10.0];
+        let result = conformal_predict(&residuals, &forecasts, 0.1).unwrap();
+        assert!(result.calibration_insufficient);
+        assert!(result.conformity_score.is_infinite());
+        assert!(result.lower[0].is_infinite() && result.lower[0] < 0.0);
+        assert!(result.upper[0].is_infinite() && result.upper[0] > 0.0);
+        assert!(result.coverage.is_nan());
+        assert_eq!(result.n_calibration, 5);
+    }
+
+    #[test]
+    fn test_conformal_predict_sufficient_is_not_flagged() {
+        let residuals = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let forecasts = vec![10.0];
+        let result = conformal_predict(&residuals, &forecasts, 0.2).unwrap();
+        assert!(!result.calibration_insufficient);
+        assert_relative_eq!(result.conformity_score, 5.0, epsilon = 1e-9);
+        assert_relative_eq!(result.coverage, 1.0, epsilon = 1e-9);
+    }
+
+    #[test]
+    fn test_conformal_quantile_empty_is_insufficient_not_error() {
+        // Phase 16 D-05: an empty residual pool is n=0, always insufficient,
+        // and no longer an error -- it reports an infinite (unbounded) score.
         let residuals: Vec<f64> = vec![];
-        assert!(conformal_quantile(&residuals, 0.1).is_err());
+        let q = conformal_quantile(&residuals, 0.1).unwrap();
+        assert!(q.is_infinite() && q > 0.0);
     }
 
     #[test]

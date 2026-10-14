@@ -1628,6 +1628,11 @@ pub struct ConformalResultFFI {
     pub n_calibration: size_t,
     /// Method used for conformal prediction
     pub method: [c_char; 32],
+    /// `true` when no finite-sample interval exists at this
+    /// `(n_calibration, alpha)` (Phase 16 D-05/G12). When set,
+    /// `conformity_score`/`coverage` are NaN and every `lower`/`upper`
+    /// entry is NaN (unbounded).
+    pub calibration_insufficient: bool,
 }
 
 impl Default for ConformalResultFFI {
@@ -1642,6 +1647,7 @@ impl Default for ConformalResultFFI {
             conformity_score: 0.0,
             n_calibration: 0,
             method: [0; 32],
+            calibration_insufficient: false,
         }
     }
 }
@@ -1661,6 +1667,10 @@ pub struct ConformalCalibrationFFI {
     pub n_calibration: size_t,
     /// Method used for calibration ("symmetric" or "adaptive").
     pub method: [c_char; 32],
+    /// `true` when no finite-sample interval exists at this
+    /// `(n_calibration, alpha)` (Phase 16 D-05/G12); see
+    /// `ConformalResultFFI::calibration_insufficient`.
+    pub calibration_insufficient: bool,
 }
 
 impl Default for ConformalCalibrationFFI {
@@ -1671,6 +1681,7 @@ impl Default for ConformalCalibrationFFI {
             conformity_score: 0.0,
             n_calibration: 0,
             method: [0; 32],
+            calibration_insufficient: false,
         }
     }
 }

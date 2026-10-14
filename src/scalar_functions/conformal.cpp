@@ -11,6 +11,13 @@
 
 namespace duckdb {
 
+// Writes `value` into row `row_idx` of a DOUBLE result child, or SQL NULL if
+// `value` is NaN (Phase 16: coverage/conformity_score can be NaN when
+// calibration is insufficient or there is no calibration data at all).
+// Forward-declared here (defined below, near the from-pairs/calibrate
+// internal functions) so every conformal scalar can share it.
+static void WriteDoubleOrNull(Vector &vec, idx_t row_idx, double value);
+
 // ============================================================================
 // ts_conformal_quantile - Compute conformity score from residuals
 // ts_conformal_quantile(residuals[], alpha) -> DOUBLE
@@ -46,6 +53,16 @@ static void TsConformalQuantileFunction(DataChunk &args, ExpressionState &state,
         );
 
         if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_conformal_quantile: %s", error.message);
+            }
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+
+        // Phase 16 D-05: an insufficient calibration set reports NaN here
+        // (unbounded quantile) -- surface it as SQL NULL, not NaN.
+        if (std::isnan(quantile_result)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -226,6 +243,7 @@ static void TsConformalPredictFunction(DataChunk &args, ExpressionState &state, 
     auto &method_vec = *struct_entries[5];
     auto &nominal_level_vec = *struct_entries[6];
     auto &n_calibration_vec = *struct_entries[7];
+    auto &calibration_insufficient_vec = *struct_entries[8];
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (residuals_reader.IsNull(row_idx) || forecasts_reader.IsNull(row_idx) ||
@@ -251,6 +269,9 @@ static void TsConformalPredictFunction(DataChunk &args, ExpressionState &state, 
         );
 
         if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_conformal_predict: %s", error.message);
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -260,11 +281,12 @@ static void TsConformalPredictFunction(DataChunk &args, ExpressionState &state, 
         WriteDoubleListNanAsNull(upper_vec, row_idx, conf_result.upper, conf_result.n_forecasts);
 
         // Scalar fields
-        FlatVector::GetData<double>(coverage_vec)[row_idx] = conf_result.coverage;
-        FlatVector::GetData<double>(score_vec)[row_idx] = conf_result.conformity_score;
+        WriteDoubleOrNull(coverage_vec, row_idx, conf_result.coverage);
+        WriteDoubleOrNull(score_vec, row_idx, conf_result.conformity_score);
         FlatVector::GetData<string_t>(method_vec)[row_idx] = StringVector::AddString(method_vec, conf_result.method);
         FlatVector::GetData<double>(nominal_level_vec)[row_idx] = conf_result.nominal_level;
         FlatVector::GetData<int64_t>(n_calibration_vec)[row_idx] = (int64_t)conf_result.n_calibration;
+        FlatVector::GetData<bool>(calibration_insufficient_vec)[row_idx] = conf_result.calibration_insufficient;
 
         // Free FFI memory
         anofox_free_conformal_result(&conf_result);
@@ -281,6 +303,7 @@ void RegisterTsConformalPredictFunction(ExtensionLoader &loader) {
     struct_children.push_back(make_pair("method", LogicalType(LogicalTypeId::VARCHAR)));
     struct_children.push_back(make_pair("nominal_level", LogicalType(LogicalTypeId::DOUBLE)));
     struct_children.push_back(make_pair("n_calibration", LogicalType(LogicalTypeId::BIGINT)));
+    struct_children.push_back(make_pair("calibration_insufficient", LogicalType(LogicalTypeId::BOOLEAN)));
     auto result_type = LogicalType::STRUCT(std::move(struct_children));
 
     ScalarFunctionSet ts_cp_set("ts_conformal_predict");
@@ -354,6 +377,7 @@ static void TsConformalPredictAsymmetricFunction(DataChunk &args, ExpressionStat
     auto &method_vec = *struct_entries[5];
     auto &nominal_level_vec = *struct_entries[6];
     auto &n_calibration_vec = *struct_entries[7];
+    auto &calibration_insufficient_vec = *struct_entries[8];
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (residuals_reader.IsNull(row_idx) || forecasts_reader.IsNull(row_idx) ||
@@ -379,6 +403,9 @@ static void TsConformalPredictAsymmetricFunction(DataChunk &args, ExpressionStat
         );
 
         if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_conformal_predict_asymmetric: %s", error.message);
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -388,11 +415,12 @@ static void TsConformalPredictAsymmetricFunction(DataChunk &args, ExpressionStat
         WriteDoubleListNanAsNull(upper_vec, row_idx, conf_result.upper, conf_result.n_forecasts);
 
         // Scalar fields
-        FlatVector::GetData<double>(coverage_vec)[row_idx] = conf_result.coverage;
-        FlatVector::GetData<double>(score_vec)[row_idx] = conf_result.conformity_score;
+        WriteDoubleOrNull(coverage_vec, row_idx, conf_result.coverage);
+        WriteDoubleOrNull(score_vec, row_idx, conf_result.conformity_score);
         FlatVector::GetData<string_t>(method_vec)[row_idx] = StringVector::AddString(method_vec, conf_result.method);
         FlatVector::GetData<double>(nominal_level_vec)[row_idx] = conf_result.nominal_level;
         FlatVector::GetData<int64_t>(n_calibration_vec)[row_idx] = (int64_t)conf_result.n_calibration;
+        FlatVector::GetData<bool>(calibration_insufficient_vec)[row_idx] = conf_result.calibration_insufficient;
 
         // Free FFI memory
         anofox_free_conformal_result(&conf_result);
@@ -409,6 +437,7 @@ void RegisterTsConformalPredictAsymmetricFunction(ExtensionLoader &loader) {
     struct_children.push_back(make_pair("method", LogicalType(LogicalTypeId::VARCHAR)));
     struct_children.push_back(make_pair("nominal_level", LogicalType(LogicalTypeId::DOUBLE)));
     struct_children.push_back(make_pair("n_calibration", LogicalType(LogicalTypeId::BIGINT)));
+    struct_children.push_back(make_pair("calibration_insufficient", LogicalType(LogicalTypeId::BOOLEAN)));
     auto result_type = LogicalType::STRUCT(std::move(struct_children));
 
     ScalarFunctionSet ts_cpa_set("ts_conformal_predict_asymmetric");
@@ -1289,7 +1318,8 @@ void RegisterTsConformalPredictPerStepFunction(ExtensionLoader &loader) {
 
 // Writes `value` into row `row_idx` of a DOUBLE result child, or SQL NULL if
 // `value` is NaN (Phase 16: coverage/conformity_score can be NaN when there
-// is no calibration data at all).
+// is no calibration data at all, OR when calibration is insufficient --
+// D-05/G12).
 static void WriteDoubleOrNull(Vector &vec, idx_t row_idx, double value) {
     if (std::isnan(value)) {
         FlatVector::SetNull(vec, row_idx, true);
@@ -1324,6 +1354,7 @@ static void TsConformalFromPairsFunction(DataChunk &args, ExpressionState &state
     auto &score_out = *struct_entries[5];
     auto &n_calibration_out = *struct_entries[6];
     auto &method_out = *struct_entries[7];
+    auto &calibration_insufficient_out = *struct_entries[8];
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (cal_actuals_reader.IsNull(row_idx) || cal_forecasts_reader.IsNull(row_idx) ||
@@ -1370,6 +1401,7 @@ static void TsConformalFromPairsFunction(DataChunk &args, ExpressionState &state
         WriteDoubleOrNull(score_out, row_idx, conf_result.conformity_score);
         FlatVector::GetData<int64_t>(n_calibration_out)[row_idx] = (int64_t)conf_result.n_calibration;
         FlatVector::GetData<string_t>(method_out)[row_idx] = StringVector::AddString(method_out, conf_result.method);
+        FlatVector::GetData<bool>(calibration_insufficient_out)[row_idx] = conf_result.calibration_insufficient;
 
         anofox_free_conformal_result(&conf_result);
     }
@@ -1395,6 +1427,7 @@ static void TsConformalCalibrateFromPairsFunction(DataChunk &args, ExpressionSta
     auto &coverage_out = *struct_entries[2];
     auto &nominal_level_out = *struct_entries[3];
     auto &n_calibration_out = *struct_entries[4];
+    auto &calibration_insufficient_out = *struct_entries[5];
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (actuals_reader.IsNull(row_idx) || forecasts_reader.IsNull(row_idx) ||
@@ -1434,6 +1467,7 @@ static void TsConformalCalibrateFromPairsFunction(DataChunk &args, ExpressionSta
         WriteDoubleOrNull(coverage_out, row_idx, cal_result.coverage);
         FlatVector::GetData<double>(nominal_level_out)[row_idx] = cal_result.nominal_level;
         FlatVector::GetData<int64_t>(n_calibration_out)[row_idx] = (int64_t)cal_result.n_calibration;
+        FlatVector::GetData<bool>(calibration_insufficient_out)[row_idx] = cal_result.calibration_insufficient;
     }
 }
 
@@ -1448,6 +1482,7 @@ void RegisterTsConformalFromPairsFunction(ExtensionLoader &loader) {
         struct_children.push_back(make_pair("conformity_score", LogicalType(LogicalTypeId::DOUBLE)));
         struct_children.push_back(make_pair("n_calibration", LogicalType(LogicalTypeId::BIGINT)));
         struct_children.push_back(make_pair("method", LogicalType(LogicalTypeId::VARCHAR)));
+        struct_children.push_back(make_pair("calibration_insufficient", LogicalType(LogicalTypeId::BOOLEAN)));
         auto result_type = LogicalType::STRUCT(std::move(struct_children));
 
         ScalarFunction from_pairs_func(
@@ -1472,6 +1507,7 @@ void RegisterTsConformalFromPairsFunction(ExtensionLoader &loader) {
         struct_children.push_back(make_pair("coverage", LogicalType(LogicalTypeId::DOUBLE)));
         struct_children.push_back(make_pair("nominal_level", LogicalType(LogicalTypeId::DOUBLE)));
         struct_children.push_back(make_pair("n_calibration", LogicalType(LogicalTypeId::BIGINT)));
+        struct_children.push_back(make_pair("calibration_insufficient", LogicalType(LogicalTypeId::BOOLEAN)));
         auto result_type = LogicalType::STRUCT(std::move(struct_children));
 
         ScalarFunction calibrate_func(

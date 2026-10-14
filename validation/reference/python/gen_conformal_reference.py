@@ -58,6 +58,44 @@ def split_calibration(residuals: list[float], alpha: float) -> dict:
     }
 
 
+def split_calibration_v2(residuals: list[float], alpha: float) -> dict:
+    """Finite-sample split-conformal calibration (Phase 16 D-05/D-06 plan
+    16-02): non-finite residuals (NaN/+-inf) are dropped BEFORE taking
+    absolute values, and `k = ceil((n + 1) * (1 - alpha)) > n` (including
+    `n == 0`) is reported as an explicit `calibration_insufficient` flag --
+    never clamped to the max residual. `conformity_score`/`coverage` are
+    `None` (-> JSON null -> Rust/SQL NaN/NULL) when insufficient."""
+    arr = np.asarray(residuals, dtype=np.float64)
+    finite = arr[np.isfinite(arr)]
+    abs_r = np.abs(finite)
+    n = int(abs_r.shape[0])
+    insufficient = n == 0
+    k = None
+    if not insufficient:
+        k = math.ceil((n + 1) * (1.0 - alpha))
+        insufficient = k > n
+
+    if insufficient:
+        return {
+            "conformity_score": None,
+            "coverage": None,
+            "nominal_level": 1.0 - alpha,
+            "n_calibration": n,
+            "calibration_insufficient": True,
+        }
+
+    level = k / n
+    conformity_score = float(np.quantile(abs_r, level, method="linear"))
+    coverage = float(np.mean(abs_r <= conformity_score))
+    return {
+        "conformity_score": conformity_score,
+        "coverage": coverage,
+        "nominal_level": 1.0 - alpha,
+        "n_calibration": n,
+        "calibration_insufficient": False,
+    }
+
+
 def build_two_group() -> dict:
     cal_dates = [date_str((2024, 1, 1), i) for i in range(20)]
     future_dates = [date_str((2024, 2, 1), i) for i in range(3)]
@@ -130,10 +168,101 @@ def build_interval_width() -> dict:
     }
 
 
+def build_insufficient_n5() -> dict:
+    """5 calibration pairs, residuals 1..5: alpha 0.1 -> insufficient
+    (ceil(6*0.9)=6 > 5); alpha 0.2 -> q 5.0, coverage 1.0 (ceil(6*0.8)=5 <= 5,
+    level 1.0 -> max)."""
+    actual = [101.0, 102.0, 103.0, 104.0, 105.0]
+    forecast = [100.0] * 5
+    residuals = [a - f for a, f in zip(actual, forecast)]
+    alphas_out = {str(a): split_calibration_v2(residuals, a) for a in [0.1, 0.2]}
+    return {
+        "actual": actual,
+        "forecast": forecast,
+        "future_point": [10.0],
+        "alphas": alphas_out,
+    }
+
+
+def build_n1() -> dict:
+    """One calibration pair, residual 2.5: alpha 0.5 -> q 2.5 (ceil(2*0.5)=1
+    <= 1); alpha 0.4 -> insufficient (ceil(2*0.6)=2 > 1)."""
+    actual = [102.5]
+    forecast = [100.0]
+    residuals = [a - f for a, f in zip(actual, forecast)]
+    alphas_out = {str(a): split_calibration_v2(residuals, a) for a in [0.4, 0.5]}
+    return {"actual": actual, "forecast": forecast, "alphas": alphas_out}
+
+
+def build_n0() -> dict:
+    """Zero calibration pairs: always insufficient regardless of alpha."""
+    alphas_out = {str(a): split_calibration_v2([], a) for a in [0.1, 0.5]}
+    return {"alphas": alphas_out}
+
+
+def build_all_nan() -> dict:
+    """4 pairs whose actuals are all NaN -> n_calibration 0, insufficient."""
+    actual = [float("nan")] * 4
+    forecast = [100.0] * 4
+    residuals = [a - f for a, f in zip(actual, forecast)]
+    alphas_out = {"0.1": split_calibration_v2(residuals, 0.1)}
+    return {"actual": actual, "forecast": forecast, "alphas": alphas_out}
+
+
+def build_nan_filtered() -> dict:
+    """two_group group A's construction (scale 1.0), with actual[3] = NaN
+    (complete_cases drops this pair) and forecast[7] = inf (its residual is
+    then -inf, dropped by the non-finite filter) -> n_calibration 18 out of
+    20 original pairs."""
+    actual = []
+    forecast = []
+    for i in range(20):
+        sign = 1.0 if i % 2 == 0 else -1.0
+        a = 100.0 + 1.0 * (i + 1) * 0.1 * sign
+        f = 100.0
+        actual.append(a)
+        forecast.append(f)
+    actual[3] = float("nan")
+    forecast[7] = float("inf")
+    residuals = [a - f for a, f in zip(actual, forecast)]
+    alphas_out = {"0.1": split_calibration_v2(residuals, 0.1)}
+    return {"actual": actual, "forecast": forecast, "alphas": alphas_out}
+
+
+def build_invalid_alphas() -> list[float]:
+    """alpha values outside (0, 1): D-06 rejects all of these naming the
+    value, never silently defaulting or clamping."""
+    return [0.0, 1.0, -0.1, 1.5]
+
+
+def build_threshold_table() -> list[dict]:
+    """For n = 0..60 and alpha in {0.01, 0.05, 0.1, 0.2, 0.25, 0.5, 0.9}: the
+    insufficiency flag `ceil((n + 1) * (1 - alpha)) > n` (n = 0 always
+    insufficient). Used to assert Rust's finite-sample level helper agrees
+    with numpy for every (n, alpha) combination."""
+    rows = []
+    for n in range(0, 61):
+        for alpha in [0.01, 0.05, 0.1, 0.2, 0.25, 0.5, 0.9]:
+            if n == 0:
+                insufficient = True
+            else:
+                k = math.ceil((n + 1) * (1.0 - alpha))
+                insufficient = k > n
+            rows.append({"n": n, "alpha": alpha, "insufficient": bool(insufficient)})
+    return rows
+
+
 def main() -> None:
     payload = {
         "two_group": build_two_group(),
         "interval_width": build_interval_width(),
+        "insufficient_n5": build_insufficient_n5(),
+        "n1": build_n1(),
+        "n0": build_n0(),
+        "all_nan": build_all_nan(),
+        "nan_filtered": build_nan_filtered(),
+        "invalid_alphas": build_invalid_alphas(),
+        "threshold_table": build_threshold_table(),
         "tolerance": TOLERANCE,
     }
     out_path = write_fixture(

@@ -1491,6 +1491,13 @@ typedef struct ConformalResultFFI {
      * Method used for conformal prediction
      */
     char method[32];
+    /**
+     * `true` when no finite-sample interval exists at this
+     * `(n_calibration, alpha)` (Phase 16 D-05/G12). When set,
+     * `conformity_score`/`coverage` are NaN and every `lower`/`upper`
+     * entry is NaN (unbounded).
+     */
+    bool calibration_insufficient;
 } ConformalResultFFI;
 
 /**
@@ -1519,6 +1526,12 @@ typedef struct ConformalCalibrationFFI {
      * Method used for calibration ("symmetric" or "adaptive").
      */
     char method[32];
+    /**
+     * `true` when no finite-sample interval exists at this
+     * `(n_calibration, alpha)` (Phase 16 D-05/G12); see
+     * `ConformalResultFFI::calibration_insufficient`.
+     */
+    bool calibration_insufficient;
 } ConformalCalibrationFFI;
 
 /**
