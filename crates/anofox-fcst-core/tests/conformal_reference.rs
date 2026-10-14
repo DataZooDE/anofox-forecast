@@ -22,6 +22,7 @@ use anofox_fcst_core::conformal::{
     conformal_predict_adaptive, conformal_predict_asymmetric, conformal_quantile, ConformalMethod,
     ConformalStrategy,
 };
+use anofox_fcst_core::{bootstrap_intervals, bootstrap_quantiles};
 use approx::assert_relative_eq;
 use common::{f64_vec, load_fixture, tolerance};
 use serde_json::Value;
@@ -1095,4 +1096,180 @@ fn adaptive_heteroscedastic_monte_carlo_coverage_matches_numpy() {
             "{ctx} mean_width: got {got_width}, want {want_width}, rel_diff {rel_diff}"
         );
     }
+}
+
+// =========================================================================
+// Phase 16 plan 16-03 (D-10, G2, CONF-01): bootstrap residual sign.
+// `validation/reference/fixtures/bootstrap/lognormal_cases.json` is an
+// INDEPENDENT numpy simulation of the same construction
+// (`anofox_forecast::postprocess::bootstrap::{simulate_paths,
+// extract_quantiles}`) -- not a copy of this crate's own output -- so it
+// catches a sign regression that would otherwise pass a self-consistency
+// check.
+// =========================================================================
+
+/// `mirror_anchor`: 9 zero residuals + one 10.0 (P(drawn 10) = 0.1) make the
+/// 0.05/0.95 order statistics land EXACTLY on 0.0/10.0 regardless of Monte
+/// Carlo noise, on both Rust's StdRng and numpy's PCG64 -- so this is an
+/// exact-equality check, not a tolerance band. Before D-10, the mirrored
+/// sign gave lower=90.0 (the long tail landed on the LOWER side).
+#[test]
+fn bootstrap_mirror_anchor_puts_long_tail_on_upper_side() {
+    let fx = load_fixture("bootstrap/lognormal_cases.json");
+    let case = &fx["mirror_anchor"];
+    let residuals = f64_vec(&case["residuals"]);
+    let point = f64_vec(&case["point"]);
+    let coverage = common::num(&case["coverage"]);
+    let n_paths = common::num(&case["n_paths"]) as usize;
+    let seed = common::num(&case["seed"]) as u64;
+    let want_lower = f64_vec(&case["lower"]);
+    let want_upper = f64_vec(&case["upper"]);
+    assert_eq!(want_lower, vec![100.0]);
+    assert_eq!(want_upper, vec![110.0]);
+
+    let result = bootstrap_intervals(&residuals, &point, n_paths, coverage, Some(seed))
+        .expect("bootstrap_mirror_anchor_puts_long_tail_on_upper_side: bootstrap_intervals failed");
+    assert_eq!(
+        result.lower, want_lower,
+        "mirror_anchor lower must stay at the point forecast (100.0), never mirrored to 90.0"
+    );
+    assert_eq!(
+        result.upper, want_upper,
+        "mirror_anchor upper must carry the long tail (110.0), never mirrored to 100.0"
+    );
+}
+
+/// `lognormal_right`/`lognormal_left`: every step's bound must be within
+/// `bound_rel_width * numpy_width` of numpy's 200,000-path simulation, and
+/// the tail side (`upper - point` vs `point - lower`) must match the
+/// fixture's residual skew direction at EVERY step.
+#[test]
+fn bootstrap_lognormal_right_and_left_match_numpy_tail_side_and_width() {
+    let fx = load_fixture("bootstrap/lognormal_cases.json");
+    let bound_rel_width = tolerance(&fx, "bound_rel_width");
+
+    for (case_name, right_tail) in [("lognormal_right", true), ("lognormal_left", false)] {
+        let case = &fx[case_name];
+        let residuals = f64_vec(&case["residuals"]);
+        let point = f64_vec(&case["point"]);
+        let coverage = common::num(&case["coverage"]);
+        let n_paths = common::num(&case["n_paths"]) as usize;
+        let seed = common::num(&case["seed"]) as u64;
+        let want_lower = f64_vec(&case["lower"]);
+        let want_upper = f64_vec(&case["upper"]);
+
+        let result = bootstrap_intervals(&residuals, &point, n_paths, coverage, Some(seed))
+            .unwrap_or_else(|e| panic!("{case_name}: bootstrap_intervals failed: {e}"));
+
+        assert_eq!(result.point, point, "{case_name}: point forecast unchanged");
+
+        for h in 0..point.len() {
+            let numpy_width = want_upper[h] - want_lower[h];
+            let bound = bound_rel_width * numpy_width;
+            assert!(
+                (result.lower[h] - want_lower[h]).abs() <= bound,
+                "{case_name} step {h} lower: got {}, want {} (numpy), diff exceeds {bound}",
+                result.lower[h],
+                want_lower[h]
+            );
+            assert!(
+                (result.upper[h] - want_upper[h]).abs() <= bound,
+                "{case_name} step {h} upper: got {}, want {} (numpy), diff exceeds {bound}",
+                result.upper[h],
+                want_upper[h]
+            );
+
+            let upper_gap = result.upper[h] - point[h];
+            let lower_gap = point[h] - result.lower[h];
+            if right_tail {
+                assert!(
+                    upper_gap > lower_gap,
+                    "{case_name} step {h}: expected the upper tail to be longer (upper_gap={upper_gap}, lower_gap={lower_gap})"
+                );
+            } else {
+                assert!(
+                    upper_gap < lower_gap,
+                    "{case_name} step {h}: expected the lower tail to be longer (upper_gap={upper_gap}, lower_gap={lower_gap})"
+                );
+            }
+        }
+    }
+}
+
+/// `bootstrap_quantiles` at `[0.05, 0.95]` must agree with
+/// `bootstrap_intervals`'s `lower`/`upper` on the SAME `lognormal_right`
+/// residuals/seed/n_paths/coverage, within the fixture's own tolerance --
+/// both call the identical upstream `simulate_paths`/`extract_quantiles`
+/// machinery on the same RNG draws, but `bootstrap_intervals` derives its
+/// quantile level as `(1.0 - coverage) / 2.0` (`0.049999999999999996` for
+/// `coverage = 0.9`, not bit-identical to the literal `0.05`), which can
+/// shift the selected order-statistic index by one near a tie -- a
+/// tolerance comparison is correct here, not exact equality.
+#[test]
+fn bootstrap_quantiles_agrees_with_bootstrap_intervals_on_lognormal_right() {
+    let fx = load_fixture("bootstrap/lognormal_cases.json");
+    let bound_rel_width = tolerance(&fx, "bound_rel_width");
+    let case = &fx["lognormal_right"];
+    let residuals = f64_vec(&case["residuals"]);
+    let point = f64_vec(&case["point"]);
+    let coverage = common::num(&case["coverage"]);
+    let n_paths = common::num(&case["n_paths"]) as usize;
+    let seed = common::num(&case["seed"]) as u64;
+    let numpy_lower = f64_vec(&case["lower"]);
+    let numpy_upper = f64_vec(&case["upper"]);
+
+    let intervals = bootstrap_intervals(&residuals, &point, n_paths, coverage, Some(seed))
+        .expect("bootstrap_quantiles_agrees_with_bootstrap_intervals_on_lognormal_right: bootstrap_intervals failed");
+    let quantiles = bootstrap_quantiles(&residuals, &point, n_paths, &[0.05, 0.95], Some(seed))
+        .expect("bootstrap_quantiles_agrees_with_bootstrap_intervals_on_lognormal_right: bootstrap_quantiles failed");
+
+    assert_eq!(quantiles.values.len(), 2);
+    for h in 0..point.len() {
+        let numpy_width = numpy_upper[h] - numpy_lower[h];
+        let bound = bound_rel_width * numpy_width;
+        assert!(
+            (quantiles.values[0][h] - intervals.lower[h]).abs() <= bound,
+            "step {h}: bootstrap_quantiles q=0.05 ({}) vs bootstrap_intervals lower ({}) exceeds {bound}",
+            quantiles.values[0][h],
+            intervals.lower[h]
+        );
+        assert!(
+            (quantiles.values[1][h] - intervals.upper[h]).abs() <= bound,
+            "step {h}: bootstrap_quantiles q=0.95 ({}) vs bootstrap_intervals upper ({}) exceeds {bound}",
+            quantiles.values[1][h],
+            intervals.upper[h]
+        );
+    }
+}
+
+/// D-10/G2: before the fix, both bootstrap functions called
+/// `fit(&zeros, residuals)`, storing `0 - residual = -residual` and
+/// mirroring every bound. `fit(residuals, &zeros)` is the correct call
+/// (`fit(forecasts, actuals)` stores `forecasts - actuals`).
+#[test]
+fn bootstrap_rs_calls_fit_with_residuals_first() {
+    let src = std::fs::read_to_string(
+        common::repo_root().join("crates/anofox-fcst-core/src/bootstrap.rs"),
+    )
+    .expect("bootstrap_rs_calls_fit_with_residuals_first: failed to read bootstrap.rs");
+    let non_comment_lines: Vec<&str> = src
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("//"))
+        .collect();
+    let fit_residuals_first = non_comment_lines
+        .iter()
+        .filter(|l| l.contains("fit(residuals"))
+        .count();
+    let fit_zeros_first = non_comment_lines
+        .iter()
+        .filter(|l| l.contains("fit(&zeros"))
+        .count();
+    assert!(
+        fit_residuals_first >= 2,
+        "expected at least 2 non-comment `fit(residuals` call sites, found {fit_residuals_first}"
+    );
+    assert_eq!(
+        fit_zeros_first, 0,
+        "found {fit_zeros_first} non-comment `fit(&zeros` call sites -- the mirrored-sign call must be gone"
+    );
 }

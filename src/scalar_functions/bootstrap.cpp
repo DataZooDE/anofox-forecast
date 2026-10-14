@@ -63,6 +63,9 @@ static void TsBootstrapIntervalsFunction(DataChunk &args, ExpressionState &state
         );
 
         if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_bootstrap_intervals: %s", error.message);
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -197,6 +200,9 @@ static void TsBootstrapQuantilesFunction(DataChunk &args, ExpressionState &state
         );
 
         if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_bootstrap_quantiles: %s", error.message);
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }

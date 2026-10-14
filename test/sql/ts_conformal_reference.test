@@ -703,3 +703,178 @@ statement error
 SELECT ts_conformal_learn([1.0, -2.0]::DOUBLE[], [0.5]::DOUBLE[], 'adaptive', 'split', [0.0, 2.0]::DOUBLE[]);
 ----
 difficulty
+
+# =============================================================================
+# 16-03 bootstrap (Task 1)
+# =============================================================================
+#
+# Literals below are copied from
+# validation/reference/fixtures/bootstrap/lognormal_cases.json via:
+#   python3 -c "import json; d=json.load(open('validation/reference/fixtures/bootstrap/lognormal_cases.json')); print(d['lognormal_right'])"
+#   python3 -c "import json; d=json.load(open('validation/reference/fixtures/bootstrap/lognormal_cases.json')); print(d['lognormal_left'])"
+# tolerance.bound_rel_width = 0.12 (see validation/reference/README.md section 4
+# "bootstrap tolerance rationale" for why 20,000 Rust paths vs 200,000 numpy
+# ground-truth paths needs a looser-than-usual bound on this narrow-horizon,
+# discretely-rounded fixture).
+
+# --- D-10/G2 mirror anchor: 9 zero residuals + one 10.0 (P(drawn 10) = 0.1) --
+# the long tail must land on the UPPER side (lower stays 100.0, upper 110.0),
+# never mirrored to 90.0 / 100.0 ---
+query I
+SELECT (r).lower[1] = 100.0 AND (r).upper[1] = 110.0
+FROM (SELECT ts_bootstrap_intervals([0,0,0,0,0,0,0,0,0,10]::DOUBLE[], [100.0]::DOUBLE[], 2000, 0.9, 42) AS r);
+----
+true
+
+# --- lognormal_right / lognormal_left: cache both results (20000 paths,
+# coverage 0.9, seed 42) in temp tables so each step gets its own assertion
+# (easier to pinpoint a failing step than one large AND-chain) ---
+statement ok
+CREATE TABLE bs_right AS
+SELECT ts_bootstrap_intervals(
+    [-0.9123, -0.911, -0.7584, -0.5502, 1.2222, -0.1979, 0.3441, -0.7384, 1.8372, 1.2669,
+     2.1256, 0.4689, -1.0082, -0.2756, -0.7437, -0.1443, -0.676, -0.6905, -0.6681, 0.2287,
+     1.3459, 0.414, 0.9443, -1.0083, 0.0687, 0.1458, 0.6169, -1.076, -0.2902, 0.3261,
+     -0.3248, -0.7844, 0.1712, -0.4579, -0.7097, -0.6372, -0.3706, -0.6975, -0.2795, 0.3279,
+     0.7386, -0.5869, -0.8973, -0.4626, 0.2331, 0.05, -0.1903, -0.3913, -0.414, -0.556,
+     0.1123, -0.9122, 0.1252, 5.4901, -0.3937, -0.2203, -0.2217, -0.4062, 1.6123, 0.3446
+    ]::DOUBLE[],
+    [100.0, 100.0, 100.0, 100.0, 100.0]::DOUBLE[],
+    20000, 0.9, 42
+) AS r;
+
+statement ok
+CREATE TABLE bs_left AS
+SELECT ts_bootstrap_intervals(
+    [0.9123, 0.911, 0.7584, 0.5502, -1.2222, 0.1979, -0.3441, 0.7384, -1.8372, -1.2669,
+     -2.1256, -0.4689, 1.0082, 0.2756, 0.7437, 0.1443, 0.676, 0.6905, 0.6681, -0.2287,
+     -1.3459, -0.414, -0.9443, 1.0083, -0.0687, -0.1458, -0.6169, 1.076, 0.2902, -0.3261,
+     0.3248, 0.7844, -0.1712, 0.4579, 0.7097, 0.6372, 0.3706, 0.6975, 0.2795, -0.3279,
+     -0.7386, 0.5869, 0.8973, 0.4626, -0.2331, -0.05, 0.1903, 0.3913, 0.414, 0.556,
+     -0.1123, 0.9122, -0.1252, -5.4901, 0.3937, 0.2203, 0.2217, 0.4062, -1.6123, -0.3446
+    ]::DOUBLE[],
+    [100.0, 100.0, 100.0, 100.0, 100.0]::DOUBLE[],
+    20000, 0.9, 42
+) AS r;
+
+# --- lognormal_right step 1..5: bound within tolerance of the numpy
+# literal, and upper - point > point - lower (long tail on the UPPER side)
+# at EVERY step ---
+query I
+SELECT ABS((r).lower[1] - 99.0877) < 0.12 * (101.6123 - 99.0877)
+    AND ABS((r).upper[1] - 101.6123) < 0.12 * (101.6123 - 99.0877)
+    AND (r).upper[1] - 100.0 > 100.0 - (r).lower[1] FROM bs_right;
+----
+true
+
+query I
+SELECT ABS((r).lower[2] - 98.4196) < 0.12 * (102.4517 - 98.4196)
+    AND ABS((r).upper[2] - 102.4517) < 0.12 * (102.4517 - 98.4196)
+    AND (r).upper[2] - 100.0 > 100.0 - (r).lower[2] FROM bs_right;
+----
+true
+
+query I
+SELECT ABS((r).lower[3] - 97.9352) < 0.12 * (103.8804 - 97.9352)
+    AND ABS((r).upper[3] - 103.8804) < 0.12 * (103.8804 - 97.9352)
+    AND (r).upper[3] - 100.0 > 100.0 - (r).lower[3] FROM bs_right;
+----
+true
+
+query I
+SELECT ABS((r).lower[4] - 97.524) < 0.12 * (104.3722 - 97.524)
+    AND ABS((r).upper[4] - 104.3722) < 0.12 * (104.3722 - 97.524)
+    AND (r).upper[4] - 100.0 > 100.0 - (r).lower[4] FROM bs_right;
+----
+true
+
+query I
+SELECT ABS((r).lower[5] - 97.1518) < 0.12 * (104.7321 - 97.1518)
+    AND ABS((r).upper[5] - 104.7321) < 0.12 * (104.7321 - 97.1518)
+    AND (r).upper[5] - 100.0 > 100.0 - (r).lower[5] FROM bs_right;
+----
+true
+
+# --- lognormal_left step 1..5: the negated residuals, so the long tail is
+# on the LOWER side at EVERY step (upper - point < point - lower) ---
+query I
+SELECT ABS((r).lower[1] - 98.3877) < 0.12 * (100.9123 - 98.3877)
+    AND ABS((r).upper[1] - 100.9123) < 0.12 * (100.9123 - 98.3877)
+    AND (r).upper[1] - 100.0 < 100.0 - (r).lower[1] FROM bs_left;
+----
+true
+
+query I
+SELECT ABS((r).lower[2] - 97.5483) < 0.12 * (101.5804 - 97.5483)
+    AND ABS((r).upper[2] - 101.5804) < 0.12 * (101.5804 - 97.5483)
+    AND (r).upper[2] - 100.0 < 100.0 - (r).lower[2] FROM bs_left;
+----
+true
+
+query I
+SELECT ABS((r).lower[3] - 96.1196) < 0.12 * (102.0648 - 96.1196)
+    AND ABS((r).upper[3] - 102.0648) < 0.12 * (102.0648 - 96.1196)
+    AND (r).upper[3] - 100.0 < 100.0 - (r).lower[3] FROM bs_left;
+----
+true
+
+query I
+SELECT ABS((r).lower[4] - 95.6278) < 0.12 * (102.476 - 95.6278)
+    AND ABS((r).upper[4] - 102.476) < 0.12 * (102.476 - 95.6278)
+    AND (r).upper[4] - 100.0 < 100.0 - (r).lower[4] FROM bs_left;
+----
+true
+
+query I
+SELECT ABS((r).lower[5] - 95.2679) < 0.12 * (102.8482 - 95.2679)
+    AND ABS((r).upper[5] - 102.8482) < 0.12 * (102.8482 - 95.2679)
+    AND (r).upper[5] - 100.0 < 100.0 - (r).lower[5] FROM bs_left;
+----
+true
+
+# --- T-16-17 validation: coverage outside (0, 1), n_paths < 10, and
+# n_paths * horizon > 10,000,000 each raise an SQL error naming the value ---
+statement error
+SELECT ts_bootstrap_intervals([1.0, -1.0, 2.0, -2.0, 0.5, -0.5, 1.5, -1.5, 0.3, -0.3]::DOUBLE[], [100.0]::DOUBLE[], 2000, 1.5, 42);
+----
+coverage must be in (0, 1)
+
+statement error
+SELECT ts_bootstrap_intervals([1.0, -1.0, 2.0, -2.0, 0.5, -0.5, 1.5, -1.5, 0.3, -0.3]::DOUBLE[], [100.0]::DOUBLE[], 5, 0.9, 42);
+----
+n_paths
+
+statement error
+SELECT ts_bootstrap_intervals(
+    [1.0, -1.0, 2.0, -2.0, 0.5, -0.5, 1.5, -1.5, 0.3, -0.3]::DOUBLE[],
+    [100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0]::DOUBLE[],
+    2000000, 0.9, 42
+);
+----
+n_paths
+
+# --- ts_bootstrap_quantiles at [0.05, 0.95] agrees with ts_bootstrap_intervals
+# on the same lognormal_right residuals/seed (within the same tolerance).
+# `values` is FLAT (q0_t0..q0_t4, q1_t0..q1_t4): index i for q=0.05, 5+i for
+# q=0.95, with n_forecasts=5. ---
+query I
+SELECT bool_and(
+    ABS(qt.q.values[i] - br.r.lower[i]) < 0.12 * (br.r.upper[i] - br.r.lower[i])
+    AND ABS(qt.q.values[5 + i] - br.r.upper[i]) < 0.12 * (br.r.upper[i] - br.r.lower[i])
+)
+FROM bs_right AS br, (
+    SELECT ts_bootstrap_quantiles(
+        [-0.9123, -0.911, -0.7584, -0.5502, 1.2222, -0.1979, 0.3441, -0.7384, 1.8372, 1.2669,
+         2.1256, 0.4689, -1.0082, -0.2756, -0.7437, -0.1443, -0.676, -0.6905, -0.6681, 0.2287,
+         1.3459, 0.414, 0.9443, -1.0083, 0.0687, 0.1458, 0.6169, -1.076, -0.2902, 0.3261,
+         -0.3248, -0.7844, 0.1712, -0.4579, -0.7097, -0.6372, -0.3706, -0.6975, -0.2795, 0.3279,
+         0.7386, -0.5869, -0.8973, -0.4626, 0.2331, 0.05, -0.1903, -0.3913, -0.414, -0.556,
+         0.1123, -0.9122, 0.1252, 5.4901, -0.3937, -0.2203, -0.2217, -0.4062, 1.6123, 0.3446
+        ]::DOUBLE[],
+        [100.0, 100.0, 100.0, 100.0, 100.0]::DOUBLE[],
+        20000, [0.05, 0.95]::DOUBLE[], 42
+    ) AS q
+) AS qt, generate_series(1, 5) AS t(i);
+----
+true
+

@@ -104,6 +104,7 @@ test without a separate Rust edit.
 | `r_decomposition` | `cases.json` | `r/gen_decomposition_reference.R` | `component_abs` (1e-8), `classical_abs` (1e-10) | Phase 15 plan 15-04 (DET-04, D-09, D-10): `anofox_fcst_core::decomposition::{mstl_fit,mstl_decompose,classical_decompose}` -- R `forecast::mstl()` (6 `mstl_cases`: single/multi/dropped-period/non-seasonal/constant) and R `stats::decompose()` (5 `decompose_cases`: additive/multiplicative, odd/even period, short series), via `crates/anofox-fcst-core/tests/mstl_decompose_reference.rs` and `test/sql/ts_detection_reference.test` |
 | `period_detection` | `cases.json` | `python/gen_period_detection_reference.py` | `power_rel` (1e-9), `power_abs` (1e-12), `acf_abs` (1e-12), `rss_rel` (1e-9), `rss_abs` (1e-20), `ls_rel` (1e-9), `detrend_abs` (1e-10) | Phase 15 plan 15-05 (DET-05, DET-06, D-11, D-12): `anofox_fcst_core::periods::{detrended_periodogram,estimate_period_fft_ts,acf,estimate_period_acf_ts,regression_period_rss,estimate_period_regression_ts,lomb_scargle_power,lomb_scargle}` and `seasonality`'s detrend-first strength functions -- `scipy.signal.periodogram`/`lombscargle`/`detrend`, `statsmodels.tsa.stattools.acf`, and `numpy.linalg.lstsq` RSS across five case groups (periodogram, acf, regression, lombscargle, strength), via `crates/anofox-fcst-core/tests/period_detection_reference.rs` and `test/sql/ts_detection_reference.test` |
 | `conformal` | `split_cases.json` | `python/gen_conformal_reference.py` | `score_abs` (1e-9), `coverage_abs` (1e-12) | Phase 16 plan 16-01 (RUST-04, D-01, D-02, D-03; extended by 16-02/16-03): `anofox_fcst_core::conformal::{conformal_from_pairs,conformal_calibrate}` -- per-group and pooled split-conformal `conformity_score`/empirical `coverage`/`nominal_level`/`n_calibration` on a two-group calibration pool (`two_group`, alpha 0.1/0.2) and a pairwise-complete `ts_mean_interval_width` case (`interval_width`), via `crates/anofox-fcst-core/tests/conformal_reference.rs` and the non-json-gated `test/sql/ts_conformal_reference.test` |
+| `bootstrap` | `lognormal_cases.json` | `python/gen_bootstrap_reference.py` | `bound_rel_width` (0.12) | Phase 16 plan 16-03 (CONF-01, D-10): `anofox_fcst_core::bootstrap::{bootstrap_intervals,bootstrap_quantiles}` -- an independent numpy simulation of the SAME residual-resampling construction (`anofox_forecast::postprocess::bootstrap::{simulate_paths,extract_quantiles}`) on a discrete mirror-anchor case (exact 100.0/110.0) and a seeded right-skewed log-normal residual case plus its exact negation (`lognormal_right`/`lognormal_left`), proving the long tail lands on the correct side after the fix for the pre-Phase-16 sign bug (G2), via `crates/anofox-fcst-core/tests/conformal_reference.rs` and the non-json-gated `test/sql/ts_conformal_reference.test` |
 
 **`tsfresh_features`'s `mapping.json` is a second, hand-maintained fixture** (not
 generator output) alongside the nine series fixtures -- it is the D-01
@@ -253,6 +254,22 @@ evaluated on the same values both sides already agree to `score_abs`) over a fix
 (20 or 40) -- the only possible discrepancy is a residual landing within `score_abs` of the
 threshold and comparing differently, which the fixture's hand-picked values avoid.
 
+**`bootstrap` tolerance rationale (Phase 16 plan 16-03, D-10):** `bound_rel_width` (0.12)
+bounds a 20,000-path Rust simulation against the fixture's 200,000-path numpy ground truth, as
+a FRACTION of the ground truth's own interval width at that step -- not an absolute tolerance,
+since the width itself grows with horizon. The mirror-anchor case needs no tolerance at all:
+its residuals are strictly `{0.0, 10.0}` with `P(10.0) = 0.1`, so the 5%/95% order statistics
+land deep inside a long run of identical values regardless of path count or RNG algorithm,
+making `lower`/`upper` exactly `100.0`/`110.0` on BOTH numpy and Rust. The continuous
+`lognormal_right`/`lognormal_left` cases are the ones that need the 0.12 bound: residuals
+rounded to 4 decimals and only 5 cumulative draws per path make the shortest-horizon step's
+width narrow enough that relative sampling error reaches ~8.9% even re-simulated independently
+at 100,000 paths in numpy (measured directly, not assumed) -- a quantization/clustering
+artifact of the discrete draws landing near that quantile's order-statistic index, not Monte
+Carlo noise that keeps shrinking with more paths. 0.12 covers the measured worst case with
+margin while still failing hard on an actual sign/construction bug, which misses by closer to
+100% (the wrong tail entirely stays on the wrong side), not ~9%.
+
 ## 5. Tool versions
 
 These are the toolchain versions this phase verified against. **Each fixture's own
@@ -308,6 +325,9 @@ uv run --locked --project validation/reference/python python validation/referenc
 
 # Python family added in Phase 16 plan 16-01 (extended by 16-02/16-03):
 uv run --locked --project validation/reference/python python validation/reference/python/gen_conformal_reference.py
+
+# Python family added in Phase 16 plan 16-03:
+uv run --locked --project validation/reference/python python validation/reference/python/gen_bootstrap_reference.py
 
 # Determinism check — every generator is seeded and writes no timestamps/hostnames,
 # so regenerating with the same toolchain versions must produce an empty diff:

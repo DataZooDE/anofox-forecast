@@ -6361,10 +6361,18 @@ pub unsafe extern "C" fn anofox_ts_bootstrap_intervals(
         let filled_forecasts = anofox_fcst_core::fill_missing(&forecast_series, 0.0);
         let seed_opt = if seed >= 0 { Some(seed as u64) } else { None };
 
+        // Phase 16 T-16-17: n_paths < 1 is a caller error, never silently
+        // clamped up to 1 -- `bootstrap_intervals` itself rejects < 10, but
+        // a negative/zero c_int must not reach `as usize` wraparound first.
+        if n_paths < 1 {
+            return Err(anofox_fcst_core::ForecastError::InvalidInput(format!(
+                "n_paths must be >= 10, got {n_paths}"
+            )));
+        }
         let mut intervals = anofox_fcst_core::bootstrap_intervals(
             &res_values,
             &filled_forecasts,
-            n_paths.max(1) as usize,
+            n_paths as usize,
             coverage,
             seed_opt,
         )?;
@@ -6397,7 +6405,7 @@ pub unsafe extern "C" fn anofox_ts_bootstrap_intervals(
             true
         }
         Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &format!("{}", e));
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
@@ -6451,10 +6459,15 @@ pub unsafe extern "C" fn anofox_ts_bootstrap_quantiles(
         let q_slice = std::slice::from_raw_parts(quantile_levels, n_quantiles);
         let seed_opt = if seed >= 0 { Some(seed as u64) } else { None };
 
+        if n_paths < 1 {
+            return Err(anofox_fcst_core::ForecastError::InvalidInput(format!(
+                "n_paths must be >= 10, got {n_paths}"
+            )));
+        }
         let mut qr = anofox_fcst_core::bootstrap_quantiles(
             &res_values,
             &filled_forecasts,
-            n_paths.max(1) as usize,
+            n_paths as usize,
             q_slice,
             seed_opt,
         )?;
@@ -6495,7 +6508,7 @@ pub unsafe extern "C" fn anofox_ts_bootstrap_quantiles(
             true
         }
         Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &format!("{}", e));
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
