@@ -1010,3 +1010,65 @@ statement error
 SELECT * FROM ts_conformal_apply_by('wr04_fc', g, dt, fc, 'wr04_cal_dup_pooled');
 ----
 more than one row for the same group_col value
+
+# =============================================================================
+# WR-03 (review fix): a NULL group_col row is the pooled fallback ONLY when
+# it is the SOLE row of the calibration table -- a real NULL group key
+# sitting alongside per-group rows must not silently act as pooled for
+# every other, unrelated group.
+# =============================================================================
+
+statement ok
+CREATE TABLE wr03_fc(g VARCHAR, dt INTEGER, fc DOUBLE);
+
+statement ok
+INSERT INTO wr03_fc VALUES ('A', 1, 10.0), ('B', 1, 20.0);
+
+# --- scenario 1: a genuine one-row pooled table (the documented shape) ->
+# applies to every group (sanity: pooled fallback still works) ---
+statement ok
+CREATE TABLE wr03_cal_pooled_only(group_col VARCHAR, method VARCHAR, conformity_score DOUBLE);
+
+statement ok
+INSERT INTO wr03_cal_pooled_only VALUES (NULL, 'symmetric', 5.0);
+
+query I
+SELECT COUNT(*) = 2 AND bool_and(ABS(conformity_score - 5.0) < 1e-12)
+FROM ts_conformal_apply_by('wr03_fc', g, dt, fc, 'wr03_cal_pooled_only');
+----
+true
+
+# --- scenario 2: per-group table PLUS an extra, genuinely NULL group_col
+# row -- group A matches directly; group B (no direct match) must NOT fall
+# back to the NULL row's score (NULL bounds instead) ---
+statement ok
+CREATE TABLE wr03_cal_extra_null(group_col VARCHAR, method VARCHAR, conformity_score DOUBLE);
+
+statement ok
+INSERT INTO wr03_cal_extra_null VALUES ('A', 'symmetric', 1.0), (NULL, 'symmetric', 99.0);
+
+query I
+SELECT ABS(conformity_score - 1.0) < 1e-12
+FROM ts_conformal_apply_by('wr03_fc', g, dt, fc, 'wr03_cal_extra_null') WHERE group_col = 'A';
+----
+true
+
+query I
+SELECT conformity_score IS NULL AND lower IS NULL AND upper IS NULL
+FROM ts_conformal_apply_by('wr03_fc', g, dt, fc, 'wr03_cal_extra_null') WHERE group_col = 'B';
+----
+true
+
+# --- scenario 3: a group entirely missing from a per-group-only
+# calibration table (no NULL row at all) keeps NULL bounds, as before ---
+statement ok
+CREATE TABLE wr03_cal_a_only(group_col VARCHAR, method VARCHAR, conformity_score DOUBLE);
+
+statement ok
+INSERT INTO wr03_cal_a_only VALUES ('A', 'symmetric', 1.0);
+
+query I
+SELECT conformity_score IS NULL AND lower IS NULL AND upper IS NULL
+FROM ts_conformal_apply_by('wr03_fc', g, dt, fc, 'wr03_cal_a_only') WHERE group_col = 'B';
+----
+true

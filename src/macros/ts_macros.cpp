@@ -1844,11 +1844,15 @@ FROM calibrated
     // forecasts, one row per (group, forecast row) (Phase 16 D-01/D-03/D-14)
     // C++ API: ts_conformal_apply_by(forecast_results, group_col, date_col, forecast_col, calibration)
     // `calibration` names a table holding ts_conformal_calibrate's output columns (group_col,
-    // method, conformity_score); it must hold at MOST one row per group_col value, plus
-    // optionally ONE pooled row with group_col = NULL. Per forecast group: the calibration row
-    // whose group_col matches is used if one exists, otherwise the pooled row (group_col IS
-    // NULL), otherwise bounds come back NULL for that group's rows. A literal score is applied
-    // by wrapping it in a one-row table with group_col = NULL (D-14).
+    // method, conformity_score); it must hold at MOST one row per group_col value. Per forecast
+    // group: the calibration row whose group_col matches is used if one exists, otherwise bounds
+    // come back NULL for that group's rows.
+    // Phase 16 WR-03 fix: a NULL group_col row is treated as the pooled fallback ONLY when it is
+    // the SOLE row of the calibration table -- exactly the shape ts_conformal_calibrate(params :=
+    // {'pooled': true}) and the literal-score one-row wrapper (D-14) both produce. A per-group
+    // calibration table that happens to also contain a row with a genuine NULL group_col (e.g. an
+    // ungrouped segment in the caller's own backtest data) no longer silently applies that row's
+    // score to every other, unrelated group -- it is just an unmatched extra row.
     // Phase 16 WR-04 fix: more than one calibration row sharing the same group_col value
     // (including more than one row with group_col = NULL) raises a clear SQL error instead of
     // silently fanning the join out into duplicate output rows per forecast point.
@@ -1868,6 +1872,9 @@ cal_dupe_check AS (
     ELSE NULL END AS _err
     FROM (SELECT group_col FROM cal GROUP BY group_col HAVING COUNT(*) > 1) _dupes
 ),
+cal_pooled_eligible AS (
+    SELECT (COUNT(*) = 1) AS _eligible FROM cal
+),
 per_group AS (
     SELECT
         group_col AS _grp,
@@ -1883,9 +1890,10 @@ matched AS (
         COALESCE(direct.conformity_score, pooled.conformity_score, dupe_check._err) AS _score,
         COALESCE(direct.method, pooled.method) AS _method
     FROM per_group pg
+    CROSS JOIN cal_pooled_eligible eligible
     CROSS JOIN cal_dupe_check dupe_check
     LEFT JOIN cal direct ON direct.group_col = pg._grp
-    LEFT JOIN cal pooled ON pooled.group_col IS NULL
+    LEFT JOIN cal pooled ON pooled.group_col IS NULL AND eligible._eligible
 ),
 applied AS (
     SELECT
