@@ -158,3 +158,155 @@ query I
 SELECT isnan((ts_adf([1.0, 2.0, 3.0]::DOUBLE[])).cv_5pct)
 ----
 true
+
+#######################################
+# 17-01 KPSS (tseries / statsmodels)
+#######################################
+
+# air17 'c' and 'ct': statistic within 1e-10 of the fixture, p equal, lags 4
+query I
+SELECT abs((ts_kpss(LIST(v ORDER BY ds), -1, 'c')).statistic - 2.739473620962186) < 1e-10
+FROM air17;
+----
+true
+
+query I
+SELECT (ts_kpss(LIST(v ORDER BY ds), -1, 'c')).p_value = 0.01
+FROM air17;
+----
+true
+
+query I
+SELECT (ts_kpss(LIST(v ORDER BY ds), -1, 'c')).lags
+FROM air17;
+----
+4
+
+query I
+SELECT abs((ts_kpss(LIST(v ORDER BY ds), -1, 'ct')).statistic - 0.09614984853532407) < 1e-10
+FROM air17;
+----
+true
+
+query I
+SELECT (ts_kpss(LIST(v ORDER BY ds), -1, 'ct')).p_value = 0.1
+FROM air17;
+----
+true
+
+query I
+SELECT (ts_kpss(LIST(v ORDER BY ds), -1, 'ct')).lags
+FROM air17;
+----
+4
+
+# ts_kpss_by(regression := 'ct') equals the scalar
+query I
+SELECT abs((kpss).statistic - (SELECT (ts_kpss(LIST(v ORDER BY ds), -1, 'ct')).statistic FROM air17)) < 1e-12
+FROM ts_kpss_by('air17', id, ds, v, regression := 'ct');
+----
+true
+
+# ts17 with lags 1000 and 'ct': clamped to n/2 = 50
+query I
+SELECT (ts_kpss(LIST(v ORDER BY ds), 1000, 'ct')).lags
+FROM ts17;
+----
+50
+
+# unknown regression raises an informative error
+statement error
+SELECT (ts_kpss(LIST(v ORDER BY ds), -1, 'n')).statistic FROM air17;
+----
+expected one of: c, ct
+
+statement error
+SELECT (ts_stationarity(LIST(v ORDER BY ds), 'n')).verdict FROM air17;
+----
+expected one of: c, ct
+
+# interior NaN (D-12 missing convention) at position 6 of the ts17 list
+# still raises the series gate's "interior NULL" error (D-03)
+statement error
+SELECT ts_kpss(list_concat(list_concat(
+    (SELECT LIST(v ORDER BY ds) FROM ts17)[1:5],
+    ['NaN'::DOUBLE]),
+    (SELECT LIST(v ORDER BY ds) FROM ts17)[6:100]));
+----
+interior NULL at position 6
+
+#######################################
+# 17-01 four-way stationarity verdict (D-04)
+#######################################
+
+# air17: 'c' -> non_stationary, 'ct' -> stationary
+query I
+SELECT (ts_stationarity(LIST(v ORDER BY ds))).verdict
+FROM air17;
+----
+non_stationary
+
+query I
+SELECT (ts_stationarity(LIST(v ORDER BY ds), 'ct')).verdict
+FROM air17;
+----
+stationary
+
+# ts17 (trend_stationary): 'ct' -> trend_stationary, 'c' -> non_stationary
+query I
+SELECT (ts_stationarity(LIST(v ORDER BY ds), 'ct')).verdict
+FROM ts17;
+----
+trend_stationary
+
+query I
+SELECT (ts_stationarity(LIST(v ORDER BY ds), 'c')).verdict
+FROM ts17;
+----
+non_stationary
+
+query I
+SELECT stationarity.verdict
+FROM ts_stationarity_by('ts17', id, ds, v, regression := 'ct') AS stationarity;
+----
+trend_stationary
+
+query I
+SELECT stationarity.verdict
+FROM ts_stationarity_by('ts17', id, ds, v, regression := 'c') AS stationarity;
+----
+non_stationary
+
+# a constant series -> 'constant' verdict, scalar and via ts_stationarity_by
+statement ok
+CREATE TABLE const30 AS
+SELECT 'k' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, 5.0 AS v
+FROM range(30) t(i);
+
+query I
+SELECT (ts_stationarity(LIST(v ORDER BY ds))).verdict
+FROM const30;
+----
+constant
+
+query I
+SELECT stationarity.verdict
+FROM ts_stationarity_by('const30', id, ds, v) AS stationarity;
+----
+constant
+
+# too-short / degenerate series -> verdict IS NULL, not a crash
+query I
+SELECT (ts_stationarity([1.0, 2.0, 3.0]::DOUBLE[])).verdict IS NULL
+----
+true
+
+query I
+SELECT isnan((ts_stationarity([1.0, 2.0, 3.0]::DOUBLE[])).adf_statistic)
+----
+true
+
+query I
+SELECT (ts_stationarity(list_transform(range(30), i -> (2.0 + 0.5 * i)::DOUBLE), 'ct')).verdict IS NULL
+----
+true

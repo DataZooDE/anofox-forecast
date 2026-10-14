@@ -2527,36 +2527,38 @@ GROUP BY group_col
     "SELECT group_col, (adf).statistic, (adf).p_value FROM ts_adf_by('sales', product_id, ds, y, regression := 'ct')",
     "diagnostics"},
 
-    // ts_kpss_by: KPSS stationarity test per group (STAT-02)
-    // C++ API: ts_kpss_by(source, group_col, date_col, value_col [, lags:=-1])
+    // ts_kpss_by: KPSS stationarity test per group (STAT-02, D-05a)
+    // C++ API: ts_kpss_by(source, group_col, date_col, value_col [, lags:=-1] [, regression:='c'])
     // Returns: TABLE(group_col, kpss STRUCT(statistic, p_value, lags, is_stationary, cv_1pct, cv_5pct, cv_10pct))
     {"ts_kpss_by", {"source", "group_col", "date_col", "value_col", nullptr},
-     {{"lags", "-1"}, {nullptr, nullptr}},
+     {{"lags", "-1"}, {"regression", "'c'"}, {nullptr, nullptr}},
 R"(
-SELECT group_col, ts_kpss(LIST(value_col::DOUBLE ORDER BY date_col), lags::INTEGER) AS kpss
+SELECT group_col, ts_kpss(LIST(value_col::DOUBLE ORDER BY date_col), lags::INTEGER, regression::VARCHAR) AS kpss
 FROM query_table(source::VARCHAR)
 GROUP BY group_col
 )",
     "KPSS stationarity test per group. Returns STRUCT(statistic, p_value, lags, is_stationary, cv_1pct, cv_5pct, cv_10pct) per group. "
-    "Null hypothesis is level-stationarity; is_stationary=true means the null is not rejected at 5%. "
-    "Pass lags:=N to override the automatic bandwidth.",
-    "SELECT group_col, (kpss).statistic, (kpss).is_stationary FROM ts_kpss_by('sales', product_id, ds, y)",
+    "Pass lags:=N to override the automatic bandwidth. "
+    "regression:='c' (level, null hypothesis is level-stationarity, default) or regression:='ct' (trend). "
+    "is_stationary=true means the null is not rejected at 5%.",
+    "SELECT group_col, (kpss).statistic, (kpss).is_stationary FROM ts_kpss_by('sales', product_id, ds, y, regression := 'ct')",
     "diagnostics"},
 
-    // ts_stationarity_by: combined ADF + KPSS four-way verdict per group (STAT-03)
-    // C++ API: ts_stationarity_by(source, group_col, date_col, value_col)
+    // ts_stationarity_by: combined ADF + KPSS D-04 four-way verdict per group (STAT-03, D-04, D-05)
+    // C++ API: ts_stationarity_by(source, group_col, date_col, value_col [, regression:='c'])
     // Returns: TABLE(group_col, stationarity STRUCT(adf_statistic, adf_p_value, kpss_statistic, kpss_p_value, adf_is_stationary, kpss_is_stationary, verdict))
     {"ts_stationarity_by", {"source", "group_col", "date_col", "value_col", nullptr},
-     {{nullptr, nullptr}},
+     {{"regression", "'c'"}, {nullptr, nullptr}},
 R"(
-SELECT group_col, ts_stationarity(LIST(value_col::DOUBLE ORDER BY date_col)) AS stationarity
+SELECT group_col, ts_stationarity(LIST(value_col::DOUBLE ORDER BY date_col), regression::VARCHAR) AS stationarity
 FROM query_table(source::VARCHAR)
 GROUP BY group_col
 )",
-    "Combined ADF + KPSS stationarity verdict per group. Returns STRUCT(adf_statistic, adf_p_value, kpss_statistic, kpss_p_value, "
+    "Combined ADF + KPSS stationarity verdict per group (D-04). Returns STRUCT(adf_statistic, adf_p_value, kpss_statistic, kpss_p_value, "
     "adf_is_stationary, kpss_is_stationary, verdict) per group. verdict is one of "
-    "'stationary', 'trend_stationary', 'difference_stationary', 'non_stationary'.",
-    "SELECT group_col, (stationarity).verdict FROM ts_stationarity_by('sales', product_id, ds, y)",
+    "'stationary', 'non_stationary', 'trend_stationary', 'difference_stationary', 'constant', or NULL (degenerate series). "
+    "regression:='c' (default, applies to both tests) or regression:='ct'.",
+    "SELECT group_col, (stationarity).verdict FROM ts_stationarity_by('sales', product_id, ds, y, regression := 'ct')",
     "diagnostics"},
 
     // ts_ljung_box_by: Ljung-Box residual white-noise test per group (RESID-01)

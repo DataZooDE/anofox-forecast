@@ -1984,8 +1984,11 @@ pub struct AnofoxCombinedStationarityResult {
     pub adf_is_stationary: bool,
     /// `true` if KPSS alone judges the series stationary
     pub kpss_is_stationary: bool,
-    /// Four-way verdict, NUL-terminated:
-    /// `stationary` / `trend_stationary` / `difference_stationary` / `non_stationary`
+    /// D-04 four-way verdict, NUL-terminated: `stationary` / `non_stationary`
+    /// / `trend_stationary` / `difference_stationary` / `constant`. An
+    /// EMPTY string (NUL at index 0) means SQL NULL -- either test's
+    /// statistic was `NaN` (too-short series, or a collinear regression
+    /// under `regression`).
     pub verdict: [c_char; 32],
 }
 

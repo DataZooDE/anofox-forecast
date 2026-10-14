@@ -67,24 +67,36 @@ FROM (SELECT ts_adf(LIST(val ORDER BY ds)) AS adf FROM diag_series WHERE grp = '
 ----
 true
 
-# critical values match expected MacKinnon constants for constant regression
+# Critical values: anofox-forecast 0.16 reports MacKinnon (2010) finite-sample
+# critical values (depend on nobs and regression), not the old hardcoded
+# asymptotic constants (-3.43/-2.86/-2.57). Re-pinned to Group B's exact
+# fixture values (statsmodels_stationarity/adf_kpss_cases.json, diag_b 'c',
+# default maxlag) -- Phase 17 plan 17-01, CHANGELOG "ts_adf critical values"
+# row. Before: ABS(cv_1pct - (-3.43)) < 0.05 (and the 5%/10% siblings).
 query I
-SELECT ABS((adf).cv_1pct - (-3.43)) < 0.05
+SELECT ABS((adf).cv_1pct - (-3.626651907578875)) < 1e-10
 FROM (SELECT ts_adf(LIST(val ORDER BY ds)) AS adf FROM diag_series WHERE grp = 'B');
 ----
 true
 
 query I
-SELECT ABS((adf).cv_5pct - (-2.86)) < 0.05
+SELECT ABS((adf).cv_5pct - (-2.9459512825788754)) < 1e-10
 FROM (SELECT ts_adf(LIST(val ORDER BY ds)) AS adf FROM diag_series WHERE grp = 'B');
 ----
 true
 
 query I
-SELECT ABS((adf).cv_10pct - (-2.57)) < 0.05
+SELECT ABS((adf).cv_10pct - (-2.6116707716049383)) < 1e-10
 FROM (SELECT ts_adf(LIST(val ORDER BY ds)) AS adf FROM diag_series WHERE grp = 'B');
 ----
 true
+
+# lags equal the fixture's usedlag (3) for the default maxlag
+query I
+SELECT (adf).lags
+FROM (SELECT ts_adf(LIST(val ORDER BY ds)) AS adf FROM diag_series WHERE grp = 'B');
+----
+3
 
 #######################################
 # ts_adf: 2-arg overload (max_lags)

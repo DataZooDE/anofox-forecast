@@ -7772,14 +7772,16 @@ pub unsafe extern "C" fn anofox_ts_series_gate(
 ///
 /// # Safety
 ///
-/// `values` and `out_result` must be non-null. `validity` may be null (all valid).
-/// `length` must equal the number of `f64` elements at `values`.
+/// `values` and `out_result` must be non-null. `validity` may be null (all
+/// valid). `length` must equal the number of `f64` elements at `values`.
+/// `regression` must be either null or a valid NUL-terminated C string.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_kpss(
     values: *const c_double,
     validity: *const u64,
     length: size_t,
     lags: c_int,
+    regression: *const c_char,
     out_result: *mut AnofoxStationarityResult,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -7799,11 +7801,20 @@ pub unsafe extern "C" fn anofox_ts_kpss(
         return true;
     }
 
+    // D-05a: parse `regression` OUTSIDE catch_unwind (see anofox_ts_adf).
+    let regression = match parse_regression(regression) {
+        Ok(r) => r,
+        Err(e) => {
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
+            return false;
+        }
+    };
+
     let lags_opt: Option<usize> = if lags < 0 { None } else { Some(lags as usize) };
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let series = build_values(values, validity, length);
-        anofox_fcst_core::kpss(&series, lags_opt)
+        anofox_fcst_core::kpss(&series, lags_opt, regression)
     }));
 
     match result {
@@ -7822,13 +7833,15 @@ pub unsafe extern "C" fn anofox_ts_kpss(
 ///
 /// # Safety
 ///
-/// `values` and `out_result` must be non-null. `validity` may be null (all valid).
-/// `length` must equal the number of `f64` elements at `values`.
+/// `values` and `out_result` must be non-null. `validity` may be null (all
+/// valid). `length` must equal the number of `f64` elements at `values`.
+/// `regression` must be either null or a valid NUL-terminated C string.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_stationarity(
     values: *const c_double,
     validity: *const u64,
     length: size_t,
+    regression: *const c_char,
     out_result: *mut AnofoxCombinedStationarityResult,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -7848,9 +7861,18 @@ pub unsafe extern "C" fn anofox_ts_stationarity(
         return true;
     }
 
+    // D-04/D-05: parse `regression` OUTSIDE catch_unwind (see anofox_ts_adf).
+    let regression = match parse_regression(regression) {
+        Ok(r) => r,
+        Err(e) => {
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
+            return false;
+        }
+    };
+
     let result = catch_unwind(AssertUnwindSafe(|| {
         let series = build_values(values, validity, length);
-        anofox_fcst_core::stationarity(&series)
+        anofox_fcst_core::stationarity(&series, regression)
     }));
 
     match result {
@@ -7861,7 +7883,9 @@ pub unsafe extern "C" fn anofox_ts_stationarity(
             (*out_result).kpss_p_value = r.kpss_p_value;
             (*out_result).adf_is_stationary = r.adf_is_stationary;
             (*out_result).kpss_is_stationary = r.kpss_is_stationary;
-            copy_string_to_buffer(r.verdict, &mut (*out_result).verdict);
+            // D-04: None (NULL verdict) copies an empty string; the C++
+            // caller sets the verdict child NULL when the buffer is empty.
+            copy_string_to_buffer(r.verdict.unwrap_or(""), &mut (*out_result).verdict);
             true
         }
         Err(_) => {

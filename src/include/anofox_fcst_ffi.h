@@ -1843,8 +1843,11 @@ typedef struct AnofoxCombinedStationarityResult {
      */
     bool kpss_is_stationary;
     /**
-     * Four-way verdict, NUL-terminated:
-     * `stationary` / `trend_stationary` / `difference_stationary` / `non_stationary`
+     * D-04 four-way verdict, NUL-terminated: `stationary` / `non_stationary`
+     * / `trend_stationary` / `difference_stationary` / `constant`. An
+     * EMPTY string (NUL at index 0) means SQL NULL -- either test's
+     * statistic was `NaN` (too-short series, or a collinear regression
+     * under `regression`).
      */
     char verdict[32];
 } AnofoxCombinedStationarityResult;
@@ -3777,13 +3780,15 @@ bool anofox_ts_series_gate(const double *values,
  *
  * # Safety
  *
- * `values` and `out_result` must be non-null. `validity` may be null (all valid).
- * `length` must equal the number of `f64` elements at `values`.
+ * `values` and `out_result` must be non-null. `validity` may be null (all
+ * valid). `length` must equal the number of `f64` elements at `values`.
+ * `regression` must be either null or a valid NUL-terminated C string.
  */
 bool anofox_ts_kpss(const double *values,
                     const uint64_t *validity,
                     size_t length,
                     int lags,
+                    const char *regression,
                     struct AnofoxStationarityResult *out_result,
                     struct AnofoxError *out_error);
 
@@ -3792,12 +3797,14 @@ bool anofox_ts_kpss(const double *values,
  *
  * # Safety
  *
- * `values` and `out_result` must be non-null. `validity` may be null (all valid).
- * `length` must equal the number of `f64` elements at `values`.
+ * `values` and `out_result` must be non-null. `validity` may be null (all
+ * valid). `length` must equal the number of `f64` elements at `values`.
+ * `regression` must be either null or a valid NUL-terminated C string.
  */
 bool anofox_ts_stationarity(const double *values,
                             const uint64_t *validity,
                             size_t length,
+                            const char *regression,
                             struct AnofoxCombinedStationarityResult *out_result,
                             struct AnofoxError *out_error);
 

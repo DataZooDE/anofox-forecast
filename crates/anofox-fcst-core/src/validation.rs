@@ -204,7 +204,7 @@ pub fn kpss(
 const KPSS_TREND_TABLE: [(f64, f64); 4] =
     [(0.119, 0.10), (0.146, 0.05), (0.176, 0.025), (0.216, 0.01)];
 
-fn kpss_trend_p_value(stat: f64) -> f64 {
+fn trend_kpss_p_value(stat: f64) -> f64 {
     if stat.is_nan() {
         return f64::NAN;
     }
@@ -235,14 +235,100 @@ fn kpss_trend_p_value(stat: f64) -> f64 {
 /// IDENTICAL to the crate's level-KPSS Bartlett kernel (weights
 /// `1 - j/(l+1)`, `/n` autocovariances) with the SAME default/clamped
 /// bandwidth. Critical values are the tseries Trend table (0.216/0.146/
-/// 0.119 at 1%/5%/10%); the p-value is [`kpss_trend_p_value`]'s
+/// 0.119 at 1%/5%/10%); the p-value is [`trend_kpss_p_value`]'s
 /// interpolation. A non-positive or non-finite long-run variance (e.g. an
 /// exactly-linear series, whose OLS residuals are ~0) returns the `NaN`
 /// result via [`normalize_degenerate`] rather than panicking or dividing by
 /// zero.
 fn kpss_trend(series: &[f64], lags: Option<usize>) -> StationarityOut {
-    let _ = (series, lags);
-    unimplemented!("D-05a RED: kpss_trend not yet implemented")
+    let n = series.len();
+    if n < 4 {
+        return StationarityOut {
+            statistic: f64::NAN,
+            p_value: f64::NAN,
+            lags: lags.unwrap_or(0),
+            is_stationary: false,
+            cv_1pct: f64::NAN,
+            cv_5pct: f64::NAN,
+            cv_10pct: f64::NAN,
+        };
+    }
+
+    let l = lags
+        .unwrap_or_else(|| (4.0 * (n as f64 / 100.0).powf(0.25)).floor() as usize)
+        .min(n / 2)
+        .max(1);
+
+    // Closed-form OLS: y = a + b*t, t = 0..n-1.
+    let mean_t = (n as f64 - 1.0) / 2.0;
+    let mean_y = series.iter().sum::<f64>() / n as f64;
+    let mut sxx = 0.0;
+    let mut sxy = 0.0;
+    for (i, &y) in series.iter().enumerate() {
+        let dt = i as f64 - mean_t;
+        sxx += dt * dt;
+        sxy += dt * (y - mean_y);
+    }
+    let residuals: Vec<f64> = if sxx > 0.0 {
+        let b = sxy / sxx;
+        let a = mean_y - b * mean_t;
+        series
+            .iter()
+            .enumerate()
+            .map(|(i, &y)| y - (a + b * i as f64))
+            .collect()
+    } else {
+        series.iter().map(|&y| y - mean_y).collect()
+    };
+
+    let mut cumsum = vec![0.0; n];
+    cumsum[0] = residuals[0];
+    for i in 1..n {
+        cumsum[i] = cumsum[i - 1] + residuals[i];
+    }
+    let numerator: f64 = cumsum.iter().map(|&s| s * s).sum::<f64>() / (n * n) as f64;
+
+    let mut variance = residuals.iter().map(|&r| r * r).sum::<f64>() / n as f64;
+    for j in 1..=l {
+        let weight = 1.0 - j as f64 / (l + 1) as f64;
+        let autocovar: f64 = residuals
+            .iter()
+            .skip(j)
+            .zip(residuals.iter())
+            .map(|(&x, &y)| x * y)
+            .sum::<f64>()
+            / n as f64;
+        variance += 2.0 * weight * autocovar;
+    }
+
+    if !variance.is_finite() || variance <= 0.0 {
+        return StationarityOut {
+            statistic: f64::NAN,
+            p_value: f64::NAN,
+            lags: l,
+            is_stationary: false,
+            cv_1pct: f64::NAN,
+            cv_5pct: f64::NAN,
+            cv_10pct: f64::NAN,
+        };
+    }
+
+    let statistic = numerator / variance;
+    let cv_1pct = 0.216;
+    let cv_5pct = 0.146;
+    let cv_10pct = 0.119;
+    let p_value = trend_kpss_p_value(statistic);
+    let is_stationary = statistic < cv_5pct;
+
+    normalize_degenerate(StationarityOut {
+        statistic,
+        p_value,
+        lags: l,
+        is_stationary,
+        cv_1pct,
+        cv_5pct,
+        cv_10pct,
+    })
 }
 
 /// Combined ADF + KPSS stationarity verdict.
@@ -283,13 +369,11 @@ pub struct CombinedStationarityOut {
 /// `adf_is_stationary == true` and "KPSS rejects" is
 /// `kpss_is_stationary == false`.
 pub fn classify_stationarity(adf_is_stationary: bool, kpss_is_stationary: bool) -> &'static str {
-    // RED (D-05a/D-04 TDD gate): intentionally still the OLD, pre-fix
-    // mapping here -- GREEN swaps this to the D-04 table.
     match (adf_is_stationary, kpss_is_stationary) {
         (true, true) => "stationary",
-        (true, false) => "trend_stationary",
-        (false, false) => "difference_stationary",
-        (false, true) => "non_stationary",
+        (false, true) => "trend_stationary",
+        (false, false) => "non_stationary",
+        (true, false) => "difference_stationary",
     }
 }
 
@@ -309,12 +393,17 @@ pub fn stationarity(series: &[f64], regression: StationarityRegression) -> Combi
     let adf_r = adf(series, None, regression);
     let kpss_r = kpss(series, None, regression);
 
-    // RED (D-05a/D-04 TDD gate): no constant/NaN-degenerate detection yet --
-    // GREEN adds the `is_constant`/NaN -> None logic per the behavior block.
-    let verdict = Some(classify_stationarity(
-        adf_r.is_stationary,
-        kpss_r.is_stationary,
-    ));
+    let present: Vec<Option<f64>> = series.iter().map(|&v| Some(v)).collect();
+    let verdict = if series.len() >= 2 && is_constant(&present) {
+        Some("constant")
+    } else if adf_r.statistic.is_nan() || kpss_r.statistic.is_nan() {
+        None
+    } else {
+        Some(classify_stationarity(
+            adf_r.is_stationary,
+            kpss_r.is_stationary,
+        ))
+    };
 
     CombinedStationarityOut {
         adf_statistic: adf_r.statistic,
@@ -697,7 +786,7 @@ mod tests {
     }
 
     #[test]
-    fn kpss_trend_matches_behavior_spec() {
+    fn trend_kpss_matches_behavior_spec() {
         // trend_stationary fixture series (100 values) from
         // validation/reference/python/gen_stationarity_reference.py.
         let ts: Vec<f64> = vec![
@@ -723,10 +812,10 @@ mod tests {
         assert!(r.is_stationary);
 
         // p-value interpolation table.
-        assert_relative_eq!(kpss_trend_p_value(0.146), 0.05);
-        assert_relative_eq!(kpss_trend_p_value(0.161), 0.0375);
-        assert_relative_eq!(kpss_trend_p_value(0.05), 0.10);
-        assert_relative_eq!(kpss_trend_p_value(0.30), 0.01);
+        assert_relative_eq!(trend_kpss_p_value(0.146), 0.05);
+        assert_relative_eq!(trend_kpss_p_value(0.161), 0.0375);
+        assert_relative_eq!(trend_kpss_p_value(0.05), 0.10);
+        assert_relative_eq!(trend_kpss_p_value(0.30), 0.01);
 
         // KPSS('ct') with an explicit lags override of 1000 clamps to n/2 = 50.
         let r_clamped = kpss(&ts, Some(1000), StationarityRegression::ConstantTrend);

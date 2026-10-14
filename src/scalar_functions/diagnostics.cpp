@@ -258,10 +258,12 @@ void RegisterTsAdfFunction(ExtensionLoader &loader) {
 }
 
 // ============================================================================
-// ts_kpss(series LIST(DOUBLE) [, lags INTEGER]) → STRUCT(statistic, p_value,
-//   lags, is_stationary, cv_1pct, cv_5pct, cv_10pct)   [STAT-02]
+// ts_kpss(series LIST(DOUBLE) [, lags INTEGER [, regression VARCHAR]]) →
+//   STRUCT(statistic, p_value, lags, is_stationary, cv_1pct, cv_5pct,
+//   cv_10pct)   [STAT-02, D-05a]
 //
-// Same 7-field STRUCT as ts_adf (KPSS returns the crate's StationarityResult).
+// Same 7-field STRUCT as ts_adf (KPSS returns the crate's StationarityResult
+// for 'c', or the extension's own trend KPSS for 'ct' -- D-05a).
 // For KPSS, is_stationary=true means the statistic FAILS to reject the
 // stationarity null (statistic below the 5% critical value).
 // ============================================================================
@@ -276,6 +278,13 @@ static void TsKpssFunction(DataChunk &args, ExpressionState &state, Vector &resu
     unique_ptr<ScalarArgReader<int32_t>> lags_reader;
     if (has_lags) {
         lags_reader = make_uniq<ScalarArgReader<int32_t>>(args.data[1], count);
+    }
+
+    // Optional third argument: regression VARCHAR ('c' default, or 'ct') (D-05a)
+    bool has_regression = (args.ColumnCount() >= 3);
+    unique_ptr<ScalarArgReader<string_t>> regression_reader;
+    if (has_regression) {
+        regression_reader = make_uniq<ScalarArgReader<string_t>>(args.data[2], count);
     }
 
     auto &struct_entries = StructVector::GetEntries(result);
@@ -300,13 +309,23 @@ static void TsKpssFunction(DataChunk &args, ExpressionState &state, Vector &resu
             lags_val = lags_reader->Get(row_idx);
         }
 
+        std::string regression_owned;
+        const char *regression_str = nullptr;
+        if (has_regression && !regression_reader->IsNull(row_idx)) {
+            regression_owned = regression_reader->Get(row_idx).GetString();
+            regression_str = regression_owned.c_str();
+        }
+
         AnofoxStationarityResult r = {};
         AnofoxError err = {};
         bool ok = anofox_ts_kpss(
             series.data(), nullptr, series.size(),
-            static_cast<int>(lags_val), &r, &err);
+            static_cast<int>(lags_val), regression_str, &r, &err);
 
         if (!ok) {
+            if (err.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_kpss: %s", err.message ? err.message : "invalid input");
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -322,12 +341,14 @@ static void TsKpssFunction(DataChunk &args, ExpressionState &state, Vector &resu
 }
 
 // ============================================================================
-// ts_stationarity(series LIST(DOUBLE)) → STRUCT(adf_statistic, adf_p_value,
-//   kpss_statistic, kpss_p_value, adf_is_stationary, kpss_is_stationary,
-//   verdict)   [STAT-03]
+// ts_stationarity(series LIST(DOUBLE) [, regression VARCHAR]) →
+//   STRUCT(adf_statistic, adf_p_value, kpss_statistic, kpss_p_value,
+//   adf_is_stationary, kpss_is_stationary, verdict)   [STAT-03, D-04, D-05]
 //
-// Runs both ADF and KPSS and derives the four-way verdict
-// (stationary / trend_stationary / difference_stationary / non_stationary).
+// Runs both ADF and KPSS (same regression applied to both) and derives the
+// D-04 four-way verdict (stationary / non_stationary / trend_stationary /
+// difference_stationary), or 'constant', or SQL NULL (verdict child only)
+// for a degenerate series.
 // STRUCT field order must match AnofoxCombinedStationarityResult.
 // ============================================================================
 
@@ -336,6 +357,13 @@ static void TsStationarityFunction(DataChunk &args, ExpressionState &state, Vect
     idx_t count = args.size();
 
     ListDoubleReader series_reader(values_vec, count);
+
+    // Optional second argument: regression VARCHAR ('c' default, or 'ct') (D-04/D-05)
+    bool has_regression = (args.ColumnCount() >= 2);
+    unique_ptr<ScalarArgReader<string_t>> regression_reader;
+    if (has_regression) {
+        regression_reader = make_uniq<ScalarArgReader<string_t>>(args.data[1], count);
+    }
 
     auto &struct_entries = StructVector::GetEntries(result);
     auto adf_stat_data  = FlatVector::GetData<double>(*struct_entries[0]);
@@ -355,14 +383,33 @@ static void TsStationarityFunction(DataChunk &args, ExpressionState &state, Vect
             continue;
         }
 
+        std::string regression_owned;
+        const char *regression_str = nullptr;
+        if (has_regression && !regression_reader->IsNull(row_idx)) {
+            regression_owned = regression_reader->Get(row_idx).GetString();
+            regression_str = regression_owned.c_str();
+        }
+
         AnofoxCombinedStationarityResult r = {};
         AnofoxError err = {};
         bool ok = anofox_ts_stationarity(
-            series.data(), nullptr, series.size(), &r, &err);
+            series.data(), nullptr, series.size(), regression_str, &r, &err);
 
         if (!ok) {
+            if (err.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_stationarity: %s", err.message ? err.message : "invalid input");
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
+        }
+
+        // D-04: an empty verdict buffer (NUL at index 0) means SQL NULL --
+        // set only the verdict child NULL, every other field stays valid
+        // (the per-test adf_*/kpss_* fields always reflect the real result).
+        if (r.verdict[0] == '\0') {
+            FlatVector::SetNull(verdict_vec, row_idx, true);
+        } else {
+            verdict_data[row_idx] = StringVector::AddString(verdict_vec, r.verdict);
         }
 
         adf_stat_data[row_idx]   = r.adf_statistic;
@@ -371,8 +418,6 @@ static void TsStationarityFunction(DataChunk &args, ExpressionState &state, Vect
         kpss_pval_data[row_idx]  = r.kpss_p_value;
         adf_istat_data[row_idx]  = r.adf_is_stationary;
         kpss_istat_data[row_idx] = r.kpss_is_stationary;
-        // r.verdict is a NUL-terminated char[32]
-        verdict_data[row_idx]    = StringVector::AddString(verdict_vec, r.verdict);
     }
 }
 
@@ -409,27 +454,46 @@ void RegisterTsKpssFunction(ExtensionLoader &loader) {
     kpss_set.AddFunction(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         result_type, TsKpssFunction));
-    kpss_set.AddFunction(ScalarFunction(
+    // 2-arg and 3-arg overloads take a nullable lags / regression: a NULL
+    // means "auto" / 'c' respectively, not SQL NULL (same SPECIAL_HANDLING
+    // fix as ts_adf).
+    ScalarFunction kpss_2arg(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType(LogicalTypeId::INTEGER)},
-        result_type, TsKpssFunction));
+        result_type, TsKpssFunction);
+    kpss_2arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    kpss_set.AddFunction(kpss_2arg);
+    ScalarFunction kpss_3arg(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+         LogicalType(LogicalTypeId::INTEGER),
+         LogicalType(LogicalTypeId::VARCHAR)},
+        result_type, TsKpssFunction);
+    kpss_3arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    kpss_set.AddFunction(kpss_3arg);
     {
         CreateScalarFunctionInfo info(kpss_set);
         FunctionDescription desc;
         desc.description =
-            "Kwiatkowski-Phillips-Schmidt-Shin (KPSS) stationarity test. "
-            "Null hypothesis: the series is level-stationary. "
-            "Returns STRUCT(statistic DOUBLE, p_value DOUBLE, lags BIGINT, "
-            "is_stationary BOOLEAN, cv_1pct DOUBLE, cv_5pct DOUBLE, cv_10pct DOUBLE); "
-            "is_stationary=true means the null is NOT rejected at 5%. "
-            "Uses level ('c') specification; p-values are approximate (interpolated, "
-            "clamped to [0.01, 0.10]).";
-        desc.examples = {"ts_kpss(LIST(y ORDER BY ds))", "ts_kpss(LIST(y ORDER BY ds), 4)"};
+            "Kwiatkowski-Phillips-Schmidt-Shin (KPSS) stationarity test, matching "
+            "tseries::kpss.test(lshort = TRUE). Returns STRUCT(statistic DOUBLE, "
+            "p_value DOUBLE, lags BIGINT, is_stationary BOOLEAN, cv_1pct DOUBLE, "
+            "cv_5pct DOUBLE, cv_10pct DOUBLE); is_stationary=true means the null "
+            "is NOT rejected at 5%. regression is 'c' (level, null = \"Level\", "
+            "default) or 'ct' (trend, null = \"Trend\"); NULL means 'c'. "
+            "p-values are approximate (interpolated, clamped to [0.01, 0.10]). "
+            "Returns NaN statistic/p_value/critical values for series shorter "
+            "than 4 observations or (under 'ct') an exactly-collinear trend fit.";
+        desc.examples = {
+            "ts_kpss(LIST(y ORDER BY ds))",
+            "ts_kpss(LIST(y ORDER BY ds), 4)",
+            "ts_kpss(LIST(y ORDER BY ds), -1, 'ct')"
+        };
         desc.categories = {"time-series", "diagnostics"};
-        desc.parameter_names = {"series", "lags"};
+        desc.parameter_names = {"series", "lags", "regression"};
         desc.parameter_types = {
             LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
-            LogicalType(LogicalTypeId::INTEGER)};
+            LogicalType(LogicalTypeId::INTEGER),
+            LogicalType(LogicalTypeId::VARCHAR)};
         info.descriptions.push_back(std::move(desc));
         loader.RegisterFunction(std::move(info));
     }
@@ -438,10 +502,19 @@ void RegisterTsKpssFunction(ExtensionLoader &loader) {
     alias_set.AddFunction(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         LogicalType::STRUCT(StationarityStructChildren()), TsKpssFunction));
-    alias_set.AddFunction(ScalarFunction(
+    ScalarFunction alias_kpss_2arg(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType(LogicalTypeId::INTEGER)},
-        LogicalType::STRUCT(StationarityStructChildren()), TsKpssFunction));
+        LogicalType::STRUCT(StationarityStructChildren()), TsKpssFunction);
+    alias_kpss_2arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    alias_set.AddFunction(alias_kpss_2arg);
+    ScalarFunction alias_kpss_3arg(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+         LogicalType(LogicalTypeId::INTEGER),
+         LogicalType(LogicalTypeId::VARCHAR)},
+        LogicalType::STRUCT(StationarityStructChildren()), TsKpssFunction);
+    alias_kpss_3arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    alias_set.AddFunction(alias_kpss_3arg);
     {
         CreateScalarFunctionInfo info(alias_set);
         info.alias_of = "ts_kpss";
@@ -461,19 +534,38 @@ void RegisterTsStationarityFunction(ExtensionLoader &loader) {
     stat_set.AddFunction(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         result_type, TsStationarityFunction));
+    // 2-arg overload takes a nullable regression: NULL means 'c' (same
+    // SPECIAL_HANDLING fix as ts_adf/ts_kpss).
+    ScalarFunction stat_2arg(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+         LogicalType(LogicalTypeId::VARCHAR)},
+        result_type, TsStationarityFunction);
+    stat_2arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    stat_set.AddFunction(stat_2arg);
     {
         CreateScalarFunctionInfo info(stat_set);
         FunctionDescription desc;
         desc.description =
-            "Combined ADF + KPSS stationarity verdict. Runs both tests and returns "
+            "Combined ADF + KPSS stationarity verdict (D-04). Runs both tests "
+            "(with the SAME regression applied to both) and returns "
             "STRUCT(adf_statistic DOUBLE, adf_p_value DOUBLE, kpss_statistic DOUBLE, "
             "kpss_p_value DOUBLE, adf_is_stationary BOOLEAN, kpss_is_stationary BOOLEAN, "
-            "verdict VARCHAR). verdict is one of "
-            "'stationary', 'trend_stationary', 'difference_stationary', 'non_stationary'.";
-        desc.examples = {"ts_stationarity(LIST(y ORDER BY ds))"};
+            "verdict VARCHAR). verdict is one of 'stationary' (ADF rejects, KPSS "
+            "does not), 'non_stationary' (ADF does not reject, KPSS rejects), "
+            "'trend_stationary' (neither rejects), 'difference_stationary' (both "
+            "reject), or 'constant' (n >= 2, all values equal); verdict is SQL "
+            "NULL when either test's statistic is NaN (too-short series, or an "
+            "exactly-collinear regression). regression is 'c' (default) or 'ct'; "
+            "NULL means 'c'.";
+        desc.examples = {
+            "ts_stationarity(LIST(y ORDER BY ds))",
+            "ts_stationarity(LIST(y ORDER BY ds), 'ct')"
+        };
         desc.categories = {"time-series", "diagnostics"};
-        desc.parameter_names = {"series"};
-        desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))};
+        desc.parameter_names = {"series", "regression"};
+        desc.parameter_types = {
+            LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+            LogicalType(LogicalTypeId::VARCHAR)};
         info.descriptions.push_back(std::move(desc));
         loader.RegisterFunction(std::move(info));
     }
@@ -482,6 +574,12 @@ void RegisterTsStationarityFunction(ExtensionLoader &loader) {
     alias_set.AddFunction(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         LogicalType::STRUCT(CombinedStationarityStructChildren()), TsStationarityFunction));
+    ScalarFunction alias_stat_2arg(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+         LogicalType(LogicalTypeId::VARCHAR)},
+        LogicalType::STRUCT(CombinedStationarityStructChildren()), TsStationarityFunction);
+    alias_stat_2arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    alias_set.AddFunction(alias_stat_2arg);
     {
         CreateScalarFunctionInfo info(alias_set);
         info.alias_of = "ts_stationarity";
