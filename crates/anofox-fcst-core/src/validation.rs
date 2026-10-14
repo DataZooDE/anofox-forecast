@@ -15,6 +15,7 @@
 //! ```
 
 use crate::error::ForecastError;
+use crate::filter::is_constant;
 use anofox_forecast::validation;
 use anofox_forecast::validation::AdfRegression;
 use std::str::FromStr;
@@ -160,8 +161,8 @@ pub fn adf(
     validation::adf_test_with_options(series, &options).into()
 }
 
-/// Run the KPSS test for (level) stationarity, matching `tseries::kpss.test`
-/// (`null = "Level"`, `lshort = TRUE`) to numerical tolerance.
+/// Run the KPSS test for (level or trend) stationarity, matching
+/// `tseries::kpss.test` (`lshort = TRUE`) to numerical tolerance (D-05/D-05a).
 ///
 /// # Arguments
 ///
@@ -169,18 +170,79 @@ pub fn adf(
 /// * `lags` — Bandwidth (number of lags) for the Bartlett long-run variance
 ///   estimator. `None` → automatic `floor(4*(n/100)^0.25)`, clamped
 ///   `.min(n/2).max(1)`.
+/// * `regression` — `Constant` ("c", `null = "Level"`) dispatches to the
+///   crate's own `kpss_test`; `ConstantTrend` ("ct", `null = "Trend"`)
+///   dispatches to [`kpss_trend`] (D-05a — not available in anofox-forecast
+///   0.16.1, so implemented here in the extension's Rust core; an upstream
+///   port is deferred).
 ///
 /// # Notes
 ///
 /// KPSS reverses the ADF null hypothesis: H0 = the series *is*
-/// level-stationary. `is_stationary` is `true` when the statistic fails to
-/// reject that null (statistic below the 5% critical value). p-values are
-/// approximate (piecewise-linear interpolation of the KPSS table, clamped to
-/// `[0.01, 0.10]`, matching `tseries::kpss.test` exactly). The `'ct'` (trend)
-/// specification is added in [`kpss_trend`] (D-05a) via the 3-argument
-/// `kpss(series, lags, regression)` wrapper.
-pub fn kpss(series: &[f64], lags: Option<usize>) -> StationarityOut {
-    validation::kpss_test(series, lags).into()
+/// stationary (around a constant, or around a constant + linear trend
+/// under `ConstantTrend`). `is_stationary` is `true` when the statistic
+/// fails to reject that null (statistic below the 5% critical value).
+/// p-values are approximate (piecewise-linear interpolation of the
+/// appropriate KPSS table, clamped to `[0.01, 0.10]`, matching
+/// `tseries::kpss.test` exactly).
+pub fn kpss(
+    series: &[f64],
+    lags: Option<usize>,
+    regression: StationarityRegression,
+) -> StationarityOut {
+    match regression {
+        StationarityRegression::Constant => validation::kpss_test(series, lags).into(),
+        StationarityRegression::ConstantTrend => kpss_trend(series, lags),
+    }
+}
+
+/// `tseries::kpss.test`'s Trend table (`null = "Trend"`): linear
+/// interpolation between these `(statistic, p_value)` pairs, clamped to
+/// `[0.01, 0.10]` at both ends (R's `approx(..., rule = 2)`), mirroring
+/// [`validation::kpss_p_value`]'s Level table but with the Trend critical
+/// values.
+const KPSS_TREND_TABLE: [(f64, f64); 4] =
+    [(0.119, 0.10), (0.146, 0.05), (0.176, 0.025), (0.216, 0.01)];
+
+fn kpss_trend_p_value(stat: f64) -> f64 {
+    if stat.is_nan() {
+        return f64::NAN;
+    }
+    if stat <= KPSS_TREND_TABLE[0].0 {
+        return KPSS_TREND_TABLE[0].1;
+    }
+    if stat >= KPSS_TREND_TABLE[KPSS_TREND_TABLE.len() - 1].0 {
+        return KPSS_TREND_TABLE[KPSS_TREND_TABLE.len() - 1].1;
+    }
+    for i in 0..KPSS_TREND_TABLE.len() - 1 {
+        let (x1, y1) = KPSS_TREND_TABLE[i];
+        let (x2, y2) = KPSS_TREND_TABLE[i + 1];
+        if stat >= x1 && stat <= x2 {
+            return y1 + (y2 - y1) * (stat - x1) / (x2 - x1);
+        }
+    }
+    unreachable!("stat is within table bounds by the checks above")
+}
+
+/// Trend KPSS (D-05a): `tseries::kpss.test(x, null = "Trend", lshort = TRUE)`.
+/// Not available in anofox-forecast 0.16.1 -- implemented here in the
+/// extension's Rust core (deferred upstream port, see 17-CONTEXT.md).
+///
+/// Residuals come from the OLS fit of `series` on a constant and the time
+/// index `t = 0..n-1` (closed-form intercept/slope -- no matrix library,
+/// mirroring `detrending::detrend_linear`'s spirit but kept local since this
+/// is a diagnostic, not a decomposition). The long-run variance estimator is
+/// IDENTICAL to the crate's level-KPSS Bartlett kernel (weights
+/// `1 - j/(l+1)`, `/n` autocovariances) with the SAME default/clamped
+/// bandwidth. Critical values are the tseries Trend table (0.216/0.146/
+/// 0.119 at 1%/5%/10%); the p-value is [`kpss_trend_p_value`]'s
+/// interpolation. A non-positive or non-finite long-run variance (e.g. an
+/// exactly-linear series, whose OLS residuals are ~0) returns the `NaN`
+/// result via [`normalize_degenerate`] rather than panicking or dividing by
+/// zero.
+fn kpss_trend(series: &[f64], lags: Option<usize>) -> StationarityOut {
+    let _ = (series, lags);
+    unimplemented!("D-05a RED: kpss_trend not yet implemented")
 }
 
 /// Combined ADF + KPSS stationarity verdict.
@@ -200,19 +262,29 @@ pub struct CombinedStationarityOut {
     pub adf_is_stationary: bool,
     /// Whether KPSS alone judges the series stationary (fails to reject stationarity)
     pub kpss_is_stationary: bool,
-    /// Four-way verdict: one of
-    /// `stationary`, `trend_stationary`, `difference_stationary`, `non_stationary`
-    pub verdict: &'static str,
+    /// D-04 four-way verdict: one of `stationary`, `non_stationary`,
+    /// `trend_stationary`, `difference_stationary`, `constant`; `None` means
+    /// SQL NULL (either test's statistic is `NaN` -- e.g. too-short series,
+    /// or an exactly-collinear regression).
+    pub verdict: Option<&'static str>,
 }
 
-/// Classify the four-way stationarity verdict from the two per-test stationarity flags.
+/// Classify the D-04 four-way stationarity verdict from the two per-test
+/// stationarity flags (standard ADF+KPSS combination, statsmodels
+/// convention):
+/// * ADF rejects, KPSS does not reject → `stationary`
+/// * ADF does not reject, KPSS rejects → `non_stationary`
+/// * neither rejects                   → `trend_stationary` (stationary around a deterministic trend)
+/// * both reject                       → `difference_stationary` (unit root → difference it)
 ///
-/// Standard ADF+KPSS combination (both flags mean "this test says stationary"):
-/// * both stationary               → `stationary`
-/// * ADF stationary, KPSS not      → `trend_stationary` (stationary around a deterministic trend)
-/// * both non-stationary           → `difference_stationary` (unit root → difference it)
-/// * ADF not, KPSS stationary      → `non_stationary` (conflicting / inconclusive)
+/// `adf_is_stationary`/`kpss_is_stationary` are each test's OWN
+/// "is stationary" flag (ADF: rejects the unit-root null; KPSS: fails to
+/// reject the stationarity null) -- so "ADF rejects" is
+/// `adf_is_stationary == true` and "KPSS rejects" is
+/// `kpss_is_stationary == false`.
 pub fn classify_stationarity(adf_is_stationary: bool, kpss_is_stationary: bool) -> &'static str {
+    // RED (D-05a/D-04 TDD gate): intentionally still the OLD, pre-fix
+    // mapping here -- GREEN swaps this to the D-04 table.
     match (adf_is_stationary, kpss_is_stationary) {
         (true, true) => "stationary",
         (true, false) => "trend_stationary",
@@ -221,11 +293,29 @@ pub fn classify_stationarity(adf_is_stationary: bool, kpss_is_stationary: bool) 
     }
 }
 
-/// Run both ADF and KPSS and derive the combined four-way verdict.
-pub fn stationarity(series: &[f64]) -> CombinedStationarityOut {
-    let adf_r = adf(series, None, StationarityRegression::Constant);
-    let kpss_r = kpss(series, None);
-    let verdict = classify_stationarity(adf_r.is_stationary, kpss_r.is_stationary);
+/// Run both ADF and KPSS and derive the combined D-04 four-way verdict
+/// (D-04, D-05). `regression` applies to BOTH tests.
+///
+/// The verdict is decided before the two-test mapping:
+/// * a constant series (`n >= 2`, all present values equal per the crate's
+///   own [`is_constant`] predicate) → `Some("constant")`
+/// * either test's statistic is `NaN` → `None` (SQL NULL)
+/// * otherwise → `Some(classify_stationarity(..))`
+///
+/// The per-test fields (`adf_statistic`, `kpss_statistic`, ...) are always
+/// the plain [`adf`]/[`kpss`] outputs, so they keep equalling `ts_adf` /
+/// `ts_kpss` run directly on the same series and regression.
+pub fn stationarity(series: &[f64], regression: StationarityRegression) -> CombinedStationarityOut {
+    let adf_r = adf(series, None, regression);
+    let kpss_r = kpss(series, None, regression);
+
+    // RED (D-05a/D-04 TDD gate): no constant/NaN-degenerate detection yet --
+    // GREEN adds the `is_constant`/NaN -> None logic per the behavior block.
+    let verdict = Some(classify_stationarity(
+        adf_r.is_stationary,
+        kpss_r.is_stationary,
+    ));
+
     CombinedStationarityOut {
         adf_statistic: adf_r.statistic,
         adf_p_value: adf_r.p_value,
@@ -541,7 +631,7 @@ mod tests {
     #[test]
     fn kpss_returns_finite_statistic_and_valid_pvalue() {
         let series = ar1_stationary(80, 5);
-        let result = kpss(&series, None);
+        let result = kpss(&series, None, StationarityRegression::Constant);
         assert!(
             result.statistic.is_finite(),
             "KPSS statistic should be finite"
@@ -558,8 +648,8 @@ mod tests {
         // KPSS statistic is LARGER for non-stationary series (rejects the stationarity null)
         let rw = random_walk(120, 3);
         let ar = ar1_stationary(120, 3);
-        let rw_k = kpss(&rw, None);
-        let ar_k = kpss(&ar, None);
+        let rw_k = kpss(&rw, None, StationarityRegression::Constant);
+        let ar_k = kpss(&ar, None, StationarityRegression::Constant);
         assert!(
             rw_k.statistic > ar_k.statistic,
             "random-walk KPSS ({:.4}) should exceed stationary KPSS ({:.4})",
@@ -570,22 +660,29 @@ mod tests {
 
     #[test]
     fn classify_stationarity_truth_table() {
+        // D-04: ADF rejects, KPSS does not reject -> stationary.
         assert_eq!(classify_stationarity(true, true), "stationary");
-        assert_eq!(classify_stationarity(true, false), "trend_stationary");
-        assert_eq!(classify_stationarity(false, false), "difference_stationary");
-        assert_eq!(classify_stationarity(false, true), "non_stationary");
+        // ADF does not reject, KPSS rejects -> non_stationary.
+        assert_eq!(classify_stationarity(false, false), "non_stationary");
+        // Neither rejects -> trend_stationary.
+        assert_eq!(classify_stationarity(false, true), "trend_stationary");
+        // Both reject -> difference_stationary.
+        assert_eq!(classify_stationarity(true, false), "difference_stationary");
     }
 
     #[test]
     fn stationarity_verdict_is_one_of_four_labels() {
         let series = ar1_stationary(100, 11);
-        let combined = stationarity(&series);
+        let combined = stationarity(&series, StationarityRegression::Constant);
         assert!(
             matches!(
                 combined.verdict,
-                "stationary" | "trend_stationary" | "difference_stationary" | "non_stationary"
+                Some("stationary")
+                    | Some("trend_stationary")
+                    | Some("difference_stationary")
+                    | Some("non_stationary")
             ),
-            "verdict must be one of the four labels, got {}",
+            "verdict must be one of the four labels, got {:?}",
             combined.verdict
         );
         // The combined statistics must match the individual test outputs.
@@ -593,7 +690,100 @@ mod tests {
             combined.adf_statistic,
             adf(&series, None, StationarityRegression::Constant).statistic
         );
-        assert_relative_eq!(combined.kpss_statistic, kpss(&series, None).statistic);
+        assert_relative_eq!(
+            combined.kpss_statistic,
+            kpss(&series, None, StationarityRegression::Constant).statistic
+        );
+    }
+
+    #[test]
+    fn kpss_trend_matches_behavior_spec() {
+        // trend_stationary fixture series (100 values) from
+        // validation/reference/python/gen_stationarity_reference.py.
+        let ts: Vec<f64> = vec![
+            11.6868, 11.6724, 11.7833, 11.1672, 11.9244, 11.9678, 11.7347, 11.9132, 13.0209,
+            13.9755, 12.6389, 11.3045, 11.1077, 12.8573, 12.3706, 12.1477, 13.7922, 14.5765,
+            13.4204, 10.7194, 11.9456, 13.974, 14.2568, 12.7642, 12.7654, 14.6512, 15.689, 12.7434,
+            11.9204, 13.6517, 15.4728, 16.7095, 15.8291, 15.5605, 16.3353, 17.4651, 17.2086,
+            18.1492, 19.4742, 19.7893, 19.7197, 20.1087, 18.5176, 19.301, 17.9914, 19.8214,
+            19.0297, 17.6203, 17.5362, 19.0964, 19.0789, 20.4123, 21.7995, 20.9125, 21.1322,
+            22.2103, 21.8015, 24.1885, 23.4572, 22.7352, 22.3906, 22.7709, 23.1019, 24.8245,
+            23.6303, 23.6606, 24.6127, 23.1483, 23.5438, 24.2914, 22.9941, 23.6819, 25.4222,
+            27.0908, 27.1649, 26.4485, 25.8, 27.1473, 27.7016, 27.4023, 26.4704, 26.2581, 26.9843,
+            26.2706, 28.1165, 28.9246, 28.1264, 27.9331, 27.9118, 30.5434, 29.5322, 28.9346,
+            27.1721, 27.8209, 27.5195, 28.6054, 28.6876, 29.5953, 31.4823, 29.888,
+        ];
+        let r = kpss(&ts, None, StationarityRegression::ConstantTrend);
+        assert_relative_eq!(r.statistic, 0.11714250016361194, epsilon = 1e-10);
+        assert_eq!(r.lags, 4);
+        assert_relative_eq!(r.p_value, 0.1);
+        assert_relative_eq!(r.cv_1pct, 0.216);
+        assert_relative_eq!(r.cv_5pct, 0.146);
+        assert_relative_eq!(r.cv_10pct, 0.119);
+        assert!(r.is_stationary);
+
+        // p-value interpolation table.
+        assert_relative_eq!(kpss_trend_p_value(0.146), 0.05);
+        assert_relative_eq!(kpss_trend_p_value(0.161), 0.0375);
+        assert_relative_eq!(kpss_trend_p_value(0.05), 0.10);
+        assert_relative_eq!(kpss_trend_p_value(0.30), 0.01);
+
+        // KPSS('ct') with an explicit lags override of 1000 clamps to n/2 = 50.
+        let r_clamped = kpss(&ts, Some(1000), StationarityRegression::ConstantTrend);
+        assert_eq!(r_clamped.lags, 50);
+        assert!(r_clamped.statistic.is_finite());
+
+        // n = 3 -> NaN, no panic.
+        let short = vec![1.0, 2.0, 3.0];
+        let r_short = kpss(&short, None, StationarityRegression::ConstantTrend);
+        assert!(r_short.statistic.is_nan());
+        assert!(r_short.p_value.is_nan());
+        assert!(!r_short.is_stationary);
+
+        // Exactly-linear series (n=30): singular trend fit -> NaN, no panic.
+        let linear: Vec<f64> = (0..30).map(|i| 2.0 + 0.5 * i as f64).collect();
+        let r_linear = kpss(&linear, None, StationarityRegression::ConstantTrend);
+        assert!(r_linear.statistic.is_nan());
+        assert!(r_linear.p_value.is_nan());
+        assert!(r_linear.cv_1pct.is_nan());
+        assert!(!r_linear.is_stationary);
+    }
+
+    #[test]
+    fn stationarity_constant_and_degenerate_verdicts() {
+        // Constant series (n >= 2, all equal) -> Some("constant").
+        let c30: Vec<f64> = vec![5.0; 30];
+        assert_eq!(
+            stationarity(&c30, StationarityRegression::Constant).verdict,
+            Some("constant")
+        );
+        let c2: Vec<f64> = vec![5.0, 5.0];
+        assert_eq!(
+            stationarity(&c2, StationarityRegression::Constant).verdict,
+            Some("constant")
+        );
+
+        // n = 1: fewer than 2 present values -- not "constant" per this
+        // function's own n >= 2 guard, and ADF/KPSS are both NaN -> None.
+        let c1: Vec<f64> = vec![5.0];
+        assert_eq!(
+            stationarity(&c1, StationarityRegression::Constant).verdict,
+            None
+        );
+
+        // n = 3, non-constant, too short for ADF/KPSS -> None (NaN statistic).
+        let short = vec![1.0, 2.0, 3.0];
+        assert_eq!(
+            stationarity(&short, StationarityRegression::Constant).verdict,
+            None
+        );
+
+        // Exactly-linear series under 'ct' -> None (KPSS NaN).
+        let linear: Vec<f64> = (0..30).map(|i| 2.0 + 0.5 * i as f64).collect();
+        assert_eq!(
+            stationarity(&linear, StationarityRegression::ConstantTrend).verdict,
+            None
+        );
     }
 
     /// White-noise-ish residuals: LCG uniform noise, roughly independent.
