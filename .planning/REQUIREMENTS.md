@@ -20,7 +20,7 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 
 - [x] **DEP-01**: anofox-regression bumped `=0.5.3` → `=0.5.15`; multi-scale exogenous OLS matches numpy `lstsq` (fixes coefficient scrambling + O(n²) memory) [H].
 - [x] **DEP-02**: anofox-forecast bumped to ≥0.15.10 (MFLES runaway, panel NaN guards, Laplace leaf fixes) [H].
-- [ ] **DEP-03**: fdars-core bumped 0.3 → 0.47 with features `["parallel"]` (no `linalg`, removing the duplicate anofox-regression 0.4.0); native + WASM builds compile [H].
+- [x] **DEP-03**: fdars-core bumped 0.3 → 0.47 with features `["parallel"]` (no `linalg`, removing the duplicate anofox-regression 0.4.0); native + WASM builds compile [H].
 - [x] **DEP-04**: Documented/CI MSRV matches what the dependency tree actually requires [H toolchain].
 
 ### Forecast Wrapper (crates/anofox-fcst-core/src/forecast.rs, FFI)
@@ -37,7 +37,7 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 
 ### Wrapper Bug Fixes
 
-- [ ] **WRAP-01**: fdars calls in detrending.rs and seasonality.rs pass the series correctly; `ts_detrend`, `ts_detrend_by`, `ts_decompose_seasonal`, `classify_seasonality`, amplitude-modulation return non-trivial results matching numpy `polyfit` / reference; `'quadratic'` maps to polynomial degree 2 or errors [B1–B3].
+- [x] **WRAP-01**: fdars calls in detrending.rs and seasonality.rs pass the series correctly; `ts_detrend`, `ts_detrend_by`, `ts_decompose_seasonal`, `classify_seasonality`, amplitude-modulation return non-trivial results matching numpy `polyfit` / reference; `'quadratic'` maps to polynomial degree 2 or errors [B1–B3].
 - [x] **WRAP-02**: `ts_data_quality_by` passes dates, frequency and n_short; gap/temporal scores reflect real gaps; `find_mode` ties are deterministic [E6, E7].
 - [x] **WRAP-03**: `detect_frequency` is deterministic on ties and its unit (µs) is documented correctly; monthly/quarterly/yearly gap fill preserves month-end alignment [G23, G24].
 
@@ -73,13 +73,13 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 
 ### Detection & Decomposition
 
-- [ ] **DET-01**: Peak detection follows scipy `find_peaks` semantics (indices, plateaus, prominence) and matches scipy on fixtures [G1].
+- [x] **DET-01**: Peak detection follows scipy `find_peaks` semantics (indices, plateaus, prominence) and matches scipy on fixtures [G1].
 - [x] **DET-02**: BOCPD implements Adams & MacKay correctly (normalised Student-t predictive, correct Normal-Gamma update, truncation keeps mass, changepoint rule detects a 3σ step and stays quiet on stationary noise) [G3–G6].
 - [x] **DET-03**: PELT penalty is scale-invariant (variance-normalised cost or BIC-style penalty with σ²); normal and L1 costs correct (median for L1); pruning implemented [G7, G8].
-- [ ] **DET-04**: MSTL processes periods shortest-first with STL (Loess) components matching R `forecast::mstl`/statsmodels within tolerance; even-window averages correct [G9–G11].
-- [ ] **DET-05**: Period detection is robust: FFT detrends before the periodogram and handles odd n; ACF period allows lag 2 and requires significance; regression-period defaults include integer candidates; Lomb-Scargle validates inputs [G17, G18, G20, G21].
-- [ ] **DET-06**: Seasonal-strength variants detrend before measuring; wavelet strength is fixed (noise ≈ 0) or removed; trend-strength doc matches implementation [G19, G22].
-- [ ] **DET-07**: is_constant uses a scale-relative tolerance; edge-NULL interpolation behaviour documented [G25, G26].
+- [x] **DET-04**: MSTL processes periods shortest-first with STL (Loess) components matching R `forecast::mstl`/statsmodels within tolerance; even-window averages correct [G9–G11].
+- [x] **DET-05**: Period detection is robust: FFT detrends before the periodogram and handles odd n; ACF period allows lag 2 and requires significance; regression-period defaults include integer candidates; Lomb-Scargle validates inputs [G17, G18, G20, G21].
+- [x] **DET-06**: Seasonal-strength variants detrend before measuring; wavelet strength is fixed (noise ≈ 0) or removed; trend-strength doc matches implementation [G19, G22].
+- [x] **DET-07**: is_constant uses a scale-relative tolerance; edge-NULL interpolation behaviour documented [G25, G26].
 
 ### Conformal & Bootstrap
 
@@ -133,7 +133,7 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 | TEST-03 | Phase 18 | Pending |
 | DEP-01 | Phase 9 | Complete |
 | DEP-02 | Phase 9 | Complete |
-| DEP-03 | Phase 15 | Pending |
+| DEP-03 | Phase 15 | Complete |
 | DEP-04 | Phase 9 | Complete |
 | FCST-01 | Phase 10 | Complete |
 | FCST-02 | Phase 10 | Complete |
@@ -144,7 +144,7 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 | FCST-07 | Phase 10 | Complete |
 | FCST-08 | Phase 10 | Complete |
 | FCST-09 | Phase 17 | Pending |
-| WRAP-01 | Phase 15 | Pending |
+| WRAP-01 | Phase 15 | Complete |
 | WRAP-02 | Phase 13 | Complete |
 | WRAP-03 | Phase 13 | Complete |
 | RUST-01 | Phase 12 | Complete |
@@ -168,13 +168,13 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 | FEAT-03 | Phase 14 | Complete |
 | FEAT-04 | Phase 14 | Complete |
 | FEAT-05 | Phase 14 | Complete |
-| DET-01 | Phase 15 | Pending |
+| DET-01 | Phase 15 | Complete |
 | DET-02 | Phase 15 | Complete |
 | DET-03 | Phase 15 | Complete |
-| DET-04 | Phase 15 | Pending |
-| DET-05 | Phase 15 | Pending |
-| DET-06 | Phase 15 | Pending |
-| DET-07 | Phase 15 | Pending |
+| DET-04 | Phase 15 | Complete |
+| DET-05 | Phase 15 | Complete |
+| DET-06 | Phase 15 | Complete |
+| DET-07 | Phase 15 | Complete |
 | CONF-01 | Phase 16 | Pending |
 | CONF-02 | Phase 16 | Pending |
 | CONF-03 | Phase 16 | Pending |

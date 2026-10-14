@@ -73,7 +73,7 @@ Phase artifacts (plans, summaries, verification): [milestones/v0.9.0-phases/](mi
 - [x] **Phase 12: Statistics Marshalling Moves to Rust** - ToUnifiedFormat + validity for list args, Rust-owned NULL policy, diff/fill/backtest/hierarchy/agg delegated to Rust (completed 2026-10-10)
 - [x] **Phase 13: Core Statistics, Metrics & Data Quality** - scipy-exact moments, STL F_T/F_S strengths, Hyndman-Koehler MASE, MAPE zero policy, real gap/frequency data quality (completed 2026-10-11)
 - [x] **Phase 14: tsfresh Feature Parity** - All 117 features match tsfresh on reference series or carry a documented deviation (completed 2026-10-12)
-- [ ] **Phase 15: Detection & Decomposition on fdars 0.47** - fdars 0.47 bump fixes detrend/seasonality no-ops; scipy peaks, correct BOCPD/PELT, STL-based MSTL, robust period detection
+- [x] **Phase 15: Detection & Decomposition on fdars 0.47** - fdars 0.47 bump fixes detrend/seasonality no-ops; scipy peaks, correct BOCPD/PELT, STL-based MSTL, robust period detection (completed 2026-10-14)
 - [ ] **Phase 16: Conformal & Bootstrap Correctness** - Horizon-ordered, per-group conformal surface computed in Rust; correct split/asymmetric/adaptive/jackknife+ and bootstrap sign
 - [ ] **Phase 17: Upstream Consumption & Diagnostics Parity** - Extension consumes the released upstream fixes; stationarity verdicts, model-aware Ljung-Box and R `forecast` parity verified from SQL
 - [ ] **Phase 18: Correctness Regression Suite, Audit & Docs** - Value-asserting tests everywhere, SQL correctness suite, no-stats-in-C++ audit, docs/skills/CHANGELOG synced
@@ -307,23 +307,23 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 15-01-PLAN.md — package-legitimacy gate, fdars-core 0.47 bump ([parallel]/[js], no linalg) + one FdMatrix helper; ts_detrend polyfit tracer, strict 'quadratic'/'cubic' methods; classify/amplitude-modulation/ts_decompose_seasonal non-trivial; WASM check; Phase 15 SQL test + snippet harness (wave 1)
+- [x] 15-01-PLAN.md — package-legitimacy gate, fdars-core 0.47 bump ([parallel]/[js], no linalg) + one FdMatrix helper; ts_detrend polyfit tracer, strict 'quadratic'/'cubic' methods; classify/amplitude-modulation/ts_decompose_seasonal non-trivial; WASM check; Phase 15 SQL test + snippet harness (wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 15-02-PLAN.md — scipy find_peaks port (plateau midpoints, O(n) prominence, height/distance/prominence) behind the unchanged ts_detect_peaks surface (wave 2)
+- [x] 15-02-PLAN.md — scipy find_peaks port (plateau midpoints, O(n) prominence, height/distance/prominence) behind the unchanged ts_detect_peaks surface (wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 15-03-PLAN.md — Adams & MacKay BOCPD (numpy reference, MAP-reset rule) + sigma-normalised PELT with median L1 and exact-safe pruning (Rust-only, exact-DP reference) (wave 3)
+- [x] 15-03-PLAN.md — Adams & MacKay BOCPD (numpy reference, MAP-reset rule) + sigma-normalised PELT with median L1 and exact-safe pruning (Rust-only, exact-DP reference) (wave 3)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 15-04-PLAN.md — R forecast::mstl via the shared stl.rs iteration (one implementation with ts_stats), seasonal_periods wired to SQL, R stats::decompose classical methods on ts_decompose_seasonal (wave 4)
+- [x] 15-04-PLAN.md — R forecast::mstl via the shared stl.rs iteration (one implementation with ts_stats), seasonal_periods wired to SQL, R stats::decompose classical methods on ts_decompose_seasonal (wave 4)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 15-05-PLAN.md — detrended scipy FFT period, significant ACF from lag 2, integer-grid regression period, validated Lomb-Scargle, detrend-first strengths (wavelet removed), scale-relative is_constant, edge-NULL docs + pins, phase-wide docs/skills/CHANGELOG sweep (wave 5)
+- [x] 15-05-PLAN.md — detrended scipy FFT period, significant ACF from lag 2, integer-grid regression period, validated Lomb-Scargle, detrend-first strengths (wavelet removed), scale-relative is_constant, edge-NULL docs + pins, phase-wide docs/skills/CHANGELOG sweep (wave 5)
 
 ### Phase 16: Conformal & Bootstrap Correctness
 
@@ -418,7 +418,7 @@ Phases execute in numeric order: 9 → 10 → 11 → 12 → 13 → 14 → 15 →
 | 12. Statistics Marshalling Moves to Rust | 8/8 | Complete    | 2026-10-10 |
 | 13. Core Statistics, Metrics & Data Quality | 4/4 | Complete    | 2026-10-11 |
 | 14. tsfresh Feature Parity | 4/4 | Complete    | 2026-10-12 |
-| 15. Detection & Decomposition on fdars 0.47 | 0/5 | Not started | - |
+| 15. Detection & Decomposition on fdars 0.47 | 5/5 | Complete    | 2026-10-14 |
 | 16. Conformal & Bootstrap Correctness | 0/TBD | Not started | - |
 | 17. Upstream Consumption & Diagnostics Parity | 0/TBD | Not started | - |
 | 18. Correctness Regression Suite, Audit & Docs | 0/TBD | Not started | - |
