@@ -44,6 +44,10 @@ Execution note: planned in parallel with Phases 15/16, but EXECUTES after Phase 
 
 - **D-13:** If the 17-03 diagnosis confirms it, the SQL model name 'Holt' is remapped to the crate's ETS(A,A,N), which is the definition of R's `holt()`. Pre-diagnosis this shrinks the gap from 11.5% to 1.7% on AirPassengers. Breaking output change, with CHANGELOG before/after rows. (User, 2026-10-14.)
 
+### Revision for anofox-forecast 0.16.1 (user, 2026-10-14)
+- **D-14:** Bump to **0.16.1** instead of 0.16.0 (this supersedes the D-01 version). 0.16.1 adds AutoARIMA's R-parity fixes (upstream PR #223: a port of R's `stats::arima` estimation path and the Hyndman-Khandakar stepwise search with R defaults). It is being merged and released as Phase 17 is revised. 17-01's start guard must confirm `anofox-forecast 0.16.1` is on crates.io (`cargo search anofox-forecast` / the crates.io API) before bumping. If it is not published yet, stop and report; do not fall back to 0.16.0.
+- **D-15:** AutoARIMA is no longer a known gap (supersedes D-02). FCST-09 asserts AutoARIMA against R `auto.arima` like the other models: same selected order on AirPassengers (R: ARIMA(2,1,1)(0,1,0)[12]) and the simulated series, with point/interval tolerances measured and documented. UPST-01 closes in this phase, so the deferred follow-up bump is removed.
+
 ### Claude's Discretion
 - Exact tolerance values per model (each justified), the Monte Carlo seed and size, simulated-series parameters, and where the parity test lives (Rust integration test over the core forecast wrapper and/or SQL).
 
@@ -79,6 +83,5 @@ Execution note: planned in parallel with Phases 15/16, but EXECUTES after Phase 
 ## Deferred Ideas
 
 - Port the KPSS trend variant (D-05a) upstream into anofox-forecast.
-- A follow-up bump to the anofox-forecast release containing AutoARIMA #223 (closes UPST-01, tightens the AutoARIMA parity tolerance).
 
 </deferred>
