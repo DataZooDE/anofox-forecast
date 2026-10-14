@@ -581,6 +581,21 @@ pub fn estimate_period_regression_ts(
         return Err(ForecastError::InsufficientData { needed: 8, got: n });
     }
 
+    // WR-01: mirror lomb_scargle's bound validation -- without this, a
+    // caller-supplied period_min <= 0.0 lets the default integer-grid path
+    // include zero/negative candidate periods, and on a non-seasonal series
+    // the RSS tie-break can select the most negative candidate as
+    // best_period (a nonsensical negative "detected period").
+    if let Some(mn) = period_min {
+        if !mn.is_finite() || mn <= 0.0 {
+            return Err(ForecastError::InvalidParameter {
+                param: "period_min".to_string(),
+                value: mn.to_string(),
+                reason: "must be a positive finite number".to_string(),
+            });
+        }
+    }
+
     if let (Some(mn), Some(mx)) = (period_min, period_max) {
         if mn >= mx {
             return Err(ForecastError::InvalidParameter {
