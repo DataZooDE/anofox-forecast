@@ -848,11 +848,17 @@ pub fn lomb_scargle(
     // (e.g. a too-short series making t_span/2 < 2.0) is InsufficientData
     // -> NULL row, not an error, since the caller supplied nothing wrong.
     if let Some(nf) = n_frequencies {
-        if nf < 2 {
+        // CR-02: the lower bound alone left no upper bound anywhere in the
+        // stack, so a huge value (or a negative SQL argument that wraps to a
+        // huge size_t in the C++ caller) could drive an allocation of
+        // billions of f64 elements. Rust's global allocator aborts the whole
+        // process on allocation failure -- not a catch_unwind-able panic --
+        // so this must be rejected here before any allocation happens.
+        if nf < 2 || nf > 1_000_000 {
             return Err(ForecastError::InvalidParameter {
                 param: "n_frequencies".to_string(),
                 value: nf.to_string(),
-                reason: "must be at least 2".to_string(),
+                reason: "must be between 2 and 1,000,000".to_string(),
             });
         }
     }
@@ -2373,6 +2379,29 @@ mod tests {
             "Lomb-Scargle noisy: period={:.2}, power={:.4}",
             result.period, result.power
         );
+    }
+
+    #[test]
+    fn test_lomb_scargle_n_frequencies_upper_bound_rejected() {
+        // CR-02: an absurdly large n_frequencies must be rejected before any
+        // allocation is attempted (the global allocator aborts the process
+        // on OOM rather than returning a catchable error).
+        let values = generate_seasonal_series(120, 12.0, 5.0);
+        let result = lomb_scargle(&values, None, None, None, Some(2_000_000_000));
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ForecastError::InvalidParameter { param, .. } => {
+                assert_eq!(param, "n_frequencies");
+            }
+            other => panic!("expected InvalidParameter, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_lomb_scargle_n_frequencies_lower_bound_rejected() {
+        let values = generate_seasonal_series(120, 12.0, 5.0);
+        let result = lomb_scargle(&values, None, None, None, Some(1));
+        assert!(result.is_err());
     }
 
     #[test]

@@ -1080,7 +1080,17 @@ static void TsLombScargleFunction(DataChunk &args, ExpressionState &state, Vecto
         }
         size_t n_frequencies = 0;
         if (has_n_frequencies && !n_frequencies_reader->IsNull(row_idx)) {
-            n_frequencies = static_cast<size_t>(n_frequencies_reader->Get(row_idx));
+            // CR-02: reject negative values before the size_t cast -- a
+            // negative int64_t silently wraps to a huge size_t, which the
+            // Rust side also now bounds-checks, but failing fast here with a
+            // clear message avoids relying solely on that downstream check.
+            int64_t raw_n_frequencies = n_frequencies_reader->Get(row_idx);
+            if (raw_n_frequencies < 0) {
+                throw InvalidInputException(
+                    "ts_lomb_scargle: n_frequencies must be non-negative, got %lld",
+                    static_cast<long long>(raw_n_frequencies));
+            }
+            n_frequencies = static_cast<size_t>(raw_n_frequencies);
         }
 
         LombScargleResultFFI ls_result;
