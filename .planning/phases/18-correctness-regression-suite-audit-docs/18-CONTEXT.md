@@ -36,6 +36,9 @@ Execution note: planned in parallel with Phases 16/17. It EXECUTES last, after P
   3. audit script + allow-list + CI [RUST-10];
   4. snippet checker + docs/skills sweep + CHANGELOG breaking-changes section [DOCS-01, DOCS-02].
 
+### Post-planning decision (user, 2026-10-14)
+- **D-10:** The WR-05 fix adds a final output column `n_unassessed` to `ts_data_quality_summary` (groups with no usable dates), so that good + fair + poor + unassessed = total, and `avg_score` covers assessed groups only. A new output column, documented in the CHANGELOG.
+
 ### Claude's Discretion
 - Exact audit patterns and allow-list format, the correctness file split if an area is too large, and how the length-only sweep detects "length-only".
 
