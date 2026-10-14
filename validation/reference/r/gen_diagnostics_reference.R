@@ -111,6 +111,58 @@ series_block <- function(y) {
   list(values = as.numeric(y), n = length(y), tests = diag_tests(y))
 }
 
+# ---- 17-02: Ljung-Box fitdf / Durbin-Watson portmanteau cases -------------
+#
+# Model-aware Ljung-Box (D-06, DIAG-04): R Box.test(fitdf = p + q) on the
+# residuals of a fitted ARMA(1,1) model, and on first-differenced random-walk
+# series (fitdf 2 to exercise a non-zero correction even without a real
+# model). durbin_watson is the closed form sum(diff(values)^2)/sum(values^2)
+# -- no separate R call needed since this matches the extension's own
+# formula exactly.
+
+arma11_fit <- arima(series$ar1[1:120], order = c(1, 0, 1))
+arma11_resid <- as.numeric(residuals(arma11_fit))
+diff_rw_full <- diff(series$rw)
+diff_rw30 <- diff_rw_full[1:30]
+
+portmanteau_case <- function(name, r_call, values, lag, fitdf) {
+  bt <- Box.test(values, lag = lag, type = "Ljung-Box", fitdf = fitdf)
+  list(
+    name = name,
+    r_call = r_call,
+    values = as.numeric(values),
+    lag = lag,
+    fitdf = fitdf,
+    statistic = as.numeric(bt$statistic),
+    df = as.numeric(bt$parameter),
+    p_value = as.numeric(bt$p.value),
+    durbin_watson = sum(diff(values)^2) / sum(values^2)
+  )
+}
+
+portmanteau_cases <- list(
+  arma11_resid_lag10_fitdf2 = portmanteau_case(
+    "arma11_resid_lag10_fitdf2",
+    "Box.test(residuals(arima(ar1[1:120], order=c(1,0,1))), lag=10, fitdf=2)",
+    arma11_resid, 10, 2
+  ),
+  arma11_resid_lag20_fitdf2 = portmanteau_case(
+    "arma11_resid_lag20_fitdf2",
+    "Box.test(residuals(arima(ar1[1:120], order=c(1,0,1))), lag=20, fitdf=2)",
+    arma11_resid, 20, 2
+  ),
+  diff_rw_lag40_fitdf2 = portmanteau_case(
+    "diff_rw_lag40_fitdf2",
+    "Box.test(diff(rw), lag=40, fitdf=2)",
+    diff_rw_full, 40, 2
+  ),
+  diff_rw30_lag6_fitdf2 = portmanteau_case(
+    "diff_rw30_lag6_fitdf2",
+    "Box.test(diff(rw)[1:30], lag=6, fitdf=2)",
+    diff_rw30, 6, 2
+  )
+)
+
 diag_fixture <- c(
   provenance("r_diagnostics", GENERATOR_PATH),
   list(
@@ -121,7 +173,10 @@ diag_fixture <- c(
         "p-values come from table interpolation / response-surface",
         "regressions in tseries/urca, not closed-form; consumer phases may",
         "tighten this tolerance with documented rationale."
-      )
+      ),
+      portmanteau_statistic_abs = 1e-9,
+      portmanteau_p_value_abs = 1e-9,
+      dw_abs = 1e-12
     ),
     series = list(
       air = series_block(series$air),
@@ -129,7 +184,8 @@ diag_fixture <- c(
       rw = series_block(series$rw),
       diff_rw = series_block(diff(series$rw)),
       ar1 = series_block(series$ar1)
-    )
+    ),
+    portmanteau_cases = portmanteau_cases
   )
 )
 

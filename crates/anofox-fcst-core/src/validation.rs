@@ -440,13 +440,65 @@ impl From<validation::LjungBoxResult> for LjungBoxOut {
     }
 }
 
-/// Ljung-Box test on residuals (RESID-01).
+/// Ljung-Box test on residuals, model-aware (RESID-01, D-06/DIAG-04).
 ///
-/// `lags` — number of autocorrelation lags to test; `None` → `min(10, n/5)`.
-/// `fitted_params` is fixed at 0 (the caller supplies raw residuals, not a
-/// model), so `df == lags`.
-pub fn ljung_box(residuals: &[f64], lags: Option<usize>) -> LjungBoxOut {
-    validation::ljung_box(residuals, lags, 0).into()
+/// `lags` — number of autocorrelation lags to test; `None` → the crate's
+/// default `min(10, n/5).max(1)`, then clamped to `n - 1`.
+/// `fitted_params` — number of estimated model parameters (e.g. `p + q` for
+/// an ARMA(p, q) residual series); `df = effective_lags - fitted_params`.
+///
+/// Returns `Err(InvalidParameter)` when `fitted_params` would leave
+/// `df <= 0` at the *effective* (resolved/clamped) lag count — the crate
+/// itself silently floors that case to `df = 1`, which this wrapper treats
+/// as a caller error instead (T-17-07). `n < 3` still returns the crate's
+/// `NaN` result (lags 0, df 0) with no error, since there is no lag count to
+/// validate against yet.
+///
+/// When the statistic is finite and positive, the p-value is recomputed via
+/// the exact chi-square survival function (`statrs::distribution::ChiSquared`),
+/// matching R `pchisq`/`Box.test` exactly — the crate's own `df > 30` branch
+/// uses a Wilson-Hilferty approximation that deviates by up to ~2e-4.
+pub fn ljung_box(
+    residuals: &[f64],
+    lags: Option<usize>,
+    fitted_params: usize,
+) -> Result<LjungBoxOut, ForecastError> {
+    let n = residuals.len();
+
+    // n < 3: the crate returns a NaN result (lags 0, df 0) with no lag
+    // resolution performed; nothing to validate fitted_params against.
+    if n < 3 {
+        return Ok(validation::ljung_box(residuals, lags, fitted_params).into());
+    }
+
+    // Resolve the effective lags exactly as the crate does, so the df
+    // validation below matches what the crate will actually compute.
+    let effective_lags = lags.unwrap_or_else(|| 10.min(n / 5).max(1));
+    let effective_lags = effective_lags.min(n - 1);
+
+    if fitted_params >= effective_lags {
+        return Err(ForecastError::InvalidParameter {
+            param: "fitted_params".to_string(),
+            value: fitted_params.to_string(),
+            reason: format!(
+                "degrees of freedom lags - fitted_params must be >= 1 (lags={effective_lags}, fitted_params={fitted_params})"
+            ),
+        });
+    }
+
+    let mut out: LjungBoxOut = validation::ljung_box(residuals, lags, fitted_params).into();
+    // fitted_params < effective_lags was just checked, so the crate's own
+    // `df.max(1)` flooring never engages here: df == effective_lags - fitted_params.
+    out.df = effective_lags - fitted_params;
+
+    if out.statistic.is_finite() && out.statistic > 0.0 {
+        use statrs::distribution::{ChiSquared, ContinuousCDF};
+        if let Ok(chi) = ChiSquared::new(out.df as f64) {
+            out.p_value = chi.sf(out.statistic);
+        }
+    }
+
+    Ok(out)
 }
 
 /// Map the crate's autocorrelation classification to a stable string label.
@@ -527,7 +579,17 @@ pub struct ResidualDiagnosticsOut {
 /// Jarque-Bera (normality) and Durbin-Watson (first-order autocorrelation) are
 /// reported as advisory fields but do not gate adequacy.
 pub fn residual_diagnostics(residuals: &[f64], alpha: f64) -> ResidualDiagnosticsOut {
-    let lb = ljung_box(residuals, None);
+    // fitted_params 0 with the default lags is never an Err from `ljung_box`
+    // (df <= 0 would require fitted_params >= effective_lags, impossible at
+    // 0 unless effective_lags is 0 — which only happens when `n < 3`, and
+    // that path returns `Ok` with a NaN result, not an error). Map an
+    // unreachable Err to the same NaN fields rather than unwrap/expect.
+    let lb = ljung_box(residuals, None, 0).unwrap_or(LjungBoxOut {
+        statistic: f64::NAN,
+        p_value: f64::NAN,
+        lags: 0,
+        df: 0,
+    });
     let dw = durbin_watson(residuals);
     let jb = jarque_bera(residuals);
     let adequate = lb.p_value.is_finite() && lb.p_value > alpha;
@@ -889,7 +951,7 @@ mod tests {
     #[test]
     fn ljung_box_valid_output_and_df_equals_lags() {
         let resid = white_noise(100, 21);
-        let r = ljung_box(&resid, Some(8));
+        let r = ljung_box(&resid, Some(8), 0).expect("fitted_params 0 never errors");
         assert!(r.statistic.is_finite() && r.statistic >= 0.0);
         assert!(r.p_value >= 0.0 && r.p_value <= 1.0);
         // fitted_params = 0 → df == lags

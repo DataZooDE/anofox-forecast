@@ -2561,17 +2561,19 @@ GROUP BY group_col
     "SELECT group_col, (stationarity).verdict FROM ts_stationarity_by('sales', product_id, ds, y, regression := 'ct')",
     "diagnostics"},
 
-    // ts_ljung_box_by: Ljung-Box residual white-noise test per group (RESID-01)
+    // ts_ljung_box_by: Ljung-Box residual white-noise test per group (RESID-01, D-06/DIAG-04)
     {"ts_ljung_box_by", {"source", "group_col", "date_col", "value_col", nullptr},
-     {{"lags", "-1"}, {nullptr, nullptr}},
+     {{"lags", "-1"}, {"fitted_params", "0"}, {nullptr, nullptr}},
 R"(
-SELECT group_col, ts_ljung_box(LIST(value_col::DOUBLE ORDER BY date_col), lags::INTEGER) AS ljung_box
+SELECT group_col, ts_ljung_box(LIST(value_col::DOUBLE ORDER BY date_col), lags::INTEGER, fitted_params::INTEGER) AS ljung_box
 FROM query_table(source::VARCHAR)
 GROUP BY group_col
 )",
     "Ljung-Box white-noise test on residuals per group. Returns STRUCT(statistic, p_value, lags, df). "
-    "value_col should be model residuals; default lags = min(10, n/5). Pass lags:=N to override.",
-    "SELECT group_col, (ljung_box).p_value FROM ts_ljung_box_by('resids', product_id, ds, e)",
+    "value_col should be model residuals; default lags = min(10, n/5). Pass lags:=N to override. "
+    "df = lags - fitted_params; pass fitted_params := p + q for ARMA(p, q) residuals to get "
+    "R Box.test(fitdf = p + q)-matching p-values (fitted_params >= the effective lags is a SQL error).",
+    "SELECT group_col, (ljung_box).p_value FROM ts_ljung_box_by('resids', product_id, ds, e, fitted_params := 2)",
     "diagnostics"},
 
     // ts_durbin_watson_by: Durbin-Watson statistic per group (RESID-02)

@@ -3809,7 +3809,13 @@ bool anofox_ts_stationarity(const double *values,
                             struct AnofoxError *out_error);
 
 /**
- * Ljung-Box white-noise test on residuals (RESID-01).
+ * Ljung-Box white-noise test on residuals, model-aware (RESID-01, D-06/DIAG-04).
+ *
+ * `fitted_params` — number of estimated model parameters (e.g. `p + q` for
+ * an ARMA(p, q) residual series); `df = lags - fitted_params`. A negative
+ * value is `ErrorCode::InvalidInput`. `df <= 0` at the effective (resolved,
+ * clamped) lag count is `ErrorCode::InvalidInput` naming `fitted_params`,
+ * the lags and "degrees of freedom" (see `ffi_error_code`).
  *
  * # Safety
  * `values` and `out_result` must be non-null. `validity` may be null (all valid).
@@ -3818,6 +3824,7 @@ bool anofox_ts_ljung_box(const double *values,
                          const uint64_t *validity,
                          size_t length,
                          int lags,
+                         int fitted_params,
                          struct AnofoxLjungBoxResult *out_result,
                          struct AnofoxError *out_error);
 

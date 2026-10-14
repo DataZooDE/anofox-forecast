@@ -7899,7 +7899,13 @@ pub unsafe extern "C" fn anofox_ts_stationarity(
     }
 }
 
-/// Ljung-Box white-noise test on residuals (RESID-01).
+/// Ljung-Box white-noise test on residuals, model-aware (RESID-01, D-06/DIAG-04).
+///
+/// `fitted_params` — number of estimated model parameters (e.g. `p + q` for
+/// an ARMA(p, q) residual series); `df = lags - fitted_params`. A negative
+/// value is `ErrorCode::InvalidInput`. `df <= 0` at the effective (resolved,
+/// clamped) lag count is `ErrorCode::InvalidInput` naming `fitted_params`,
+/// the lags and "degrees of freedom" (see `ffi_error_code`).
 ///
 /// # Safety
 /// `values` and `out_result` must be non-null. `validity` may be null (all valid).
@@ -7909,6 +7915,7 @@ pub unsafe extern "C" fn anofox_ts_ljung_box(
     validity: *const u64,
     length: size_t,
     lags: c_int,
+    fitted_params: c_int,
     out_result: *mut AnofoxLjungBoxResult,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -7924,15 +7931,28 @@ pub unsafe extern "C" fn anofox_ts_ljung_box(
     if length == 0 {
         return true;
     }
+    if fitted_params < 0 {
+        set_error(
+            out_error,
+            ErrorCode::InvalidInput,
+            &format!("fitted_params must be >= 0, got {fitted_params}"),
+        );
+        return false;
+    }
     let lags_opt: Option<usize> = if lags < 0 { None } else { Some(lags as usize) };
+    let fitted_params = fitted_params as usize;
     let result = catch_unwind(AssertUnwindSafe(|| {
         let series = build_values(values, validity, length);
-        anofox_fcst_core::ljung_box(&series, lags_opt)
+        anofox_fcst_core::ljung_box(&series, lags_opt, fitted_params)
     }));
     match result {
-        Ok(r) => {
+        Ok(Ok(r)) => {
             *out_result = r.into();
             true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
+            false
         }
         Err(_) => {
             set_error(

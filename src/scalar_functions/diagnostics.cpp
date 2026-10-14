@@ -608,6 +608,13 @@ static void TsLjungBoxFunction(DataChunk &args, ExpressionState &state, Vector &
         lags_reader = make_uniq<ScalarArgReader<int32_t>>(args.data[1], count);
     }
 
+    // Optional third argument: fitted_params INTEGER (default 0) (D-06/DIAG-04)
+    bool has_fitted_params = (args.ColumnCount() >= 3);
+    unique_ptr<ScalarArgReader<int32_t>> fitted_params_reader;
+    if (has_fitted_params) {
+        fitted_params_reader = make_uniq<ScalarArgReader<int32_t>>(args.data[2], count);
+    }
+
     auto &e = StructVector::GetEntries(result);
     auto stat_data = FlatVector::GetData<double>(*e[0]);
     auto pval_data = FlatVector::GetData<double>(*e[1]);
@@ -624,10 +631,19 @@ static void TsLjungBoxFunction(DataChunk &args, ExpressionState &state, Vector &
         if (has_lags && !lags_reader->IsNull(row_idx)) {
             lags_val = lags_reader->Get(row_idx);
         }
+        int32_t fitted_params_val = 0;
+        if (has_fitted_params && !fitted_params_reader->IsNull(row_idx)) {
+            fitted_params_val = fitted_params_reader->Get(row_idx);
+        }
         AnofoxLjungBoxResult r = {};
         AnofoxError err = {};
-        if (!anofox_ts_ljung_box(series.data(), nullptr, series.size(),
-                                 static_cast<int>(lags_val), &r, &err)) {
+        bool ok = anofox_ts_ljung_box(series.data(), nullptr, series.size(),
+                                       static_cast<int>(lags_val),
+                                       static_cast<int>(fitted_params_val), &r, &err);
+        if (!ok) {
+            if (err.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_ljung_box: %s", err.message ? err.message : "invalid input");
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -839,17 +855,25 @@ void RegisterTsLjungBoxFunction(ExtensionLoader &loader) {
     s.AddFunction(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))}, rt, TsLjungBoxFunction));
     s.AddFunction(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
                                   LogicalType(LogicalTypeId::INTEGER)}, rt, TsLjungBoxFunction));
+    s.AddFunction(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+                                  LogicalType(LogicalTypeId::INTEGER),
+                                  LogicalType(LogicalTypeId::INTEGER)}, rt, TsLjungBoxFunction));
     {
         CreateScalarFunctionInfo info(s);
         FunctionDescription desc;
         desc.description =
             "Ljung-Box white-noise test on residuals. Returns STRUCT(statistic DOUBLE, "
-            "p_value DOUBLE, lags BIGINT, df BIGINT). Default lags = min(10, n/5); a large "
-            "statistic / small p-value indicates residual autocorrelation.";
-        desc.examples = {"ts_ljung_box(LIST(resid ORDER BY ds))", "ts_ljung_box(LIST(resid ORDER BY ds), 12)"};
+            "p_value DOUBLE, lags BIGINT, df BIGINT). Default lags = min(10, n/5); df = lags - "
+            "fitted_params (default fitted_params 0). Pass fitted_params := p + q for ARMA(p, q) "
+            "residuals to get R Box.test(fitdf = p + q)-matching p-values; fitted_params >= the "
+            "effective lags is a SQL error. A large statistic / small p-value indicates residual "
+            "autocorrelation.";
+        desc.examples = {"ts_ljung_box(LIST(resid ORDER BY ds))", "ts_ljung_box(LIST(resid ORDER BY ds), 12)",
+                         "ts_ljung_box(LIST(resid ORDER BY ds), 10, 2)"};
         desc.categories = {"time-series", "diagnostics"};
-        desc.parameter_names = {"residuals", "lags"};
+        desc.parameter_names = {"residuals", "lags", "fitted_params"};
         desc.parameter_types = {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+                                LogicalType(LogicalTypeId::INTEGER),
                                 LogicalType(LogicalTypeId::INTEGER)};
         info.descriptions.push_back(std::move(desc));
         loader.RegisterFunction(std::move(info));
@@ -858,6 +882,9 @@ void RegisterTsLjungBoxFunction(ExtensionLoader &loader) {
     ScalarFunctionSet a("anofox_fcst_ts_ljung_box");
     a.AddFunction(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))}, rt2, TsLjungBoxFunction));
     a.AddFunction(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+                                  LogicalType(LogicalTypeId::INTEGER)}, rt2, TsLjungBoxFunction));
+    a.AddFunction(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+                                  LogicalType(LogicalTypeId::INTEGER),
                                   LogicalType(LogicalTypeId::INTEGER)}, rt2, TsLjungBoxFunction));
     {
         CreateScalarFunctionInfo info(a);
