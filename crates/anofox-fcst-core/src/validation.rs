@@ -658,7 +658,7 @@ mod tests {
             });
             assert_eq!(
                 r,
-                if s.to_ascii_lowercase() == "c" {
+                if s.eq_ignore_ascii_case("c") {
                     StationarityRegression::Constant
                 } else {
                     StationarityRegression::ConstantTrend

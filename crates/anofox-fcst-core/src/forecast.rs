@@ -1380,13 +1380,6 @@ fn forecast_crate_exog(
                         notation, e
                     ))
                 })?;
-                if !parsed_spec.is_valid() {
-                    return Err(ForecastError::InvalidInput(format!(
-                        "ETS model '{}' is an unstable combination (multiplicative error with \
-                         additive components).",
-                        notation
-                    )));
-                }
                 let seasonal_period = if parsed_spec.has_seasonal() && period > 1 {
                     period
                 } else {
@@ -1928,22 +1921,18 @@ fn forecast_ets(
             )));
         }
 
-        // Parse the spec
+        // Parse the spec. anofox-forecast 0.16.x: every constructible
+        // (error, trend, seasonal) combination -- including MAA/MAdA, once
+        // rejected here as "unstable" -- parses successfully; from_notation
+        // itself no longer rejects them (ETSSpec::is_valid() always returns
+        // true per the crate's 0.16.0 CHANGELOG "Changed — ETS (UPST-03)"),
+        // so a second gate here would be dead code.
         let parsed_spec = ETSSpec::from_notation(notation).map_err(|e| {
             ForecastError::InvalidInput(format!(
                 "Invalid ETS model specification '{}': {}",
                 notation, e
             ))
         })?;
-
-        // Reject unstable combinations (multiplicative error with additive components)
-        if !parsed_spec.is_valid() {
-            return Err(ForecastError::InvalidInput(format!(
-                "ETS model '{}' is an unstable combination (multiplicative error with additive components). \
-                 Try one of: 'AAA', 'ANA', 'AAdA', 'MNM', 'MAM', 'MAdM', 'MMM', 'MMdM', or use 'AutoETS' for automatic selection.",
-                notation
-            )));
-        }
 
         // User explicitly requested this spec — if it fails to fit,
         // return ComputationError so the group is skipped (null forecast),
@@ -4914,6 +4903,49 @@ mod tests {
             "ETS without explicit spec should fall back: {:?}",
             result.err()
         );
+    }
+
+    /// Phase 17 plan 17-01: anofox-forecast 0.16.x's ETSSpec::is_valid()
+    /// always returns true (0.16.0 CHANGELOG "Changed — ETS (UPST-03)"),
+    /// so MAA/MAdA -- previously rejected by the (now-removed) dead
+    /// wrapper validity gates -- fit successfully.
+    #[test]
+    fn test_ets_maa_and_mada_fit_successfully() {
+        let fx = crate::test_fixtures::load_fixture("r_forecast/air_passengers.json");
+        let values: Vec<Option<f64>> = crate::test_fixtures::f64_vec(&fx["inputs"]["values"])
+            .into_iter()
+            .map(Some)
+            .collect();
+
+        let maa_options = ForecastOptions {
+            model: ModelType::ETS,
+            ets_spec: Some("MAA".to_string()),
+            seasonal_period: 12,
+            horizon: 3,
+            ..Default::default()
+        };
+        let maa_result = forecast(&values, &maa_options);
+        assert!(
+            maa_result.is_ok(),
+            "ETS 'MAA' should fit on AirPassengers: {:?}",
+            maa_result.err()
+        );
+        assert_eq!(maa_result.unwrap().model_name, "ETS(M,A,A)");
+
+        let mada_options = ForecastOptions {
+            model: ModelType::ETS,
+            ets_spec: Some("MAdA".to_string()),
+            seasonal_period: 12,
+            horizon: 3,
+            ..Default::default()
+        };
+        let mada_result = forecast(&values, &mada_options);
+        assert!(
+            mada_result.is_ok(),
+            "ETS 'MAdA' should fit on AirPassengers: {:?}",
+            mada_result.err()
+        );
+        assert_eq!(mada_result.unwrap().model_name, "ETS(M,Ad,A)");
     }
 
     #[test]

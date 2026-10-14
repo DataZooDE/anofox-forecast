@@ -587,6 +587,45 @@ use the semver numbering this project started with.
   `'asymmetric_conformal'` the older `ts_conformal_predict`/`ts_conformal_predict_
   asymmetric` scalars still return — those two scalars are untouched by Phase 16).
 
+- **Runs on anofox-forecast 0.16.1 — ADF/KPSS match statsmodels / R tseries,
+  `ts_stationarity` uses the standard ADF/KPSS four-way verdict, and AutoARIMA selects
+  models the way R `auto.arima` does (Phase 17).** `anofox-forecast` bumps `0.15.10` →
+  `0.16.1` (D-01/D-14; no `[patch]`/git/path override). `ts_adf`/`ts_adf_by`/`ts_kpss`/
+  `ts_kpss_by`/`ts_stationarity`/`ts_stationarity_by` gain a `regression := 'c' | 'ct'`
+  parameter (default `'c'`, statsmodels/urca naming) applied to both tests; `ts_adf`
+  returns statsmodels `adfuller(autolag='AIC')`-exact statistics, AIC-selected lags, and
+  MacKinnon (1994/2010) p-values and finite-sample critical values (no longer a fixed
+  asymptotic constant table); `ts_kpss` under `regression := 'ct'` runs a new trend-KPSS
+  implemented in this extension's Rust core (D-05a — not available in the crate),
+  matching R `tseries::kpss.test(null = "Trend")`. `ts_stationarity`'s four-way verdict
+  is now the standard ADF+KPSS mapping (D-04) — three of the four labels were previously
+  swapped — plus an explicit `'constant'` verdict for a constant series and SQL `NULL`
+  (not a mislabeled string) for a degenerate series (too short, or a collinear
+  regression). `ETS` model specs `'MAA'`/`'MAdA'` now fit (the crate's own
+  `ETSSpec::is_valid()` always returns `true` since 0.16.0; this wrapper's own redundant
+  gate is removed). `AutoARIMA` now reproduces R `forecast::auto.arima` (PR #223, UPST-01)
+  — selected orders and point forecasts change wherever the old search differed from R.
+  `ETS`/`SES`/`Holt`/`HoltWinters`/`Theta`/`TBATS`/`MSTL`/`GARCH` prediction intervals and
+  `Theta`'s point forecasts also shift (0.16.0's corrected formulas and alpha
+  optimisation, PRs #222/#224/#225); plan 17-03 documents the measured R parity.
+
+  | Function (input) | Before | After | What changed |
+  |---|---|---|---|
+  | `ts_adf(air_passengers)` `.statistic` / `.p_value` / `.lags` | `-1.7304178767068465` / `0.3` / `5` | `-0.986479461317597` / `0.7581636095609505` / `4` | 0.16.1's `adfuller`-equivalent augmented regression + AIC lag search replaces the old fixed-lag, non-augmented implementation |
+  | `ts_adf` critical values (any series, regression `'c'`) | fixed asymptotic constants `-3.43` / `-2.86` / `-2.57` for every `n` | MacKinnon (2010) finite-sample surface, depends on `nobs`; e.g. `diag_series` group B: `-3.626651907578875` / `-2.9459512825788754` / `-2.6116707716049383` | D-05: `test/sql/ts_diagnostics.test`'s 3 hardcoded-constant assertions re-pinned to the fixture |
+  | `ts_adf_by`/`ts_kpss_by`/`ts_stationarity_by` `regression` parameter | did not exist (constant-only) | `regression := 'c'` (default) or `'ct'`, applied to both tests | D-05 |
+  | `ts_kpss(trend_stationary_series, regression := 'ct')` | n/a (no trend KPSS) | `.statistic = 0.11714250016361194`, matches R `tseries::kpss.test(null="Trend")` to 1e-10 | D-05a, new trend KPSS implemented in this extension |
+  | `ts_kpss` p-value range | approximate, level table only | `[0.01, 0.10]` for both `'c'` and `'ct'` (interpolated tseries tables) | D-05a |
+  | `ts_stationarity(air_passengers)` `.verdict`, regression `'c'` / `'ct'` | `'difference_stationary'` / `'difference_stationary'` (3 of 4 D-04 labels were swapped) | `'non_stationary'` / `'stationary'` | D-04: ADF rejects+KPSS doesn't → `stationary`; ADF doesn't+KPSS rejects → `non_stationary`; neither rejects → `trend_stationary`; both reject → `difference_stationary` |
+  | `ts_stationarity` on a 30-point constant series | `'non_stationary'` | `'constant'` | D-04 explicit constant verdict |
+  | `ts_stationarity` on `[1.0, 2.0, 3.0]` (too short) / critical values on any NaN-statistic input | `'difference_stationary'` (a real-looking but meaningless label) / `0.0` | `.verdict IS NULL`, `.adf_statistic`/critical values all `NaN` | D-04/T-17-04: a NaN statistic now propagates to every dependent field, never a misleading label or a `0.0` |
+  | `ts_adf`/`ts_kpss`/`ts_stationarity` with `regression := 'n'` (or any value other than `'c'`/`'ct'`) | n/a (parameter did not exist) | SQL error: `"expected one of: c, ct"` | D-05 |
+  | `ts_forecast_by('ETS', .., MAP{'model': 'MAA'})` / `'MAdA'` | SQL error: `"ETS(MAA) is an unstable model combination per FPP3 taxonomy"` | fits: `model_name = 'ETS(M,A,A)'` / `'ETS(M,Ad,A)'` | 0.16.0 CHANGELOG "Changed — ETS (UPST-03)": `ETSSpec::is_valid()` always returns `true` |
+  | `ts_forecast_by('AutoETS', air_passengers, seasonal_period=12)` `.model_name` / `.yhat[1]` | `'AutoETS(A,N,M)'` / `446.24696013683115` | `'AutoETS(M,A,M)'` / `447.0613404930957` | 0.16.0 PR #224 (ETS) changes the AIC-selected candidate and its fit |
+  | `ts_forecast_by('Theta', air_passengers, seasonal_period=12)` `.yhat[1]` | `433.1175018887427` | `440.07675284965757` | 0.16.0 PR #222: Theta's alpha is now optimised per-series instead of fixed at `0.1` |
+  | `ts_forecast_by('AutoARIMA', air_passengers, seasonal_period=12)` `.model_name` / `.yhat[1]` | `'AutoARIMA(1,1,3)(0,1,1)[12]'` / `444.4025123655398` | `'AutoARIMA(2,1,1)(0,1,0)[12]'` / `445.5968786698059` | 0.16.1 PR #223 (UPST-01): AutoARIMA ports R `forecast::auto.arima`'s stepwise search and estimation — `(2,1,1)(0,1,0)[12]` is the order R itself selects on this series |
+  | `ETS`/`SES`/`Holt`/`HoltWinters`/`Theta`/`TBATS`/`MSTL`/`GARCH` prediction intervals | pre-0.16.0 crate interval formulas | 0.16.0's corrected formulas | summary row; plan 17-03 documents the measured R parity per model |
+
 ### Added
 
 - `arima_order` / `seasonal_order` parameters on `ts_forecast_by`, `ts_forecast_exog_by`,

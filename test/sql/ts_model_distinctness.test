@@ -73,6 +73,9 @@ FROM forecasts;
 #    DynamicOptimizedTheta (DOTM)
 ###############################################################################
 
+# theta re-pinned 18.356416 -> 19.828823 (Phase 17 plan 17-01, anofox-forecast
+# 0.16.1 PR #222: Theta's alpha is now optimised per-series instead of fixed
+# at 0.1); all_distinct stays 1.
 query IIIII
 WITH vals AS (SELECT list(y) AS y FROM distinctness_ts),
 forecasts AS (
@@ -88,7 +91,7 @@ SELECT theta, opt_theta, dyn_theta, dyn_opt_theta,
   (theta != opt_theta OR theta != dyn_theta OR theta != dyn_opt_theta)::INT AS all_distinct
 FROM forecasts;
 ----
-18.356416	19.778702	18.668893	19.347803	1
+19.828823	19.778702	18.668893	19.347803	1
 
 ###############################################################################
 # 3. Exponential smoothing: Optimized variants — FIXED (forecast-extension-b3ou)
@@ -167,6 +170,11 @@ FROM forecasts;
 ###############################################################################
 
 # AutoETS vs AutoARIMA vs AutoTheta — must always be distinct
+# Re-pinned (Phase 17 plan 17-01, anofox-forecast 0.16.1 PR #223: AutoARIMA
+# R auto.arima port): auto_ets 19.956521 -> 19.955976 (AutoARIMA's changed
+# selection perturbs nothing else here, but AutoETS's own fit shifts at the
+# last printed digit), auto_arima 18.014537 -> 17.412868. all_distinct
+# stays 1.
 query IIII
 WITH vals AS (SELECT list(y) AS y FROM distinctness_ts),
 forecasts AS (
@@ -180,7 +188,7 @@ SELECT auto_ets, auto_arima, auto_theta,
   (auto_ets != auto_arima AND auto_ets != auto_theta)::INT AS all_distinct
 FROM forecasts;
 ----
-19.956521	18.014537	19.778702	1
+19.955976	17.412868	19.778702	1
 
 # Baseline models: Naive vs SMA vs RandomWalkDrift — must always be distinct
 query IIII

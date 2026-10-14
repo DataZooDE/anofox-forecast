@@ -80,21 +80,25 @@ true
 # FCST-03: MSE no longer identical across model families (was universally
 # 2090.28 via the old SES(alpha=0.3) stand-in fitted/residual formula).
 #
-# Deviation (verified, non-regression, same class as 10-01's documented
+# Phase 17 plan 17-01 (anofox-forecast 0.16.1 PR #222): the Theta/
+# CrostonClassic MSE coincidence documented below (pre-0.16) NO LONGER
+# HOLDS — Theta's alpha is now optimised per-series instead of fixed at
+# 0.1, so Theta's in-sample MSE diverges from Croston's (which still uses
+# a fixed alpha=0.1). Expectation changes from 4 distinct to 5 distinct
+# (every model now produces a genuinely different MSE on this series).
+#
+# Historical note (pre-0.16 deviation, same class as 10-01's documented
 # ADIDA/IMAPA-vs-fabricated-width and SES-vs-2090.28 coincidences): on this
-# specific AirPassengers series, Theta's and CrostonClassic's MSE are
-# bit-identical (confirmed by direct residual-array inspection, not just
-# rounded MSE) because both are genuinely SES(alpha=0.1)-based in-sample —
-# `anofox-forecast`'s `Theta::fit` computes in-sample fitted/residuals from
+# specific AirPassengers series, Theta's and CrostonClassic's MSE used to be
+# bit-identical because both were genuinely SES(alpha=0.1)-based in-sample —
+# `anofox-forecast`'s `Theta::fit` computed in-sample fitted/residuals from
 # the plain SES level component only (the theta-drift term `b` is applied
 # to the h-step-ahead point forecast, never to in-sample fitted), and
-# Croston's default alpha is also 0.1; on AirPassengers (strictly positive,
+# Croston's default alpha was also 0.1; on AirPassengers (strictly positive,
 # no zero-demand gaps) Croston's demand-interval component degenerates to
-# interval=1 always, making it plain SES(0.1) too. This is a real,
-# crate-internal design coincidence for THIS series, not a dispatch bug —
-# so 4 distinct (not 5) is the correct expectation here; the stronger,
+# interval=1 always, making it plain SES(0.1) too. The stronger,
 # unconditional claim (no mse within 0.01 of the OLD universal 2090.28
-# fabrication) is asserted separately below and holds for all 5 models.
+# fabrication) is asserted separately below and still holds for all 5 models.
 #######################################
 
 query I
@@ -117,7 +121,7 @@ SELECT count(DISTINCT round(mse, 6)) FROM (
     FROM (VALUES ('SES'), ('Holt'), ('AutoARIMA'), ('Theta'), ('CrostonClassic')) AS t(m)
 );
 ----
-4
+5
 
 # Deviation (verified, matches 10-01's documented forecast_intervals.rs
 # `mse_is_crate_residual_mse` exception): SES's OWN real residual MSE on this

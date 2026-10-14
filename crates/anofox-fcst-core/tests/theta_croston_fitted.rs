@@ -1,14 +1,15 @@
-//! Pins `anofox-forecast` 0.15.10 behaviour: on a non-seasonal, no-zero
-//! series, `Theta` (STM, fixed alpha=0.1) and `CrostonClassic` (fixed
-//! alpha=0.1, unit intervals when every point is a demand) compute
-//! IN-SAMPLE fitted values via the exact same SES(alpha=0.1) one-step-level
-//! recursion, even though their out-of-sample forecasts diverge (Theta adds
-//! a drift term `extract_forecast`/`predict_with_intervals` applies; Croston
-//! does not). This is NOT a wrapper dispatch bug — `forecast.rs::
-//! extract_forecast` reads `model.fitted_values()`/`model.residuals()`
-//! straight from the crate `Forecaster` trait object each model type fits,
-//! with no shared helper and no aliasing (`wrapper_fitted_is_the_crate_
-//! models_own_fitted_values` below proves this independently).
+//! Pinned `anofox-forecast` 0.15.10 behaviour (now superseded, see below):
+//! on a non-seasonal, no-zero series, `Theta` (STM, fixed alpha=0.1) and
+//! `CrostonClassic` (fixed alpha=0.1, unit intervals when every point is a
+//! demand) computed IN-SAMPLE fitted values via the exact same
+//! SES(alpha=0.1) one-step-level recursion, even though their out-of-sample
+//! forecasts diverged (Theta adds a drift term `extract_forecast`/
+//! `predict_with_intervals` applies; Croston does not). This was NOT a
+//! wrapper dispatch bug — `forecast.rs::extract_forecast` reads
+//! `model.fitted_values()`/`model.residuals()` straight from the crate
+//! `Forecaster` trait object each model type fits, with no shared helper
+//! and no aliasing (`wrapper_fitted_is_the_crate_models_own_fitted_values`
+//! below proves this independently, and still holds).
 //!
 //! Gap-closure plan 10-10, Task 2 (FCST-03 / D-11 / 10-VERIFICATION.md
 //! coincidental_reliance item). 10-VERIFICATION.md flagged this fitted-array
@@ -17,14 +18,20 @@
 //! Theta's fitted/residuals output for anything calibration-sensitive" — this
 //! file is that confirmation.
 //!
-//! Phase 11 (UPST-04: "Theta (STM) estimates alpha by SES optimisation", see
-//! deferred-items.md entry 2) is expected to BREAK the first test here once
-//! Theta's alpha stops being fixed at 0.1 — when that happens, update
-//! `theta_and_croston_classic_fitted_are_both_ses_alpha_0_1_on_positive_series`
-//! to reflect the new (optimised-alpha) Theta behaviour; do not silently
-//! delete it, since the other two tests still document real, load-bearing
+//! **Phase 17 plan 17-01 (anofox-forecast 0.16.0+ bump):** Theta's alpha is
+//! now optimised (no longer fixed at 0.1), so the SES(0.1) coincidence
+//! above broke for Theta specifically.
+//! `theta_optimised_alpha_diverges_from_croston_classic_on_positive_series`
+//! (renamed from
+//! `theta_and_croston_classic_fitted_are_both_ses_alpha_0_1_on_positive_series`)
+//! now documents the OPPOSITE: CrostonClassic's fitted values still equal
+//! the independent SES(0.1) recursion exactly (its alpha is still fixed),
+//! but Theta's fitted values now diverge from both that recursion and from
+//! Croston's fitted array (max abs diff on the AirPassengers prefix:
+//! ~38.44, far above 1e-6) because Theta's alpha is optimised per-series.
+//! The other two tests are unchanged — they document real, load-bearing
 //! crate behaviour (Theta's drift-free in-sample path, and Croston's
-//! intermittent-series divergence).
+//! intermittent-series divergence) that the dependency bump did not touch.
 
 use anofox_fcst_core::forecast::{forecast, ForecastOptions, ModelType};
 use anofox_forecast::core::TimeSeries;
@@ -110,7 +117,7 @@ fn croston_options(horizon: usize) -> ForecastOptions {
 }
 
 #[test]
-fn theta_and_croston_classic_fitted_are_both_ses_alpha_0_1_on_positive_series() {
+fn theta_optimised_alpha_diverges_from_croston_classic_on_positive_series() {
     let raw = air_passengers_prefix_24();
     let values: Vec<Option<f64>> = raw.iter().map(|&v| Some(v)).collect();
 
@@ -123,7 +130,7 @@ fn theta_and_croston_classic_fitted_are_both_ses_alpha_0_1_on_positive_series() 
     assert_eq!(croston_result.model_name, "CrostonClassic");
 
     // Dispatch is genuinely distinct — the two models' forecasts diverge
-    // even though (as asserted below) their fitted arrays do not.
+    // even though, pre-0.16, their fitted arrays coincided.
     let max_point_diff = theta_result
         .point
         .iter()
@@ -147,15 +154,9 @@ fn theta_and_croston_classic_fitted_are_both_ses_alpha_0_1_on_positive_series() 
     assert_eq!(croston_fitted.len(), raw.len());
 
     let expected = independent_ses_alpha_0_1(&raw);
-    for (i, (&actual, &exp)) in theta_fitted.iter().zip(expected.iter()).enumerate() {
-        assert!(
-            (actual - exp).abs() < 1e-9,
-            "Theta fitted[{}] = {} does not match independent SES(0.1) recursion {}",
-            i,
-            actual,
-            exp
-        );
-    }
+
+    // CrostonClassic's alpha is still fixed at 0.1 — its fitted values
+    // still match the independent SES(0.1) recursion exactly.
     for (i, (&actual, &exp)) in croston_fitted.iter().zip(expected.iter()).enumerate() {
         assert!(
             (actual - exp).abs() < 1e-9,
@@ -166,16 +167,32 @@ fn theta_and_croston_classic_fitted_are_both_ses_alpha_0_1_on_positive_series() 
         );
     }
 
-    // The headline coincidence: bitwise-equal fitted arrays and equal MSE,
-    // despite genuinely distinct dispatch and diverging forecasts.
-    assert_eq!(
-        theta_fitted, croston_fitted,
-        "Theta and CrostonClassic fitted arrays should be bitwise equal on this no-zero, \
-         non-seasonal series (crate 0.15.10 behaviour, not a wrapper bug)"
+    // Theta's alpha is now optimised (anofox-forecast 0.16.0+), so its
+    // fitted values diverge from the fixed-alpha=0.1 recursion...
+    let theta_vs_expected_max_diff = theta_fitted
+        .iter()
+        .zip(expected.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0_f64, f64::max);
+    assert!(
+        theta_vs_expected_max_diff > 1e-6,
+        "Theta's fitted values should now diverge from the fixed SES(0.1) recursion (alpha is \
+         optimised since anofox-forecast 0.16.0); max diff = {}",
+        theta_vs_expected_max_diff
     );
-    assert_eq!(
-        theta_result.mse, croston_result.mse,
-        "Theta and CrostonClassic MSE should be equal given bitwise-equal fitted/residuals"
+
+    // ...and therefore from CrostonClassic's fitted array too (the
+    // pre-0.16 coincidence this file documented no longer holds).
+    let theta_vs_croston_max_diff = theta_fitted
+        .iter()
+        .zip(croston_fitted.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0_f64, f64::max);
+    assert!(
+        theta_vs_croston_max_diff > 1e-6,
+        "Theta and CrostonClassic fitted arrays should now diverge (Theta's alpha is optimised, \
+         Croston's stays fixed at 0.1); max diff = {}",
+        theta_vs_croston_max_diff
     );
 }
 
