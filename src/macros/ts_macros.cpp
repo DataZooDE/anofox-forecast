@@ -1849,6 +1849,9 @@ FROM calibrated
     // whose group_col matches is used if one exists, otherwise the pooled row (group_col IS
     // NULL), otherwise bounds come back NULL for that group's rows. A literal score is applied
     // by wrapping it in a one-row table with group_col = NULL (D-14).
+    // Phase 16 WR-04 fix: more than one calibration row sharing the same group_col value
+    // (including more than one row with group_col = NULL) raises a clear SQL error instead of
+    // silently fanning the join out into duplicate output rows per forecast point.
     // difficulty_col (Phase 16 D-08, plan 16-02): named, default NULL. Bounds are computed via
     // ts_conformal_intervals(points, conformity_score, method, difficulties) using the matched
     // calibration row's OWN method, so the method/difficulty strictness rules (difficulty only
@@ -1858,6 +1861,12 @@ FROM calibrated
 R"(
 WITH cal AS (
     SELECT * FROM query_table(calibration::VARCHAR)
+),
+cal_dupe_check AS (
+    SELECT CASE WHEN COUNT(*) > 0 THEN
+        error('ts_conformal_apply_by: calibration table has more than one row for the same group_col value (it must hold at most one row per group_col value, including at most one pooled row with group_col = NULL)')
+    ELSE NULL END AS _err
+    FROM (SELECT group_col FROM cal GROUP BY group_col HAVING COUNT(*) > 1) _dupes
 ),
 per_group AS (
     SELECT
@@ -1871,9 +1880,10 @@ matched AS (
     SELECT
         pg._grp AS _grp,
         pg._points AS _points,
-        COALESCE(direct.conformity_score, pooled.conformity_score) AS _score,
+        COALESCE(direct.conformity_score, pooled.conformity_score, dupe_check._err) AS _score,
         COALESCE(direct.method, pooled.method) AS _method
     FROM per_group pg
+    CROSS JOIN cal_dupe_check dupe_check
     LEFT JOIN cal direct ON direct.group_col = pg._grp
     LEFT JOIN cal pooled ON pooled.group_col IS NULL
 ),

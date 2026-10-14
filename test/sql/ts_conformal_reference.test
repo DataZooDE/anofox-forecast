@@ -975,3 +975,38 @@ query I
 SELECT ts_conformal_intervals([]::DOUBLE[], 1.0, 'symmetric', NULL::DOUBLE[]) IS NOT NULL;
 ----
 true
+
+# =============================================================================
+# WR-04 (review fix): a calibration table with more than one row for the
+# same group_col value raises a clear SQL error instead of silently fanning
+# the join out into duplicate output rows per forecast point.
+# =============================================================================
+
+statement ok
+CREATE TABLE wr04_fc(g VARCHAR, dt INTEGER, fc DOUBLE);
+
+statement ok
+INSERT INTO wr04_fc VALUES ('A', 1, 10.0);
+
+statement ok
+CREATE TABLE wr04_cal_dup(group_col VARCHAR, method VARCHAR, conformity_score DOUBLE);
+
+statement ok
+INSERT INTO wr04_cal_dup VALUES ('A', 'symmetric', 1.0), ('A', 'symmetric', 2.0);
+
+statement error
+SELECT * FROM ts_conformal_apply_by('wr04_fc', g, dt, fc, 'wr04_cal_dup');
+----
+more than one row for the same group_col value
+
+# --- duplicate pooled rows (group_col = NULL twice) also raise ---
+statement ok
+CREATE TABLE wr04_cal_dup_pooled(group_col VARCHAR, method VARCHAR, conformity_score DOUBLE);
+
+statement ok
+INSERT INTO wr04_cal_dup_pooled VALUES (NULL, 'symmetric', 1.0), (NULL, 'symmetric', 2.0);
+
+statement error
+SELECT * FROM ts_conformal_apply_by('wr04_fc', g, dt, fc, 'wr04_cal_dup_pooled');
+----
+more than one row for the same group_col value
