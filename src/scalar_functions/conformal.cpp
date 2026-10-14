@@ -158,7 +158,13 @@ static void TsConformalIntervalsFunction(DataChunk &args, ExpressionState &state
             &out_lower, &out_upper, &error
         );
 
-        if (!success || out_lower == nullptr || out_upper == nullptr) {
+        // Phase 16 WR-01 fix: a successful, empty (forecasts.size() == 0)
+        // call legitimately returns null out_lower/out_upper pointers (the
+        // FFI allocator never mallocs for a zero-length result) -- that is
+        // NOT a failure. Only `!success` means the call actually failed;
+        // WriteDoubleListNanAsNull safely no-ops on a null pointer paired
+        // with a zero length, producing an empty (not NULL) list element.
+        if (!success) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -245,6 +251,22 @@ void RegisterTsConformalIntervalsFunction(ExtensionLoader &loader) {
     struct_children.push_back(make_pair("upper", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
     auto result_type = LogicalType::STRUCT(std::move(struct_children));
 
+    // Phase 16 WR-01 fix: a SQL NULL `difficulty` argument (not merely an
+    // empty list) is a documented valid "no difficulty_col at all" call
+    // (see TsConformalApplyScoreFunction's doc comment) and must still
+    // invoke the function body. DuckDB's DEFAULT_NULL_HANDLING would
+    // otherwise short-circuit the WHOLE row to SQL NULL whenever ANY
+    // argument -- including a NULL difficulty list -- is NULL, before the
+    // function ever runs. SPECIAL_HANDLING opts out of that so the
+    // function's own explicit forecasts/score/method null checks (which
+    // deliberately do NOT include difficulty) are what decide NULL-ness.
+    ScalarFunction ts_ci_apply_score_func(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::VARCHAR), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+        result_type,
+        TsConformalApplyScoreFunction
+    );
+    ts_ci_apply_score_func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+
     ScalarFunctionSet ts_ci_set("ts_conformal_intervals");
     ts_ci_set.AddFunction(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
@@ -252,11 +274,7 @@ void RegisterTsConformalIntervalsFunction(ExtensionLoader &loader) {
         TsConformalIntervalsFunction
     ));
     // 4-arg overload (Phase 16 D-08): method + per-row difficulty for 'adaptive'.
-    ts_ci_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::VARCHAR), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
-        result_type,
-        TsConformalApplyScoreFunction
-    ));
+    ts_ci_set.AddFunction(ts_ci_apply_score_func);
     {
         CreateScalarFunctionInfo info(ts_ci_set);
         FunctionDescription desc;
@@ -278,11 +296,7 @@ void RegisterTsConformalIntervalsFunction(ExtensionLoader &loader) {
         result_type,
         TsConformalIntervalsFunction
     ));
-    anofox_set.AddFunction(ScalarFunction(
-        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::VARCHAR), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
-        result_type,
-        TsConformalApplyScoreFunction
-    ));
+    anofox_set.AddFunction(ts_ci_apply_score_func);
     {
         CreateScalarFunctionInfo info(anofox_set);
         info.alias_of = "ts_conformal_intervals";

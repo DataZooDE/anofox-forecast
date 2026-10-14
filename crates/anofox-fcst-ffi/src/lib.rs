@@ -5336,13 +5336,24 @@ pub unsafe extern "C" fn anofox_ts_conformal_intervals(
 ) -> bool {
     init_error(out_error);
 
-    if forecasts.is_null() || out_lower.is_null() || out_upper.is_null() {
+    if out_lower.is_null() || out_upper.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+    if length != 0 && forecasts.is_null() {
         set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
         return false;
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let forecast_series = build_series(forecasts, forecasts_validity, length);
+        // Phase 16 WR-01 fix: a non-null, zero-length forecasts list must
+        // produce an empty result, matching every sibling conformal FFI
+        // entry point's "non-null, zero-length means empty" convention.
+        let forecast_series = if length == 0 {
+            Vec::new()
+        } else {
+            build_series(forecasts, forecasts_validity, length)
+        };
         let filled = anofox_fcst_core::fill_missing(&forecast_series, 0.0);
         let (mut lower, mut upper) =
             anofox_fcst_core::conformal_intervals(&filled, conformity_score);
