@@ -229,6 +229,244 @@ def build_nan_filtered() -> dict:
     return {"actual": actual, "forecast": forecast, "alphas": alphas_out}
 
 
+def asymmetric_calibration(residuals: list[float], alpha: float) -> dict:
+    """Phase 16 D-07 (plan 16-02): asymmetric margins from the FULL
+    finite-residual count (not a positive/negative subset). `k = ceil((n +
+    1) * (1 - alpha / 2))`; insufficient if `n == 0` or `k > n`. `upper =
+    quantile(r, k/n)`; `lower = quantile(-r, k/n)`; `coverage = mean(-lower
+    <= r <= upper)`; `conformity_score = (lower + upper) / 2`."""
+    arr = np.asarray(residuals, dtype=np.float64)
+    finite = arr[np.isfinite(arr)]
+    n = int(finite.shape[0])
+    half_alpha = alpha / 2.0
+    insufficient = n == 0
+    k = None
+    if not insufficient:
+        k = math.ceil((n + 1) * (1.0 - half_alpha))
+        insufficient = k > n
+
+    if insufficient:
+        return {
+            "lower_margin": None,
+            "upper_margin": None,
+            "coverage": None,
+            "conformity_score": None,
+            "nominal_level": 1.0 - alpha,
+            "n_calibration": n,
+            "calibration_insufficient": True,
+        }
+
+    level = k / n
+    upper_margin = float(np.quantile(finite, level, method="linear"))
+    lower_margin = float(np.quantile(-finite, level, method="linear"))
+    coverage = float(np.mean((finite >= -lower_margin) & (finite <= upper_margin)))
+    conformity_score = (lower_margin + upper_margin) / 2.0
+    return {
+        "lower_margin": lower_margin,
+        "upper_margin": upper_margin,
+        "coverage": coverage,
+        "conformity_score": conformity_score,
+        "nominal_level": 1.0 - alpha,
+        "n_calibration": n,
+        "calibration_insufficient": False,
+    }
+
+
+def build_asym_n20() -> dict:
+    """Hand-checked (planner, 2026-10-12): lower margin 0.81, upper margin
+    3.5125, coverage 0.9, conformity_score 2.16125 at alpha 0.2."""
+    residuals = [-1.0, -0.8, -0.6, -0.4, -0.2] + [0.25 * k for k in range(1, 16)]
+    return {
+        "residuals": residuals,
+        "future_point": [100.0],
+        "alphas": {"0.2": asymmetric_calibration(residuals, 0.2)},
+    }
+
+
+def build_asym_n10() -> dict:
+    """Same skewed residuals as the old positive/negative-subset test: at
+    alpha 0.1, half_alpha=0.05, ceil(11*0.95)=11 > 10 -> insufficient."""
+    residuals = [2.0, 3.0, 2.5, 3.5, 4.0, -0.5, -0.3, -0.2, -0.1, 2.8]
+    return {"residuals": residuals, "alphas": {"0.1": asymmetric_calibration(residuals, 0.1)}}
+
+
+def build_asym_all_positive() -> dict:
+    """All-positive residuals 1..20 at alpha 0.2: the lower margin (quantile
+    of the NEGATED residuals) is negative -- expected and documented, not a
+    bug: a model that only ever under-predicts has no evidence its own point
+    forecast is ever too high."""
+    residuals = [float(i) for i in range(1, 21)]
+    return {"residuals": residuals, "alphas": {"0.2": asymmetric_calibration(residuals, 0.2)}}
+
+
+def build_asym_seeded_cases() -> dict:
+    """3 seeded cases from a single `default_rng(16021)` stream (normal,
+    centred log-normal, normal; n = 40, 99, 199): numpy margins at alpha 0.1
+    for Rust to reproduce EXACTLY from the stored `residuals` array (the RNG
+    only generates the fixture's fixed residual values here -- it is never
+    re-run on the Rust side, unlike the independently-seeded Monte Carlo
+    coverage simulation in monte_carlo.json)."""
+    rng = np.random.default_rng(16021)
+    sigma = 0.75
+    cases = {}
+
+    r40 = rng.standard_normal(40)
+    cases["seeded_n40_normal"] = {
+        "residuals": r40.tolist(),
+        "alpha": 0.1,
+        **asymmetric_calibration(r40.tolist(), 0.1),
+    }
+
+    r99_raw = rng.lognormal(mean=0.0, sigma=sigma, size=99)
+    r99 = (r99_raw - math.exp(sigma**2 / 2.0)).tolist()
+    cases["seeded_n99_lognormal"] = {
+        "residuals": r99,
+        "alpha": 0.1,
+        **asymmetric_calibration(r99, 0.1),
+    }
+
+    r199 = rng.standard_normal(199).tolist()
+    cases["seeded_n199_normal"] = {
+        "residuals": r199,
+        "alpha": 0.1,
+        **asymmetric_calibration(r199, 0.1),
+    }
+
+    return cases
+
+
+# ============================================================================
+# Monte Carlo coverage simulation (Phase 16 D-07, CONF-03): independent numpy
+# simulation of the SAME symmetric/asymmetric constructions Rust implements,
+# compared via a coverage/width TOLERANCE band (not RNG-exact parity --
+# Rust's own Monte Carlo test uses an independently-seeded inline SplitMix64
+# generator, a different algorithm from numpy's PCG64 default_rng).
+# ============================================================================
+
+MC_TRIALS = 2000
+MC_N_CAL = 199
+MC_M_TEST = 25
+MC_ALPHAS = [0.1, 0.2]
+# Seeds for this file's OWN numpy simulation (distinct from the seeds
+# 16101/16102/16103 Rust's inline generator uses for its independent run).
+MC_SEEDS = {
+    "symmetric_normal": 16041,
+    "symmetric_lognormal": 16042,
+    "asymmetric_normal": 16043,
+    "asymmetric_lognormal": 16044,
+}
+
+
+def _mc_draw(rng: np.random.Generator, dist: str, n: int) -> np.ndarray:
+    if dist == "normal":
+        return rng.standard_normal(n)
+    if dist == "lognormal":
+        sigma = 0.75
+        return rng.lognormal(mean=0.0, sigma=sigma, size=n) - math.exp(sigma**2 / 2.0)
+    raise ValueError(f"unknown distribution: {dist}")
+
+
+def _mc_old_asymmetric_margins(cal: np.ndarray, half_alpha: float) -> tuple[float, float]:
+    """The OLD (pre-16-02) positive/negative-subset asymmetric construction,
+    replicated here only to document the coverage/width regression it had
+    (documentation for the 16-03 CHANGELOG), never used by Rust."""
+    positive = cal[cal > 0]
+    negative = np.abs(cal[cal < 0])
+    if positive.size == 0:
+        upper_margin = 0.0
+    else:
+        n = positive.size
+        k = math.ceil((n + 1) * (1.0 - half_alpha))
+        level = min(k / n, 1.0)
+        upper_margin = float(np.quantile(positive, level, method="linear"))
+    if negative.size == 0:
+        lower_margin = 0.0
+    else:
+        n = negative.size
+        k = math.ceil((n + 1) * (1.0 - half_alpha))
+        level = min(k / n, 1.0)
+        lower_margin = float(np.quantile(negative, level, method="linear"))
+    return lower_margin, upper_margin
+
+
+def monte_carlo_run(method: str, dist: str, seed: int) -> dict:
+    """Runs MC_TRIALS trials ONCE per (method, dist), evaluating every alpha
+    in MC_ALPHAS from the SAME draws (standard Monte Carlo practice -- not a
+    fresh simulation per alpha)."""
+    rng = np.random.default_rng(seed)
+    acc = {a: {"covered": 0, "total": 0, "widths": []} for a in MC_ALPHAS}
+    old_acc = (
+        {a: {"covered": 0, "total": 0, "widths": []} for a in MC_ALPHAS}
+        if method == "asymmetric"
+        else None
+    )
+
+    for _ in range(MC_TRIALS):
+        cal = _mc_draw(rng, dist, MC_N_CAL)
+        test = _mc_draw(rng, dist, MC_M_TEST)
+        for alpha in MC_ALPHAS:
+            if method == "symmetric":
+                abs_cal = np.abs(cal)
+                k = math.ceil((MC_N_CAL + 1) * (1.0 - alpha))
+                level = k / MC_N_CAL
+                q = float(np.quantile(abs_cal, level, method="linear"))
+                lower_m, upper_m = q, q
+            else:
+                half_alpha = alpha / 2.0
+                k = math.ceil((MC_N_CAL + 1) * (1.0 - half_alpha))
+                level = k / MC_N_CAL
+                upper_m = float(np.quantile(cal, level, method="linear"))
+                lower_m = float(np.quantile(-cal, level, method="linear"))
+
+            acc[alpha]["covered"] += int(np.sum((test >= -lower_m) & (test <= upper_m)))
+            acc[alpha]["total"] += MC_M_TEST
+            acc[alpha]["widths"].append(lower_m + upper_m)
+
+            if method == "asymmetric":
+                old_lower, old_upper = _mc_old_asymmetric_margins(cal, alpha / 2.0)
+                old_acc[alpha]["covered"] += int(
+                    np.sum((test >= -old_lower) & (test <= old_upper))
+                )
+                old_acc[alpha]["total"] += MC_M_TEST
+                old_acc[alpha]["widths"].append(old_lower + old_upper)
+
+    out = {}
+    for alpha in MC_ALPHAS:
+        mean_width = float(np.mean(acc[alpha]["widths"]))
+        entry = {
+            "coverage": acc[alpha]["covered"] / acc[alpha]["total"],
+            "mean_width": mean_width,
+        }
+        if method == "asymmetric":
+            old_width = float(np.mean(old_acc[alpha]["widths"]))
+            entry["old_construction"] = {
+                "coverage": old_acc[alpha]["covered"] / old_acc[alpha]["total"],
+                "mean_width": old_width,
+            }
+            entry["old_over_new_width_ratio"] = old_width / mean_width
+        out[str(alpha)] = entry
+    return out
+
+
+def build_monte_carlo() -> dict:
+    results: dict[str, dict] = {}
+    for method in ["symmetric", "asymmetric"]:
+        results[method] = {}
+        for dist in ["normal", "lognormal"]:
+            seed = MC_SEEDS[f"{method}_{dist}"]
+            results[method][dist] = monte_carlo_run(method, dist, seed)
+    return {
+        "params": {
+            "trials": MC_TRIALS,
+            "n_cal": MC_N_CAL,
+            "m_test": MC_M_TEST,
+            "alphas": MC_ALPHAS,
+        },
+        "seeds": MC_SEEDS,
+        "results": results,
+    }
+
+
 def build_invalid_alphas() -> list[float]:
     """alpha values outside (0, 1): D-06 rejects all of these naming the
     value, never silently defaulting or clamping."""
@@ -252,6 +490,10 @@ def build_threshold_table() -> list[dict]:
     return rows
 
 
+ASYMMETRIC_TOLERANCE = {"score_abs": 1e-9, "coverage_abs": 1e-12}
+MONTE_CARLO_TOLERANCE = {"coverage_abs": 0.02, "mean_width_rel": 0.05}
+
+
 def main() -> None:
     payload = {
         "two_group": build_two_group(),
@@ -271,6 +513,35 @@ def main() -> None:
         generator=generator_path(__file__),
         versions=tool_versions("numpy"),
         payload=payload,
+    )
+    print(f"Wrote {out_path}")
+
+    asymmetric_payload = {
+        "asym_n20": build_asym_n20(),
+        "asym_n10": build_asym_n10(),
+        "asym_all_positive": build_asym_all_positive(),
+        "seeded": build_asym_seeded_cases(),
+        "tolerance": ASYMMETRIC_TOLERANCE,
+    }
+    out_path = write_fixture(
+        family="conformal",
+        filename="asymmetric_cases.json",
+        generator=generator_path(__file__),
+        versions=tool_versions("numpy"),
+        payload=asymmetric_payload,
+    )
+    print(f"Wrote {out_path}")
+
+    monte_carlo_payload = {
+        **build_monte_carlo(),
+        "tolerance": MONTE_CARLO_TOLERANCE,
+    }
+    out_path = write_fixture(
+        family="conformal",
+        filename="monte_carlo.json",
+        generator=generator_path(__file__),
+        versions=tool_versions("numpy"),
+        payload=monte_carlo_payload,
     )
     print(f"Wrote {out_path}")
 

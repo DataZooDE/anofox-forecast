@@ -12,8 +12,17 @@ require anofox_forecast
 # Residual pool drops NULL (ts_conformal_quantile)
 #######################################
 
+# alpha 0.5 (not 0.1): Phase 16 D-05 makes n=3 INSUFFICIENT at alpha 0.1
+# (ceil(4*0.9)=4>3, both sides NULL and NULL = NULL is NULL, not true);
+# alpha 0.5 is sufficient (ceil(4*0.5)=2<=3), keeping this test's intent.
 query I
-SELECT ts_conformal_quantile([1, NULL, 2, 3]::DOUBLE[], 0.1) = ts_conformal_quantile([1, 2, 3]::DOUBLE[], 0.1);
+SELECT ts_conformal_quantile([1, NULL, 2, 3]::DOUBLE[], 0.5) = ts_conformal_quantile([1, 2, 3]::DOUBLE[], 0.5);
+----
+true
+
+# the non-NULL-dropped result stays finite at the sufficient alpha.
+query I
+SELECT ts_conformal_quantile([1, NULL, 2, 3]::DOUBLE[], 0.5) IS NOT NULL;
 ----
 true
 
@@ -105,13 +114,18 @@ CREATE TABLE per_step AS SELECT
     [101.0, 103.0, 106.0, NULL, 111.0, 116.0, 121.0, 123.0, 127.0, 128.0, 134.0, 132.0]::DOUBLE[] AS fold_actuals_missing,
     [100.0, 105.0, 110.0]::DOUBLE[] AS point;
 
+# alpha 0.3 (not 0.1): Phase 16 D-05 makes n=4 folds INSUFFICIENT at alpha
+# 0.1 (ceil(5*0.9)=5>4), and n=3 (after dropping the one missing actual)
+# also insufficient at 0.1 (ceil(4*0.9)=4>3); alpha 0.3 is sufficient for
+# both (ceil(5*0.7)=4<=4, ceil(4*0.7)=3<=3), keeping this test's intent
+# (pairwise-complete calibration unaffected at the other steps) meaningful.
 query I
 SELECT
-    (ts_conformal_predict_per_step(fold_forecasts, fold_actuals_missing, point, 0.1, 3)).half_widths[2]
-    = (ts_conformal_predict_per_step(fold_forecasts, fold_actuals_complete, point, 0.1, 3)).half_widths[2]
-    AND (ts_conformal_predict_per_step(fold_forecasts, fold_actuals_missing, point, 0.1, 3)).half_widths[3]
-    = (ts_conformal_predict_per_step(fold_forecasts, fold_actuals_complete, point, 0.1, 3)).half_widths[3]
-    AND (ts_conformal_predict_per_step(fold_forecasts, fold_actuals_missing, point, 0.1, 3)).half_widths[1] IS NOT NULL
+    (ts_conformal_predict_per_step(fold_forecasts, fold_actuals_missing, point, 0.3, 3)).half_widths[2]
+    = (ts_conformal_predict_per_step(fold_forecasts, fold_actuals_complete, point, 0.3, 3)).half_widths[2]
+    AND (ts_conformal_predict_per_step(fold_forecasts, fold_actuals_missing, point, 0.3, 3)).half_widths[3]
+    = (ts_conformal_predict_per_step(fold_forecasts, fold_actuals_complete, point, 0.3, 3)).half_widths[3]
+    AND (ts_conformal_predict_per_step(fold_forecasts, fold_actuals_missing, point, 0.3, 3)).half_widths[1] IS NOT NULL
 FROM per_step;
 ----
 true

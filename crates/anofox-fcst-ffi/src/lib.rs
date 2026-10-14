@@ -5659,7 +5659,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict_multi(
             true
         }
         Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
@@ -5717,7 +5717,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict_adaptive(
             true
         }
         Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
@@ -5866,7 +5866,7 @@ pub unsafe extern "C" fn anofox_ts_mean_interval_width(
             true
         }
         Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
@@ -5934,7 +5934,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_learn(
             true
         }
         Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
@@ -6023,7 +6023,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_apply(
             true
         }
         Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
@@ -6075,7 +6075,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_coverage(
             true
         }
         Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
@@ -6132,7 +6132,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_evaluate(
             true
         }
         Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
@@ -6438,23 +6438,36 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict_per_step(
             (*out_result).n_forecasts = ps.point.len();
             (*out_result).coverage = ps.coverage;
 
+            // Phase 16 D-05/G16: an insufficient step's half-width (and the
+            // bounds derived from it) is infinite -- written as NaN so C++
+            // can turn it into SQL NULL; a NaN half-width is the only marker
+            // of an insufficient step (no new per-step field).
+            let lower_nan: Vec<f64> = ps.lower.iter().copied().map(nan_if_non_finite).collect();
+            let upper_nan: Vec<f64> = ps.upper.iter().copied().map(nan_if_non_finite).collect();
+            let half_widths_nan: Vec<f64> = ps
+                .half_widths
+                .iter()
+                .copied()
+                .map(nan_if_non_finite)
+                .collect();
+
             (*out_result).point =
                 match alloc_or_error(&ps.point, out_error, "Failed to allocate point") {
                     Ok(ptr) => ptr,
                     Err(()) => return false,
                 };
             (*out_result).lower =
-                match alloc_or_error(&ps.lower, out_error, "Failed to allocate lower") {
+                match alloc_or_error(&lower_nan, out_error, "Failed to allocate lower") {
                     Ok(ptr) => ptr,
                     Err(()) => return false,
                 };
             (*out_result).upper =
-                match alloc_or_error(&ps.upper, out_error, "Failed to allocate upper") {
+                match alloc_or_error(&upper_nan, out_error, "Failed to allocate upper") {
                     Ok(ptr) => ptr,
                     Err(()) => return false,
                 };
             (*out_result).half_widths = match alloc_or_error(
-                &ps.half_widths,
+                &half_widths_nan,
                 out_error,
                 "Failed to allocate half_widths",
             ) {
@@ -6507,17 +6520,40 @@ pub unsafe extern "C" fn anofox_free_conformal_per_step_result(
 }
 
 /// Helper function to fill a CalibrationProfileFFI from a core CalibrationProfile.
+///
+/// Phase 16 D-05: a per-alpha score can be `f64::INFINITY` when that level's
+/// calibration is insufficient; written here as NaN so C++ can turn it into
+/// SQL NULL.
 unsafe fn fill_calibration_profile(
     out: *mut types::CalibrationProfileFFI,
     profile: &anofox_fcst_core::CalibrationProfile,
 ) {
+    let state_vector_nan: Vec<f64> = profile
+        .state_vector
+        .iter()
+        .copied()
+        .map(nan_if_non_finite)
+        .collect();
+    let scores_lower_nan: Vec<f64> = profile
+        .scores_lower
+        .iter()
+        .copied()
+        .map(nan_if_non_finite)
+        .collect();
+    let scores_upper_nan: Vec<f64> = profile
+        .scores_upper
+        .iter()
+        .copied()
+        .map(nan_if_non_finite)
+        .collect();
+
     (*out).method = profile.method.into();
     (*out).strategy = profile.strategy.into();
     (*out).alphas = vec_to_c_double_array(&profile.alphas);
-    (*out).state_vector = vec_to_c_double_array(&profile.state_vector);
+    (*out).state_vector = vec_to_c_double_array(&state_vector_nan);
     (*out).state_vector_len = profile.state_vector.len();
-    (*out).scores_lower = vec_to_c_double_array(&profile.scores_lower);
-    (*out).scores_upper = vec_to_c_double_array(&profile.scores_upper);
+    (*out).scores_lower = vec_to_c_double_array(&scores_lower_nan);
+    (*out).scores_upper = vec_to_c_double_array(&scores_upper_nan);
     (*out).n_levels = profile.alphas.len();
     (*out).n_residuals = profile.n_residuals;
 }
@@ -6544,8 +6580,10 @@ unsafe fn fill_prediction_intervals(
     for level_idx in 0..n_levels {
         for fcst_idx in 0..n_forecasts {
             let flat_idx = level_idx * n_forecasts + fcst_idx;
-            *lower_ptr.add(flat_idx) = intervals.lower[level_idx][fcst_idx];
-            *upper_ptr.add(flat_idx) = intervals.upper[level_idx][fcst_idx];
+            // Phase 16 D-05: an insufficient level's score is infinite, so
+            // its bounds are +/-inf -- written as NaN for C++ to NULL.
+            *lower_ptr.add(flat_idx) = nan_if_non_finite(intervals.lower[level_idx][fcst_idx]);
+            *upper_ptr.add(flat_idx) = nan_if_non_finite(intervals.upper[level_idx][fcst_idx]);
         }
     }
 

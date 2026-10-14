@@ -446,11 +446,17 @@ pub fn conformal_predict_adaptive(
     })
 }
 
-/// Computes asymmetric conformal intervals using signed residuals.
+/// Computes asymmetric conformal intervals using the alpha/2 and 1-alpha/2
+/// finite-sample quantiles of the SIGNED residuals (Phase 16 D-07, CONF-03).
 ///
 /// Unlike standard conformal prediction which creates symmetric intervals,
-/// this method uses separate quantiles for positive and negative residuals,
-/// allowing for asymmetric intervals that better capture skewed distributions.
+/// this method computes the upper margin as the `k/n` quantile of the signed
+/// residuals and the lower margin as the `k/n` quantile of the NEGATED
+/// signed residuals (both over the FULL finite-residual count `n`, not a
+/// positive/negative subset), allowing for asymmetric intervals that better
+/// capture skewed distributions. A negative lower margin is allowed and
+/// expected for a biased model: the resulting interval may exclude the
+/// model's own point forecast.
 ///
 /// # Arguments
 /// * `residuals` - Calibration residuals (actual - predicted), signed
@@ -464,66 +470,50 @@ pub fn conformal_predict_asymmetric(
     forecasts: &[f64],
     alpha: f64,
 ) -> Result<ConformalResult> {
-    if residuals.is_empty() {
-        return Err(ForecastError::InsufficientData { needed: 1, got: 0 });
-    }
+    validate_alpha(alpha)?;
+    let half_alpha = alpha / 2.0;
 
-    if !(0.0..1.0).contains(&alpha) {
-        return Err(ForecastError::InvalidInput(
-            "Alpha must be between 0 and 1 (exclusive)".to_string(),
-        ));
-    }
-
-    // Separate positive and negative residuals
-    let positive: Vec<f64> = residuals.iter().filter(|&&r| r > 0.0).copied().collect();
-    let negative: Vec<f64> = residuals
+    // Phase 16 D-06/G16: non-finite residuals filtered before any quantile.
+    let finite: Vec<f64> = residuals
         .iter()
-        .filter(|&&r| r < 0.0)
-        .map(|&r| r.abs())
+        .copied()
+        .filter(|r| r.is_finite())
         .collect();
+    let n_calibration = finite.len();
 
-    // Compute quantiles for each direction
-    // Use alpha/2 for each tail to maintain overall coverage
-    let alpha_half = alpha / 2.0;
+    let mut sorted_r: Vec<f64> = finite.clone();
+    sorted_r.sort_by(f64::total_cmp);
+    let mut sorted_neg_r: Vec<f64> = finite.iter().map(|r| -r).collect();
+    sorted_neg_r.sort_by(f64::total_cmp);
 
-    let upper_margin = if positive.is_empty() {
-        0.0
-    } else {
-        let mut sorted = positive.clone();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        let n = sorted.len() as f64;
-        let q = ((n + 1.0) * (1.0 - alpha_half)).ceil() / n;
-        compute_quantile(&sorted, q.clamp(0.0, 1.0))
-    };
+    let level = finite_sample_level(n_calibration, half_alpha);
+    let calibration_insufficient = level.is_none();
 
-    let lower_margin = if negative.is_empty() {
-        0.0
-    } else {
-        let mut sorted = negative.clone();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        let n = sorted.len() as f64;
-        let q = ((n + 1.0) * (1.0 - alpha_half)).ceil() / n;
-        compute_quantile(&sorted, q.clamp(0.0, 1.0))
+    let (lower_margin, upper_margin, coverage) = match level {
+        None => (f64::INFINITY, f64::INFINITY, f64::NAN),
+        Some(lvl) => {
+            let lower_margin = compute_quantile(&sorted_neg_r, lvl);
+            let upper_margin = compute_quantile(&sorted_r, lvl);
+            // Phase 16 D-02: empirical coverage = fraction of SIGNED
+            // calibration residuals within [-lower_margin, upper_margin].
+            let coverage = if n_calibration == 0 {
+                f64::NAN
+            } else {
+                finite
+                    .iter()
+                    .filter(|&&r| r >= -lower_margin && r <= upper_margin)
+                    .count() as f64
+                    / n_calibration as f64
+            };
+            (lower_margin, upper_margin, coverage)
+        }
     };
 
     let lower: Vec<f64> = forecasts.iter().map(|f| f - lower_margin).collect();
     let upper: Vec<f64> = forecasts.iter().map(|f| f + upper_margin).collect();
 
-    // Report average margin as conformity score
-    let avg_margin = (upper_margin + lower_margin) / 2.0;
-
-    // Phase 16 D-02: empirical coverage = fraction of SIGNED calibration
-    // residuals within [-lower_margin, upper_margin].
-    let n_calibration = residuals.len();
-    let coverage = if n_calibration == 0 {
-        f64::NAN
-    } else {
-        residuals
-            .iter()
-            .filter(|&&r| r >= -lower_margin && r <= upper_margin)
-            .count() as f64
-            / n_calibration as f64
-    };
+    // Report the mean of the two margins as conformity score (half-width).
+    let conformity_score = (lower_margin + upper_margin) / 2.0;
 
     Ok(ConformalResult {
         point: forecasts.to_vec(),
@@ -531,12 +521,10 @@ pub fn conformal_predict_asymmetric(
         upper,
         coverage,
         nominal_level: 1.0 - alpha,
-        conformity_score: avg_margin,
+        conformity_score,
         n_calibration,
         method: "asymmetric_conformal".to_string(),
-        // Phase 16 D-07 (plan 16-02) reworks asymmetric's margin
-        // construction and insufficiency reporting.
-        calibration_insufficient: false,
+        calibration_insufficient,
     })
 }
 
@@ -956,12 +944,7 @@ pub fn conformal_learn(
     }
 
     for &alpha in alphas {
-        if !(0.0..1.0).contains(&alpha) {
-            return Err(ForecastError::InvalidInput(format!(
-                "Alpha must be in (0, 1), got {}",
-                alpha
-            )));
-        }
+        validate_alpha(alpha)?;
     }
 
     // Validate difficulty for adaptive method
@@ -999,9 +982,15 @@ pub fn conformal_learn(
     let mut scores_lower = Vec::with_capacity(alphas.len());
     let mut scores_upper = Vec::with_capacity(alphas.len());
 
-    // Compute sorted absolute residuals (used by all strategies)
-    let mut abs_residuals: Vec<f64> = residuals.iter().map(|r| r.abs()).collect();
-    abs_residuals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    // Phase 16 D-06/G16: non-finite residuals filtered before any sort/quantile.
+    let finite_residuals: Vec<f64> = residuals
+        .iter()
+        .copied()
+        .filter(|r| r.is_finite())
+        .collect();
+    let n_finite = finite_residuals.len();
+    let mut abs_residuals: Vec<f64> = finite_residuals.iter().map(|r| r.abs()).collect();
+    abs_residuals.sort_by(f64::total_cmp);
 
     // For JackknifePlus, we store the full sorted residual distribution
     // For Split/CrossVal, we compute quantiles and store them in state_vector
@@ -1015,10 +1004,12 @@ pub fn conformal_learn(
             // For JackknifePlus, scores are computed at apply time
             // but we pre-compute them here for convenience access
             for &alpha in alphas {
-                let n = abs_residuals.len() as f64;
-                let quantile_level = ((n + 1.0) * (1.0 - alpha)).ceil() / n;
-                let quantile_level = quantile_level.clamp(0.0, 1.0);
-                let score = compute_quantile(&abs_residuals, quantile_level);
+                // Phase 16 D-05/G12: insufficient -> unbounded (infinite)
+                // score, never clamped into the max residual.
+                let score = match finite_sample_level(n_finite, alpha) {
+                    None => f64::INFINITY,
+                    Some(level) => compute_quantile(&abs_residuals, level),
+                };
                 scores_lower.push(score);
                 scores_upper.push(score);
             }
@@ -1030,52 +1021,35 @@ pub fn conformal_learn(
             match method {
                 ConformalMethod::Symmetric => {
                     for &alpha in alphas {
-                        let n = abs_residuals.len() as f64;
-                        let quantile_level = ((n + 1.0) * (1.0 - alpha)).ceil() / n;
-                        let quantile_level = quantile_level.clamp(0.0, 1.0);
-                        let score = compute_quantile(&abs_residuals, quantile_level);
+                        let score = match finite_sample_level(n_finite, alpha) {
+                            None => f64::INFINITY,
+                            Some(level) => compute_quantile(&abs_residuals, level),
+                        };
                         scores_lower.push(score);
                         scores_upper.push(score);
                     }
                 }
 
                 ConformalMethod::Asymmetric => {
-                    // Separate positive and negative residuals
-                    let positive: Vec<f64> =
-                        residuals.iter().filter(|&&r| r > 0.0).copied().collect();
-                    let negative: Vec<f64> = residuals
-                        .iter()
-                        .filter(|&&r| r < 0.0)
-                        .map(|&r| r.abs())
-                        .collect();
-
-                    let mut sorted_positive = positive;
-                    let mut sorted_negative = negative;
-                    sorted_positive
-                        .sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-                    sorted_negative
-                        .sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                    // Phase 16 D-07: upper margin = quantile of the signed
+                    // residuals; lower margin = quantile of the negated
+                    // signed residuals, both over the FULL finite count
+                    // (matches conformal_predict_asymmetric exactly).
+                    let mut sorted_r: Vec<f64> = finite_residuals.clone();
+                    sorted_r.sort_by(f64::total_cmp);
+                    let mut sorted_neg_r: Vec<f64> = finite_residuals.iter().map(|r| -r).collect();
+                    sorted_neg_r.sort_by(f64::total_cmp);
 
                     for &alpha in alphas {
-                        let alpha_half = alpha / 2.0;
-
-                        // Upper margin from positive residuals
-                        let upper_margin = if sorted_positive.is_empty() {
-                            0.0
-                        } else {
-                            let n = sorted_positive.len() as f64;
-                            let q = ((n + 1.0) * (1.0 - alpha_half)).ceil() / n;
-                            compute_quantile(&sorted_positive, q.clamp(0.0, 1.0))
-                        };
-
-                        // Lower margin from negative residuals (absolute values)
-                        let lower_margin = if sorted_negative.is_empty() {
-                            0.0
-                        } else {
-                            let n = sorted_negative.len() as f64;
-                            let q = ((n + 1.0) * (1.0 - alpha_half)).ceil() / n;
-                            compute_quantile(&sorted_negative, q.clamp(0.0, 1.0))
-                        };
+                        let half_alpha = alpha / 2.0;
+                        let (lower_margin, upper_margin) =
+                            match finite_sample_level(n_finite, half_alpha) {
+                                None => (f64::INFINITY, f64::INFINITY),
+                                Some(level) => (
+                                    compute_quantile(&sorted_neg_r, level),
+                                    compute_quantile(&sorted_r, level),
+                                ),
+                            };
 
                         scores_lower.push(lower_margin);
                         scores_upper.push(upper_margin);
@@ -1086,10 +1060,10 @@ pub fn conformal_learn(
                     // For adaptive, we store the base symmetric scores
                     // The actual scaling happens at apply time using the forecast difficulty
                     for &alpha in alphas {
-                        let n = abs_residuals.len() as f64;
-                        let quantile_level = ((n + 1.0) * (1.0 - alpha)).ceil() / n;
-                        let quantile_level = quantile_level.clamp(0.0, 1.0);
-                        let score = compute_quantile(&abs_residuals, quantile_level);
+                        let score = match finite_sample_level(n_finite, alpha) {
+                            None => f64::INFINITY,
+                            Some(level) => compute_quantile(&abs_residuals, level),
+                        };
                         scores_lower.push(score);
                         scores_upper.push(score);
                     }
@@ -1191,13 +1165,14 @@ pub fn conformal_apply(
 
         for (level_idx, &alpha) in profile.alphas.iter().enumerate() {
             // For JackknifePlus, we compute intervals using the full residual distribution
-            // This allows dynamic quantile computation and potentially tighter intervals
-            let n = residuals.len() as f64;
-            let quantile_level = ((n + 1.0) * (1.0 - alpha)).ceil() / n;
-            let quantile_level = quantile_level.clamp(0.0, 1.0);
-
-            // Residuals are already sorted, so we can compute quantile directly
-            let score = compute_quantile(residuals, quantile_level);
+            // This allows dynamic quantile computation and potentially tighter intervals.
+            // Phase 16 D-05/G12: insufficient -> unbounded (infinite) score,
+            // never clamped. Residuals are already sorted (ascending, finite,
+            // non-negative), so we can compute the quantile directly.
+            let score = match finite_sample_level(residuals.len(), alpha) {
+                None => f64::INFINITY,
+                Some(level) => compute_quantile(residuals, level),
+            };
 
             // For JackknifePlus with Adaptive method, scale by difficulty
             if profile.method == ConformalMethod::Adaptive {
@@ -1366,12 +1341,7 @@ pub fn winkler_score(actuals: &[f64], lower: &[f64], upper: &[f64], alpha: f64) 
         )));
     }
 
-    if !(0.0..1.0).contains(&alpha) {
-        return Err(ForecastError::InvalidInput(format!(
-            "Alpha must be in (0, 1), got {}",
-            alpha
-        )));
-    }
+    validate_alpha(alpha)?;
 
     let penalty_factor = 2.0 / alpha;
     let mut total_score = 0.0;
@@ -1626,11 +1596,14 @@ mod tests {
 
     #[test]
     fn test_conformal_predict_asymmetric() {
-        // Skewed residuals: mostly positive (over-predictions)
+        // Skewed residuals: mostly positive (over-predictions). alpha 0.2
+        // (not 0.1): with n=10, half_alpha=0.05 makes ceil(11*0.95)=11 > 10
+        // INSUFFICIENT under Phase 16 D-05 at alpha 0.1; alpha 0.2 gives
+        // half_alpha=0.1, ceil(11*0.9)=10 <= 10, sufficient.
         let residuals = vec![2.0, 3.0, 2.5, 3.5, 4.0, -0.5, -0.3, -0.2, -0.1, 2.8];
         let forecasts = vec![100.0];
 
-        let result = conformal_predict_asymmetric(&residuals, &forecasts, 0.1).unwrap();
+        let result = conformal_predict_asymmetric(&residuals, &forecasts, 0.2).unwrap();
 
         assert_eq!(result.method, "asymmetric_conformal");
 
@@ -1985,9 +1958,11 @@ mod tests {
 
     #[test]
     fn test_conformal_learn_asymmetric() {
-        // Skewed residuals: mostly positive
+        // Skewed residuals: mostly positive. alpha 0.2 (not 0.1): see
+        // test_conformal_predict_asymmetric for why n=10 at alpha 0.1 is
+        // now insufficient under Phase 16 D-05.
         let residuals = vec![2.0, 3.0, 2.5, 3.5, 4.0, -0.5, -0.3, -0.2, -0.1, 2.8];
-        let alphas = vec![0.1];
+        let alphas = vec![0.2];
 
         let profile = conformal_learn(
             &residuals,
@@ -2313,6 +2288,18 @@ mod tests {
     }
 
     #[test]
+    fn test_winkler_score_rejects_alpha_zero() {
+        let err = winkler_score(&[100.0], &[95.0], &[105.0], 0.0).unwrap_err();
+        assert!(err.to_string().contains("alpha must be in (0, 1), got 0"));
+    }
+
+    #[test]
+    fn test_conformal_evaluate_rejects_alpha_zero() {
+        let err = conformal_evaluate(&[100.0], &[95.0], &[105.0], 0.0).unwrap_err();
+        assert!(err.to_string().contains("alpha must be in (0, 1), got 0"));
+    }
+
+    #[test]
     fn test_conformal_evaluate_fn() {
         let actuals = vec![100.0, 105.0, 110.0];
         let lower = vec![95.0, 100.0, 105.0];
@@ -2413,11 +2400,7 @@ pub(crate) fn conformal_predict_per_step(
             fold_actuals.len()
         )));
     }
-    if !(0.0..1.0).contains(&alpha) {
-        return Err(ForecastError::InvalidInput(
-            "Alpha must be between 0 and 1 (exclusive)".to_string(),
-        ));
-    }
+    validate_alpha(alpha)?;
 
     let coverage = 1.0 - alpha;
     let cp = ConformalPredictor::split(coverage);
@@ -2444,10 +2427,20 @@ pub(crate) fn conformal_predict_per_step(
 /// `ceil(n * adjusted_level) - 1` clamped into `[0, n-1]`. Used so a per-step
 /// quantile computed over a FULL (no missing pairs) step is bitwise identical
 /// to [`conformal_predict_per_step`]'s result for that step (D-02).
+///
+/// Phase 16 D-05/G16: sorts with `f64::total_cmp` (identical ordering to the
+/// old unwrapped `partial_cmp` for finite input, but never panics), and
+/// returns `f64::INFINITY` when the finite-sample level helper (`alpha =
+/// 1 - coverage`) reports insufficiency instead of clamping via `.min(1.0)`.
+/// When sufficient, the index formula is UNCHANGED, so complete-data results
+/// stay bit-identical to the crate oracle.
 fn split_quantile(scores: &[f64], coverage: f64) -> f64 {
     let mut sorted = scores.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    sorted.sort_by(f64::total_cmp);
     let n = sorted.len();
+    if finite_sample_level(n, 1.0 - coverage).is_none() {
+        return f64::INFINITY;
+    }
     let adjusted_level = (((n + 1) as f64) * coverage / n as f64).min(1.0);
     let idx = ((n as f64) * adjusted_level).ceil() as usize;
     let idx = idx.saturating_sub(1).min(n - 1);
@@ -2476,7 +2469,6 @@ pub fn conformal_predict_per_step_validated(
     alpha: f64,
 ) -> Result<ConformalPerStepResult> {
     use crate::missing;
-    use anofox_forecast::postprocess::ConformalPredictor;
 
     if horizon == 0 {
         return Err(ForecastError::InvalidInput(
@@ -2512,27 +2504,27 @@ pub fn conformal_predict_per_step_validated(
             got: n_folds,
         });
     }
-    if !(0.0..1.0).contains(&alpha) {
-        return Err(ForecastError::InvalidInput(
-            "Alpha must be between 0 and 1 (exclusive)".to_string(),
-        ));
-    }
+    validate_alpha(alpha)?;
 
     let coverage = 1.0 - alpha;
-    let cp = ConformalPredictor::split(coverage);
 
     // Pooled fallback: every complete (forecast, actual) pair across every
     // fold and step, flattened — mirrors the crate's own pooled-quantile
     // fallback in `fit_per_step` (used when a step has fewer than 2
-    // residuals), but computed over complete pairs only.
+    // residuals), but computed over complete pairs only. Phase 16 D-05: a
+    // pooled fallback with fewer than 2 pairs is INSUFFICIENT (an infinite
+    // half-width), never a silent 0.0 width.
     let pooled = missing::complete_cases(&[fold_forecasts, fold_actuals])?;
-    let pooled_quantile = if pooled[0].len() >= 2 {
-        cp.fit(&pooled[0], &pooled[1])
-            .map(|r| r.quantile_value())
-            .unwrap_or(0.0)
-    } else {
-        0.0
-    };
+    // Phase 16 D-06/G16: a complete (forecast, actual) pair that is itself
+    // non-finite (e.g. both +inf, whose |f - a| is NaN) is dropped here
+    // rather than reaching `split_quantile`'s sort.
+    let pooled_scores: Vec<f64> = pooled[0]
+        .iter()
+        .zip(pooled[1].iter())
+        .map(|(f, a)| (f - a).abs())
+        .filter(|s| s.is_finite())
+        .collect();
+    let pooled_quantile = split_quantile(&pooled_scores, coverage);
 
     let mut half_widths = Vec::with_capacity(horizon);
     for t in 0..horizon {
@@ -2544,21 +2536,24 @@ pub fn conformal_predict_per_step_validated(
             .collect();
 
         let complete = missing::complete_cases(&[&step_forecasts, &step_actuals])?;
+        // Phase 16 D-06/G16: use only complete pairs whose |f - a| is finite
+        // -- a pair that is itself non-finite (e.g. both +inf) is dropped
+        // here instead of ever reaching `split_quantile`'s sort.
+        let finite_scores: Vec<f64> = complete[0]
+            .iter()
+            .zip(complete[1].iter())
+            .map(|(f, a)| (f - a).abs())
+            .filter(|s| s.is_finite())
+            .collect();
 
-        let hw = if complete[0].len() == n_folds {
-            // No missing pair at this step: replicate the crate's own
-            // per-step quantile formula exactly (same inputs -> bitwise
-            // identical result to the complete-data crate-backed function).
-            let scores: Vec<f64> = complete[0]
-                .iter()
-                .zip(complete[1].iter())
-                .map(|(f, a)| (f - a).abs())
-                .collect();
-            split_quantile(&scores, coverage)
-        } else if complete[0].len() >= 2 {
-            cp.fit(&complete[0], &complete[1])
-                .map(|r| r.quantile_value())
-                .unwrap_or(pooled_quantile)
+        let hw = if finite_scores.len() >= 2 {
+            // Complete step (== n_folds, all finite) or a partial step with
+            // at least 2 finite complete pairs: the same `split_quantile`
+            // formula replicates the crate's own per-step quantile exactly
+            // when complete (D-02) and reports insufficiency (infinite
+            // half-width) via the finite-sample level helper otherwise
+            // (D-05/G16) -- never the upstream `cp.fit` call, which clamps.
+            split_quantile(&finite_scores, coverage)
         } else {
             pooled_quantile
         };
@@ -2595,10 +2590,15 @@ mod per_step_pairwise_tests {
     #[test]
     fn complete_data_matches_crate_backed_function() {
         // 3 folds, horizon 2 — same data as test_conformal_per_step_basic.
+        // alpha 0.3 (not 0.1): with n=3 per step, ceil(4*0.9)=4 > 3 makes
+        // alpha 0.1 INSUFFICIENT under Phase 16 D-05 -- restricted to a
+        // sufficient configuration (ceil(4*0.7)=3 <= 3) so this oracle
+        // comparison stays meaningful; see insufficient_step_reports_infinite
+        // for the insufficient-case behavior.
         let fold_forecasts = [100.0, 105.0, 110.0, 115.0, 120.0, 125.0];
         let fold_actuals = [101.0, 108.0, 109.0, 118.0, 121.0, 122.0];
         let point = [100.0, 105.0];
-        let alpha = 0.1;
+        let alpha = 0.3;
 
         let old = conformal_predict_per_step(
             &[vec![100.0, 105.0], vec![110.0, 115.0], vec![120.0, 125.0]],
@@ -2646,7 +2646,10 @@ mod per_step_pairwise_tests {
             128.0, 134.0, 132.0, // fold 3
         ];
         let point = [100.0, 105.0, 110.0];
-        let alpha = 0.1;
+        // alpha 0.3 (not 0.1): sufficient for both n=4 (complete steps,
+        // ceil(5*0.7)=4<=4) and n=3 (step 0 after dropping the missing
+        // pair, ceil(4*0.7)=3<=3) under Phase 16 D-05.
+        let alpha = 0.3;
 
         let complete = conformal_predict_per_step_validated(
             &to_opt(&fold_forecasts),
@@ -2689,6 +2692,104 @@ mod per_step_pairwise_tests {
             with_missing.half_widths[0],
             expected
         );
+    }
+
+    #[test]
+    fn two_folds_alpha_0_1_is_insufficient_every_step() {
+        // 2 folds, horizon 3: n=2 per step. ceil(3*0.9)=3 > 2 -> insufficient
+        // at every step (Phase 16 D-05).
+        let fold_forecasts = to_opt(&[100.0, 105.0, 110.0, 100.0, 105.0, 110.0]);
+        let fold_actuals = to_opt(&[101.0, 108.0, 109.0, 103.0, 106.0, 107.0]);
+        let point = to_opt(&[100.0, 105.0, 110.0]);
+
+        let result =
+            conformal_predict_per_step_validated(&fold_forecasts, &fold_actuals, 3, &point, 0.1)
+                .unwrap();
+
+        for (i, hw) in result.half_widths.iter().enumerate() {
+            assert!(hw.is_infinite(), "step {i}: expected infinite, got {hw}");
+            assert!(result.lower[i].is_infinite() && result.lower[i] < 0.0);
+            assert!(result.upper[i].is_infinite() && result.upper[i] > 0.0);
+        }
+    }
+
+    #[test]
+    fn two_folds_alpha_0_4_is_sufficient_and_bit_identical_to_oracle() {
+        // Same 2-fold data, alpha 0.4: ceil(3*0.6)=2<=2 -> sufficient.
+        let fold_forecasts = [100.0, 105.0, 110.0, 100.0, 105.0, 110.0];
+        let fold_actuals = [101.0, 108.0, 109.0, 103.0, 106.0, 107.0];
+        let point = [100.0, 105.0, 110.0];
+        let alpha = 0.4;
+
+        let old = conformal_predict_per_step(
+            &[vec![100.0, 105.0, 110.0], vec![100.0, 105.0, 110.0]],
+            &[vec![101.0, 108.0, 109.0], vec![103.0, 106.0, 107.0]],
+            &point,
+            alpha,
+        )
+        .unwrap();
+
+        let new = conformal_predict_per_step_validated(
+            &to_opt(&fold_forecasts),
+            &to_opt(&fold_actuals),
+            3,
+            &to_opt(&point),
+            alpha,
+        )
+        .unwrap();
+
+        for i in 0..3 {
+            assert!(new.half_widths[i].is_finite(), "step {i} should be finite");
+            assert!(
+                (old.half_widths[i] - new.half_widths[i]).abs() < 1e-12,
+                "step {}: old={} new={}",
+                i,
+                old.half_widths[i],
+                new.half_widths[i]
+            );
+        }
+    }
+
+    #[test]
+    fn infinite_forecast_and_actual_pair_is_dropped_not_panicking() {
+        // 3 folds, horizon 1. Fold 1's forecast AND actual are both +inf, so
+        // |f - a| = NaN -- complete_cases keeps the pair (neither side is
+        // individually NaN) but the per-step filter must still drop it by
+        // score finiteness (D-06/G16), leaving 2 finite pairs (sufficient at
+        // alpha 0.4: ceil(3*0.6)=2<=2) instead of panicking on the sort.
+        let fold_forecasts = to_opt(&[100.0, f64::INFINITY, 110.0]);
+        let fold_actuals = to_opt(&[101.0, f64::INFINITY, 109.0]);
+        let point = to_opt(&[100.0]);
+
+        let result =
+            conformal_predict_per_step_validated(&fold_forecasts, &fold_actuals, 1, &point, 0.4)
+                .unwrap();
+
+        assert!(result.half_widths[0].is_finite());
+        // Equals the 2-pair (fold 0, fold 2) quantile directly.
+        let expected = split_quantile(&[1.0, 1.0], 0.6);
+        assert!((result.half_widths[0] - expected).abs() < 1e-12);
+    }
+
+    #[test]
+    fn pooled_fallback_with_fewer_than_two_pairs_is_insufficient_not_zero() {
+        // 2 folds, horizon 2. Every pair except (fold 0, step 0) is missing,
+        // so EVERY step has < 2 complete pairs and falls back to the pooled
+        // quantile -- but the pooled set itself has only 1 pair, which is
+        // insufficient at alpha 0.1 (ceil(2*0.9)=2 > 1). Must report an
+        // infinite half-width at every step, never a silent 0.0 width.
+        let fold_forecasts = to_opt(&[100.0, 105.0, 200.0, 205.0]);
+        let fold_actuals: Vec<Option<f64>> = vec![Some(101.0), None, None, None];
+        let point = to_opt(&[100.0, 105.0]);
+
+        let result =
+            conformal_predict_per_step_validated(&fold_forecasts, &fold_actuals, 2, &point, 0.1)
+                .unwrap();
+
+        for (i, hw) in result.half_widths.iter().enumerate() {
+            assert!(hw.is_infinite(), "step {i}: expected infinite, got {hw}");
+            assert_ne!(*hw, 0.0, "step {i}: must not be a silent 0.0 width");
+        }
     }
 
     #[test]

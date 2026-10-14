@@ -18,6 +18,10 @@ namespace duckdb {
 // internal functions) so every conformal scalar can share it.
 static void WriteDoubleOrNull(Vector &vec, idx_t row_idx, double value);
 
+// Substitutes NaN into `values[i]` wherever `validity` marks position i as
+// NULL. Forward-declared here (defined below) for the same reason.
+static void FillNanAtInvalid(vector<double> &values, const vector<uint64_t> &validity);
+
 // ============================================================================
 // ts_conformal_quantile - Compute conformity score from residuals
 // ts_conformal_quantile(residuals[], alpha) -> DOUBLE
@@ -583,6 +587,9 @@ static void TsConformalLearnFunction(DataChunk &args, ExpressionState &state, Ve
         );
 
         if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_conformal_learn: %s", error.message);
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -594,9 +601,11 @@ static void TsConformalLearnFunction(DataChunk &args, ExpressionState &state, Ve
         FlatVector::GetData<string_t>(out_strategy_vec)[row_idx] = StringVector::AddString(out_strategy_vec, StrategyToString(profile.strategy));
 
         WriteDoubleList(out_alphas_vec, row_idx, profile.alphas, profile.n_levels);
-        WriteDoubleList(out_state_vec, row_idx, profile.state_vector, profile.state_vector_len);
-        WriteDoubleList(out_scores_lower_vec, row_idx, profile.scores_lower, profile.n_levels);
-        WriteDoubleList(out_scores_upper_vec, row_idx, profile.scores_upper, profile.n_levels);
+        // Phase 16 D-05: an insufficient level's stored score is NaN
+        // (unbounded) -- write as list-NULL, not a literal NaN double.
+        WriteDoubleListNanAsNull(out_state_vec, row_idx, profile.state_vector, profile.state_vector_len);
+        WriteDoubleListNanAsNull(out_scores_lower_vec, row_idx, profile.scores_lower, profile.n_levels);
+        WriteDoubleListNanAsNull(out_scores_upper_vec, row_idx, profile.scores_upper, profile.n_levels);
 
         // n_residuals
         FlatVector::GetData<int64_t>(out_n_residuals_vec)[row_idx] = static_cast<int64_t>(profile.n_residuals);
@@ -721,10 +730,18 @@ static void TsConformalApplyFunction(DataChunk &args, ExpressionState &state, Ve
         auto n_residuals = FlatVector::GetData<int64_t>(n_residuals_vec)[row_idx];
 
         vector<double> alphas, state_vector, scores_lower, scores_upper;
+        vector<uint64_t> state_validity, scores_lower_validity, scores_upper_validity;
         alphas_reader.ReadNoNulls(row_idx, alphas, "ts_conformal_apply", "profile.alphas");
-        state_reader.ReadNoNulls(row_idx, state_vector, "ts_conformal_apply", "profile.state_vector");
-        scores_lower_reader.ReadNoNulls(row_idx, scores_lower, "ts_conformal_apply", "profile.scores_lower");
-        scores_upper_reader.ReadNoNulls(row_idx, scores_upper, "ts_conformal_apply", "profile.scores_upper");
+        // Phase 16 D-05: state_vector/scores_lower/scores_upper may hold a
+        // NULL entry (an insufficient calibration level, written by
+        // ts_conformal_learn via WriteDoubleListNanAsNull) -- read with
+        // validity and substitute NaN rather than erroring via ReadNoNulls.
+        state_reader.Read(row_idx, state_vector, state_validity);
+        FillNanAtInvalid(state_vector, state_validity);
+        scores_lower_reader.Read(row_idx, scores_lower, scores_lower_validity);
+        FillNanAtInvalid(scores_lower, scores_lower_validity);
+        scores_upper_reader.Read(row_idx, scores_upper, scores_upper_validity);
+        FillNanAtInvalid(scores_upper, scores_upper_validity);
 
         // Build CalibrationProfileFFI from the struct
         CalibrationProfileFFI profile = {};
@@ -749,6 +766,9 @@ static void TsConformalApplyFunction(DataChunk &args, ExpressionState &state, Ve
         );
 
         if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_conformal_apply: %s", error.message);
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -881,6 +901,9 @@ static void TsConformalCoverageFunction(DataChunk &args, ExpressionState &state,
         );
 
         if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_conformal_coverage: %s", error.message);
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -991,6 +1014,9 @@ static void TsConformalEvaluateFunction(DataChunk &args, ExpressionState &state,
         );
 
         if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_conformal_evaluate: %s", error.message);
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -1102,6 +1128,16 @@ static void TsMeanIntervalWidthFunction(DataChunk &args, ExpressionState &state,
         );
 
         if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_mean_interval_width: %s", error.message);
+            }
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+
+        // Phase 16: an unbounded (+/-inf) lower/upper pair yields a NaN
+        // width -- surface as SQL NULL, not a literal NaN.
+        if (std::isnan(miw_result)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -1232,7 +1268,8 @@ static void TsConformalPredictPerStepFunction(DataChunk &args, ExpressionState &
         WriteDoubleListNanAsNull(point_out, row_idx, ps_result.point, ps_result.n_forecasts);
         WriteDoubleListNanAsNull(lower_out, row_idx, ps_result.lower, ps_result.n_forecasts);
         WriteDoubleListNanAsNull(upper_out, row_idx, ps_result.upper, ps_result.n_forecasts);
-        WriteDoubleList(hw_out, row_idx, ps_result.half_widths, ps_result.n_forecasts);
+        // Phase 16 D-05/G16: a NaN half-width marks an insufficient step.
+        WriteDoubleListNanAsNull(hw_out, row_idx, ps_result.half_widths, ps_result.n_forecasts);
         FlatVector::GetData<double>(coverage_out)[row_idx] = ps_result.coverage;
 
         anofox_free_conformal_per_step_result(&ps_result);
@@ -1325,6 +1362,24 @@ static void WriteDoubleOrNull(Vector &vec, idx_t row_idx, double value) {
         FlatVector::SetNull(vec, row_idx, true);
     } else {
         FlatVector::GetData<double>(vec)[row_idx] = value;
+    }
+}
+
+// Substitutes NaN into `values[i]` wherever `validity` marks position i as
+// NULL (Phase 16: ts_conformal_apply reads a learned profile's scores back
+// from a calibration table, which may hold an insufficient-calibration NULL
+// entry -- NaN is the convention every conformal arithmetic path already
+// treats as "unbounded", so this keeps the score array aligned with the
+// profile's intent without reintroducing a 0.0 placeholder).
+static void FillNanAtInvalid(vector<double> &values, const vector<uint64_t> &validity) {
+    if (validity.empty()) {
+        return; // no NULLs present
+    }
+    for (idx_t i = 0; i < values.size(); i++) {
+        bool valid = (validity[i / 64] >> (i % 64)) & 1ULL;
+        if (!valid) {
+            values[i] = std::nan("");
+        }
     }
 }
 

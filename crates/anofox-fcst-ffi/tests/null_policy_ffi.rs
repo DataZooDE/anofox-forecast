@@ -752,7 +752,10 @@ fn per_step_residual_count_not_multiple_of_horizon_is_invalid_input() {
 
 #[test]
 fn per_step_null_point_forecast_yields_nan_at_that_position_only() {
-    // 3 folds, horizon 2, all complete.
+    // 3 folds, horizon 2, all complete. alpha 0.5 (not 0.1): Phase 16 D-05
+    // makes n=3 per step INSUFFICIENT at alpha 0.1 (ceil(4*0.9)=4>3); alpha
+    // 0.5 is sufficient (ceil(4*0.5)=2<=3), keeping this test's intent
+    // (NULL point forecast -> NaN only at that position) meaningful.
     let fold_forecasts = [100.0, 105.0, 110.0, 115.0, 120.0, 125.0];
     let fold_actuals = [101.0, 108.0, 109.0, 118.0, 121.0, 122.0];
     let point = [100.0, 105.0];
@@ -772,7 +775,7 @@ fn per_step_null_point_forecast_yields_nan_at_that_position_only() {
             point.as_ptr(),
             &point_validity,
             point.len(),
-            0.1,
+            0.5,
             &mut out_result,
             &mut error,
         )
@@ -783,12 +786,18 @@ fn per_step_null_point_forecast_yields_nan_at_that_position_only() {
         assert!((*out_result.point.add(1)).is_nan());
         assert!((*out_result.lower.add(1)).is_nan());
         assert!((*out_result.upper.add(1)).is_nan());
+        // The non-NULL position (0) stays finite: sufficient at alpha 0.5.
+        assert!((*out_result.lower).is_finite());
+        assert!((*out_result.upper).is_finite());
         anofox_free_conformal_per_step_result(&mut out_result);
     }
 }
 
 #[test]
 fn conformal_quantile_with_null_matches_complete_data() {
+    // Phase 16 D-05: n=3 at alpha 0.1 is now insufficient (ceil(4*0.9)=4>3)
+    // -- alpha 0.5 keeps this test's intent (NULL residual dropped, 3
+    // complete residuals match) at a sufficient level (ceil(4*0.5)=2<=3).
     let with_null = [1.0, 0.0, 2.0, 3.0];
     let with_null_validity = bitmask(&[true, false, true, true]);
     let complete = [1.0, 2.0, 3.0];
@@ -800,7 +809,7 @@ fn conformal_quantile_with_null_matches_complete_data() {
             with_null.as_ptr(),
             &with_null_validity,
             with_null.len(),
-            0.1,
+            0.5,
             &mut with_null_result,
             &mut error,
         )
@@ -813,13 +822,15 @@ fn conformal_quantile_with_null_matches_complete_data() {
             complete.as_ptr(),
             std::ptr::null(),
             complete.len(),
-            0.1,
+            0.5,
             &mut complete_result,
             &mut error,
         )
     };
     assert!(success);
     assert_eq!(with_null_result, complete_result);
+    // Sufficient at alpha 0.5: the non-NULL-dropped position stays finite.
+    assert!(with_null_result.is_finite());
 }
 
 #[test]
@@ -902,6 +913,9 @@ fn conformal_intervals_null_forecast_is_position_preserving() {
 
 #[test]
 fn conformal_predict_residual_null_matches_complete_residuals() {
+    // Phase 16 D-05: n=3 at alpha 0.1 is now insufficient (ceil(4*0.9)=4>3)
+    // -- alpha 0.5 keeps this test's intent at a sufficient level
+    // (ceil(4*0.5)=2<=3).
     let residuals_with_null = [0.5, 0.0, 0.8, -0.2];
     let residuals_validity = bitmask(&[true, false, true, true]);
     let residuals_complete = [0.5, 0.8, -0.2];
@@ -917,7 +931,7 @@ fn conformal_predict_residual_null_matches_complete_residuals() {
             forecasts.as_ptr(),
             std::ptr::null(),
             forecasts.len(),
-            0.1,
+            0.5,
             &mut with_null,
             &mut error,
         )
@@ -933,7 +947,7 @@ fn conformal_predict_residual_null_matches_complete_residuals() {
             forecasts.as_ptr(),
             std::ptr::null(),
             forecasts.len(),
-            0.1,
+            0.5,
             &mut complete,
             &mut error,
         )
@@ -941,9 +955,84 @@ fn conformal_predict_residual_null_matches_complete_residuals() {
     assert!(success, "error: {}", error_message(&error));
 
     assert_eq!(with_null.conformity_score, complete.conformity_score);
+    // Sufficient at alpha 0.5: the score stays finite, not a NULL-equivalent.
+    assert!(with_null.conformity_score.is_finite());
+    assert!(!with_null.calibration_insufficient);
     unsafe {
         anofox_free_conformal_result(&mut with_null);
         anofox_free_conformal_result(&mut complete);
+    }
+}
+
+#[test]
+fn conformal_quantile_alpha_zero_is_invalid_input() {
+    let residuals = [1.0, 2.0, 3.0];
+    let mut result = 0.0f64;
+    let mut error = AnofoxError::default();
+    let success = unsafe {
+        anofox_ts_conformal_quantile(
+            residuals.as_ptr(),
+            std::ptr::null(),
+            residuals.len(),
+            0.0,
+            &mut result,
+            &mut error,
+        )
+    };
+    assert!(!success);
+    assert_eq!(error.code, ErrorCode::InvalidInput);
+    assert!(error_message(&error).contains("alpha must be in (0, 1), got"));
+}
+
+#[test]
+fn conformal_quantile_insufficient_calibration_succeeds_with_nan_out_result() {
+    // n=5 at alpha 0.1: ceil(6*0.9)=6 > 5 -> insufficient. The call itself
+    // still SUCCEEDS (Phase 16 D-05: insufficiency is a reported value, not
+    // an error); `out_result` is NaN for the C++ layer to NULL.
+    let residuals = [1.0, 2.0, 3.0, 4.0, 5.0];
+    let mut result = 0.0f64;
+    let mut error = AnofoxError::default();
+    let success = unsafe {
+        anofox_ts_conformal_quantile(
+            residuals.as_ptr(),
+            std::ptr::null(),
+            residuals.len(),
+            0.1,
+            &mut result,
+            &mut error,
+        )
+    };
+    assert!(success, "error: {}", error_message(&error));
+    assert!(result.is_nan());
+}
+
+#[test]
+fn conformal_predict_insufficient_calibration_sets_flag_true() {
+    let residuals = [1.0, 2.0, 3.0, 4.0, 5.0];
+    let forecasts = [10.0];
+    let mut out = ConformalResultFFI::default();
+    let mut error = AnofoxError::default();
+    let success = unsafe {
+        anofox_ts_conformal_predict(
+            residuals.as_ptr(),
+            std::ptr::null(),
+            residuals.len(),
+            forecasts.as_ptr(),
+            std::ptr::null(),
+            forecasts.len(),
+            0.1,
+            &mut out,
+            &mut error,
+        )
+    };
+    assert!(success, "error: {}", error_message(&error));
+    assert!(out.calibration_insufficient);
+    assert!(out.coverage.is_nan());
+    assert!(out.conformity_score.is_nan());
+    unsafe {
+        assert!((*out.lower).is_nan());
+        assert!((*out.upper).is_nan());
+        anofox_free_conformal_result(&mut out);
     }
 }
 
