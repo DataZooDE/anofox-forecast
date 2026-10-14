@@ -1471,18 +1471,55 @@ typedef struct ConformalResultFFI {
      */
     size_t n_forecasts;
     /**
-     * Nominal coverage level (1 - alpha)
+     * Empirical coverage on the calibration residuals (Phase 16 D-02) --
+     * NOT the requested level; see `nominal_level` for that.
      */
     double coverage;
+    /**
+     * The requested coverage level (1 - alpha) (Phase 16 D-02).
+     */
+    double nominal_level;
     /**
      * The computed conformity score (quantile threshold)
      */
     double conformity_score;
     /**
+     * Number of calibration residuals actually used (Phase 16 D-02).
+     */
+    size_t n_calibration;
+    /**
      * Method used for conformal prediction
      */
     char method[32];
 } ConformalResultFFI;
+
+/**
+ * Result of calibrating a conformal predictor from per-row `(actual,
+ * forecast)` pairs, without applying it to any point forecasts yet
+ * (Phase 16 D-03).
+ */
+typedef struct ConformalCalibrationFFI {
+    /**
+     * Empirical coverage on the calibration residuals.
+     */
+    double coverage;
+    /**
+     * The requested coverage level (1 - alpha).
+     */
+    double nominal_level;
+    /**
+     * The computed conformity score (quantile threshold).
+     */
+    double conformity_score;
+    /**
+     * Number of calibration residuals actually used.
+     */
+    size_t n_calibration;
+    /**
+     * Method used for calibration ("symmetric" or "adaptive").
+     */
+    char method[32];
+} ConformalCalibrationFFI;
 
 /**
  * Result of conformal prediction with multiple coverage levels.
@@ -3111,6 +3148,55 @@ bool anofox_ts_conformal_predict(const double *residuals,
                                  double alpha,
                                  struct ConformalResultFFI *out_result,
                                  struct AnofoxError *out_error);
+
+/**
+ * Compute conformal prediction intervals directly from per-row calibration
+ * (actual, forecast) pairs and a list of point forecasts (Phase 16 D-01/D-02).
+ *
+ * A null method pointer means "symmetric"; otherwise the method name is
+ * parsed strictly via `ConformalMethod::from_str` (an unknown name is an
+ * `InvalidInput` error, not a silent fallback).
+ *
+ * # Safety
+ * All non-null pointer arguments must be valid. A data pointer may be null
+ * only when its paired length is 0 (never calls `from_raw_parts` on a null
+ * pointer with a nonzero length).
+ */
+bool anofox_ts_conformal_from_pairs(const double *cal_actuals,
+                                    const uint64_t *cal_actuals_validity,
+                                    size_t cal_actuals_len,
+                                    const double *cal_forecasts,
+                                    const uint64_t *cal_forecasts_validity,
+                                    size_t cal_forecasts_len,
+                                    const double *point_forecasts,
+                                    const uint64_t *point_validity,
+                                    size_t point_len,
+                                    double alpha,
+                                    const char *method,
+                                    struct ConformalResultFFI *out_result,
+                                    struct AnofoxError *out_error);
+
+/**
+ * Calibrate a conformal predictor from per-row `(actual, forecast)` pairs,
+ * without applying it to any point forecasts yet (Phase 16 D-03).
+ *
+ * A null method pointer means "symmetric"; otherwise the method name is
+ * parsed strictly via `ConformalMethod::from_str`.
+ *
+ * # Safety
+ * All non-null pointer arguments must be valid. A data pointer may be null
+ * only when its paired length is 0.
+ */
+bool anofox_ts_conformal_calibrate(const double *actuals,
+                                   const uint64_t *actuals_validity,
+                                   size_t actuals_len,
+                                   const double *forecasts,
+                                   const uint64_t *forecasts_validity,
+                                   size_t forecasts_len,
+                                   double alpha,
+                                   const char *method,
+                                   struct ConformalCalibrationFFI *out_result,
+                                   struct AnofoxError *out_error);
 
 /**
  * Perform conformal prediction with multiple coverage levels.

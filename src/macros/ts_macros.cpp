@@ -1714,68 +1714,62 @@ SELECT * FROM _ts_cv_hydrate_native(
     "SELECT * FROM ts_cv_hydrate_by('cv_splits', product_id, date, qty, 'features', unknown_cols)",
     "cross-validation"},
 
-    // ts_conformal_by: Compute conformal prediction intervals for grouped series
-    // C++ API: ts_conformal_by(backtest_results, group_col, actual_col, forecast_col, point_forecast_col, params)
-    // backtest_results: Table with backtest residuals (actual - forecast)
-    // params MAP supports:
+    // ts_conformal_by: Compute conformal prediction intervals, one row per (group, forecast row)
+    // C++ API: ts_conformal_by(backtest_results, group_col, date_col, actual_col, forecast_col, point_forecast_col, params := MAP{})
+    // backtest_results: table holding BOTH calibration rows (actual_col/forecast_col set,
+    //   point_forecast_col NULL) and future rows (actual_col/forecast_col NULL, point_forecast_col set),
+    //   all ordered/paired by date_col (Phase 16 D-01). Residuals and empirical coverage are
+    //   computed in Rust, never subtracted in SQL (D-02).
+    // params MAP supports (read json-free; CAST, not TRY_CAST, so a malformed value errors):
     //   alpha (DOUBLE) - miscoverage rate (default 0.1 for 90% coverage)
-    //   method (VARCHAR) - 'symmetric' or 'asymmetric' (default 'symmetric')
-    // Returns: group_col, point, lower, upper, coverage, conformity_score, method
-    {"ts_conformal_by", {"backtest_results", "group_col", "actual_col", "forecast_col", "point_forecast_col", "params", nullptr}, {{nullptr, nullptr}},
+    //   method (VARCHAR) - 'symmetric' (alias 'split'), 'asymmetric', or 'adaptive' (default 'symmetric')
+    // Returns: group_col, date_col, point, lower, upper, coverage, nominal_level,
+    //          conformity_score, n_calibration, method
+    {"ts_conformal_by", {"backtest_results", "group_col", "date_col", "actual_col", "forecast_col", "point_forecast_col", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
 R"(
 WITH _params AS (
     SELECT
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.alpha') AS DOUBLE), 0.1) AS _alpha,
-        COALESCE(json_extract_string(to_json(params), '$.method'), 'symmetric') AS _method
+        CAST(COALESCE((params::MAP(VARCHAR, VARCHAR))['alpha'], '0.1') AS DOUBLE) AS _alpha,
+        COALESCE((params::MAP(VARCHAR, VARCHAR))['method'], 'symmetric') AS _method
 ),
-residuals AS (
+per_group AS (
     SELECT
         group_col AS _grp,
-        (actual_col - forecast_col)::DOUBLE AS residual
+        LIST({a: actual_col::DOUBLE, f: forecast_col::DOUBLE} ORDER BY date_col) AS _pairs,
+        LIST({t: date_col, p: point_forecast_col::DOUBLE} ORDER BY date_col)
+            FILTER (WHERE point_forecast_col IS NOT NULL) AS _points
     FROM query_table(backtest_results::VARCHAR)
-    WHERE actual_col IS NOT NULL AND forecast_col IS NOT NULL
-),
-point_forecasts AS (
-    SELECT
-        group_col AS _grp,
-        LIST(point_forecast_col::DOUBLE ORDER BY point_forecast_col) AS _forecasts
-    FROM query_table(backtest_results::VARCHAR)
-    WHERE point_forecast_col IS NOT NULL
     GROUP BY group_col
 ),
 conformal_calc AS (
     SELECT
-        r._grp,
-        CASE (SELECT _method FROM _params)
-            WHEN 'asymmetric' THEN
-                ts_conformal_predict_asymmetric(
-                    LIST(r.residual),
-                    pf._forecasts,
-                    (SELECT _alpha FROM _params)
-                )
-            ELSE
-                ts_conformal_predict(
-                    LIST(r.residual),
-                    pf._forecasts,
-                    (SELECT _alpha FROM _params)
-                )
-        END AS conf_result
-    FROM residuals r
-    JOIN point_forecasts pf ON r._grp = pf._grp
-    GROUP BY r._grp, pf._forecasts
+        _grp,
+        _points,
+        _ts_conformal_from_pairs(
+            [pr.a FOR pr IN _pairs],
+            [pr.f FOR pr IN _pairs],
+            [pt.p FOR pt IN _points],
+            (SELECT _alpha FROM _params),
+            (SELECT _method FROM _params)
+        ) AS conf_result
+    FROM per_group
+    WHERE len(_points) > 0
 )
 SELECT
     _grp AS group_col,
-    (conf_result).point AS point,
-    (conf_result).lower AS lower,
-    (conf_result).upper AS upper,
+    UNNEST(_points).t AS date_col,
+    UNNEST((conf_result).point) AS point,
+    UNNEST((conf_result).lower) AS lower,
+    UNNEST((conf_result).upper) AS upper,
     (conf_result).coverage AS coverage,
+    (conf_result).nominal_level AS nominal_level,
     (conf_result).conformity_score AS conformity_score,
+    (conf_result).n_calibration AS n_calibration,
     (conf_result).method AS method
 FROM conformal_calc
 )",
-    "One-step conformal prediction: calibrates on backtest residuals and applies to new forecasts.",
-    "SELECT * FROM ts_conformal_by('backtest', product_id, actual, forecast, point_forecast)",
+    "One-step conformal prediction: calibrates on backtest residuals and applies to new forecasts, one row per (group, date).",
+    "SELECT * FROM ts_conformal_by('backtest', product_id, date, actual, forecast, point_forecast)",
     "conformal-prediction"},
 
     // ts_conformal_calibrate: Compute conformal quantile from backtest residuals

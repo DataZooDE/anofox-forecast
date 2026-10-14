@@ -224,6 +224,8 @@ static void TsConformalPredictFunction(DataChunk &args, ExpressionState &state, 
     auto &coverage_vec = *struct_entries[3];
     auto &score_vec = *struct_entries[4];
     auto &method_vec = *struct_entries[5];
+    auto &nominal_level_vec = *struct_entries[6];
+    auto &n_calibration_vec = *struct_entries[7];
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (residuals_reader.IsNull(row_idx) || forecasts_reader.IsNull(row_idx) ||
@@ -261,6 +263,8 @@ static void TsConformalPredictFunction(DataChunk &args, ExpressionState &state, 
         FlatVector::GetData<double>(coverage_vec)[row_idx] = conf_result.coverage;
         FlatVector::GetData<double>(score_vec)[row_idx] = conf_result.conformity_score;
         FlatVector::GetData<string_t>(method_vec)[row_idx] = StringVector::AddString(method_vec, conf_result.method);
+        FlatVector::GetData<double>(nominal_level_vec)[row_idx] = conf_result.nominal_level;
+        FlatVector::GetData<int64_t>(n_calibration_vec)[row_idx] = (int64_t)conf_result.n_calibration;
 
         // Free FFI memory
         anofox_free_conformal_result(&conf_result);
@@ -275,6 +279,8 @@ void RegisterTsConformalPredictFunction(ExtensionLoader &loader) {
     struct_children.push_back(make_pair("coverage", LogicalType(LogicalTypeId::DOUBLE)));
     struct_children.push_back(make_pair("conformity_score", LogicalType(LogicalTypeId::DOUBLE)));
     struct_children.push_back(make_pair("method", LogicalType(LogicalTypeId::VARCHAR)));
+    struct_children.push_back(make_pair("nominal_level", LogicalType(LogicalTypeId::DOUBLE)));
+    struct_children.push_back(make_pair("n_calibration", LogicalType(LogicalTypeId::BIGINT)));
     auto result_type = LogicalType::STRUCT(std::move(struct_children));
 
     ScalarFunctionSet ts_cp_set("ts_conformal_predict");
@@ -346,6 +352,8 @@ static void TsConformalPredictAsymmetricFunction(DataChunk &args, ExpressionStat
     auto &coverage_vec = *struct_entries[3];
     auto &score_vec = *struct_entries[4];
     auto &method_vec = *struct_entries[5];
+    auto &nominal_level_vec = *struct_entries[6];
+    auto &n_calibration_vec = *struct_entries[7];
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (residuals_reader.IsNull(row_idx) || forecasts_reader.IsNull(row_idx) ||
@@ -383,6 +391,8 @@ static void TsConformalPredictAsymmetricFunction(DataChunk &args, ExpressionStat
         FlatVector::GetData<double>(coverage_vec)[row_idx] = conf_result.coverage;
         FlatVector::GetData<double>(score_vec)[row_idx] = conf_result.conformity_score;
         FlatVector::GetData<string_t>(method_vec)[row_idx] = StringVector::AddString(method_vec, conf_result.method);
+        FlatVector::GetData<double>(nominal_level_vec)[row_idx] = conf_result.nominal_level;
+        FlatVector::GetData<int64_t>(n_calibration_vec)[row_idx] = (int64_t)conf_result.n_calibration;
 
         // Free FFI memory
         anofox_free_conformal_result(&conf_result);
@@ -397,6 +407,8 @@ void RegisterTsConformalPredictAsymmetricFunction(ExtensionLoader &loader) {
     struct_children.push_back(make_pair("coverage", LogicalType(LogicalTypeId::DOUBLE)));
     struct_children.push_back(make_pair("conformity_score", LogicalType(LogicalTypeId::DOUBLE)));
     struct_children.push_back(make_pair("method", LogicalType(LogicalTypeId::VARCHAR)));
+    struct_children.push_back(make_pair("nominal_level", LogicalType(LogicalTypeId::DOUBLE)));
+    struct_children.push_back(make_pair("n_calibration", LogicalType(LogicalTypeId::BIGINT)));
     auto result_type = LogicalType::STRUCT(std::move(struct_children));
 
     ScalarFunctionSet ts_cpa_set("ts_conformal_predict_asymmetric");
@@ -1263,6 +1275,217 @@ void RegisterTsConformalPredictPerStepFunction(ExtensionLoader &loader) {
         };
         info.descriptions.push_back(std::move(desc));
         loader.RegisterFunction(std::move(info));
+    }
+}
+
+// ============================================================================
+// _ts_conformal_from_pairs / _ts_conformal_calibrate (Phase 16 D-01/D-02/D-03)
+//
+// Internal functions backing the ts_conformal_by / ts_conformal_calibrate
+// macros: residuals are computed in Rust from per-row (actual, forecast)
+// calibration pairs -- never subtracted in SQL -- and empirical coverage on
+// the calibration set is reported alongside the requested nominal_level.
+// ============================================================================
+
+// Writes `value` into row `row_idx` of a DOUBLE result child, or SQL NULL if
+// `value` is NaN (Phase 16: coverage/conformity_score can be NaN when there
+// is no calibration data at all).
+static void WriteDoubleOrNull(Vector &vec, idx_t row_idx, double value) {
+    if (std::isnan(value)) {
+        FlatVector::SetNull(vec, row_idx, true);
+    } else {
+        FlatVector::GetData<double>(vec)[row_idx] = value;
+    }
+}
+
+// _ts_conformal_from_pairs(cal_actuals[], cal_forecasts[], point_forecasts[], alpha, method)
+//   -> STRUCT(point[], lower[], upper[], coverage, nominal_level,
+//             conformity_score, n_calibration, method)
+static void TsConformalFromPairsFunction(DataChunk &args, ExpressionState &state, Vector &result) {
+    auto &cal_actuals_vec = args.data[0];
+    auto &cal_forecasts_vec = args.data[1];
+    auto &point_vec = args.data[2];
+    auto &alpha_vec = args.data[3];
+    auto &method_vec = args.data[4];
+    idx_t count = args.size();
+
+    ListDoubleReader cal_actuals_reader(cal_actuals_vec, count);
+    ListDoubleReader cal_forecasts_reader(cal_forecasts_vec, count);
+    ListDoubleReader point_reader(point_vec, count);
+    ScalarArgReader<double> alpha_reader(alpha_vec, count);
+    ScalarArgReader<string_t> method_reader(method_vec, count);
+
+    auto &struct_entries = StructVector::GetEntries(result);
+    auto &point_out = *struct_entries[0];
+    auto &lower_out = *struct_entries[1];
+    auto &upper_out = *struct_entries[2];
+    auto &coverage_out = *struct_entries[3];
+    auto &nominal_level_out = *struct_entries[4];
+    auto &score_out = *struct_entries[5];
+    auto &n_calibration_out = *struct_entries[6];
+    auto &method_out = *struct_entries[7];
+
+    for (idx_t row_idx = 0; row_idx < count; row_idx++) {
+        if (cal_actuals_reader.IsNull(row_idx) || cal_forecasts_reader.IsNull(row_idx) ||
+            point_reader.IsNull(row_idx) || alpha_reader.IsNull(row_idx) ||
+            method_reader.IsNull(row_idx)) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+
+        vector<double> cal_actuals, cal_forecasts, point_forecasts;
+        vector<uint64_t> cal_actuals_validity, cal_forecasts_validity, point_validity;
+        cal_actuals_reader.Read(row_idx, cal_actuals, cal_actuals_validity);
+        cal_forecasts_reader.Read(row_idx, cal_forecasts, cal_forecasts_validity);
+        point_reader.Read(row_idx, point_forecasts, point_validity);
+        double alpha = alpha_reader.Get(row_idx);
+        auto method_str = method_reader.Get(row_idx).GetString();
+
+        ConformalResultFFI conf_result = {};
+        AnofoxError error;
+        bool success = anofox_ts_conformal_from_pairs(
+            cal_actuals.data(), cal_actuals_validity.empty() ? nullptr : cal_actuals_validity.data(),
+            cal_actuals.size(),
+            cal_forecasts.data(), cal_forecasts_validity.empty() ? nullptr : cal_forecasts_validity.data(),
+            cal_forecasts.size(),
+            point_forecasts.data(), point_validity.empty() ? nullptr : point_validity.data(),
+            point_forecasts.size(),
+            alpha, method_str.c_str(),
+            &conf_result, &error
+        );
+
+        if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("_ts_conformal_from_pairs: %s", error.message);
+            }
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+
+        WriteDoubleListNanAsNull(point_out, row_idx, conf_result.point, conf_result.n_forecasts);
+        WriteDoubleListNanAsNull(lower_out, row_idx, conf_result.lower, conf_result.n_forecasts);
+        WriteDoubleListNanAsNull(upper_out, row_idx, conf_result.upper, conf_result.n_forecasts);
+        WriteDoubleOrNull(coverage_out, row_idx, conf_result.coverage);
+        FlatVector::GetData<double>(nominal_level_out)[row_idx] = conf_result.nominal_level;
+        WriteDoubleOrNull(score_out, row_idx, conf_result.conformity_score);
+        FlatVector::GetData<int64_t>(n_calibration_out)[row_idx] = (int64_t)conf_result.n_calibration;
+        FlatVector::GetData<string_t>(method_out)[row_idx] = StringVector::AddString(method_out, conf_result.method);
+
+        anofox_free_conformal_result(&conf_result);
+    }
+}
+
+// _ts_conformal_calibrate(actuals[], forecasts[], alpha, method)
+//   -> STRUCT(method, conformity_score, coverage, nominal_level, n_calibration)
+static void TsConformalCalibrateFromPairsFunction(DataChunk &args, ExpressionState &state, Vector &result) {
+    auto &actuals_vec = args.data[0];
+    auto &forecasts_vec = args.data[1];
+    auto &alpha_vec = args.data[2];
+    auto &method_vec = args.data[3];
+    idx_t count = args.size();
+
+    ListDoubleReader actuals_reader(actuals_vec, count);
+    ListDoubleReader forecasts_reader(forecasts_vec, count);
+    ScalarArgReader<double> alpha_reader(alpha_vec, count);
+    ScalarArgReader<string_t> method_reader(method_vec, count);
+
+    auto &struct_entries = StructVector::GetEntries(result);
+    auto &method_out = *struct_entries[0];
+    auto &score_out = *struct_entries[1];
+    auto &coverage_out = *struct_entries[2];
+    auto &nominal_level_out = *struct_entries[3];
+    auto &n_calibration_out = *struct_entries[4];
+
+    for (idx_t row_idx = 0; row_idx < count; row_idx++) {
+        if (actuals_reader.IsNull(row_idx) || forecasts_reader.IsNull(row_idx) ||
+            alpha_reader.IsNull(row_idx) || method_reader.IsNull(row_idx)) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+
+        vector<double> actuals, forecasts;
+        vector<uint64_t> actuals_validity, forecasts_validity;
+        actuals_reader.Read(row_idx, actuals, actuals_validity);
+        forecasts_reader.Read(row_idx, forecasts, forecasts_validity);
+        double alpha = alpha_reader.Get(row_idx);
+        auto method_str = method_reader.Get(row_idx).GetString();
+
+        ConformalCalibrationFFI cal_result = {};
+        AnofoxError error;
+        bool success = anofox_ts_conformal_calibrate(
+            actuals.data(), actuals_validity.empty() ? nullptr : actuals_validity.data(),
+            actuals.size(),
+            forecasts.data(), forecasts_validity.empty() ? nullptr : forecasts_validity.data(),
+            forecasts.size(),
+            alpha, method_str.c_str(),
+            &cal_result, &error
+        );
+
+        if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("_ts_conformal_calibrate: %s", error.message);
+            }
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+
+        FlatVector::GetData<string_t>(method_out)[row_idx] = StringVector::AddString(method_out, cal_result.method);
+        WriteDoubleOrNull(score_out, row_idx, cal_result.conformity_score);
+        WriteDoubleOrNull(coverage_out, row_idx, cal_result.coverage);
+        FlatVector::GetData<double>(nominal_level_out)[row_idx] = cal_result.nominal_level;
+        FlatVector::GetData<int64_t>(n_calibration_out)[row_idx] = (int64_t)cal_result.n_calibration;
+    }
+}
+
+void RegisterTsConformalFromPairsFunction(ExtensionLoader &loader) {
+    {
+        child_list_t<LogicalType> struct_children;
+        struct_children.push_back(make_pair("point", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+        struct_children.push_back(make_pair("lower", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+        struct_children.push_back(make_pair("upper", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+        struct_children.push_back(make_pair("coverage", LogicalType(LogicalTypeId::DOUBLE)));
+        struct_children.push_back(make_pair("nominal_level", LogicalType(LogicalTypeId::DOUBLE)));
+        struct_children.push_back(make_pair("conformity_score", LogicalType(LogicalTypeId::DOUBLE)));
+        struct_children.push_back(make_pair("n_calibration", LogicalType(LogicalTypeId::BIGINT)));
+        struct_children.push_back(make_pair("method", LogicalType(LogicalTypeId::VARCHAR)));
+        auto result_type = LogicalType::STRUCT(std::move(struct_children));
+
+        ScalarFunction from_pairs_func(
+            "_ts_conformal_from_pairs",
+            {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+             LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+             LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+             LogicalType(LogicalTypeId::DOUBLE),
+             LogicalType(LogicalTypeId::VARCHAR)},
+            result_type,
+            TsConformalFromPairsFunction
+        );
+        CreateScalarFunctionInfo info(from_pairs_func);
+        info.internal = true;
+        loader.RegisterFunction(info);
+    }
+
+    {
+        child_list_t<LogicalType> struct_children;
+        struct_children.push_back(make_pair("method", LogicalType(LogicalTypeId::VARCHAR)));
+        struct_children.push_back(make_pair("conformity_score", LogicalType(LogicalTypeId::DOUBLE)));
+        struct_children.push_back(make_pair("coverage", LogicalType(LogicalTypeId::DOUBLE)));
+        struct_children.push_back(make_pair("nominal_level", LogicalType(LogicalTypeId::DOUBLE)));
+        struct_children.push_back(make_pair("n_calibration", LogicalType(LogicalTypeId::BIGINT)));
+        auto result_type = LogicalType::STRUCT(std::move(struct_children));
+
+        ScalarFunction calibrate_func(
+            "_ts_conformal_calibrate",
+            {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+             LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+             LogicalType(LogicalTypeId::DOUBLE),
+             LogicalType(LogicalTypeId::VARCHAR)},
+            result_type,
+            TsConformalCalibrateFromPairsFunction
+        );
+        CreateScalarFunctionInfo info(calibrate_func);
+        info.internal = true;
+        loader.RegisterFunction(info);
     }
 }
 

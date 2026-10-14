@@ -141,6 +141,9 @@ static void LoadInternal(ExtensionLoader &loader) {
     // Register Per-Step Conformal Prediction
     RegisterTsConformalPredictPerStepFunction(loader);
 
+    // Register internal conformal-from-pairs/calibrate functions (Phase 16)
+    RegisterTsConformalFromPairsFunction(loader);
+
     // Register Bootstrap Prediction
     RegisterTsBootstrapIntervalsFunction(loader);
     RegisterTsBootstrapQuantilesFunction(loader);

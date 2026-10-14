@@ -1,0 +1,174 @@
+# name: test/sql/ts_conformal_reference.test
+# description: Phase 16 conformal/bootstrap value assertions against
+#   validation/reference/fixtures/conformal and bootstrap, plans 16-01..16-03.
+# group: [sql]
+#
+# This file must stay free of any json-extension directive (Phase 13 lesson:
+# the four conformal macros asserted here read `params` json-free via
+# `params::MAP(VARCHAR, VARCHAR)` -- re-introducing a json dependency here
+# would silently mask a regression back to the old json_extract_string path).
+#
+# Literals below are copied from validation/reference/fixtures/conformal/split_cases.json via:
+#   python3 -c "import json; d=json.load(open('validation/reference/fixtures/conformal/split_cases.json')); print(d['two_group']['groups']['A']['alphas']['0.1'])"
+#   python3 -c "import json; d=json.load(open('validation/reference/fixtures/conformal/split_cases.json')); print(d['two_group']['groups']['B']['alphas']['0.1'])"
+
+require anofox_forecast
+
+# =============================================================================
+# 16-01 ts_conformal_by
+# =============================================================================
+
+statement ok
+CREATE TABLE cbt(g VARCHAR, ds DATE, actual DOUBLE, forecast DOUBLE, point DOUBLE);
+
+statement ok
+INSERT INTO cbt VALUES
+  ('A', DATE '2024-01-01', 100.1, 100.0, NULL),
+  ('A', DATE '2024-01-02', 99.8, 100.0, NULL),
+  ('A', DATE '2024-01-03', 100.3, 100.0, NULL),
+  ('A', DATE '2024-01-04', 99.6, 100.0, NULL),
+  ('A', DATE '2024-01-05', 100.5, 100.0, NULL),
+  ('A', DATE '2024-01-06', 99.4, 100.0, NULL),
+  ('A', DATE '2024-01-07', 100.7, 100.0, NULL),
+  ('A', DATE '2024-01-08', 99.2, 100.0, NULL),
+  ('A', DATE '2024-01-09', 100.9, 100.0, NULL),
+  ('A', DATE '2024-01-10', 99.0, 100.0, NULL),
+  ('A', DATE '2024-01-11', 101.1, 100.0, NULL),
+  ('A', DATE '2024-01-12', 98.8, 100.0, NULL),
+  ('A', DATE '2024-01-13', 101.3, 100.0, NULL),
+  ('A', DATE '2024-01-14', 98.6, 100.0, NULL),
+  ('A', DATE '2024-01-15', 101.5, 100.0, NULL),
+  ('A', DATE '2024-01-16', 98.4, 100.0, NULL),
+  ('A', DATE '2024-01-17', 101.7, 100.0, NULL),
+  ('A', DATE '2024-01-18', 98.2, 100.0, NULL),
+  ('A', DATE '2024-01-19', 101.9, 100.0, NULL),
+  ('A', DATE '2024-01-20', 98.0, 100.0, NULL),
+  ('B', DATE '2024-01-01', 101.0, 100.0, NULL),
+  ('B', DATE '2024-01-02', 98.0, 100.0, NULL),
+  ('B', DATE '2024-01-03', 103.0, 100.0, NULL),
+  ('B', DATE '2024-01-04', 96.0, 100.0, NULL),
+  ('B', DATE '2024-01-05', 105.0, 100.0, NULL),
+  ('B', DATE '2024-01-06', 94.0, 100.0, NULL),
+  ('B', DATE '2024-01-07', 107.0, 100.0, NULL),
+  ('B', DATE '2024-01-08', 92.0, 100.0, NULL),
+  ('B', DATE '2024-01-09', 109.0, 100.0, NULL),
+  ('B', DATE '2024-01-10', 90.0, 100.0, NULL),
+  ('B', DATE '2024-01-11', 111.0, 100.0, NULL),
+  ('B', DATE '2024-01-12', 88.0, 100.0, NULL),
+  ('B', DATE '2024-01-13', 113.0, 100.0, NULL),
+  ('B', DATE '2024-01-14', 86.0, 100.0, NULL),
+  ('B', DATE '2024-01-15', 115.0, 100.0, NULL),
+  ('B', DATE '2024-01-16', 84.0, 100.0, NULL),
+  ('B', DATE '2024-01-17', 117.0, 100.0, NULL),
+  ('B', DATE '2024-01-18', 82.0, 100.0, NULL),
+  ('B', DATE '2024-01-19', 119.0, 100.0, NULL),
+  ('B', DATE '2024-01-20', 80.0, 100.0, NULL),
+  ('A', DATE '2024-02-01', NULL, NULL, 30.0),
+  ('A', DATE '2024-02-02', NULL, NULL, 10.0),
+  ('A', DATE '2024-02-03', NULL, NULL, 20.0),
+  ('B', DATE '2024-02-01', NULL, NULL, 5.0),
+  ('B', DATE '2024-02-02', NULL, NULL, 50.0),
+  ('B', DATE '2024-02-03', NULL, NULL, 25.0);
+
+# --- exactly one row per (group, forecast row): 2 groups x 3 future rows = 6 ---
+query I
+SELECT COUNT(*) FROM ts_conformal_by('cbt', g, ds, actual, forecast, point);
+----
+6
+
+# --- A 2024-02-01: point 30.0, lower 28.095, upper 31.905 (within 1e-9) ---
+query I
+SELECT ABS(point - 30.0) < 1e-9 AND ABS(lower - 28.094999999999995) < 1e-9 AND ABS(upper - 31.905000000000005) < 1e-9
+FROM ts_conformal_by('cbt', g, ds, actual, forecast, point) WHERE group_col = 'A' AND date_col = DATE '2024-02-01';
+----
+true
+
+# --- A 2024-02-02: point 10.0, lower 8.095, upper 11.905 ---
+query I
+SELECT ABS(point - 10.0) < 1e-9 AND ABS(lower - 8.094999999999995) < 1e-9 AND ABS(upper - 11.905000000000005) < 1e-9
+FROM ts_conformal_by('cbt', g, ds, actual, forecast, point) WHERE group_col = 'A' AND date_col = DATE '2024-02-02';
+----
+true
+
+# --- A 2024-02-03: point 20.0, lower 18.095, upper 21.905 ---
+query I
+SELECT ABS(point - 20.0) < 1e-9 AND ABS(lower - 18.094999999999995) < 1e-9 AND ABS(upper - 21.905000000000005) < 1e-9
+FROM ts_conformal_by('cbt', g, ds, actual, forecast, point) WHERE group_col = 'A' AND date_col = DATE '2024-02-03';
+----
+true
+
+# --- B 2024-02-01: point 5.0, lower -14.05, upper 24.05 (non-monotonic point
+# list 5, 50, 25 proves the output is NOT value-sorted, D-01/D4) ---
+query I
+SELECT ABS(point - 5.0) < 1e-9 AND ABS(lower - (-14.05)) < 1e-9 AND ABS(upper - 24.05) < 1e-9
+FROM ts_conformal_by('cbt', g, ds, actual, forecast, point) WHERE group_col = 'B' AND date_col = DATE '2024-02-01';
+----
+true
+
+# --- B 2024-02-02: point 50.0, lower 30.95, upper 69.05 ---
+query I
+SELECT ABS(point - 50.0) < 1e-9 AND ABS(lower - 30.95) < 1e-9 AND ABS(upper - 69.05) < 1e-9
+FROM ts_conformal_by('cbt', g, ds, actual, forecast, point) WHERE group_col = 'B' AND date_col = DATE '2024-02-02';
+----
+true
+
+# --- B 2024-02-03: point 25.0, lower 5.95, upper 44.05 ---
+query I
+SELECT ABS(point - 25.0) < 1e-9 AND ABS(lower - 5.949999999999999) < 1e-9 AND ABS(upper - 44.05) < 1e-9
+FROM ts_conformal_by('cbt', g, ds, actual, forecast, point) WHERE group_col = 'B' AND date_col = DATE '2024-02-03';
+----
+true
+
+# --- A conformity_score = 1.905, n_calibration = 20, method = symmetric ---
+query I
+SELECT ABS(conformity_score - 1.9050000000000056) < 1e-9 AND n_calibration = 20 AND method = 'symmetric'
+FROM ts_conformal_by('cbt', g, ds, actual, forecast, point) WHERE group_col = 'A' LIMIT 1;
+----
+true
+
+# --- B conformity_score = 19.05 ---
+query I
+SELECT ABS(conformity_score - 19.05) < 1e-9
+FROM ts_conformal_by('cbt', g, ds, actual, forecast, point) WHERE group_col = 'B' LIMIT 1;
+----
+true
+
+# --- empirical coverage 0.95 and nominal_level 0.9 for EVERY output row ---
+query I
+SELECT COUNT(*) = 6 AND bool_and(ABS(coverage - 0.95) < 1e-12) AND bool_and(ABS(nominal_level - 0.9) < 1e-12)
+FROM ts_conformal_by('cbt', g, ds, actual, forecast, point);
+----
+true
+
+# --- alpha := 0.2 via named STRUCT params gives A conformity_score 1.715 ---
+query I
+SELECT ABS(conformity_score - 1.7150000000000019) < 1e-9
+FROM ts_conformal_by('cbt', g, ds, actual, forecast, point, params := {'alpha': 0.2}) WHERE group_col = 'A' LIMIT 1;
+----
+true
+
+# --- alpha via positional MAP{'alpha': '0.2'} agrees with the STRUCT form ---
+query I
+SELECT ABS(conformity_score - 1.7150000000000019) < 1e-9
+FROM ts_conformal_by('cbt', g, ds, actual, forecast, point, MAP{'alpha': '0.2'}) WHERE group_col = 'A' LIMIT 1;
+----
+true
+
+# --- malformed alpha errors instead of silently defaulting to 0.1 ---
+statement error
+SELECT * FROM ts_conformal_by('cbt', g, ds, actual, forecast, point, params := {'alpha': 'abc'});
+----
+Could not convert
+
+# --- unknown method raises an SQL error listing the valid names ---
+statement error
+SELECT * FROM ts_conformal_by('cbt', g, ds, actual, forecast, point, params := {'method': 'bogus'});
+----
+symmetric (alias split
+
+# --- mismatched calibration list lengths passed directly to
+# _ts_conformal_from_pairs raise an InvalidInput SQL error naming both lengths ---
+statement error
+SELECT _ts_conformal_from_pairs([1.0, 2.0]::DOUBLE[], [1.0]::DOUBLE[], []::DOUBLE[], 0.1, 'symmetric');
+----
+same length: 2 vs 1

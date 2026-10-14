@@ -49,6 +49,7 @@
 //! ```
 
 use crate::error::{ForecastError, Result};
+use crate::missing;
 
 /// Result of conformal prediction containing intervals and metadata.
 #[derive(Debug, Clone)]
@@ -59,10 +60,19 @@ pub struct ConformalResult {
     pub lower: Vec<f64>,
     /// Upper bounds of prediction intervals
     pub upper: Vec<f64>,
-    /// Nominal coverage level (1 - alpha)
+    /// Empirical coverage on the calibration residuals: the fraction of
+    /// calibration residuals that fall within the computed conformity
+    /// margin(s) (Phase 16 D-02). This is NOT the requested level — see
+    /// `nominal_level` for that.
     pub coverage: f64,
+    /// The requested coverage level (1 - alpha), i.e. what used to be
+    /// (incorrectly) reported as `coverage` before Phase 16 D-02.
+    pub nominal_level: f64,
     /// The computed conformity score (quantile threshold)
     pub conformity_score: f64,
+    /// Number of calibration residuals actually used (after dropping
+    /// missing/incomplete pairs).
+    pub n_calibration: usize,
     /// Method used for conformal prediction
     pub method: String,
 }
@@ -197,7 +207,7 @@ pub fn conformal_intervals(forecasts: &[f64], conformity_score: f64) -> (Vec<f64
 /// let result = conformal_predict(&residuals, &forecasts, 0.1).unwrap();
 ///
 /// assert_eq!(result.point, forecasts);
-/// assert_eq!(result.coverage, 0.9);
+/// assert_eq!(result.nominal_level, 0.9);
 /// assert_eq!(result.lower.len(), 3);
 /// assert_eq!(result.upper.len(), 3);
 /// ```
@@ -209,12 +219,28 @@ pub fn conformal_predict(
     let conformity_score = conformal_quantile(residuals, alpha)?;
     let (lower, upper) = conformal_intervals(forecasts, conformity_score);
 
+    // Phase 16 D-02: `coverage` is the EMPIRICAL coverage on the calibration
+    // residuals themselves (fraction of |residual| <= conformity_score), not
+    // the requested level. The requested level is `nominal_level`.
+    let n_calibration = residuals.len();
+    let coverage = if n_calibration == 0 {
+        f64::NAN
+    } else {
+        residuals
+            .iter()
+            .filter(|r| r.abs() <= conformity_score)
+            .count() as f64
+            / n_calibration as f64
+    };
+
     Ok(ConformalResult {
         point: forecasts.to_vec(),
         lower,
         upper,
-        coverage: 1.0 - alpha,
+        coverage,
+        nominal_level: 1.0 - alpha,
         conformity_score,
+        n_calibration,
         method: "split_conformal".to_string(),
     })
 }
@@ -339,12 +365,23 @@ pub fn conformal_predict_adaptive(
         .map(|(f, d)| f + base_score * d)
         .collect();
 
+    // Phase 16 D-02: empirical coverage = fraction of calibration residuals
+    // with |r| <= base_score (the unnormalized base conformity score).
+    let n_calibration = residuals.len();
+    let coverage = if n_calibration == 0 {
+        f64::NAN
+    } else {
+        residuals.iter().filter(|r| r.abs() <= base_score).count() as f64 / n_calibration as f64
+    };
+
     Ok(ConformalResult {
         point: forecasts.to_vec(),
         lower,
         upper,
-        coverage: 1.0 - alpha,
+        coverage,
+        nominal_level: 1.0 - alpha,
         conformity_score: base_score,
+        n_calibration,
         method: "adaptive_conformal".to_string(),
     })
 }
@@ -415,13 +452,151 @@ pub fn conformal_predict_asymmetric(
     // Report average margin as conformity score
     let avg_margin = (upper_margin + lower_margin) / 2.0;
 
+    // Phase 16 D-02: empirical coverage = fraction of SIGNED calibration
+    // residuals within [-lower_margin, upper_margin].
+    let n_calibration = residuals.len();
+    let coverage = if n_calibration == 0 {
+        f64::NAN
+    } else {
+        residuals
+            .iter()
+            .filter(|&&r| r >= -lower_margin && r <= upper_margin)
+            .count() as f64
+            / n_calibration as f64
+    };
+
     Ok(ConformalResult {
         point: forecasts.to_vec(),
         lower,
         upper,
-        coverage: 1.0 - alpha,
+        coverage,
+        nominal_level: 1.0 - alpha,
         conformity_score: avg_margin,
+        n_calibration,
         method: "asymmetric_conformal".to_string(),
+    })
+}
+
+/// Computes conformal prediction intervals directly from per-row calibration
+/// (actual, forecast) pairs and a list of point forecasts (Phase 16 D-01/D-02).
+///
+/// Unlike [`conformal_predict`]/[`conformal_predict_asymmetric`], which take an
+/// already-computed residual array, this function computes `residual_i =
+/// actual_i - forecast_i` itself, over complete (non-missing) pairs only
+/// (`missing::complete_cases`) -- so SQL callers can pass per-row calibration
+/// arrays straight out of a `GROUP BY` without computing the subtraction in SQL
+/// (Phase 16 D-02: all residual arithmetic happens in Rust, not SQL).
+///
+/// `point_forecasts` may contain missing entries (`None`); the corresponding
+/// output position stays `NaN` (`missing::propagate_missing`), so a missing
+/// point forecast never shifts a later horizon step into an earlier one. An
+/// empty `point_forecasts` list is valid: `point`/`lower`/`upper` come back
+/// empty, and the calibration score/coverage are still computed.
+///
+/// `result.method` is set to the canonical [`ConformalMethod`] `Display` name
+/// ("symmetric" / "asymmetric"), not the legacy "split_conformal" /
+/// "asymmetric_conformal" strings `conformal_predict`/`conformal_predict_asymmetric`
+/// use directly.
+///
+/// # Errors
+/// - `cal_actuals.len() != cal_forecasts.len()`: `InvalidInput` naming both lengths
+///   (via `missing::complete_cases`).
+/// - `method == ConformalMethod::Adaptive`: `InvalidInput` -- adaptive conformal
+///   requires per-row difficulty values, not yet reachable through this entry
+///   point (Phase 16 plan 16-02 wires adaptive through `ts_conformal_by`).
+pub fn conformal_from_pairs(
+    cal_actuals: &[Option<f64>],
+    cal_forecasts: &[Option<f64>],
+    point_forecasts: &[Option<f64>],
+    alpha: f64,
+    method: ConformalMethod,
+) -> Result<ConformalResult> {
+    if method == ConformalMethod::Adaptive {
+        return Err(ForecastError::InvalidInput(
+            "conformal method 'adaptive' requires per-row difficulty values".to_string(),
+        ));
+    }
+
+    let complete = missing::complete_cases(&[cal_actuals, cal_forecasts])?;
+    let residuals: Vec<f64> = complete[0]
+        .iter()
+        .zip(complete[1].iter())
+        .map(|(a, f)| a - f)
+        .collect();
+
+    let filled_points = missing::fill_missing(point_forecasts, 0.0);
+
+    let mut result = match method {
+        ConformalMethod::Symmetric => conformal_predict(&residuals, &filled_points, alpha)?,
+        ConformalMethod::Asymmetric => {
+            conformal_predict_asymmetric(&residuals, &filled_points, alpha)?
+        }
+        ConformalMethod::Adaptive => {
+            unreachable!("ConformalMethod::Adaptive rejected above")
+        }
+    };
+
+    missing::propagate_missing(&mut result.point, point_forecasts);
+    missing::propagate_missing(&mut result.lower, point_forecasts);
+    missing::propagate_missing(&mut result.upper, point_forecasts);
+    result.method = method.to_string();
+
+    Ok(result)
+}
+
+/// Calibration profile from per-row `(actual, forecast)` calibration pairs,
+/// without any point forecasts to apply to yet (Phase 16 D-03).
+#[derive(Debug, Clone)]
+pub struct ConformalCalibration {
+    /// Method used for calibration (symmetric or adaptive -- asymmetric is
+    /// rejected, see `conformal_calibrate`).
+    pub method: ConformalMethod,
+    /// The computed conformity score (quantile threshold).
+    pub conformity_score: f64,
+    /// Empirical coverage on the calibration residuals.
+    pub coverage: f64,
+    /// The requested coverage level (1 - alpha).
+    pub nominal_level: f64,
+    /// Number of calibration residuals actually used (after dropping
+    /// incomplete/missing pairs).
+    pub n_calibration: usize,
+}
+
+/// Calibrates a conformal predictor from per-row `(actual, forecast)` pairs,
+/// without applying it to any point forecasts yet (Phase 16 D-03).
+///
+/// Built on [`conformal_from_pairs`] with an empty point-forecast list.
+///
+/// Asymmetric conformal produces two distinct margins (lower/upper), which
+/// cannot be expressed as the single `conformity_score` this function
+/// returns; callers that want asymmetric margins must go through
+/// `ts_conformal_by` (which calls `conformal_from_pairs` directly, carrying
+/// both margins via `lower`/`upper`), not `ts_conformal_calibrate`.
+///
+/// # Errors
+/// `method == ConformalMethod::Asymmetric`: `InvalidInput`.
+pub fn conformal_calibrate(
+    actuals: &[Option<f64>],
+    forecasts: &[Option<f64>],
+    alpha: f64,
+    method: ConformalMethod,
+) -> Result<ConformalCalibration> {
+    if method == ConformalMethod::Asymmetric {
+        return Err(ForecastError::InvalidInput(
+            "ts_conformal_calibrate supports methods 'symmetric' and 'adaptive'; asymmetric \
+             margins come from ts_conformal_by"
+                .to_string(),
+        ));
+    }
+
+    let result = conformal_from_pairs(actuals, forecasts, &[], alpha, method)?;
+
+    Ok(ConformalCalibration {
+        method,
+        conformity_score: result.conformity_score,
+        coverage: result.coverage,
+        nominal_level: result.nominal_level,
+        n_calibration: result.n_calibration,
     })
 }
 
@@ -542,11 +717,14 @@ impl std::str::FromStr for ConformalMethod {
 
     fn from_str(s: &str) -> Result<Self> {
         match s.to_lowercase().as_str() {
-            "symmetric" | "sym" => Ok(Self::Symmetric),
+            // "split" is an alias of Symmetric (Phase 16): existing docs use
+            // `'method': 'split'`.
+            "symmetric" | "split" | "sym" => Ok(Self::Symmetric),
             "asymmetric" | "asym" => Ok(Self::Asymmetric),
             "adaptive" | "adapt" => Ok(Self::Adaptive),
             _ => Err(ForecastError::InvalidInput(format!(
-                "Unknown conformal method: '{}'. Valid: symmetric, asymmetric, adaptive",
+                "Unknown conformal method: '{}'. Valid: symmetric (alias split, sym), \
+                 asymmetric (alias asym), adaptive (alias adapt)",
                 s
             ))),
         }
@@ -1234,7 +1412,12 @@ mod tests {
         let result = conformal_predict(&residuals, &forecasts, 0.1).unwrap();
 
         assert_eq!(result.point, forecasts);
-        assert_relative_eq!(result.coverage, 0.9, epsilon = 0.001);
+        assert_relative_eq!(result.nominal_level, 0.9, epsilon = 0.001);
+        // Empirical coverage on the calibration set itself: the conformity
+        // score is the max abs residual (0.8) at this n/alpha, so every
+        // calibration residual is within it.
+        assert_relative_eq!(result.coverage, 1.0, epsilon = 0.001);
+        assert_eq!(result.n_calibration, 10);
         assert_eq!(result.lower.len(), 3);
         assert_eq!(result.upper.len(), 3);
         assert!(result.conformity_score > 0.0);
@@ -1400,6 +1583,175 @@ mod tests {
             ConformalMethod::Adaptive
         );
         assert!("invalid".parse::<ConformalMethod>().is_err());
+    }
+
+    #[test]
+    fn test_conformal_method_split_alias() {
+        // Phase 16: 'split' is an alias of Symmetric (docs used this name).
+        assert_eq!(
+            "split".parse::<ConformalMethod>().unwrap(),
+            ConformalMethod::Symmetric
+        );
+        let err = "bogus".parse::<ConformalMethod>().unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("symmetric (alias split"));
+    }
+
+    #[test]
+    fn test_conformal_from_pairs_null_actual_excluded_from_n_calibration() {
+        let actuals: Vec<Option<f64>> = vec![Some(101.0), None, Some(109.0), Some(111.0)];
+        let forecasts: Vec<Option<f64>> = vec![Some(100.0), Some(100.0), Some(100.0), Some(100.0)];
+        let points: Vec<Option<f64>> = vec![Some(100.0)];
+
+        let result = conformal_from_pairs(
+            &actuals,
+            &forecasts,
+            &points,
+            0.1,
+            ConformalMethod::Symmetric,
+        )
+        .unwrap();
+        // 4 calibration rows, 1 NULL actual dropped -> 3 used.
+        assert_eq!(result.n_calibration, 3);
+    }
+
+    #[test]
+    fn test_conformal_from_pairs_length_mismatch_names_both_lengths() {
+        let actuals: Vec<Option<f64>> = vec![Some(1.0), Some(2.0), Some(3.0)];
+        let forecasts: Vec<Option<f64>> = vec![Some(1.0), Some(2.0)];
+        let points: Vec<Option<f64>> = vec![];
+
+        let err = conformal_from_pairs(
+            &actuals,
+            &forecasts,
+            &points,
+            0.1,
+            ConformalMethod::Symmetric,
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains('3'));
+        assert!(msg.contains('2'));
+    }
+
+    #[test]
+    fn test_conformal_from_pairs_empty_point_list_is_valid() {
+        let actuals: Vec<Option<f64>> = vec![Some(100.5), Some(99.5), Some(100.2), Some(99.8)];
+        let forecasts: Vec<Option<f64>> = vec![Some(100.0), Some(100.0), Some(100.0), Some(100.0)];
+        let points: Vec<Option<f64>> = vec![];
+
+        let result = conformal_from_pairs(
+            &actuals,
+            &forecasts,
+            &points,
+            0.1,
+            ConformalMethod::Symmetric,
+        )
+        .unwrap();
+        assert!(result.point.is_empty());
+        assert!(result.lower.is_empty());
+        assert!(result.upper.is_empty());
+    }
+
+    #[test]
+    fn test_conformal_from_pairs_null_point_position_stays_nan() {
+        let actuals: Vec<Option<f64>> = vec![Some(100.5), Some(99.5), Some(100.2), Some(99.8)];
+        let forecasts: Vec<Option<f64>> = vec![Some(100.0), Some(100.0), Some(100.0), Some(100.0)];
+        let points: Vec<Option<f64>> = vec![Some(30.0), None, Some(20.0)];
+
+        let result = conformal_from_pairs(
+            &actuals,
+            &forecasts,
+            &points,
+            0.1,
+            ConformalMethod::Symmetric,
+        )
+        .unwrap();
+        assert_eq!(result.point.len(), 3);
+        assert!(result.point[0].is_finite());
+        assert!(result.point[1].is_nan());
+        assert!(result.lower[1].is_nan());
+        assert!(result.upper[1].is_nan());
+        assert!(result.point[2].is_finite());
+    }
+
+    #[test]
+    fn test_conformal_from_pairs_adaptive_requires_difficulty() {
+        let actuals: Vec<Option<f64>> = vec![Some(1.0), Some(2.0)];
+        let forecasts: Vec<Option<f64>> = vec![Some(1.0), Some(1.0)];
+        let points: Vec<Option<f64>> = vec![];
+
+        let err = conformal_from_pairs(
+            &actuals,
+            &forecasts,
+            &points,
+            0.1,
+            ConformalMethod::Adaptive,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("difficulty"));
+    }
+
+    #[test]
+    fn test_conformal_from_pairs_method_is_canonical_display_name() {
+        let actuals: Vec<Option<f64>> = vec![Some(1.0), Some(-1.0), Some(2.0)];
+        let forecasts: Vec<Option<f64>> = vec![Some(0.0), Some(0.0), Some(0.0)];
+        let points: Vec<Option<f64>> = vec![Some(0.0)];
+
+        let result = conformal_from_pairs(
+            &actuals,
+            &forecasts,
+            &points,
+            0.1,
+            ConformalMethod::Symmetric,
+        )
+        .unwrap();
+        assert_eq!(result.method, "symmetric");
+
+        let result = conformal_from_pairs(
+            &actuals,
+            &forecasts,
+            &points,
+            0.1,
+            ConformalMethod::Asymmetric,
+        )
+        .unwrap();
+        assert_eq!(result.method, "asymmetric");
+    }
+
+    #[test]
+    fn test_conformal_calibrate_rejects_asymmetric() {
+        let actuals: Vec<Option<f64>> = vec![Some(1.0), Some(-1.0), Some(2.0)];
+        let forecasts: Vec<Option<f64>> = vec![Some(0.0), Some(0.0), Some(0.0)];
+
+        let err = conformal_calibrate(&actuals, &forecasts, 0.1, ConformalMethod::Asymmetric)
+            .unwrap_err();
+        assert!(err.to_string().contains("supports methods"));
+    }
+
+    #[test]
+    fn test_conformal_calibrate_symmetric_matches_from_pairs() {
+        let actuals: Vec<Option<f64>> = vec![
+            Some(100.5),
+            Some(99.5),
+            Some(100.2),
+            Some(99.8),
+            Some(100.9),
+        ];
+        let forecasts: Vec<Option<f64>> = vec![
+            Some(100.0),
+            Some(100.0),
+            Some(100.0),
+            Some(100.0),
+            Some(100.0),
+        ];
+
+        let cal =
+            conformal_calibrate(&actuals, &forecasts, 0.1, ConformalMethod::Symmetric).unwrap();
+        assert_eq!(cal.n_calibration, 5);
+        assert_eq!(cal.method, ConformalMethod::Symmetric);
+        assert!(cal.conformity_score > 0.0);
+        assert_relative_eq!(cal.nominal_level, 0.9, epsilon = 1e-9);
     }
 
     #[test]

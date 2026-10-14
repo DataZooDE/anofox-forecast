@@ -1617,10 +1617,15 @@ pub struct ConformalResultFFI {
     pub upper: *mut c_double,
     /// Number of forecasts
     pub n_forecasts: size_t,
-    /// Nominal coverage level (1 - alpha)
+    /// Empirical coverage on the calibration residuals (Phase 16 D-02) --
+    /// NOT the requested level; see `nominal_level` for that.
     pub coverage: c_double,
+    /// The requested coverage level (1 - alpha) (Phase 16 D-02).
+    pub nominal_level: c_double,
     /// The computed conformity score (quantile threshold)
     pub conformity_score: c_double,
+    /// Number of calibration residuals actually used (Phase 16 D-02).
+    pub n_calibration: size_t,
     /// Method used for conformal prediction
     pub method: [c_char; 32],
 }
@@ -1633,7 +1638,38 @@ impl Default for ConformalResultFFI {
             upper: std::ptr::null_mut(),
             n_forecasts: 0,
             coverage: 0.0,
+            nominal_level: 0.0,
             conformity_score: 0.0,
+            n_calibration: 0,
+            method: [0; 32],
+        }
+    }
+}
+
+/// Result of calibrating a conformal predictor from per-row `(actual,
+/// forecast)` pairs, without applying it to any point forecasts yet
+/// (Phase 16 D-03).
+#[repr(C)]
+pub struct ConformalCalibrationFFI {
+    /// Empirical coverage on the calibration residuals.
+    pub coverage: c_double,
+    /// The requested coverage level (1 - alpha).
+    pub nominal_level: c_double,
+    /// The computed conformity score (quantile threshold).
+    pub conformity_score: c_double,
+    /// Number of calibration residuals actually used.
+    pub n_calibration: size_t,
+    /// Method used for calibration ("symmetric" or "adaptive").
+    pub method: [c_char; 32],
+}
+
+impl Default for ConformalCalibrationFFI {
+    fn default() -> Self {
+        Self {
+            coverage: 0.0,
+            nominal_level: 0.0,
+            conformity_score: 0.0,
+            n_calibration: 0,
             method: [0; 32],
         }
     }

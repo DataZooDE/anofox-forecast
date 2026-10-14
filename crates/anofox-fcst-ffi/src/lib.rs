@@ -5440,6 +5440,183 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict(
     }
 }
 
+/// Compute conformal prediction intervals directly from per-row calibration
+/// (actual, forecast) pairs and a list of point forecasts (Phase 16 D-01/D-02).
+///
+/// A null method pointer means "symmetric"; otherwise the method name is
+/// parsed strictly via `ConformalMethod::from_str` (an unknown name is an
+/// `InvalidInput` error, not a silent fallback).
+///
+/// # Safety
+/// All non-null pointer arguments must be valid. A data pointer may be null
+/// only when its paired length is 0 (never calls `from_raw_parts` on a null
+/// pointer with a nonzero length).
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_conformal_from_pairs(
+    cal_actuals: *const c_double,
+    cal_actuals_validity: *const u64,
+    cal_actuals_len: size_t,
+    cal_forecasts: *const c_double,
+    cal_forecasts_validity: *const u64,
+    cal_forecasts_len: size_t,
+    point_forecasts: *const c_double,
+    point_validity: *const u64,
+    point_len: size_t,
+    alpha: c_double,
+    method: *const c_char,
+    out_result: *mut ConformalResultFFI,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+
+    if out_result.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let actuals_series = if cal_actuals_len == 0 {
+            Vec::new()
+        } else {
+            build_series(cal_actuals, cal_actuals_validity, cal_actuals_len)
+        };
+        let forecasts_series = if cal_forecasts_len == 0 {
+            Vec::new()
+        } else {
+            build_series(cal_forecasts, cal_forecasts_validity, cal_forecasts_len)
+        };
+        let point_series = if point_len == 0 {
+            Vec::new()
+        } else {
+            build_series(point_forecasts, point_validity, point_len)
+        };
+
+        let method_str = if method.is_null() {
+            "symmetric"
+        } else {
+            match CStr::from_ptr(method).to_str() {
+                Ok(s) => s,
+                Err(_) => {
+                    return Err(anofox_fcst_core::ForecastError::InvalidInput(
+                        "method is not valid UTF-8".to_string(),
+                    ))
+                }
+            }
+        };
+        let parsed_method: anofox_fcst_core::ConformalMethod = method_str.parse()?;
+
+        anofox_fcst_core::conformal_from_pairs(
+            &actuals_series,
+            &forecasts_series,
+            &point_series,
+            alpha,
+            parsed_method,
+        )
+    }));
+
+    match result {
+        Ok(Ok(conf_result)) => {
+            fill_conformal_result(out_result, &conf_result);
+            true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
+            false
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in conformal_from_pairs",
+            );
+            false
+        }
+    }
+}
+
+/// Calibrate a conformal predictor from per-row `(actual, forecast)` pairs,
+/// without applying it to any point forecasts yet (Phase 16 D-03).
+///
+/// A null method pointer means "symmetric"; otherwise the method name is
+/// parsed strictly via `ConformalMethod::from_str`.
+///
+/// # Safety
+/// All non-null pointer arguments must be valid. A data pointer may be null
+/// only when its paired length is 0.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_conformal_calibrate(
+    actuals: *const c_double,
+    actuals_validity: *const u64,
+    actuals_len: size_t,
+    forecasts: *const c_double,
+    forecasts_validity: *const u64,
+    forecasts_len: size_t,
+    alpha: c_double,
+    method: *const c_char,
+    out_result: *mut ConformalCalibrationFFI,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+
+    if out_result.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let actuals_series = if actuals_len == 0 {
+            Vec::new()
+        } else {
+            build_series(actuals, actuals_validity, actuals_len)
+        };
+        let forecasts_series = if forecasts_len == 0 {
+            Vec::new()
+        } else {
+            build_series(forecasts, forecasts_validity, forecasts_len)
+        };
+
+        let method_str = if method.is_null() {
+            "symmetric"
+        } else {
+            match CStr::from_ptr(method).to_str() {
+                Ok(s) => s,
+                Err(_) => {
+                    return Err(anofox_fcst_core::ForecastError::InvalidInput(
+                        "method is not valid UTF-8".to_string(),
+                    ))
+                }
+            }
+        };
+        let parsed_method: anofox_fcst_core::ConformalMethod = method_str.parse()?;
+
+        anofox_fcst_core::conformal_calibrate(
+            &actuals_series,
+            &forecasts_series,
+            alpha,
+            parsed_method,
+        )
+    }));
+
+    match result {
+        Ok(Ok(cal_result)) => {
+            fill_conformal_calibration(out_result, &cal_result);
+            true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
+            false
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in conformal_calibrate",
+            );
+            false
+        }
+    }
+}
+
 /// Perform conformal prediction with multiple coverage levels.
 ///
 /// Computes prediction intervals at multiple alpha levels simultaneously.
@@ -6383,10 +6560,31 @@ unsafe fn fill_conformal_result(
     (*out).upper = vec_to_c_double_array(&result.upper);
     (*out).n_forecasts = result.point.len();
     (*out).coverage = result.coverage;
+    (*out).nominal_level = result.nominal_level;
     (*out).conformity_score = result.conformity_score;
+    (*out).n_calibration = result.n_calibration;
 
     // Copy method name
     let method_bytes = result.method.as_bytes();
+    let len = method_bytes.len().min(31);
+    for (i, &b) in method_bytes[..len].iter().enumerate() {
+        (*out).method[i] = b as c_char;
+    }
+    (*out).method[len] = 0; // Null terminator
+}
+
+/// Helper function to fill a ConformalCalibrationFFI from a core ConformalCalibration.
+unsafe fn fill_conformal_calibration(
+    out: *mut ConformalCalibrationFFI,
+    result: &anofox_fcst_core::ConformalCalibration,
+) {
+    (*out).coverage = result.coverage;
+    (*out).nominal_level = result.nominal_level;
+    (*out).conformity_score = result.conformity_score;
+    (*out).n_calibration = result.n_calibration;
+
+    let method_str = result.method.to_string();
+    let method_bytes = method_str.as_bytes();
     let len = method_bytes.len().min(31);
     for (i, &b) in method_bytes[..len].iter().enumerate() {
         (*out).method[i] = b as c_char;

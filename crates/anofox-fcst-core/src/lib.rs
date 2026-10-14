@@ -48,8 +48,10 @@ pub use changepoint::{
 pub use conformal::{
     // New Learn/Apply API (v2)
     conformal_apply,
+    conformal_calibrate,
     conformal_coverage,
     conformal_evaluate,
+    conformal_from_pairs,
     // Legacy API (still available)
     conformal_intervals,
     conformal_learn,
@@ -63,6 +65,7 @@ pub use conformal::{
     mean_interval_width,
     winkler_score,
     CalibrationProfile,
+    ConformalCalibration,
     ConformalEvaluation,
     ConformalInterval,
     ConformalMethod,

@@ -98,6 +98,11 @@ void RegisterTsConformalEvaluateFunction(ExtensionLoader &loader);
 // Per-step conformal prediction
 void RegisterTsConformalPredictPerStepFunction(ExtensionLoader &loader);
 
+// Internal: conformal prediction/calibration directly from per-row (actual,
+// forecast) calibration pairs (Phase 16 D-01/D-02/D-03). Backs the
+// ts_conformal_by / ts_conformal_calibrate macros.
+void RegisterTsConformalFromPairsFunction(ExtensionLoader &loader);
+
 // Bootstrap prediction
 void RegisterTsBootstrapIntervalsFunction(ExtensionLoader &loader);
 void RegisterTsBootstrapQuantilesFunction(ExtensionLoader &loader);
