@@ -184,6 +184,16 @@ fn default_penalty(cost_fn: CostFunction, n: usize) -> f64 {
 ///
 /// PELT has no SQL surface (see module doc) -- this function is Rust/FFI-only.
 ///
+/// WR-02: the exact-safe pruning of `live` (Killick et al. 2012, Theorem
+/// 3.1) is amortized-efficient on typical data (see
+/// `test_pelt_pruning_effective_and_exact_on_long_series`) but has no hard
+/// cap on `live.len()`; an adversarially-constructed series could keep most
+/// candidates alive, degrading to the unpruned O(n^2) DP bound. This is
+/// acceptable while PELT stays Rust/FFI-only with no untrusted SQL caller.
+/// If a SQL surface is ever added, revisit this and consider a documented
+/// cap on `live.len()` (merge/drop the lowest-priority candidate once
+/// exceeded), analogous to BOCPD's `MAX_RUN_LENGTH`.
+///
 /// # Arguments
 /// * `values` - The time series values
 /// * `min_size` - Minimum segment size (`Normal` enforces at least 2)
