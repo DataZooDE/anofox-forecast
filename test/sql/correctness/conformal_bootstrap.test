@@ -305,3 +305,26 @@ SELECT ts_conformal_apply(
 );
 ----
 was removed
+
+# =============================================================================
+# ts_conformal_predict_asymmetric (Phase 16 CONF-03 fix; Phase 18 18-04 close-out).
+# Residuals are the asym_n20 fixture case
+# (validation/reference/fixtures/conformal/asymmetric_cases.json#asym_n20):
+# [-1.0,-0.8,-0.6,-0.4,-0.2] ++ [0.25*k for k=1..15]. At alpha 0.2 the margins are the
+# alpha/2 and 1-alpha/2 quantiles of the FULL signed residual array: lower 0.81,
+# upper 3.5125 (same literals as test/sql/ts_conformal_reference.test, asym_n20 section),
+# so forecast 100 -> [99.19, 103.5125]. The pre-fix residual-subset construction gave
+# lower 1.0 / upper 3.75.
+# =============================================================================
+
+query I
+SELECT ABS((r).lower[1] - 99.19) < 1e-9 AND ABS((r).upper[1] - 103.5125) < 1e-9
+FROM (
+    SELECT ts_conformal_predict_asymmetric(
+        [-1.0, -0.8, -0.6, -0.4, -0.2, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0, 3.25, 3.5, 3.75]::DOUBLE[],
+        [100.0]::DOUBLE[],
+        0.2
+    ) AS r
+);
+----
+true

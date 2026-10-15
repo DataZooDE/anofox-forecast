@@ -323,3 +323,30 @@ true
 
 statement ok
 DROP TABLE mm2;
+
+# =============================================================================
+# ts_smape_by / ts_r2_by (closed form, Phase 18 18-04 close-out: both are named in
+# the v0.10.0 CHANGELOG metric _by subquery-source contract). Same 10-row probe:
+# y = i, f = i + 1 for i in 1..10.
+#   sMAPE = mean_i 2|f-y|/(|y|+|f|) * 100 = mean_i 2/(2i+1) * 100 = 23.617491555572...
+#   R2    = 1 - SS_res/SS_tot = 1 - 10/82.5 = 0.878787878787...
+# =============================================================================
+
+statement ok
+CREATE TABLE probe10b AS
+SELECT 'A' AS id, i AS ds, i::DOUBLE AS y, (i + 1)::DOUBLE AS f FROM range(1, 11) t(i);
+
+query I
+SELECT abs(smape - 23.617491555572052) < 1e-9
+FROM ts_smape_by((SELECT id, ds, y, f FROM probe10b), 'ds', 'y', 'f');
+----
+true
+
+query I
+SELECT abs(r2 - (1 - 10.0 / 82.5)) < 1e-12
+FROM ts_r2_by((SELECT id, ds, y, f FROM probe10b), 'ds', 'y', 'f');
+----
+true
+
+statement ok
+DROP TABLE probe10b;
