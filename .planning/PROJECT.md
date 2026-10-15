@@ -60,6 +60,7 @@ v0.9.0 (WASM Runtime Verification) is parked with only the operator live-CI nega
 - ✓ Reference-fixture harness (`validation/reference/`: R + uv-pinned Python generators → versioned JSON fixtures → Rust loader with value assertions) — v0.10.0 Phase 9 (TEST-01)
 - ✓ Forecast wrapper delegates intervals/fitted/residuals/model identity to the crate (no fabricated ±z·sd(series)·√h bands, no SES stand-in residuals); real ARIMA/SARIMA via arima_order/seasonal_order; crate exog fits; silent fallbacks → SQL errors on every surface incl. ts_forecast_agg — v0.10.0 Phase 10 (FCST-01..08)
 - ✓ anofox-regression =0.5.15 + anofox-forecast 0.15.10 (multi-scale exog OLS matches numpy lstsq; MFLES #219 + panel NaN guards); MSRV corrected to 1.89 — v0.10.0 Phase 9 (DEP-01/02/04)
+- ✓ anofox-forecast 0.16.1 consumed with no [patch]/git/path override; ADF/KPSS `regression := 'c'|'ct'` (statsmodels/R-tseries exact, local trend KPSS), standard four-way `ts_stationarity` verdict with explicit `constant`/NULL; model-aware Ljung-Box `fitted_params` (R `Box.test(fitdf)` exact); 36-check R `forecast` parity suite + Monte Carlo interval coverage (±3pp) — v0.10.0 Phase 17 (UPST-06, UPST-01, DIAG-03..05, FCST-09)
 
 ### Active
 
@@ -68,7 +69,7 @@ v0.9.0 (WASM Runtime Verification) is parked with only the operator live-CI nega
 - [ ] All wrapper-level statistical bugs from the 2026-10-08 audit fixed with value-asserting tests
 - [ ] No statistical computation remains in C++ or SQL macros
 - [ ] Core statistics, features, detection and conformal outputs match R/scipy/tsfresh references
-- [ ] Upstream anofox-forecast diagnostics/model-selection fixes merged and consumed
+- [x] Upstream anofox-forecast diagnostics/model-selection fixes merged and consumed — anofox-forecast 0.16.1, Phase 17
 - [ ] Dependencies bumped — anofox-regression 0.5.15 + anofox-forecast 0.15.10 done (Phase 9); fdars-core 0.47 pending (Phase 15)
 
 Parked from v0.9.0: Phase 08 live-CI negative-control push (operator action).
@@ -135,7 +136,9 @@ Deferred from v0.7.0 (candidates for a future milestone):
 | Verify executor/agent reports against git+disk, re-run every example against the built extension (v0.8.0) | Two executors fabricated commit hashes/SUMMARY files; three long-running agents died on transient API errors mid-run | ✓ Good — caught + reconciled all fabrications; per-task commits protected work across agent deaths |
 | Reference-fixture harness before any statistical fix (v0.10.0) | Length-only tests let every audited bug ship; fixes need checked-in R/scipy/numpy reference values | ✓ Good — Phase 9 fixtures regenerate byte-identically; 125-entry pre-bump snapshot proved only MFLES/Laplace moved |
 | MSRV 1.89 (v0.10.0) | trueno (via anofox-forecast) needs AVX-512 intrinsics stabilised in 1.89; 1.86 claim was false | ✓ Good — `cargo +1.88.0` refused, `+1.89.0` builds/tests; CI rust-msrv job |
-| Pass crate-native intervals through even where known-miscalibrated (v0.10.0 P10) | No fabrication; calibration fixed at the source (Phase 11 upstream) rather than masked in the wrapper | — Pending (Phase 11/17) |
+| Pass crate-native intervals through even where known-miscalibrated (v0.10.0 P10) | No fabrication; calibration fixed at the source (Phase 11 upstream) rather than masked in the wrapper | ✓ Good — 0.16.1 intervals reach R parity except one documented AutoARIMA AirPassengers interval gap (RC-05, crate SARIMA variance; upstream issue drafted) |
+| SQL `'Holt'` = ETS(A,A,N), R `holt()`'s definition (v0.10.0 P17, D-13) | `HoltLinearTrend::auto()` diverged from R by 3–13x on parity fixtures | ✓ Good — R-parity point deviation cut 6.86x (AirPassengers), 13.41x (rw), 3.01x (trend) |
+| Every R-parity known gap must cite an evidenced root cause, never a loosened tolerance (v0.10.0 P17, D-12) | Prevents tolerance-widening from masking real bugs | ✓ Good — RC-01..RC-05 table; extension-side cause fixed, 3 crate-side causes drafted as upstream issues with repros |
 
 ## Evolution
 
@@ -155,4 +158,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-09 after v0.10.0 Phase 10*
+*Last updated: 2026-10-15 after v0.10.0 Phase 17*

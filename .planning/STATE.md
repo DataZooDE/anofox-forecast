@@ -2,11 +2,11 @@
 gsd_state_version: "1.0"
 milestone: v0.10.0
 milestone_name: Statistical Correctness
-current_phase: 11
-current_phase_name: Upstream anofox-forecast Correctness Fixes
+current_phase: 18
+current_phase_name: Correctness Regression Suite, Audit & Docs
 current_plan: Not started
 status: planning
-stopped_at: Phase 17 complete, ready to plan Phase 11
+stopped_at: Phase 17 complete, ready to execute Phase 18
 last_updated: "2026-10-15T17:08:56.533Z"
 last_activity: 2026-10-15
 last_activity_desc: Phase 17 complete, transitioned to Phase 11
@@ -26,14 +26,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-08 — started v0.10.0 Statistical Correctness)
 
 **Core value:** Every statistic the extension returns is correct — verified against R / scipy / statsmodels / tsfresh reference values — and is computed in the Rust crates; C++ and SQL only marshal, group, and dispatch.
-**Current focus:** Phase 17 — Upstream Consumption & Diagnostics Parity
+**Current focus:** Phase 18 — Correctness Regression Suite, Audit & Docs
 
 ## Current Position
 
-Phase: 11 — Upstream anofox-forecast Correctness Fixes
+Phase: 18 — Correctness Regression Suite, Audit & Docs
 Current Plan: Not started
-Total Plans in Phase: 3
-Status: Ready to plan
+Total Plans in Phase: 4
+Status: Ready to execute
 Last activity: 2026-10-15 — Phase 17 complete, transitioned to Phase 11
 
 Progress: [█░░░░░░░░░] 10%
@@ -126,7 +126,6 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Phase 11 → 17] Upstream release is a user action (review, merge, publish). Phase 17 may build on an interim `[patch]`, but UPST-06 cannot close until a released anofox-forecast version is consumed.
 - [Phase 13/15] STL is shared: STAT-02 uses the crate `seasonality::stl::STL` — validate vs R `stats::stl` in Phase 13; DET-04 reuses or fixes it.
 - [Phase 15] fdars 0.47 bump: ~30 mechanical compile errors in 4 files plus a WASM (`js` feature) build check — use the local wasm_eh recipe.
 - [Phase 16] Jackknife+ needs leave-one-out refits, which may not fit the GROUP BY/scalar architecture; rename/remove is an allowed CONF-05 outcome.
@@ -160,6 +159,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-15T04:59:02.258Z
-Stopped at: Phase 17 complete, ready to plan Phase 11
+Stopped at: Phase 17 complete (verified, code review 0 critical/0 warning), ready to execute Phase 18
 Resume file: None
 Next: `/gsd-plan-phase 9`
