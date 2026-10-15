@@ -393,7 +393,7 @@ Plans:
   4. `docs/` and `plugins/anofox-forecast/skills/` (bodies and frontmatter descriptions) describe the corrected definitions — interval source, MASE, strengths, features, diagnostics, conformal variants — with every changed SQL snippet executed against the built extension.
   5. CHANGELOG / release notes contain a breaking-change section listing every behaviour change that alters numerical output.
 
-**Plans**: 1/4 plans executed
+**Plans**: 2/4 plans executed
 
 Plans:
 **Wave 1**
@@ -402,7 +402,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 18-02-PLAN.md — D-08 fixes after a live metric `_by` matrix (WR-05 n_unassessed; metric source contract), nine non-json-gated `test/sql/correctness/*.test` files pinned from reference fixtures + CHANGELOG inventory gate, D-03 length-only Rust test sweep script with every flagged test upgraded (TEST-02, TEST-03) (wave 2)
+- [x] 18-02-PLAN.md — D-08 fixes after a live metric `_by` matrix (WR-05 n_unassessed; metric source contract), nine non-json-gated `test/sql/correctness/*.test` files pinned from reference fixtures + CHANGELOG inventory gate, D-03 length-only Rust test sweep script with every flagged test upgraded (TEST-02, TEST-03) (wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -438,7 +438,7 @@ Phases execute in numeric order: 9 → 10 → 11 → 12 → 13 → 14 → 15 →
 | 15. Detection & Decomposition on fdars 0.47 | 5/5 | Complete    | 2026-10-14 |
 | 16. Conformal & Bootstrap Correctness | 3/3 | Complete    | 2026-10-14 |
 | 17. Upstream Consumption & Diagnostics Parity | 3/3 | Complete    | 2026-10-15 |
-| 18. Correctness Regression Suite, Audit & Docs | 1/4 | In Progress|  |
+| 18. Correctness Regression Suite, Audit & Docs | 2/4 | In Progress|  |
 
 ## Next
 
