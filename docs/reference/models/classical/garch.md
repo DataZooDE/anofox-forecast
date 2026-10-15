@@ -73,17 +73,17 @@ Series with fewer observations are **skipped** (emitted as zero rows) — not er
 | `yhat_lower` / `yhat_upper` | DOUBLE | Crate `GARCH::predict_with_intervals` bounds (see caveat below) |
 | `model_name` | VARCHAR | `'GARCH(p,q)'` e.g. `'GARCH(1,1)'` |
 
-> **Interval caveat (D-01, known issue, Phase 11):** `yhat_lower`/`yhat_upper` are now
-> returned (no longer `NULL`), but they are **not** a band around `yhat`. `yhat` is the
-> conditional standard deviation (the analytical, deterministic
-> `sqrt(forecast_variance(h))` path). `yhat_lower`/`yhat_upper` come from the crate's
-> `predict_with_intervals`, which centers a `point ± z·σ_h` band (the `statsforecast`
-> convention) on GARCH's **simulated innovation path** — a different, seed-dependent point
-> forecast from the analytical `yhat`. The bounds therefore do **not** bracket `yhat`
-> itself, and the resulting width is **~0.13×** a reference-implementation width. See
-> [07-forecasting.md's "Prediction intervals, fitted values and input handling"](../../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling).
-> For calibrated volatility bands, use the conformal prediction functions
-> (`docs/api/11-conformal-prediction.md`) on top of `yhat` instead.
+> **Interval centring (D-01; fixed upstream in 0.16.0, UPST-05):** `yhat_lower`/`yhat_upper`
+> are centred on the fitted conditional mean (`mean ∓ z·sqrt(forecast_variance(h))`) —
+> previously they were centred on a seed-dependent simulated-innovation draw, which could
+> sit several standard deviations away from the series' actual distribution (measured
+> empirical 95% coverage against a true GARCH(1,1) DGP: 63.3% before the fix, 94.8-96.3%
+> after, across h=1..12). `yhat` itself is unchanged: the analytical, deterministic
+> conditional standard deviation (`sqrt(forecast_variance(h))`). GARCH is not individually
+> R-parity-tested (FCST-09, Phase 17 plan 17-03) — see
+> [07-forecasting.md's "Prediction intervals, fitted values and input handling"](../../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling)
+> for the models that are. For calibrated volatility bands, the conformal prediction
+> functions (`docs/api/11-conformal-prediction.md`) on top of `yhat` remain an option.
 
 ## SQL Example (verified end-to-end)
 

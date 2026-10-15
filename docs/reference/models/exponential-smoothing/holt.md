@@ -16,6 +16,23 @@ SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'Holt', ho
 
 Holt's Linear Trend Method (Double Exponential Smoothing). Extends SES by adding a trend component. Suitable for data with trend but no seasonality.
 
+> **D-12/D-13 construction change (Phase 17 plan 17-03, Task 1):** `'Holt'` now dispatches
+> to the crate's `ETS(A,A,N)` construction (`ETS::new(ETSSpec::aan(), 1)`) — R `holt()`'s
+> own definition — instead of the crate's standalone `HoltLinearTrend::auto()` (SSE
+> objective, trend seeded from a single first difference). `model_name` is unchanged
+> (still reports `"Holt"`). This cut the point-forecast deviation from R `holt()` by 6.86x
+> on AirPassengers and 13.41x on the seeded random walk; see the CHANGELOG's Breaking
+> changes for the before/after point values.
+>
+> **R `forecast` parity (FCST-09):** post-fix, `'Holt'` is identical to `ETS 'AAN'` (see
+> [ets.md](../state-space/ets.md)) — in parity on the random-walk-with-drift series, but a
+> known gap on AirPassengers and the driftless random walk. At R's own fitted parameters the
+> crate's ETS recursion and likelihood agree with R to floating-point precision; the residual
+> gap is R's own Nelder-Mead optimiser stopping at an inferior, in-bounds local optimum
+> relative to the crate's own optimiser on the same objective — root cause `RC-02`
+> (`validation/reference/README.md`'s "R-parity gap root causes" section), not a defect to
+> fix.
+
 ## Parameters
 
 | Parameter | Type | Required | Default | Description |

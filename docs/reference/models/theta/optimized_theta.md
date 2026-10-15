@@ -42,8 +42,11 @@ Optimized Theta Method. Automatically finds the optimal theta parameter that min
 [07-forecasting.md's "Prediction intervals, fitted values and input handling"](../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling)
 for calibration caveats shared across all models.
 
-> **Known issue:** interval width is roughly **2× too wide** at `h ≥ 6` versus the reference
-> R implementation, same as the rest of the Theta family (fix planned for v0.10.0, Phase 17).
+> **R `forecast` parity:** `Theta`'s point forecast and 95% bounds match R `thetaf()` within
+> the tolerances documented on [theta.md](theta.md) (FCST-09, Phase 17 plan 17-03,
+> `crates/anofox-fcst-core/tests/r_forecast_parity.rs`). This variant uses the same
+> corrected 0.16.0 interval formula as the rest of the Theta family but is not individually
+> R-parity-tested.
 
 `OptimizedTheta` accepts exogenous regressors via `ts_forecast_exog_by` and stays itself —
 `model_name` reports `"OptimizedTheta with regressors"`.

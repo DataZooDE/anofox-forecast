@@ -49,9 +49,18 @@ the `ETS` name — see [ets.md](ets.md).
 | `yhat_upper` | DOUBLE | Upper prediction interval |
 
 `yhat_lower` / `yhat_upper` are the crate `AutoETS` model's own prediction interval at
-`confidence_level` — see
+`confidence_level`, using Hyndman's analytic state-space variance for the selected spec
+since anofox-forecast 0.16.0 — see
 [07-forecasting.md's "Prediction intervals, fitted values and input handling"](../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling)
-for the known seasonal-ETS interval issue and calibration caveats shared across all models.
+for calibration caveats shared across all models.
+
+**R `forecast` parity (FCST-09, Phase 17 plan 17-03):** `AutoETS` selects the same spec R
+`ets()` selects on the seeded random-walk (`ETS(A,N,N)`) and random-walk-with-drift
+(`ETS(A,A,N)`) series (both in parity, within 1e-5 relative). On AirPassengers it is a known
+gap: the crate's optimiser scores R's selected `ETS(M,Ad,M)` worse than R does under the
+same objective, so `AutoETS` selects `ETS(M,A,M)` instead — root cause `RC-03`
+(`validation/reference/README.md`'s "R-parity gap root causes" section), with an upstream
+issue drafted and not yet filed.
 
 ## SQL Example
 

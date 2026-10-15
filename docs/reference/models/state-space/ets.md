@@ -73,10 +73,25 @@ want a specific period. Not needed at all for non-seasonal models (ANN, AAN, AAd
 | `yhat_upper` | DOUBLE | Upper prediction interval |
 
 `yhat_lower` / `yhat_upper` are the crate `ETS`/`AutoETS` model's own prediction interval at
-`confidence_level` — see
+`confidence_level`, using Hyndman's class-1/2/3 analytic state-space variances since
+anofox-forecast 0.16.0 (PR #224) — see
 [07-forecasting.md's "Prediction intervals, fitted values and input handling"](../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling)
-for the known seasonal-ETS interval issue (half-width grows `σ√h`/`σ√⌈h/m⌉` rather than
-Hyndman's analytic state-space variance — flatter than it should be, fix planned for v0.10.0, Phase 11/17).
+for the full calibration table.
+
+**R `forecast` parity (FCST-09, Phase 17 plan 17-03):** `ETS 'ANN'` matches R `ses()` within
+1e-6 on AirPassengers/rw/trend. `ETS 'AAN'` (= `Holt`, since the D-12/D-13 remap documented on
+[holt.md](../exponential-smoothing/holt.md)) is a
+known gap on AirPassengers and rw — at R's own fitted parameters the crate's ETS recursion
+and likelihood agree with R to floating-point precision, so the residual gap is R's own
+Nelder-Mead optimiser stopping at an inferior, in-bounds local optimum relative to the
+crate's own optimiser (root cause `RC-02`, not a defect); it is in parity on `trend`.
+`ETS 'AAA'` / `ETS 'MAM'` are likewise known gaps on AirPassengers for the same `RC-02`
+reason. `AutoETS` is in parity on rw/trend (selects R's spec) but a known gap on
+AirPassengers: the crate's optimiser scores R's selected `ETS(M,Ad,M)` worse than R does, so
+`AutoETS` selects `ETS(M,A,M)` instead (`RC-03`, upstream draft filed). `MAA`/`MAdA` now fit
+(the crate's `ETSSpec::is_valid()` always returns `true` since 0.16.0). Full numbers:
+`validation/reference/README.md`'s "r_forecast parity tolerances" and "R-parity gap root
+causes" sections.
 
 ## SQL Example
 

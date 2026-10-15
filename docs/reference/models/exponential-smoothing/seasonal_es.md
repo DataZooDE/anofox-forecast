@@ -41,10 +41,11 @@ not configurable from the SQL surface today.
 `yhat_lower` / `yhat_upper` are the model's own prediction interval (crate
 `predict_with_intervals`) at `confidence_level` (default 0.90). See
 [Prediction intervals, fitted values and input handling](../../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling);
-for calibrated coverage use the conformal functions. SeasonalES's half-width grows as
-`σ√h` (or `σ√⌈h/m⌉` for the seasonal term) rather than Hyndman's analytic state-space
-variance — flatter than it should be (known issue, Phase 11/17). SeasonalES does not accept
-regressors in `ts_forecast_exog_by` (errors).
+for calibrated coverage use the conformal functions. Since anofox-forecast 0.16.0, SeasonalES
+uses a per-slot `ETS(A,N,N)` variance for its interval width (not individually R-parity-tested
+— see [07-forecasting.md's prediction-intervals section](../../../api/07-forecasting.md#prediction-intervals)
+for the models that ARE R-parity-tested). SeasonalES does not accept regressors in
+`ts_forecast_exog_by` (errors).
 
 ## SQL Example
 

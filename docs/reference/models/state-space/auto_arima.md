@@ -20,9 +20,21 @@ SELECT * FROM ts_forecast_exog_by('table', group_col, date_col, value_col, ['x1'
 Automatic ARIMA (AutoRegressive Integrated Moving Average) model selection. Automatically
 searches `(p, d, q)` orders and seasonal `(P, D, Q, s)` components via the crate's own
 order search, and reports the SELECTED order in `model_name` (e.g. `"AutoARIMA(2,0,1)"` or
-`"AutoARIMA(1,1,1)(0,1,1)[12]"`). The selected order can differ from R's `auto.arima()` on
-the same series (a different order-search heuristic) — the FITTED order's own forecast still
-matches R within 1% at that order (fix planned for v0.10.0, Phase 11).
+`"AutoARIMA(1,1,1)(0,1,1)[12]"`).
+
+**R `auto.arima` parity (D-15, since anofox-forecast 0.16.1, upstream PR #223).** The order
+search now ports R's `stats::arima` estimation path and the Hyndman-Khandakar stepwise
+search with R's own defaults (`d` chosen by a KPSS-type test, `D` by a seasonal-strength
+test). As a result, `AutoARIMA` selects the SAME order R `auto.arima()` selects on the same
+series — measured on AirPassengers: `AutoARIMA(2,1,1)(0,1,0)[12]`, matching R's
+`ARIMA(2,1,1)(0,1,0)[12]` exactly, with the point forecast within 0.04% relative. A seeded
+simulation (30 random walks + 30 AR(0.7) series) measured 0 share deviation from R and 60/60
+exact `(p,d,q)` agreement (`crates/anofox-fcst-core/tests/r_forecast_parity.rs`'s
+`autoarima_selection_matches_r`, UPST-01). Selected orders differ from pre-0.16.1 releases
+of this extension (see the CHANGELOG's Breaking changes). The one known exception: on
+AirPassengers, the 95% interval is up to ~18% off R's at longer horizons (the point forecast
+and order are still exact) — tracked as `RC-05` in `validation/reference/README.md`'s
+"R-parity gap root causes" section, with an upstream fix in progress.
 
 Supports exogenous variables via `ts_forecast_exog_by`: the crate's own order search runs
 WITH the regressors attached, and `model_name` reports the selected order plus
@@ -56,7 +68,7 @@ WITH the regressors attached, and `model_name` reports the selected order plus
 `yhat_lower` / `yhat_upper` are the crate `AutoARIMA` model's own prediction interval at the
 SELECTED order, at `confidence_level` — see
 [07-forecasting.md's "Prediction intervals, fitted values and input handling"](../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling)
-for the order-selection known issue and calibration caveats shared across all models.
+for the R-parity table and calibration caveats shared across all models.
 
 ## SQL Example
 

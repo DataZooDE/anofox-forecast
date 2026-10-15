@@ -37,9 +37,9 @@ Optimized Seasonal Exponential Smoothing. Same as SeasonalES but automatically f
 `yhat_lower` / `yhat_upper` are the model's own prediction interval (crate
 `predict_with_intervals`) at `confidence_level` (default 0.90). See
 [Prediction intervals, fitted values and input handling](../../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling);
-for calibrated coverage use the conformal functions. SeasonalESOptimized shares SeasonalES's
-known interval-shape issue (half-width grows as `σ√h`/`σ√⌈h/m⌉`, flatter than Hyndman's
-analytic variance; Phase 11/17) and does not accept regressors in `ts_forecast_exog_by`
+for calibrated coverage use the conformal functions. Since anofox-forecast 0.16.0,
+SeasonalESOptimized shares SeasonalES's per-slot `ETS(A,N,N)` variance for its interval width
+(not individually R-parity-tested) and does not accept regressors in `ts_forecast_exog_by`
 (errors).
 
 ## SQL Example

@@ -24,16 +24,25 @@ user-invocable: false
 
 # Anofox Forecast — Models & `ts_forecast_by` Cheat Sheet
 
-**Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.15.10) | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
+**Extension:** `anofox_forecast` (Rust crate `anofox-forecast` v0.16.1) | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
 
 36 forecasting models exposed by SQL via three call surfaces (table macro, aggregate, scalar) + `ts_forecast_var_by` for multivariate VAR.
 
 **Prediction intervals** (`yhat_lower`/`yhat_upper`) are each model's own crate-native
-interval — not a fabricated formula. Several models have known, upstream-tracked
-calibration issues (SES flat, seasonal ETS flat, Theta ~2× too wide at h≥6, TBATS too
-narrow, GARCH bounds not bracketing `yhat`) and some paths return `NULL` bounds (panel
-models; `MSTL`/`AutoMSTL` with regressors). See `docs/api/07-forecasting.md`'s "Prediction
-intervals, fitted values and input handling" section for the full per-model table.
+interval (corrected formulas since anofox-forecast 0.16.0: Hyndman class-1/2/3 ETS
+variances, TBATS innovations state-space variance, GARCH centred on the conditional mean,
+etc.) — not a fabricated formula. **R `forecast` parity (FCST-09, Phase 17 plan 17-03):**
+of the ten core models, `Naive`/`SeasonalNaive`/`RandomWalkDrift`/`CrostonClassic`,
+`SESOptimized`/`ETS 'ANN'` (R `ses()`) and `Theta` are in full R parity; `Holt`/`ETS 'AAN'`,
+`HoltWinters`/`ETS 'AAA'`/`ETS 'MAM'` and `AutoETS` are known gaps on AirPassengers with an
+identified root cause (mostly R's own optimiser reaching a looser fit, not a defect — see
+`validation/reference/README.md`); `AutoARIMA` matches R `auto.arima`'s selected order and
+point forecast on every series since 0.16.1 (PR #223), with one known interval gap on
+AirPassengers only. `'SES'` (fixed `alpha=0.3`) is a different, non-optimised model from
+`SESOptimized` — R `ses()` parity is checked against the latter. Some paths return `NULL`
+bounds regardless (panel models; `MSTL`/`AutoMSTL` with regressors). See
+`docs/api/07-forecasting.md`'s "Prediction intervals, fitted values and input handling"
+section for the full per-model table.
 
 ## Critical gotchas
 

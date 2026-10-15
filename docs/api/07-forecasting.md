@@ -314,18 +314,55 @@ conformal prediction functions ([11-conformal-prediction.md](11-conformal-predic
 top of the point forecast for calibrated coverage in these cases, or whenever a model's own
 interval below is flagged as miscalibrated.
 
-**Known per-model calibration issues** (crate `anofox-forecast` 0.15.10; upstream fixes
-fix planned for v0.10.0, Phase 11, R-interval parity fix planned for v0.10.0, Phase 17 — these are passed through
-unchanged, never silently corrected or hidden):
+**R `forecast` parity (FCST-09, Phase 17 plan 17-03).** Point forecasts and 95% intervals
+for the ten core models are checked against R `forecast` 9.0.2 on AirPassengers plus three
+seeded simulated series (a driftless random walk, an intermittent-demand series, and a
+random walk with drift) — 36 checks total, asserted by
+`crates/anofox-fcst-core/tests/r_forecast_parity.rs` against
+`validation/reference/fixtures/r_forecast/{air_passengers,simulated_series}.json`
+`tolerance.parity_checks`. 24 of 36 checks are in parity; the other 12 are documented known
+gaps, each with an identified root cause (D-12) — see `validation/reference/README.md`'s
+"r_forecast parity tolerances" and "R-parity gap root causes" sections for the full table
+and per-check numbers.
 
-| Model(s) | Known issue | Tracking |
+| Model(s) | R parity | Root cause (when a known gap) |
 |---|---|---|
-| `SES` | Interval half-width is flat across the whole horizon (does not widen with `h`) | Phase 11 |
-| Seasonal `ETS` specs | Half-width grows as `σ√h` (or `σ√⌈h/m⌉` for the seasonal term) rather than Hyndman's class-1/2/3 analytic state-space variances — seasonal ETS intervals are flatter than they should be | Phase 11/17 |
-| `Theta`, `OptimizedTheta`, `DynamicTheta`, `DynamicOptimizedTheta`, `AutoTheta` | Interval is roughly **2× too wide** at `h ≥ 6` vs. the reference R implementation | Phase 17 |
-| `TBATS`, `AutoTBATS` | Interval width is **3–8% of** the equivalent `statsforecast` reference width — too narrow | Phase 11 |
-| `GARCH` | `yhat` is the conditional standard deviation; `yhat_lower`/`yhat_upper` are the crate's simulated-innovation bounds (`point ± z·σ_h`, the `statsforecast` convention) centred on the simulated point forecast — they do **not** bracket `yhat` itself, and the resulting width is ~0.13× a reference-implementation width | Phase 11 |
-| `AutoARIMA` | The selected order can differ from R's `auto.arima()` on the same series (different order-search heuristic: H3 in the statistical audit) — the FITTED order's own forecast still matches R within 1% at that order | Phase 11 |
+| `Naive`, `SeasonalNaive`, `RandomWalkDrift`, `CrostonClassic` | Parity (point exact; bounds within the crate's A&S 26.2.23 z-approximation / drift-interval-formula tolerance) | — |
+| `SESOptimized` / `ETS 'ANN'` | Parity on AirPassengers / rw / trend | — (the intermittent series is a known gap, see below) |
+| `SESOptimized` on the intermittent series | Known gap | `RC-04`: the crate's own SES optimiser converges to a different `(alpha, l0)` than R's on this zero-inflated series — upstream draft filed |
+| `Holt` / `ETS 'AAN'` | Known gap, but tightened: `'Holt'` now dispatches to the crate's `ETS(A,A,N)`, R `holt()`'s own definition (D-12/D-13 fix) | `RC-01` (the fix) plus `RC-02` (the residual — see next row); parity on `trend` after the fix |
+| `HoltWinters` / `ETS 'AAA'` / `ETS 'MAM'` | Known gap on AirPassengers | `RC-02`: R's own optimiser reaches a looser, in-bounds fit than the crate's on these specs — not a defect |
+| `AutoETS` | Parity on `rw`/`trend` (selects R's spec); known gap on AirPassengers | `RC-03`: the crate's optimiser scores R's selected `ETS(M,Ad,M)` worse than R does, so `AutoETS` picks `ETS(M,A,M)` instead — upstream draft filed |
+| `AutoARIMA` | Parity (order + point) on every series; the AirPassengers 95% interval is the one allowed exception (D-15/D-16, see below) | `RC-05` on that one check — upstream draft filed |
+| `Theta` | Parity (point within 1e-5, 95% bounds within 5e-4 on AirPassengers; 1e-6 on rw/trend) | — |
+
+Interval-formula changes 0.16.0 made for models not covered by the R-parity suite above (no
+R-parity claim for these; see the crate's own CHANGELOG, PR #225 for TBATS/MSTL/seasonal-ES
+and PR #211/pre-0.16 history for GARCH):
+
+| Model(s) | 0.16.0 change |
+|---|---|
+| `TBATS`, `AutoTBATS` | Innovations state-space variance (previously 3–8% of a `statsforecast` reference width) |
+| `MSTL`, `AutoMSTL` | Delegates interval computation to its trend forecaster |
+| `SeasonalES`, `SeasonalESOptimized` | Per-slot `ETS(A,N,N)` variance |
+| `GARCH` | `yhat_lower`/`yhat_upper` are centred on the conditional mean (previously centred on the simulated point forecast only) |
+
+**`'SES'` is a fixed `alpha=0.3` model**, not R's `ses()` — it is a deliberately simple,
+non-optimised baseline. R `ses()` parity is checked against `'SESOptimized'` / `ETS 'ANN'`
+above, not `'SES'`.
+
+**`AutoARIMA` and R `auto.arima` (D-15, since anofox-forecast 0.16.1, PR #223).** `AutoARIMA`
+now ports R's `stats::arima` estimation path and the Hyndman-Khandakar stepwise search with R
+defaults, so it selects the SAME order R `auto.arima` selects — `AutoARIMA(2,1,1)(0,1,0)[12]`
+on AirPassengers, `AutoARIMA(0,1,0)` on both seeded non-seasonal series (R's drift on the
+random-walk-with-drift series is evidenced by the point forecast — a drift-free `(0,1,0)`
+would be flat). A seeded selection-frequency simulation (30 random walks + 30 AR(0.7) series)
+measured 0 share deviation from R and 60/60 exact `(p,d,q)` agreement. Selected models
+differ from pre-0.16.1 releases of this extension (see Breaking changes in the CHANGELOG).
+The one interval exception: on AirPassengers, `AutoARIMA`'s 95% interval is up to ~18% off
+R's (the point forecast and order are still exact) — the crate's seasonal-ARIMA
+prediction-variance computation differs from R `stats::arima`'s `KalmanForecast` at longer
+horizons; tracked as `RC-05`, with an upstream fix in progress for a follow-up release.
 
 ### Fitted values, residuals, and MSE
 
@@ -344,12 +381,12 @@ unchanged, never silently corrected or hidden):
   series length (ARIMA/AutoARIMA differencing can drop more rows than a straight NULL-head
   alignment would), the exported `insample_fitted` array is **empty** rather than
   mis-aligned to the wrong row — a safety rule, not a bug.
-- `Theta`'s in-sample fitted values are the crate's plain SES(α=0.1) one-step level
-  (reseasonalised when seasonal), without the drift term its forecasts add — so on a
-  non-seasonal series with no zeros, `Theta`'s fitted/residuals/MSE equal
-  `CrostonClassic`'s (same fixed-α=0.1 recursion). This is crate 0.15.10 behaviour, pinned
-  by `crates/anofox-fcst-core/tests/theta_croston_fitted.rs`, and tracked for Phase 11
-  (`Theta`'s alpha is expected to become optimised rather than fixed).
+- As of `anofox-forecast` 0.16.0 (PR #222), `Theta`'s in-sample fitted values use the
+  optimised per-series `alpha`, not a fixed `0.1` — so `Theta`'s fitted/residuals/MSE no
+  longer coincide with `CrostonClassic`'s (which is still a fixed-`alpha=0.1` recursion).
+  Pinned by `crates/anofox-fcst-core/tests/theta_croston_fitted.rs`
+  (`theta_optimised_alpha_diverges_from_croston_classic_on_positive_series`); `Theta`'s
+  point-forecast R parity (FCST-09) is in the prediction-intervals section above.
 
 ```sql
 CREATE OR REPLACE TABLE fitted_demo AS

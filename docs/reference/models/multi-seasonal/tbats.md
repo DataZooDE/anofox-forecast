@@ -44,8 +44,11 @@ Trigonometric seasonality, Box-Cox transformation, ARMA errors, Trend and Season
 [07-forecasting.md's "Prediction intervals, fitted values and input handling"](../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling)
 for calibration caveats shared across all models.
 
-> **Known issue:** `TBATS`'s interval width is **3–8% of** the equivalent `statsforecast`
-> reference width — far too narrow (fix planned for v0.10.0, Phase 11).
+> **0.16.0 change:** `TBATS`'s interval now uses the innovations state-space variance
+> (previously 3–8% of an equivalent `statsforecast` reference width — far too narrow). Not
+> individually R-parity-tested; see
+> [07-forecasting.md's prediction-intervals section](../../api/07-forecasting.md#prediction-intervals)
+> for the models that ARE R-parity-tested (FCST-09, Phase 17 plan 17-03).
 
 ## SQL Example
 

@@ -16,6 +16,18 @@ SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'HoltWinte
 
 Holt-Winters Seasonal Method (Triple Exponential Smoothing). Extends Holt's method by adding a seasonal component. The workhorse for data with both trend and seasonality.
 
+> **R `forecast` parity (FCST-09, Phase 17 plan 17-03):** `'HoltWinters'` runs the crate's
+> own `HoltWinters::auto(p, SeasonalType::Additive)` construction, which an E4 diagnosis
+> check (Task 1) found already near-identical to the R-faithful `ETS(A,A,A)` mapping (the
+> mapping cut the deviation only 1.04x, below the 2x bar for a D-12 extension-side fix, so
+> no construction change was made here). It is a known gap on AirPassengers: at R's own
+> fitted parameters the crate's ETS recursion and likelihood agree with R to
+> floating-point precision, so the residual gap is R's own Nelder-Mead optimiser stopping
+> at an inferior, in-bounds local optimum — root cause `RC-02`
+> (`validation/reference/README.md`'s "R-parity gap root causes" section), not a defect.
+> `ETS 'MAM'` (R's multiplicative-seasonal Holt-Winters equivalent) is likewise a known gap
+> for the same `RC-02` reason — see [ets.md](../state-space/ets.md).
+
 ## Parameters
 
 | Parameter | Type | Required | Default | Description |

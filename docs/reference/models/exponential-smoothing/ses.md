@@ -38,13 +38,14 @@ configurable from the SQL surface today.
 | `yhat_upper` | DOUBLE | Upper prediction interval |
 
 `yhat_lower` / `yhat_upper` are the model's own prediction interval (crate
-`predict_with_intervals`) at `confidence_level` (default 0.90). See
+`predict_with_intervals`) at `confidence_level` (default 0.90), widening with `h` per
+Hyndman's class-1 `ETS(A,N,N)` analytic variance since anofox-forecast 0.16.0. See
 [Prediction intervals, fitted values and input handling](../../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling);
 for calibrated coverage use the conformal functions.
 
-**Known issue:** SES's interval bands are flat in `h` — the half-width does not widen across
-the forecast horizon (crate `anofox-forecast` 0.15.10; R's `ses()` widens with `h`). Tracked
-for Phase 11/17.
+**`'SES'` is a fixed `alpha=0.3` model**, not R's optimised `ses()` — it is a deliberately
+simple, non-optimised baseline. R `ses()` parity (FCST-09, Phase 17 plan 17-03) is checked
+against [`SESOptimized`](ses_optimized.md) / `ETS 'ANN'`, not `'SES'` itself.
 
 ## SQL Example
 

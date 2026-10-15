@@ -34,13 +34,17 @@ Optimized Simple Exponential Smoothing. Same as SES but automatically finds the 
 | `yhat_upper` | DOUBLE | Upper prediction interval |
 
 `yhat_lower` / `yhat_upper` are the model's own prediction interval (crate
-`predict_with_intervals`) at `confidence_level` (default 0.90). See
+`predict_with_intervals`) at `confidence_level` (default 0.90), widening with `h` per
+Hyndman's class-1 `ETS(A,N,N)` analytic variance since anofox-forecast 0.16.0. See
 [Prediction intervals, fitted values and input handling](../../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling);
 for calibrated coverage use the conformal functions.
 
-**Known issue:** like `SES`, SESOptimized's interval bands are flat in `h` — the half-width
-does not widen across the forecast horizon (crate `anofox-forecast` 0.15.10; R's `ses()`
-widens with `h`). Tracked for Phase 11/17.
+**R `forecast` parity (FCST-09, Phase 17 plan 17-03):** `SESOptimized` (= `ETS 'ANN'`)
+matches R `ses()` within 1e-6 relative on AirPassengers, the seeded random walk and the
+random-walk-with-drift series. On a zero-inflated intermittent-demand series it is a known
+gap: the crate's own SES optimiser converges to a different `(alpha, l0)` than R's — root
+cause `RC-04` (`validation/reference/README.md`'s "R-parity gap root causes" section),
+with an upstream issue drafted and not yet filed.
 
 ## SQL Example
 

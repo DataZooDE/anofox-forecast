@@ -23,3 +23,16 @@ mixed pass/fail row would block the whole section regardless of which column was
 item, not a behavior defect. If a future phase investigates MSTL's trend-forecaster default
 construction, cross-check whether anofox-forecast 0.16.0/0.16.1 changed its default trend
 model or initial-state heuristic.
+
+## 17-03 Task 4: pre-existing snippet FAIL in docs/api/07-forecasting.md, untouched block
+
+**Found during:** Task 4's `--all` snippet-harness sweep (`run_snippets.py --all`) over the
+changed docs/model-page/skill files, run to double-check nothing broke near the prose edits.
+
+**Issue:** `docs/api/07-forecasting.md` block 1 (`SELECT *, 'Naive' AS model FROM
+ts_forecast_by('sales_data', product_id, date, revenue, 'Naive', 7, '1d', MAP{})`) FAILs
+with `Binder Error: Referenced column "date" not found in FROM clause!` under `--all`. The
+official `--out` run (changed-blocks-only, the actual Task 4 gate) reports 0 FAIL because
+this block's text is untouched by this plan's edits — confirmed by re-running the harness
+with Task 4's changes stashed: the same FAIL reproduces identically on the pre-Task-4 HEAD.
+Not fixed here (out of scope: not caused by this task).
