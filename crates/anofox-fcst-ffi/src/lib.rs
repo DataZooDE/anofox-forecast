@@ -8510,11 +8510,18 @@ mod panel_ffi_tests {
         assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
         let preds = result.unwrap();
         assert_eq!(preds.len(), 3, "expected 3 series forecasts");
-        // Value check: per-series sane magnitude bounds derived from each
-        // series' own input range (s1 1..12, s2 3..19.5, s3 2.4..11.2) --
-        // a correct panel forecast must continue near its own series, not
-        // some degenerate/cross-contaminated magnitude.
-        let bounds = [(0.0, 30.0), (0.0, 40.0), (0.0, 25.0)];
+        // WR-03 (Phase 18 review): the former (0.0..=30.0)/(0.0..=40.0)/
+        // (0.0..=25.0) bounds were 2-3x the true per-series range and would
+        // pass a systematically-too-high/low forecast. Closed form: each
+        // series is perfectly linear (s1: 1..12 step 1, s2: 3..19.5 step
+        // 1.5, s3: 2.4..11.2 step 0.8). Bound = [first_value, last_value +
+        // span] per series, where span = last-first -- the lower bound rules
+        // out a forecast that regresses below the series' own historical
+        // minimum, the upper bound allows one more "span" of growth beyond
+        // the last observed point (headroom for GlobalETS pooling shared
+        // parameters across the panel, confirmed live: observed
+        // [[12.77..14.99], [20.65..23.98], [11.82..13.59]] for s1/s2/s3).
+        let bounds = [(1.0, 23.0), (3.0, 36.0), (2.4, 20.0)];
         for (i, series_preds) in preds.iter().enumerate() {
             assert_eq!(series_preds.len(), 4, "expected horizon=4 for series {}", i);
             let (lo, hi) = bounds[i];
@@ -8550,10 +8557,11 @@ mod panel_ffi_tests {
         );
         let preds = result.unwrap();
         assert_eq!(preds.len(), 3);
-        // Value check: same per-series sane magnitude bounds as
+        // Value check: same tightened per-series sane magnitude bounds as
         // test_happy_path_global_ets (the s1 interior NaN gap is imputed,
-        // so the forecast should still track s1's own ~1..12 range).
-        let bounds = [(0.0, 30.0), (0.0, 40.0), (0.0, 25.0)];
+        // so the forecast should still track s1's own ~1..12 range). See
+        // WR-03 comment above for the closed-form derivation.
+        let bounds = [(1.0, 23.0), (3.0, 36.0), (2.4, 20.0)];
         for (i, series_preds) in preds.iter().enumerate() {
             assert_eq!(series_preds.len(), 4);
             let (lo, hi) = bounds[i];
@@ -8604,9 +8612,10 @@ mod panel_ffi_tests {
         );
         let preds = result.unwrap();
         assert_eq!(preds.len(), 3, "expected 3 series forecasts");
-        // Value check: same per-series sane magnitude bounds as the
-        // GlobalETS happy-path test above.
-        let bounds = [(0.0, 30.0), (0.0, 40.0), (0.0, 25.0)];
+        // Value check: same tightened per-series sane magnitude bounds as
+        // the GlobalETS happy-path test above. See WR-03 comment there for
+        // the closed-form derivation.
+        let bounds = [(1.0, 23.0), (3.0, 36.0), (2.4, 20.0)];
         for (i, series_preds) in preds.iter().enumerate() {
             assert_eq!(series_preds.len(), 4, "expected horizon=4 for series {}", i);
             let (lo, hi) = bounds[i];
@@ -9065,13 +9074,21 @@ mod kalman_garch_ffi_tests {
         );
         let point = result.unwrap();
         assert_eq!(point.len(), 5, "Kalman FFI must return 5 point forecasts");
-        // Value check: input ranges 10..22 (slope 0.5, no noise); a
-        // local-level Kalman filter forecast must stay within a sane
-        // neighbourhood of that range.
+        // WR-03 (Phase 18 review): the former (0.0..=40.0) bound was nearly
+        // double the true 10..22 input range. Closed form: input is
+        // perfectly linear (value[i] = 10+0.5i, i=0..24), last observed =
+        // 22, span = 12. A local-level Kalman filter has no trend
+        // component, so it should persist near the trailing filtered level
+        // rather than continue the trend -- confirmed live: observed flat
+        // forecast of 20.65 across all 5 horizon steps. Bound at
+        // last_observed +/- span/2 (15.0..=25.0 comfortably contains 20.65
+        // while still catching a trend-continuation regression, which would
+        // push forecasts up toward/past 24, or a magnitude blowup/sign
+        // flip).
         for &v in &point {
             assert!(v.is_finite(), "Kalman FFI forecast must be finite");
             assert!(
-                (0.0..=40.0).contains(&v),
+                (15.0..=25.0).contains(&v),
                 "Kalman forecast {v} out of sane range"
             );
         }

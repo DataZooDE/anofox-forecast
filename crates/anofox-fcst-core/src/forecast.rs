@@ -4928,14 +4928,20 @@ mod tests {
             result.err()
         );
         let result = result.unwrap();
-        // Value check: input ranges 100..159 (strictly increasing); any ETS
-        // auto-selection fitting this cleanly trending series must forecast
-        // within a sane neighbourhood of that range, not degenerate/garbage
-        // magnitudes, and must report a non-empty model identity.
+        // WR-03 (Phase 18 review): the former (50.0..=400.0) bound was wide
+        // enough that a forecast 2.5x the true trend ceiling would still pass.
+        // Closed form: input is perfectly linear (value[i] = 100+i, i=0..59),
+        // last observed = 159, slope = 1/step. A clean additive-trend ETS fit
+        // of a noiseless linear series should continue that trend almost
+        // exactly: point[h] ~= 159+h for h=1..5, i.e. 160..164 (confirmed by
+        // running this test: observed [160.0, 161.0, 162.0, 163.0, 164.0]).
+        // Bound generously at last_observed +/- 2*horizon*slope to tolerate
+        // ETS smoothing-parameter fitting variance without hugging the exact
+        // printed value.
         for &v in &result.point {
             assert!(v.is_finite());
             assert!(
-                (50.0..=400.0).contains(&v),
+                (149.0..=169.0).contains(&v),
                 "ETS forecast out of sane range: {v}"
             );
         }
@@ -5535,9 +5541,17 @@ mod tests {
         );
         let out = result.unwrap();
         assert_eq!(out.point.len(), 6, "output length must equal horizon");
-        // Value check: input ranges 100..194 (strictly increasing, slope 2);
-        // the Mean of AutoETS and Naive on this clean trend must stay within
-        // a sane neighbourhood of that range, not degenerate/garbage values.
+        // WR-03 (Phase 18 review): the former (50.0..=400.0) bound was wide
+        // enough that a forecast 2x the true trend ceiling would still pass.
+        // Closed form: input is perfectly linear (value[i] = 100+2i, i=0..47),
+        // last observed = 194, slope = 2/step. Naive persists 194 for every
+        // horizon step (exact, deterministic); AutoETS on this noiseless
+        // trend should continue it almost exactly (~194+2h). Mean of the two
+        // is therefore ~194 + h for h=1..6, i.e. 195..200 (confirmed by
+        // running this test: observed [195.0, 196.0, 197.0, 198.0, 199.0,
+        // 200.0]). Bound generously at Naive's exact 194 +/- 2*horizon*slope
+        // to tolerate AutoETS fitting variance without hugging the exact
+        // printed value.
         for &v in &out.point {
             assert!(
                 v.is_finite(),
@@ -5545,7 +5559,7 @@ mod tests {
                 v
             );
             assert!(
-                (50.0..=400.0).contains(&v),
+                (170.0..=218.0).contains(&v),
                 "ensemble forecast out of sane range: {v}"
             );
         }
