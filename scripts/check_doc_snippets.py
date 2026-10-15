@@ -53,6 +53,15 @@ Writes a TSV (columns: status, file, line, first SQL line, detail) to --out PATH
   check_doc_snippets: P PASS, F FAIL, E EXPECTED-ERROR, S SYNOPSIS, N SKIP-NETWORK, T STALE
 Exit codes: 0 clean; 1 if FAIL or STALE count is non-zero; 2 if the duckdb binary is
 missing or the registered-function-name query itself fails.
+
+WR-04 (Phase 18 review): this gate requires a built `build/release/duckdb` and is
+therefore NOT wired into the no-build `.github/workflows/audit.yml` job (which only
+runs `audit_no_stats_in_cpp.py` and `check_length_only_tests.py` against source text).
+It is a required manual step of the release Definition of Done -- run it by hand (or
+via `make release && make check-docs`) before every release/tag, alongside
+`check_correctness_inventory.py` (see that script's own docstring for the same
+caveat). Do not add this to MainDistributionPipeline.yml: that workflow is DuckDB's
+own extension-ci-tools reusable workflow, not a place for project-local gates.
 """
 import os
 import re

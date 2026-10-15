@@ -31,12 +31,18 @@ header:
 	@echo "Header generated at src/include/anofox_fcst_ffi.h"
 
 # Phase 18 (RUST-10, D-04/D-05): no-statistics-in-C++/SQL audit + D-03 length-only sweep
+# This target is wired into .github/workflows/audit.yml (no build required).
 audit:
 	python3 scripts/audit_no_stats_in_cpp.py --self-test
 	python3 scripts/audit_no_stats_in_cpp.py
 	python3 scripts/check_length_only_tests.py
 
 # Phase 18 (DOCS-01, D-06): docs/skills SQL snippet + function-name checker
+# WR-04 (Phase 18 review): requires `make release` first (runs snippets against
+# build/release/duckdb), so this and check_correctness_inventory.py are NOT in
+# any CI workflow -- they are required manual release Definition-of-Done steps.
+# Run both by hand before every release/tag:
+#   GEN=ninja make release && make check-docs && python3 scripts/check_correctness_inventory.py
 check-docs:
 	python3 scripts/check_doc_snippets.py
 

@@ -15,6 +15,16 @@ Exit codes:
     1 - at least one registered function has no correctness-file coverage
     2 - build/release/duckdb is missing (nothing to query)
 
+WR-04 (Phase 18 review): this gate requires a built `build/release/duckdb` and is
+therefore NOT wired into the no-build `.github/workflows/audit.yml` job (which only
+runs `audit_no_stats_in_cpp.py` and `check_length_only_tests.py` against source text).
+It is a required manual step of the release Definition of Done -- run it by hand (or
+via `make release && python3 scripts/check_correctness_inventory.py`) before every
+release/tag, alongside `make check-docs` (see check_doc_snippets.py's own docstring
+for the same caveat). Do not add this to MainDistributionPipeline.yml: that workflow
+is DuckDB's own extension-ci-tools reusable workflow, not a place for project-local
+gates.
+
 Prints a per-function table to stdout, one `MISSING <name>` line per uncovered
 registered function (for easy grepping), and informational "not registered: ..." lines
 for names the CHANGELOG mentions that duckdb_functions() does not know about (removed,
