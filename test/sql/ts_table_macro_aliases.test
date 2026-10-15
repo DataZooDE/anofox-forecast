@@ -36,11 +36,18 @@ SELECT count(*) FROM anofox_fcst_ts_fill_gaps_by(test_data, id, date, value, '1d
 ----
 60
 
-# anofox_fcst_ts_fill_forward_by should work as alias
+# anofox_fcst_ts_fill_forward_by should work as alias. Re-pinned (Phase 18, 18-01):
+# 2023-01-01 to 2023-03-10 inclusive is 69 days (31 Jan + 28 Feb + 10 Mar), not 60 --
+# the target_date VARCHAR parsing in _ts_fill_forward_native used to misinterpret
+# '2023-03-10' as a raw day-offset via an unguarded std::stoll() prefix-parse (see
+# src/table_functions/ts_fill_forward_native.cpp, fixed in this plan's commit
+# 52e82ad), which silently produced a target date far in the past and a no-op
+# extension (60 = the original row count, unchanged). Fixed directly: this was never
+# an intended value, a pre-existing bug this same plan's Rule 1 fix corrected.
 query I
 SELECT count(*) FROM anofox_fcst_ts_fill_forward_by(test_data, id, date, value, '2023-03-10', '1d');
 ----
-60
+69
 
 # anofox_fcst_ts_fill_nulls_forward_by should work as alias
 query I
