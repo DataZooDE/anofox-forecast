@@ -1,0 +1,39 @@
+# Lightweight static audits (Phase 18, 18-03, D-05): the RUST-10 no-statistics-
+# in-C++/SQL audit (scripts/audit_no_stats_in_cpp.py) and the D-03 length-only
+# Rust-test sweep (scripts/check_length_only_tests.py). Both are pure python3
+# scans over the checked-out source tree -- no DuckDB/Rust build, no secrets,
+# no reusable extension-ci-tools workflow. Deliberately independent of
+# MainDistributionPipeline.yml, which stays untouched.
+name: Static audits
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Audit no-stats-in-C++ + length-only sweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: false
+
+      - name: Audit self-test
+        run: python3 scripts/audit_no_stats_in_cpp.py --self-test
+
+      - name: No-statistics-in-C++/SQL audit (RUST-10)
+        run: python3 scripts/audit_no_stats_in_cpp.py
+
+      - name: Length-only Rust test sweep (D-03)
+        run: python3 scripts/check_length_only_tests.py
