@@ -9,6 +9,7 @@
 #include <atomic>
 #include <thread>
 #include <regex>
+#include <stdexcept>
 
 namespace duckdb {
 
@@ -129,7 +130,17 @@ static unique_ptr<FunctionData> TsFillForwardNativeBind(
             string target_str = target_val.GetValue<string>();
             static const std::regex int_regex("^-?[0-9]+$");
             if (std::regex_match(target_str, int_regex)) {
-                bind_data->target_date_micros = std::stoll(target_str);
+                try {
+                    bind_data->target_date_micros = std::stoll(target_str);
+                } catch (const std::out_of_range &) {
+                    throw InvalidInputException(
+                        "target_date value '%s' is out of range for a raw integer day-offset",
+                        target_str);
+                } catch (const std::invalid_argument &) {
+                    throw InvalidInputException(
+                        "target_date value '%s' could not be parsed as a raw integer day-offset",
+                        target_str);
+                }
                 bind_data->target_is_raw = true;
             } else {
                 // Not a raw integer - cast to timestamp

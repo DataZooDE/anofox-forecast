@@ -290,3 +290,18 @@ Duplicate (group, date) pair detected
 
 statement ok
 DROP TABLE dup_ff_test;
+
+# ==============================================================================
+# WR-01 (Phase 18 review): target_date digit-string that overflows int64_t must
+# raise a clean DuckDB InvalidInputException naming target_date, not a leaked
+# raw std::out_of_range ("Invalid Error: stoll").
+# ==============================================================================
+
+statement error
+SELECT * FROM _ts_fill_forward_native(
+    (SELECT group_col, date_col, value FROM test_date ORDER BY group_col, date_col),
+    '99999999999999999999',
+    '1d'
+);
+----
+target_date value '99999999999999999999' is out of range for a raw integer day-offset
