@@ -142,8 +142,15 @@ true
 # (reachable from the ts_stats(...) macro's _ts_stats_with_dates call) must
 # error, not silently become epoch 0 (which looked like a multi-decade gap to
 # gap_counts/resolve_gap_step).
+# Class B fix (Phase 18, 18-01): the `frequency` argument was passed bare NULL,
+# which short-circuits TsStatsWithDatesFunction's "any top-level NULL input ->
+# SetNull" check (src/table_functions/ts_stats.cpp) BEFORE ExtractListTimestamps
+# ever runs -- so this assertion never reached the WR-01 code path it claims to
+# test (confirmed directly: it silently returned NULL, not an error, matching the
+# early-exit path, not the dates-list-element check). Passing a valid frequency
+# ('1d') lets the NULL-dates-element check actually run.
 statement error
-SELECT _ts_stats_with_dates([1.0, 2.0, 3.0], [DATE '2024-01-01', NULL, DATE '2024-01-03']::TIMESTAMP[], NULL, 0);
+SELECT _ts_stats_with_dates([1.0, 2.0, 3.0], [DATE '2024-01-01', NULL, DATE '2024-01-03']::TIMESTAMP[], '1d', 0);
 ----
 NULL element
 
@@ -314,11 +321,14 @@ DROP TABLE test_yearly_gaps;
 # ts_stats_by - Column Name Preservation with Different Names
 #######################################
 
+# Class B fix (Phase 18, 18-01): `INTERVAL i DAY` requires a literal, not an
+# expression; `INTERVAL (i) DAY` is the parenthesized form DuckDB accepts for a
+# column/expression count.
 statement ok
 CREATE TABLE test_custom_cols AS
 SELECT
     'SKU_' || i AS my_custom_product_name,
-    '2023-01-01'::TIMESTAMP + INTERVAL i DAY AS transaction_date,
+    '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY AS transaction_date,
     (100 + i)::DOUBLE AS amount
 FROM generate_series(1, 5) AS t(i);
 
