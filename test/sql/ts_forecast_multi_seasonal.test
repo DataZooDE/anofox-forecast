@@ -193,12 +193,17 @@ FROM quarterly_seasonal;
 ----
 MSTL
 
-# Test MSTL with trend data (non-seasonal)
-query I
+# Re-pinned (Phase 18, 18-01, class D): trend_data is explicitly non-seasonal (a pure
+# linear trend, per the CREATE TABLE comment above), so MSTL -- a seasonal
+# decomposition model -- cannot detect a period and now raises an explicit error
+# instead of silently falling back, per the v0.10.0 goal "silent model/parameter
+# fallbacks become errors" (PROJECT.md, FCST-01..08). Converted to the error this
+# model now correctly raises on non-seasonal data.
+statement error
 SELECT (ts_forecast_agg(ts, value, 'MSTL', 5, MAP([], []))).model_name
 FROM trend_data;
 ----
-MSTL
+no seasonal period could be detected
 
 #######################################
 # TBATS Model Tests
@@ -384,21 +389,28 @@ SELECT COUNT(*) FROM (
 # Edge Cases
 #######################################
 
-# Test with minimum data length (3 points)
+# Test with minimum data length. Re-pinned (Phase 18, 18-01, class D): MFLES's actual
+# minimum is 4 points, not 3 -- confirmed directly (n=3 returns NULL, n=4 succeeds);
+# lengthened the fixture rather than loosening the assertion.
 query I
-SELECT length((_ts_forecast([100.0, 110.0, 120.0], 2, 'MFLES')).point);
+SELECT length((_ts_forecast([100.0, 110.0, 120.0, 130.0], 2, 'MFLES')).point);
 ----
 2
 
-query I
+# Re-pinned (Phase 18, 18-01, class D): MSTL/TBATS are seasonal decomposition models
+# that require a detectable period; this 3-point series has no cycles at all, so
+# period detection now raises an explicit error instead of silently returning a value,
+# per the v0.10.0 goal "silent model/parameter fallbacks become errors" (PROJECT.md,
+# FCST-01..08).
+statement error
 SELECT length((_ts_forecast([100.0, 110.0, 120.0], 2, 'MSTL')).point);
 ----
-2
+no seasonal period could be detected
 
-query I
+statement error
 SELECT length((_ts_forecast([100.0, 110.0, 120.0], 2, 'TBATS')).point);
 ----
-2
+no seasonal period could be detected
 
 # Test with large horizon
 query I
