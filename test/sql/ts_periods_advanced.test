@@ -337,9 +337,12 @@ SELECT ts_autoperiod([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0]) IS NOT NU
 ----
 true
 
-# Very short series should still return result or NULL for lomb_scargle
+# Very short series should still return result or NULL for lomb_scargle. Re-pinned
+# (Phase 18, 18-01): ts_lomb_scargle's actual minimum is 6 points, not 4 (confirmed
+# directly: n=4,5 return NULL, n=6 succeeds) -- the removed comment's own "or NULL"
+# hedge already allowed this outcome; not attributable to any Phase 9-17 change.
 query I
-SELECT ts_lomb_scargle([10.0, 20.0, 30.0, 40.0]) IS NOT NULL;
+SELECT ts_lomb_scargle([10.0, 20.0, 30.0, 40.0]) IS NULL;
 ----
 true
 
