@@ -39,8 +39,8 @@ A time series forecasting extension for DuckDB with 36 models, statistical diagn
 - **Exogenous Variables**: crate-native exog support for Naive, ARIMA, AutoARIMA, the Theta family, ETS/AutoETS, MFLES, and MSTL — reported `model_name` is the base model's own name with `" with regressors"` appended (no separate model name)
 
 ### 🔬 Statistical Diagnostics
-- **Stationarity**: ADF, KPSS, and a combined four-way verdict (`ts_adf_by`, `ts_kpss_by`, `ts_stationarity_by`)
-- **Residual Adequacy**: Ljung-Box, Durbin-Watson, Jarque-Bera, plus a combined pass/fail report (`ts_residual_diagnostics_by`)
+- **Stationarity**: ADF, KPSS, and a combined four-way verdict, each with `regression := 'c'` (default) or `'ct'` for trend-stationarity (`ts_adf_by`, `ts_kpss_by`, `ts_stationarity_by`)
+- **Residual Adequacy**: Ljung-Box (model-aware via `fitted_params := p + q`, R `Box.test(fitdf)`-exact), Durbin-Watson, Jarque-Bera, plus a combined pass/fail report (`ts_residual_diagnostics_by`)
 - **Reference-checked**: Ljung-Box, Jarque-Bera, Durbin-Watson, and the KPSS statistic are numerically cross-checked against R (`stats::Box.test`, `tseries`) and scipy; ADF/KPSS p-values are a coarse approximation, not cross-validated (see `docs/api/10-diagnostics.md`)
 
 ### 📊 Complete Workflow

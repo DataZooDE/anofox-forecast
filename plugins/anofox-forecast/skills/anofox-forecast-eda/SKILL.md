@@ -157,15 +157,16 @@ Seven functions in two groups. The combined-verdict functions (`ts_stationarity`
 
 ### Stationarity trio
 
-**Current limitations** (full detail in `docs/api/10-diagnostics.md`): `ts_adf` is currently
-**non-augmented** (constant-only regression of Δy on y₋₁; `max_lags` only trims the sample,
-it does not add augmentation terms); the lag reported is chosen by minimum RSS, not AIC;
-p-values for both `ts_adf` and `ts_kpss` are a coarse step-table lookup — NOT MacKinnon
-interpolation and NOT cross-validated against statsmodels — and KPSS p-values are an
-unbounded extrapolation, not clamped to `[0.01, 0.10]`.
-(fix planned for v0.10.0, Phase 11/17)
+Full detail in `docs/api/10-diagnostics.md`. `ts_adf`/`ts_kpss`/`ts_stationarity` (and their
+`_by` macros) take a `regression := 'c' | 'ct'` parameter (default `'c'`): `'c'` tests around a
+constant mean (statsmodels/tseries' default), `'ct'` tests around a constant + linear time
+trend. `ts_adf` matches `statsmodels.tsa.stattools.adfuller(autolag="AIC")` exactly (AIC lag
+selection, MacKinnon finite-sample critical values/p-values); `ts_kpss` matches R
+`tseries::kpss.test()` for both `'c'` (`null = "Level"`) and `'ct'` (`null = "Trend"`, a trend
+KPSS implemented in this extension's Rust core since the upstream crate has no trend variant);
+KPSS p-values are bounded to `[0.01, 0.10]`.
 
-#### `ts_adf` / `ts_adf_by` — Dickey-Fuller unit-root test (currently non-augmented)
+#### `ts_adf` / `ts_adf_by` — Dickey-Fuller unit-root test (statsmodels-exact, AIC lag selection)
 
 H0: series has a unit root (non-stationary). Reject H0 (p < 0.05) → stationary.
 
@@ -196,9 +197,10 @@ FROM ts_adf_by('sales_data', product_id, ds, y)
 ORDER BY product_id;
 ```
 
-Optional second arg to scalar form: `ts_adf(LIST(y ORDER BY ds), max_lags INTEGER)` — `-1` = auto (default).
+Optional second/third args to scalar form: `ts_adf(LIST(y ORDER BY ds), max_lags INTEGER, regression VARCHAR)` —
+`max_lags := -1` = auto (default: `⌊(n−1)^(1/3)⌋`, AIC-selected up to that bound); `regression := 'c'` (default) or `'ct'`.
 
-#### `ts_kpss` / `ts_kpss_by` — KPSS level-stationarity test
+#### `ts_kpss` / `ts_kpss_by` — KPSS level/trend-stationarity test
 
 H0: series IS level-stationary (opposite direction from ADF). Fail to reject (p > 0.05) → stationary.
 
@@ -229,15 +231,15 @@ FROM ts_stationarity_by('sales_data', product_id, ds, y)
 ORDER BY product_id;
 ```
 
-Verdict strings (lowercase_with_underscores — not the CamelCase/hyphenated forms shown in
-older docs): `'stationary'` (both tests agree series is stationary), `'trend_stationary'`
-(ADF rejects unit root + KPSS rejects level-stationarity), `'difference_stationary'` (both
-tests point to a unit root), `'non_stationary'` (the remaining combination). **Current
-limitation:** the `trend_stationary`/`non_stationary` labels are currently inverted relative
-to the standard statsmodels convention, and a constant series currently returns
-`verdict = 'non_stationary'` rather than `'stationary'`. Prefer the individual
-`adf_is_stationary`/`kpss_is_stationary` flags if you need the textbook interpretation.
-(fix planned for v0.10.0, Phase 17)
+Verdict strings (the standard ADF+KPSS four-way mapping): `'stationary'` (ADF rejects the unit
+root AND KPSS fails to reject level-stationarity), `'trend_stationary'` (ADF does NOT reject
+but KPSS fails to reject — stationary only after removing a trend; use `regression := 'ct'` to
+see this), `'non_stationary'` (ADF does NOT reject AND KPSS rejects), `'difference_stationary'`
+(ADF rejects AND KPSS also rejects — conflicting; difference the series). Plus two explicit
+non-ambiguous cases: `'constant'` for a zero-variance series, and SQL `NULL` (never a
+misleading label) for a degenerate or too-short series. `regression := 'ct'` applies to both
+component tests, so a deterministic-trend series that reads `non_stationary` under `'c'`
+typically reads `trend_stationary` under `'ct'`.
 
 ---
 
@@ -245,7 +247,7 @@ to the standard statsmodels convention, and a constant series currently returns
 
 Apply to **residuals** from a fitted model (forecast errors), not to the raw series.
 
-#### `ts_ljung_box` / `ts_ljung_box_by` — autocorrelation test (white-noise check)
+#### `ts_ljung_box` / `ts_ljung_box_by` — autocorrelation test (white-noise check, model-aware)
 
 H0: residuals are white noise (no autocorrelation). Reject (p < 0.05) → residuals are correlated; model under-fits.
 
@@ -255,6 +257,20 @@ SELECT series_id, (lb).statistic AS q_stat, (lb).p_value, (lb).lags
 FROM ts_ljung_box_by('resids', series_id, ds, e) AS t(series_id, lb)
 ORDER BY series_id;
 ```
+
+Pass `fitted_params := p + q` for ARMA(p, q) residuals (or any count of estimated model
+parameters): `df = lags - fitted_params`, and the p-value matches R
+`Box.test(type = "Ljung-Box", fitdf = p + q)` exactly (default `fitted_params := 0` keeps
+`df == lags`, correct only for raw/unmodeled residuals).
+
+```sql
+SELECT series_id, (lb).df, (lb).p_value
+FROM ts_ljung_box_by('resids', series_id, ds, e, lags := 10, fitted_params := 1) AS t(series_id, lb)
+ORDER BY series_id;
+```
+
+`fitted_params` at or above the effective (resolved/clamped) lag count is a SQL error naming
+`fitted_params` and "degrees of freedom" — it never silently floors to `df = 1`.
 
 #### `ts_durbin_watson` / `ts_durbin_watson_by` — first-order autocorrelation
 

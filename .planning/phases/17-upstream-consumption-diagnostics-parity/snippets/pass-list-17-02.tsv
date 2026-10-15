@@ -1,0 +1,7 @@
+docs/api/10-diagnostics.md	2	PASS	LOAD anofox_forecast;	
+docs/api/10-diagnostics.md	3	PASS	SELECT	
+docs/api/10-diagnostics.md	4	PASS	SELECT	
+docs/api/10-diagnostics.md	5	PASS	SELECT kpss.* FROM (SELECT ts_kpss(LIST(y ORDER BY ds)) AS kpss FROM sales);	
+docs/api/10-diagnostics.md	6	PASS	SELECT (ts_stationarity(LIST(y ORDER BY ds))).verdict FROM sales;	
+docs/api/10-diagnostics.md	7	PASS	SELECT series_id, (ljung_box).p_value FROM ts_ljung_box_by('resids', series_id, ds, e);	
+plugins/anofox-forecast/skills/anofox-forecast-eda/SKILL.md	14	PASS	SELECT series_id, (lb).df, (lb).p_value	
