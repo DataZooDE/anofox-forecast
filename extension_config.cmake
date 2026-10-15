@@ -1,5 +1,14 @@
 # This file is included by DuckDB's CMake build system to load this extension
 
+# json is required at test-time only (50 test/sql/*.test files use `require json`
+# to assert JSON-typed intermediate results). This is DuckDB's own in-tree
+# extension (duckdb/extension/json, part of the pinned duckdb submodule) — no
+# download, no GIT_URL. A plain in-tree default-path load, deliberately
+# independent of the anofox_forecast block below: no LINKED_LIBS, no LOAD_TESTS
+# on it, and it does not touch anofox_forecast's own OpenSSL static linkage or
+# the WASM LINKED_LIBS workaround documented below.
+duckdb_extension_load(json)
+
 duckdb_extension_load(anofox_forecast
     SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}
     LOAD_TESTS
