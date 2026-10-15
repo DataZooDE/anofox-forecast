@@ -2,21 +2,21 @@
 gsd_state_version: "1.0"
 milestone: v0.10.0
 milestone_name: Statistical Correctness
-current_phase: 11
-current_phase_name: Upstream anofox-forecast Correctness Fixes
-current_plan: Not started
-status: planning
-stopped_at: Phase 16 complete, ready to plan Phase 11
-last_updated: "2026-10-14T13:19:33.191Z"
-last_activity: 2026-10-14
-last_activity_desc: Phase 16 complete, transitioned to Phase 11
-state_head: fb3f73c6e7517ec7e1c248752e5c42c7cbf2bb28
+current_phase: 17
+current_phase_name: Upstream Consumption & Diagnostics Parity
+current_plan: 1
+status: executing
+stopped_at: context exhaustion at 75% (2026-10-15)
+last_updated: "2026-10-15T04:59:02.373Z"
+last_activity: 2026-10-15
+last_activity_desc: Phase 17 execution started
+state_head: 057b12114b3abc8e7dc08a20352059cdda7c5198
 progress:
   total_phases: 10
-  completed_phases: 1
-  total_plans: 51
-  completed_plans: 48
-  percent: 10
+  completed_phases: 0
+  total_plans: 55
+  completed_plans: 50
+  percent: 0
 ---
 
 # Project State
@@ -26,17 +26,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-08 — started v0.10.0 Statistical Correctness)
 
 **Core value:** Every statistic the extension returns is correct — verified against R / scipy / statsmodels / tsfresh reference values — and is computed in the Rust crates; C++ and SQL only marshal, group, and dispatch.
-**Current focus:** Phase 16 — Conformal & Bootstrap Correctness
+**Current focus:** Phase 17 — Upstream Consumption & Diagnostics Parity
 
 ## Current Position
 
-Phase: 11 — Upstream anofox-forecast Correctness Fixes
-Current Plan: Not started
+Phase: 17 (Upstream Consumption & Diagnostics Parity) — EXECUTING
+Current Plan: 1
 Total Plans in Phase: 3
-Status: Ready to plan
-Last activity: 2026-10-14 — Phase 16 complete, transitioned to Phase 11
+Status: Executing Phase 17
+Last activity: 2026-10-15 — Phase 17 execution started
 
-Progress: [█░░░░░░░░░] 10%
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -158,7 +158,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-10T14:16:16.069Z
-Stopped at: Phase 16 complete, ready to plan Phase 11
+Last session: 2026-10-15T04:59:02.258Z
+Stopped at: context exhaustion at 75% (2026-10-15)
 Resume file: None
 Next: `/gsd-plan-phase 9`
