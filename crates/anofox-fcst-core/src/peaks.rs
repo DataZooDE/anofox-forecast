@@ -549,6 +549,19 @@ mod tests {
 
         // Verify function runs without error
         assert!(result.is_ok());
+        let result = result.unwrap();
+        // Closed form: 5*sin(2*pi*i/12) over i=0..119 (10 full periods) peaks
+        // (value exactly 5.0) at i = 3, 15, 27, ..., 111 -- 10 peaks, spaced
+        // exactly 12 apart.
+        assert_eq!(result.n_peaks, 10);
+        let expected: Vec<usize> = (0..10).map(|k| 3 + 12 * k).collect();
+        let got: Vec<usize> = result.peaks.iter().map(|p| p.index).collect();
+        assert_eq!(got, expected);
+        assert!(
+            (result.mean_period - 12.0).abs() < 1e-9,
+            "{}",
+            result.mean_period
+        );
     }
 
     #[test]
@@ -569,6 +582,36 @@ mod tests {
 
         // Verify function runs without error
         assert!(result.is_ok());
+        let result = result.unwrap();
+        // Value check (deterministic for this exact formula-generated input):
+        // normalized_timing takes only two distinct values (0.25 and 1/6)
+        // across the 10 cycles -- an integer-binning artifact of how
+        // peak-to-period phase is computed when the series length isn't an
+        // exact multiple of the smoothing basis -- giving mean_timing
+        // 0.20833..., std_timing 0.041666..., variability_score 0.41666....
+        let expected_timing = [
+            0.25,
+            1.0 / 6.0,
+            1.0 / 6.0,
+            0.25,
+            0.25,
+            1.0 / 6.0,
+            1.0 / 6.0,
+            0.25,
+            0.25,
+            1.0 / 6.0,
+        ];
+        for (got, want) in result.normalized_timing.iter().zip(&expected_timing) {
+            assert!(
+                (got - want).abs() < 1e-9,
+                "{:?} vs {:?}",
+                result.normalized_timing,
+                expected_timing
+            );
+        }
+        assert!((result.mean_timing - 0.20833333333333334).abs() < 1e-9);
+        assert!((result.std_timing - 0.04166666666666667).abs() < 1e-9);
+        assert!((result.variability_score - 0.4166666666666667).abs() < 1e-9);
     }
 
     #[test]
@@ -578,6 +621,10 @@ mod tests {
 
         // Just verify function doesn't error
         assert!(result.is_ok());
+        // Closed form (same reasoning as test_detect_peaks_basic): peaks at
+        // i = 3, 15, 27, ..., 111.
+        let expected: Vec<usize> = (0..10).map(|k| 3 + 12 * k).collect();
+        assert_eq!(result.unwrap(), expected);
     }
 
     #[test]
@@ -764,6 +811,14 @@ mod tests {
             result.is_ok(),
             "find_peaks must not panic/error on NaN input"
         );
+        // Value check: NaN positions (1, 3) are skipped as candidates; the
+        // only local maximum among the finite values (1.0, 3.0, 2.0, 5.0,
+        // 1.0 at indices 0, 2, 4, 5, 6) is index 5 (value 5.0).
+        let peaks = result.unwrap();
+        assert_eq!(peaks.len(), 1);
+        assert_eq!(peaks[0].index, 5);
+        assert_eq!(peaks[0].height, 5.0);
+        assert_eq!(peaks[0].prominence, 3.0);
     }
 
     /// scipy's own linear (`wlen=None`) prominence scan, used only to

@@ -18,6 +18,10 @@
 #![allow(clippy::doc_overindented_list_items)]
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::manual_div_ceil)]
+// unknown_lints: clippy::manual_is_multiple_of doesn't exist yet on this
+// workspace's pinned 1.89 toolchain (added in a later clippy); keeps
+// `cargo clippy -D warnings` green on both.
+#![allow(unknown_lints)]
 #![allow(clippy::manual_is_multiple_of)]
 
 pub mod allocation;
@@ -8506,13 +8510,23 @@ mod panel_ffi_tests {
         assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
         let preds = result.unwrap();
         assert_eq!(preds.len(), 3, "expected 3 series forecasts");
+        // Value check: per-series sane magnitude bounds derived from each
+        // series' own input range (s1 1..12, s2 3..19.5, s3 2.4..11.2) --
+        // a correct panel forecast must continue near its own series, not
+        // some degenerate/cross-contaminated magnitude.
+        let bounds = [(0.0, 30.0), (0.0, 40.0), (0.0, 25.0)];
         for (i, series_preds) in preds.iter().enumerate() {
             assert_eq!(series_preds.len(), 4, "expected horizon=4 for series {}", i);
+            let (lo, hi) = bounds[i];
             for &v in series_preds {
                 assert!(
                     v.is_finite(),
                     "expected finite forecast, got NaN/Inf for series {}",
                     i
+                );
+                assert!(
+                    (lo..=hi).contains(&v),
+                    "series {i} forecast {v} out of sane range [{lo}, {hi}]"
                 );
             }
         }
@@ -8536,10 +8550,19 @@ mod panel_ffi_tests {
         );
         let preds = result.unwrap();
         assert_eq!(preds.len(), 3);
-        for series_preds in &preds {
+        // Value check: same per-series sane magnitude bounds as
+        // test_happy_path_global_ets (the s1 interior NaN gap is imputed,
+        // so the forecast should still track s1's own ~1..12 range).
+        let bounds = [(0.0, 30.0), (0.0, 40.0), (0.0, 25.0)];
+        for (i, series_preds) in preds.iter().enumerate() {
             assert_eq!(series_preds.len(), 4);
+            let (lo, hi) = bounds[i];
             for &v in series_preds {
                 assert!(v.is_finite(), "expected no NaN after imputation");
+                assert!(
+                    (lo..=hi).contains(&v),
+                    "series {i} forecast {v} out of sane range [{lo}, {hi}]"
+                );
             }
         }
     }
@@ -8581,13 +8604,21 @@ mod panel_ffi_tests {
         );
         let preds = result.unwrap();
         assert_eq!(preds.len(), 3, "expected 3 series forecasts");
+        // Value check: same per-series sane magnitude bounds as the
+        // GlobalETS happy-path test above.
+        let bounds = [(0.0, 30.0), (0.0, 40.0), (0.0, 25.0)];
         for (i, series_preds) in preds.iter().enumerate() {
             assert_eq!(series_preds.len(), 4, "expected horizon=4 for series {}", i);
+            let (lo, hi) = bounds[i];
             for &v in series_preds {
                 assert!(
                     v.is_finite(),
                     "expected finite Theta forecast for series {}",
                     i
+                );
+                assert!(
+                    (lo..=hi).contains(&v),
+                    "series {i} forecast {v} out of sane range [{lo}, {hi}]"
                 );
             }
         }
@@ -9034,8 +9065,15 @@ mod kalman_garch_ffi_tests {
         );
         let point = result.unwrap();
         assert_eq!(point.len(), 5, "Kalman FFI must return 5 point forecasts");
+        // Value check: input ranges 10..22 (slope 0.5, no noise); a
+        // local-level Kalman filter forecast must stay within a sane
+        // neighbourhood of that range.
         for &v in &point {
             assert!(v.is_finite(), "Kalman FFI forecast must be finite");
+            assert!(
+                (0.0..=40.0).contains(&v),
+                "Kalman forecast {v} out of sane range"
+            );
         }
     }
 

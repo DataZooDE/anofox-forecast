@@ -1955,6 +1955,15 @@ mod tests {
         assert!(result.lower[1].is_nan());
         assert!(result.upper[1].is_nan());
         assert!(result.point[2].is_finite());
+        // Value check: alpha=0.1 on n=4 calibration residuals is insufficient
+        // (ceil((n+1)*(1-alpha)) = 5 > n), so symmetric conformal falls back
+        // to the unbounded interval at every non-NULL point position.
+        assert_eq!(result.point[0], 30.0);
+        assert_eq!(result.point[2], 20.0);
+        assert_eq!(result.lower[0], f64::NEG_INFINITY);
+        assert_eq!(result.upper[0], f64::INFINITY);
+        assert_eq!(result.lower[2], f64::NEG_INFINITY);
+        assert_eq!(result.upper[2], f64::INFINITY);
     }
 
     #[test]
@@ -2622,6 +2631,24 @@ mod tests {
         assert_eq!(result.lower.len(), 2);
         assert_eq!(result.upper.len(), 2);
         assert_eq!(result.half_widths.len(), 2);
+        // Closed form: step 0's per-fold residuals are |100-101|=1, |110-109|=1,
+        // |120-121|=1 -- all IDENTICAL, so any quantile of that calibration set
+        // is exactly 1.0 regardless of interpolation method. Step 1's residuals
+        // are |105-108|=3, |115-118|=3, |125-122|=3 -- all exactly 3.0.
+        assert!(
+            (result.half_widths[0] - 1.0).abs() < 1e-9,
+            "{:?}",
+            result.half_widths
+        );
+        assert!(
+            (result.half_widths[1] - 3.0).abs() < 1e-9,
+            "{:?}",
+            result.half_widths
+        );
+        assert!((result.lower[0] - 99.0).abs() < 1e-9);
+        assert!((result.upper[0] - 101.0).abs() < 1e-9);
+        assert!((result.lower[1] - 102.0).abs() < 1e-9);
+        assert!((result.upper[1] - 108.0).abs() < 1e-9);
     }
 }
 

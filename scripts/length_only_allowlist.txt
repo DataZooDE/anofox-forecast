@@ -1,0 +1,24 @@
+# Length-only sweep allow-list (Phase 18, 18-02, D-03).
+# Format: path | test_fn | justification
+# An entry is valid ONLY for a heuristic false positive: a test whose single
+# correct, complete expected value for its input genuinely IS a length/shape/
+# presence fact (empty list, NaN, Ok/Err) -- not a test that could reasonably
+# assert a stronger numeric value but doesn't yet. Keep this list as small as
+# possible; prefer upgrading the test (see the 18-02-SUMMARY.md for the list
+# of genuine findings that were upgraded instead of allow-listed).
+
+crates/anofox-fcst-core/src/changepoint.rs | test_constant_series_zero_changepoints_for_every_cost | A constant input has no changepoints under any cost function -- the empty list IS the complete, correct expected value (not a weaker stand-in for a numeric one).
+crates/anofox-fcst-core/src/conformal.rs | test_conformal_from_pairs_empty_point_list_is_valid | Empty point/lower/upper lists are the complete, correct output for an empty points input -- there is no stronger value to assert.
+crates/anofox-fcst-core/src/features.rs | test_fft_coefficient_nan_beyond_available_bins | NaN is the function's documented, correct return value once the requested FFT bin exceeds what the series length provides -- no other value exists to assert.
+crates/anofox-fcst-core/src/features.rs | test_sample_entropy_n3_is_nan | NaN is the documented, correct sample_entropy value for n=3 (too short for the m=2 embedding) -- no other value exists to assert.
+crates/anofox-fcst-core/src/features.rs | test_sample_entropy_nan_input_is_nan | NaN is the documented, correct sample_entropy value when the input itself contains NaN -- no other value exists to assert.
+crates/anofox-fcst-core/src/features.rs | test_approximate_entropy_nan_input_is_nan | NaN is the documented, correct approximate_entropy value when the input itself contains NaN -- no other value exists to assert.
+crates/anofox-fcst-core/src/features.rs | test_binned_entropy_nan_input_is_nan | NaN is the documented, correct binned_entropy value when the input itself contains NaN -- no other value exists to assert.
+crates/anofox-fcst-core/src/features.rs | test_benford_correlation_all_zero_is_nan | NaN is the documented, correct benford_correlation value for an all-zero series (no leading digits exist to correlate) -- no other value exists to assert.
+crates/anofox-fcst-core/src/filter.rs | test_drop_edge_zeros_all_zeros | An all-zero series has no non-zero interior to keep -- the empty list IS the complete, correct expected value.
+crates/anofox-fcst-core/src/filter.rs | test_diff_short_series | A 1-element series has no pairs to difference at order 2 -- the empty list IS the complete, correct expected value.
+crates/anofox-fcst-core/src/forecast.rs | build_forecaster_ok_for_supported_members | build_forecaster returns an opaque anofox_forecast::models::BoxedForecaster trait object with no introspectable identity from this crate without fitting it against real data (a separate, more expensive test); Ok/Err success IS the complete observable contract for this constructor smoke test. The sibling Err-path test (build_forecaster_err_for_blocked_variants) already covers the complementary branch.
+crates/anofox-fcst-core/src/forecast.rs | build_forecaster_seasonal_naive_with_period | Same opaque-type justification as build_forecaster_ok_for_supported_members -- no introspectable value exists beyond Ok/Err without a full fit+predict call (covered by the parity test build_forecaster_matches_standalone_forecast_for_every_member instead).
+crates/anofox-fcst-core/src/validation.rs | adf_short_series_returns_nan_without_panicking | NaN is the documented, correct adf statistic for a series shorter than the minimum usable length -- no other value exists to assert.
+crates/anofox-fcst-core/src/validation.rs | ljung_box_n_below_3_is_nan_not_err | NaN is the documented, correct ljung_box statistic/p_value for n < 3 -- no other value exists to assert.
+crates/anofox-fcst-core/tests/forecast_snapshot.rs | point_forecasts_match_snapshot | Collects per-case value mismatches into a `violations` Vec and asserts it empty at the end -- the real value comparison happens per-case inside the loop (via a helper this regex-based scan cannot see through), not in the final assertion the sweep flags.

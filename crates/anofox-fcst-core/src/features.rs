@@ -53,6 +53,10 @@ pub fn extract_features(values: &[f64]) -> Result<HashMap<String, f64>> {
     let mut sorted = values.to_vec();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     // Note: is_multiple_of() is unstable and breaks WASM builds
+    // #[allow(unknown_lints)]: clippy::manual_is_multiple_of doesn't exist
+    // yet on this workspace's pinned 1.89 toolchain (added in a later
+    // clippy); keeps `cargo clippy -D warnings` green on both.
+    #[allow(unknown_lints)]
     #[allow(clippy::manual_is_multiple_of)]
     let median = if values.len() % 2 == 0 {
         (sorted[values.len() / 2 - 1] + sorted[values.len() / 2]) / 2.0
@@ -1949,5 +1953,11 @@ mod tests {
             "extract_features with a NaN element: expected 117 keys, got {}",
             features.len()
         );
+        // Value checks: "length" is the raw input count (6, NaN included --
+        // it is not filtered before this feature is computed), and "mean"
+        // (sum/n over the raw values) propagates the NaN rather than
+        // silently skipping it.
+        assert_eq!(features.get("length"), Some(&6.0));
+        assert!(features.get("mean").unwrap().is_nan());
     }
 }

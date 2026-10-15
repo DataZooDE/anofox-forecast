@@ -4216,6 +4216,15 @@ mod tests {
 
         let result = forecast(&values, &options).unwrap();
         assert_eq!(result.point.len(), 5);
+        // Value check: SES has no trend/seasonal component, so its forecast
+        // is FLAT -- every horizon step repeats the same extrapolated level.
+        let level = result.point[0];
+        assert!(level.is_finite());
+        assert!(
+            result.point.iter().all(|&p| (p - level).abs() < 1e-9),
+            "SES forecast must be flat: {:?}",
+            result.point
+        );
     }
 
     #[test]
@@ -4918,6 +4927,19 @@ mod tests {
             "ETS without explicit spec should fall back: {:?}",
             result.err()
         );
+        let result = result.unwrap();
+        // Value check: input ranges 100..159 (strictly increasing); any ETS
+        // auto-selection fitting this cleanly trending series must forecast
+        // within a sane neighbourhood of that range, not degenerate/garbage
+        // magnitudes, and must report a non-empty model identity.
+        for &v in &result.point {
+            assert!(v.is_finite());
+            assert!(
+                (50.0..=400.0).contains(&v),
+                "ETS forecast out of sane range: {v}"
+            );
+        }
+        assert!(!result.model_name.is_empty());
     }
 
     /// Phase 17 plan 17-01: anofox-forecast 0.16.x's ETSSpec::is_valid()
@@ -5399,6 +5421,14 @@ mod tests {
         let empty_result = parse_combination_method(Some(""));
         assert!(none_result.is_ok(), "None should parse as Mean");
         assert!(empty_result.is_ok(), "empty string should parse as Mean");
+        assert_eq!(
+            none_result.unwrap(),
+            anofox_forecast::models::ensemble::CombinationMethod::Mean
+        );
+        assert_eq!(
+            empty_result.unwrap(),
+            anofox_forecast::models::ensemble::CombinationMethod::Mean
+        );
     }
 
     #[test]
@@ -5505,11 +5535,18 @@ mod tests {
         );
         let out = result.unwrap();
         assert_eq!(out.point.len(), 6, "output length must equal horizon");
+        // Value check: input ranges 100..194 (strictly increasing, slope 2);
+        // the Mean of AutoETS and Naive on this clean trend must stay within
+        // a sane neighbourhood of that range, not degenerate/garbage values.
         for &v in &out.point {
             assert!(
                 v.is_finite(),
                 "all point forecasts must be finite, got {}",
                 v
+            );
+            assert!(
+                (50.0..=400.0).contains(&v),
+                "ensemble forecast out of sane range: {v}"
             );
         }
     }
@@ -5563,6 +5600,27 @@ mod tests {
             "duplicate members should be allowed: {:?}",
             result.err()
         );
+        // Value check: Mean (the default when method is None) of two
+        // IDENTICAL AutoETS members reproduces standalone AutoETS exactly --
+        // the mean of two equal numbers is that number.
+        let ensemble_point = result.unwrap().point;
+        let standalone = forecast(
+            &values,
+            &ForecastOptions {
+                model: ModelType::AutoETS,
+                horizon: 4,
+                confidence_level: 0.90,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(ensemble_point.len(), standalone.point.len());
+        for (e, s) in ensemble_point.iter().zip(&standalone.point) {
+            assert!(
+                (e - s).abs() < 1e-9,
+                "duplicate-AutoETS ensemble {e} != standalone AutoETS {s}"
+            );
+        }
     }
 
     /// FCST-07: for every ModelType build_forecaster can construct, fitting

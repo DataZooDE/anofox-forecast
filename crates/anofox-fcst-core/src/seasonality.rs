@@ -867,6 +867,9 @@ mod tests {
 
         // Verify function runs without error
         assert!(result.is_ok());
+        // Value check: a clean, noise-free, non-trending sine is nearly
+        // 100% explained by its seasonal component.
+        assert!(result.unwrap() >= 0.99);
     }
 
     #[test]
@@ -876,6 +879,8 @@ mod tests {
 
         // Verify function runs without error
         assert!(result.is_ok());
+        // Value check: same series, spectral method -- also near 100%.
+        assert!(result.unwrap() >= 0.99);
     }
 
     #[test]
@@ -932,6 +937,15 @@ mod tests {
 
         // Just verify function runs without error
         assert!(result.is_ok());
+        // Value check: a clean, noise-free sine's windowed seasonal strength
+        // stays near 1.0 at every window.
+        let strengths = result.unwrap();
+        assert!(!strengths.is_empty());
+        assert!(
+            strengths.iter().all(|&s| (0.98..=1.0).contains(&s)),
+            "{:?}",
+            strengths
+        );
     }
 
     /// Deterministic LCG noise in `[-1, 1)` -- never `thread_rng` (the
@@ -993,6 +1007,25 @@ mod tests {
 
         // Just verify function runs without error
         assert!(result.is_ok());
+        let r = result.unwrap();
+        // Value check: only the AMPLITUDE changes at i=120 (5.0 -> 0.5), not
+        // the seasonal STRENGTH (a pure sine of any amplitude is ~100%
+        // explained by its own seasonal component) -- no change point is
+        // flagged, and the strength curve is ~1.0 away from the transition
+        // (a transient dip near the amplitude-change boundary is expected:
+        // a windowed estimator mixing both amplitude regimes there).
+        assert_eq!(r.change_points.len(), 0);
+        assert_eq!(r.strength_curve.len(), 240);
+        assert!(
+            r.strength_curve[..100].iter().all(|&s| s >= 0.99),
+            "{:?}",
+            &r.strength_curve[..100]
+        );
+        assert!(
+            r.strength_curve[160..].iter().all(|&s| s >= 0.99),
+            "{:?}",
+            &r.strength_curve[160..]
+        );
     }
 
     #[test]
@@ -1002,6 +1035,21 @@ mod tests {
 
         // Just verify function runs without error
         assert!(result.is_ok());
+        // Value check: for a clean period-12 sine, the instantaneous period
+        // estimate at every sample is 12.0 (within floating-point noise),
+        // and amplitude is 5.0 (within floating-point noise) everywhere.
+        let r = result.unwrap();
+        assert!(!r.period.is_empty());
+        assert!(
+            r.period.iter().all(|&p| (p - 12.0).abs() < 1e-6),
+            "{:?}",
+            r.period
+        );
+        assert!(
+            r.amplitude.iter().all(|&a| (a - 5.0).abs() < 1e-6),
+            "{:?}",
+            r.amplitude
+        );
     }
 
     #[test]

@@ -544,6 +544,14 @@ mod tests {
         let result = detrend_polynomial(&values, 2).unwrap();
 
         assert_eq!(result.trend.len(), values.len());
+        // Closed form: the input IS an exact degree-2 polynomial, so a
+        // degree-2 polynomial fit must recover it (near-)exactly.
+        let max_resid = values
+            .iter()
+            .zip(&result.trend)
+            .map(|(v, t)| (v - t).abs())
+            .fold(0.0_f64, f64::max);
+        assert!(max_resid < 1e-6, "max residual = {max_resid}");
     }
 
     #[test]
@@ -553,6 +561,21 @@ mod tests {
 
         // Verify function runs without error
         assert!(result.is_ok());
+        let result = result.unwrap();
+        // Closed form: `values` is a perfectly linear series (slope 0.5, no
+        // noise), so the order-1 difference is the constant slope (0.5) at
+        // every position except the last, which is this implementation's
+        // documented edge-padding convention (0.0).
+        let n = result.detrended.len();
+        assert_eq!(n, values.len());
+        assert!(
+            result.detrended[..n - 1]
+                .iter()
+                .all(|&d| (d - 0.5).abs() < 1e-9),
+            "{:?}",
+            result.detrended
+        );
+        assert_eq!(result.detrended[n - 1], 0.0);
     }
 
     #[test]
@@ -570,6 +593,20 @@ mod tests {
         let result = detrend_auto(&values).unwrap();
 
         assert_eq!(result.trend.len(), values.len());
+        // Closed form: `values` is a perfectly linear series (slope 0.5, no
+        // noise); whichever method detrend_auto selects, the residual
+        // (detrended) series must be ~0 everywhere -- a linear trend leaves
+        // no detectable structure behind once properly removed.
+        let max_resid = result
+            .detrended
+            .iter()
+            .cloned()
+            .fold(0.0_f64, |m, d| m.max(d.abs()));
+        assert!(
+            max_resid < 1e-3,
+            "detrend_auto selected {:?}, max |residual| = {max_resid}",
+            result.method
+        );
     }
 
     #[test]

@@ -334,6 +334,10 @@ pub fn classical_decompose(
 
     let m = period;
     // Note: is_multiple_of() is unstable and breaks WASM builds.
+    // #[allow(unknown_lints)]: clippy::manual_is_multiple_of doesn't exist
+    // yet on this workspace's pinned 1.89 toolchain (added in a later
+    // clippy); keeps `cargo clippy -D warnings` green on both.
+    #[allow(unknown_lints)]
     #[allow(clippy::manual_is_multiple_of)]
     let m_even = m % 2 == 0;
     let half = m / 2;

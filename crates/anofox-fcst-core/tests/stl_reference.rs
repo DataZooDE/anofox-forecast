@@ -127,6 +127,10 @@ fn msts_case_matches_forecast_mstl_and_per_period_strengths() {
     let mut last_trend = vec![0.0f64; n];
     for _pass in 0..2 {
         for (pos, &period) in periods.iter().enumerate() {
+            // deseas[i] is updated from seas[pos][i] (two parallel arrays
+            // indexed by the same i); an enumerate()-based rewrite would not
+            // simplify this.
+            #[allow(clippy::needless_range_loop)]
             for i in 0..n {
                 deseas[i] += seas[pos][i];
             }
@@ -135,6 +139,7 @@ fn msts_case_matches_forecast_mstl_and_per_period_strengths() {
             let fit = stl(&deseas, &params).unwrap();
             seas[pos] = fit.seasonal;
             last_trend = fit.trend;
+            #[allow(clippy::needless_range_loop)]
             for i in 0..n {
                 deseas[i] -= seas[pos][i];
             }

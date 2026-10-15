@@ -506,6 +506,11 @@ fn least_squares_qr(design: &[Vec<f64>], y: &[f64]) -> Vec<f64> {
     let mut x = vec![0.0; m];
     for i in (0..m).rev() {
         let mut s = qty[i];
+        // Back-substitution indexes two parallel arrays (r[i][k] and x[k])
+        // by the same k; an enumerate()-based rewrite would not simplify
+        // this and risks introducing a subtle bug in sensitive linear-algebra
+        // code untouched by this milestone.
+        #[allow(clippy::needless_range_loop)]
         for k in (i + 1)..m {
             s -= r[i][k] * x[k];
         }
@@ -1250,6 +1255,11 @@ pub fn ssa_period(
         for _ in 0..100 {
             // Matrix-vector multiplication: v_new = C * v
             let mut v_new: Vec<f64> = vec![0.0; l];
+            // Dense matrix-vector product indexes cov_deflated[i][j] and
+            // v[j] by the same j; an enumerate()-based rewrite would not
+            // simplify this and risks introducing a subtle bug in sensitive
+            // linear-algebra code untouched by this milestone.
+            #[allow(clippy::needless_range_loop)]
             for i in 0..l {
                 for j in 0..l {
                     v_new[i] += cov_deflated[i][j] * v[j];
@@ -1273,6 +1283,8 @@ pub fn ssa_period(
 
         // Compute eigenvalue: lambda = v^T * C * v
         let mut cv: Vec<f64> = vec![0.0; l];
+        // Same dense matrix-vector product pattern as above.
+        #[allow(clippy::needless_range_loop)]
         for i in 0..l {
             for j in 0..l {
                 cv[i] += cov_deflated[i][j] * v[j];
