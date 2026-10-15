@@ -647,10 +647,13 @@ fn confidence_level_outside_open_interval() {
     }
 }
 
-// ── r_vs_crate_half_width_information (not asserted — FCST-09 is Phase 17) ──
+// ── r_vs_crate_half_width_information (informational only) ──────────────────
 //
-// Prints the R-vs-crate h=1 95% half-width for a handful of models as
-// information for Phase 17's interval-calibration work. No assertions.
+// Prints the R-vs-crate h=1 95% half-width for a handful of models.
+// R parity is now ASSERTED by crates/anofox-fcst-core/tests/r_forecast_parity.rs
+// (Phase 17 plan 17-03, FCST-09) against validation/reference/fixtures/
+// r_forecast/{air_passengers,simulated_series}.json tolerance.parity_checks —
+// this test stays as a quick eyeball check, not a gate.
 #[test]
 fn r_vs_crate_half_width_information() {
     let fx = common::load_fixture("r_forecast/air_passengers.json");

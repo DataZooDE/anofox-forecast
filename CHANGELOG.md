@@ -644,6 +644,30 @@ use the semver numbering this project started with.
   `laplace_seasonal_batch_init`, `top_k`, `combination_method`, and a working
   `confidence_level` (see Breaking changes above — these were previously accepted
   syntactically but silently ignored on this surface).
+- **R `forecast` parity suite (FCST-09, Phase 17 plan 17-03).** 36 point / 95%-interval
+  checks against R `forecast` 9.0.2 across AirPassengers (15), a seeded random walk (9), an
+  intermittent-demand series (3) and a new seeded random-walk-with-drift series (9), covering
+  all ten FCST-09 models (`Naive`, `SeasonalNaive`, `RandomWalkDrift`, `SESOptimized`/`ETS
+  'ANN'`, `Holt`/`ETS 'AAN'`, `HoltWinters`/`ETS 'AAA'`/`ETS 'MAM'`, `AutoETS`, `AutoARIMA`,
+  `Theta`, `CrostonClassic`). 24 of 36 checks are `parity`; the 12 `known_gap` checks each
+  cite an identified root cause (D-12) — 1 extension cause already fixed (`RC-01`, the
+  `'Holt'` remap, see Breaking changes), 1 upstream `AutoETS` optimiser gap (`RC-03`), 1
+  upstream `SESOptimized` optimiser gap on the intermittent series (`RC-04`), 1 upstream
+  `AutoARIMA` interval-variance gap on AirPassengers only (`RC-05`, D-16), and 9 checks where
+  R's own optimiser reaches a looser, in-bounds fit than the crate's (`RC-02`, not a defect).
+  **AutoARIMA's R `auto.arima` parity (D-15/D-16):** since anofox-forecast 0.16.1 (PR #223),
+  AutoARIMA's selected order and point forecast are hard parity on every series (air
+  `AutoARIMA(2,1,1)(0,1,0)[12]`, rw/trend `AutoARIMA(0,1,0)`); the AirPassengers 95% interval
+  is the one allowed exception. A seeded selection-frequency simulation (UPST-01, 30 random
+  walks + 30 AR(0.7) series) measured 0 share deviation and 60/60 exact `(p,d,q)` agreement
+  with R `auto.arima`, closing UPST-01. **Monte Carlo interval coverage (D-10):** a seeded
+  2,000-replication local-level simulation measured `ETS(A,N,N)`/`SESOptimized` 95% coverage
+  within [0.935, 0.957] per horizon and 80% coverage within [0.787, 0.809] per horizon — both
+  within ±3pp of nominal. See `validation/reference/README.md`'s "r_forecast parity
+  tolerances" and "R-parity gap root causes" sections for the full tables; upstream drafts
+  for `RC-03`/`RC-04`/`RC-05` are under
+  `.planning/phases/17-upstream-consumption-diagnostics-parity/diagnosis/upstream-issues/`
+  (not filed — left for the user).
 
 ### Fixed
 

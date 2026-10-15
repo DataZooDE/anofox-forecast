@@ -87,7 +87,7 @@ test without a separate Rust edit.
 
 | Family | Files | Generator | Tolerance keys (values) | Consumers |
 |--------|-------|-----------|--------------------------|-----------|
-| `r_forecast` | `air_passengers.json`, `simulated_series.json` | `r/gen_forecast_reference.R` | `closed_form_abs` (1e-8), `model_point_rel` (0.01), `interval_rel` (0.05) | Phase 9 (closed-form Naive/SeasonalNaive/RandomWalkDrift), Phase 10 (FCST-01 model-point parity), Phase 17 (FCST-09 full R parity) |
+| `r_forecast` | `air_passengers.json`, `simulated_series.json` | `r/gen_forecast_reference.R` | `closed_form_abs` (1e-8), `model_point_rel` (0.01), `interval_rel` (0.05), `root_causes` (D-12 RC table, shared verbatim across both fixtures), `parity_checks` (per-fixture, 36 rows total: 15 air, 9 rw, 3 inter, 9 trend), `auto_arima_selection` (`share_abs` 0.10, `exact_agreement_min` 0.9, UPST-01) | Phase 9 (closed-form Naive/SeasonalNaive/RandomWalkDrift), Phase 10 (FCST-01 model-point parity), Phase 17 plan 17-03 (FCST-09 full R parity, D-12 root causes, D-15/D-16 AutoARIMA, UPST-01 selection frequency, D-10 Monte Carlo coverage): `crates/anofox-fcst-core/tests/{r_parity_diagnosis,r_forecast_parity,interval_coverage_mc}.rs` and the non-json-gated `test/sql/ts_forecast_reference.test` |
 | `r_diagnostics` | `stationarity_portmanteau.json` | `r/gen_diagnostics_reference.R` | `statistic_abs` (1e-6), `p_value_abs` (1e-4), `portmanteau_statistic_abs` (1e-9), `portmanteau_p_value_abs` (1e-9), `dw_abs` (1e-12) | Phase 11 (upstream diagnostics), Phase 17 (DIAG-03..05): `portmanteau_cases` (added 17-02, D-06) is `Box.test(type = "Ljung-Box", fitdf)` on an ARMA(1,1) residual series and on first-differenced random-walk series, plus the closed-form Durbin-Watson `sum(diff(values)^2) / sum(values^2)` — the tighter `portmanteau_*`/`dw_abs` tolerances reflect that both the Ljung-Box statistic and this extension's post-17-02 p-value (exact chi-square survival function, not the crate's Wilson-Hilferty approximation) and Durbin-Watson are closed-form on both the R and Rust sides, so only double-precision noise is expected. Consumed by `crates/anofox-fcst-core/tests/portmanteau_reference.rs` and `test/sql/ts_diagnostics_reference.test`. |
 | `moments` | `scipy_moments.json` | `python/gen_moments.py` | `abs` (1e-12), `rel` (1e-12) | Phase 9 (self-consistency pin), Phase 13 (STAT-01 `ts_stats` moments) |
 | `multiscale_ols` | `cases.json`, `exog_typical.csv` | `python/gen_multiscale_ols.py` | `coef_rel` (1e-8), `coef_abs` (1e-9), `fitted_abs_per_sd` (1e-8), `sql_point_abs` (1.0) | Phase 9: `forecast.rs::tests::fit_ols_regression_matches_numpy_lstsq_fixture` (DEP-01, inline), `tests/exog_ols_memory.rs` (15k-row peak-heap guard), `validation/reference/sql/check_dep01_exog.sql` (SQL-level, DEP-01) |
@@ -136,6 +136,122 @@ coverage and asserts every row's `status` is `"match"`; the nine
 117 assertions per series (no silent skips); `sample_entropy_roadmap_anchor`
 pins the ROADMAP's literal `sample_entropy` anchor value independently of the
 fixture JSON.
+
+### r_forecast parity tolerances (Phase 17 plan 17-03, FCST-09)
+
+`crates/anofox-fcst-core/tests/r_forecast_parity.rs` asserts every one of the 36 rows of
+`tolerance.parity_checks` (15 air, 9 rw, 3 inter, 9 trend) against
+`anofox_fcst_core::forecast::forecast` at horizon 12, confidence 0.95. Every tolerance,
+status, cause, reason and measured value below is read from the fixture -- nothing is
+hard-coded in the Rust test or here.
+
+**Tier rule** (status decided on the MEASURED value, never on the tolerance): `parity`
+when the measured point deviation is `<= 1e-3` relative (`<= 1e-8` absolute for the
+closed-form Naive / SeasonalNaive / RandomWalkDrift / CrostonClassic) AND the measured
+interval deviation is `<= 1e-2`; anything else is `known_gap`, which must cite an RC row
+below. The written tolerance adds headroom on top of the measured value (never looser
+than what was actually observed).
+
+**D-12 tolerance rule** (only for a check on a surface a Task 1 fix changed): `tol = max(floor,
+1.5 x post-fix measured, rounded up to one significant digit)`, floor `1e-8` absolute for
+closed-form points / `1e-6` relative otherwise, capped at the PRE-fix planned tolerance (the
+1.5x headroom absorbs cross-platform optimiser float noise).
+
+**`'SES'` is a fixed alpha=0.3 model**, not R's `ses()` -- R `ses()` parity is asserted on
+`'SESOptimized'` / `ETS 'ANN'` only.
+
+**AutoARIMA (D-15, narrowed by D-16, user checkpoint 2026-10-15):** since anofox-forecast
+0.16.1 (upstream PR #223), AutoARIMA reproduces R `auto.arima`'s stepwise search and
+estimation. Order identity (parsed from `model_name`) is hard parity on every series: air
+`AutoARIMA(2,1,1)(0,1,0)[12]`, rw `AutoARIMA(0,1,0)`, trend `AutoARIMA(0,1,0)` (R's drift is
+evidenced by the point forecast, since a drift-free `(0,1,0)` would be flat). Point forecasts
+are hard parity everywhere too. The ONE allowed exception is the AirPassengers 95% interval
+(RC-05 below) -- rw and trend's AutoARIMA intervals are full parity. UPST-01's seeded
+selection-frequency simulation (`auto_arima_selection`: 30 random walks + 30 AR(0.7) series,
+seed 170015, `auto_arima_selection_matches_r` in `r_forecast_parity.rs`) measured
+`rw_share crate=0.7667 r=0.7667`, `ar07_d_share crate=0.2333 r=0.2333`,
+`exact_agreement=60/60` -- both share deviations are 0 (well inside `share_abs=0.10`) and
+exact agreement is 60/60 (above `exact_agreement_min=0.9`), closing UPST-01.
+
+**Monte Carlo coverage (D-10):** a seeded (SplitMix64, seed 170010) 2,000-replication
+local-level simulation (`alpha=0.3`, `sigma=1`, `l0=10`, `n=100` train + `h=12` test) in
+`crates/anofox-fcst-core/tests/interval_coverage_mc.rs` measured, for both `ETS(A,N,N)` and
+`SESOptimized`: 95% pooled coverage 0.9475 / 0.9475 (per-horizon 0.9350..0.9570), 80% pooled
+coverage 0.7972 / 0.7972 (per-horizon 0.7870..0.8085) -- all within +/-3pp of nominal, zero fit
+failures.
+
+| series | R function | surface | point tol | interval tol | status | measured point | measured interval | cause |
+|---|---|---|---|---|---|---|---|---|
+| air | naive | Naive | abs 1e-08 | 0.0005 | parity | 0 | 0.00022 | - |
+| air | snaive | SeasonalNaive | abs 1e-08 | 0.0005 | parity | 0 | 0.00022 | - |
+| air | rwf_drift | RandomWalkDrift | abs 1e-08 | 0.005 | parity | 4.5e-13 | 0.00328 | - |
+| air | ses | SESOptimized | rel 1e-06 | 1e-06 | parity | 1.65e-09 | 2.12e-08 | - |
+| air | ses | ETS:ANN | rel 1e-06 | 1e-06 | parity | 1.65e-09 | 1.56e-08 | - |
+| air | holt | ETS:AAN | rel 0.025 | 0.05 | known_gap | 0.0168 | 0.0333 | RC-02 |
+| air | holt | Holt | rel 0.03 | 0.05 | known_gap | 0.0168 | 0.0333 | RC-01,RC-02 |
+| air | hw_additive | HoltWinters | rel 0.3 | 2.5 | known_gap | 0.215 | 1.86 | RC-02 |
+| air | hw_additive | ETS:AAA | rel 0.3 | 2.5 | known_gap | 0.206 | 1.87 | RC-02 |
+| air | hw_multiplicative | ETS:MAM | rel 0.08 | 1.4 | known_gap | 0.0594 | 1.1 | RC-02 |
+| air | ets_auto | AutoETS | rel 0.07 | 0.7 | known_gap | 0.0514 | 0.516 | RC-03 |
+| air | ets_MAM | ETS:MAM | rel 0.1 | 1.2 | known_gap | 0.0726 | 0.903 | RC-02 |
+| air | ets_AAA | ETS:AAA | rel 0.3 | 2.5 | known_gap | 0.206 | 1.87 | RC-02 |
+| air | auto_arima | AutoARIMA | rel 0.0006 | 0.3 | known_gap | 0.000398 | 0.185 | RC-05 |
+| air | thetaf | Theta | rel 1e-05 | 0.0005 | parity | 3.27e-06 | 0.00018 | - |
+| rw | naive | Naive | abs 1e-08 | 0.0005 | parity | 0 | 0.00022 | - |
+| rw | rwf_drift | RandomWalkDrift | abs 1e-08 | 0.005 | parity | 6.6e-14 | 0.0023 | - |
+| rw | ses | SESOptimized | rel 1e-06 | 1e-06 | parity | 5.37e-10 | 9.58e-08 | - |
+| rw | ses | ETS:ANN | rel 1e-06 | 1e-06 | parity | 5.37e-10 | 5.89e-08 | - |
+| rw | holt | ETS:AAN | rel 0.01 | 0.03 | known_gap | 0.0056 | 0.0196 | RC-02 |
+| rw | holt | Holt | rel 0.009 | 0.03 | known_gap | 0.0056 | 0.0196 | RC-01,RC-02 |
+| rw | ets_auto | AutoETS | rel 1e-05 | 0.0001 | parity | 2.92e-07 | 3.19e-05 | - |
+| rw | auto_arima | AutoARIMA | rel 1e-06 | 1e-06 | parity | 0 | 3.28e-08 | - |
+| rw | thetaf | Theta | rel 1e-06 | 1e-06 | parity | 3.76e-10 | 5.77e-08 | - |
+| inter | croston | CrostonClassic | abs 1e-08 | NA | parity | 2.2e-15 | NA | - |
+| inter | naive | Naive | abs 1e-08 | 0.0005 | parity | 0 | 0.00022 | - |
+| inter | ses | SESOptimized | rel 1 | 0.5 | known_gap | 0.739 | 0.383 | RC-04 |
+| trend | naive | Naive | abs 1e-08 | 0.0005 | parity | 0 | 0.00022 | - |
+| trend | rwf_drift | RandomWalkDrift | abs 1e-08 | 0.005 | parity | 7.1e-14 | 0.00314 | - |
+| trend | ses | SESOptimized | rel 1e-06 | 1e-06 | parity | 1.96e-10 | 5.95e-08 | - |
+| trend | ses | ETS:ANN | rel 1e-06 | 1e-06 | parity | 1.96e-10 | 1.87e-08 | - |
+| trend | holt | ETS:AAN | rel 0.002 | 0.01 | parity | 0.000549 | 0.00653 | - |
+| trend | holt | Holt | rel 0.002 | 0.01 | parity | 0.000549 | 0.00653 | RC-01 |
+| trend | ets_auto | AutoETS | rel 0.002 | 0.01 | parity | 0.000563 | 0.00669 | - |
+| trend | auto_arima | AutoARIMA | rel 1e-06 | 0.006 | parity | 2.23e-14 | 0.00336 | - |
+| trend | thetaf | Theta | rel 1e-06 | 1e-06 | parity | 2.79e-10 | 1.86e-08 | - |
+
+
+### R-parity gap root causes (D-12)
+
+Every `known_gap` row above cites one or more of these root-cause rows (RC-NN), each
+backed by numbers in `diagnosis/harness-output.txt`
+(`.planning/phases/17-upstream-consumption-diagnostics-parity/diagnosis/`). The diagnosis
+ladder (`crates/anofox-fcst-core/tests/r_parity_diagnosis.rs`, E1-E9) runs, for every
+pre-tolerance gap: E2 (wrapper vs. the same model built directly from anofox-forecast --
+isolates extension-side causes), E4 (an R-faithful mapping, e.g. `holt()` -> `ETS(A,A,N)` --
+an extension-side cause when it cuts the deviation by >= 2x), E5/E6 (the crate evaluated at
+R's own fitted parameters, then the crate's own optimiser from scratch -- isolates whether
+the recursion/likelihood agree with R and whether R's or the crate's optimiser reaches the
+better optimum), and E7/E8 (AutoETS candidate-AICc comparison; AutoARIMA order/estimation
+split). A gap with no identified cause after the full ladder is never recorded as a known
+gap (D-12) -- it stops the plan instead.
+
+| RC | checks | location | cause | resolution | upstream |
+|---|---|---|---|---|---|
+| RC-01 | air/holt/Holt; rw/holt/Holt; trend/holt/Holt | extension | Wrapper's SQL 'Holt' dispatched to HoltLinearTrend::auto() (SSE objective, trend seeded from a single first difference) instead of ETS(A,A,N), R holt()'s actual definition; the R-faithful ETS(A,A,N) construction cuts the point deviation 6.86x on AirPassengers and 13.41x on rw, and brings trend into the parity tier (3.01x cut). | fixed: forecast() dispatch and build_forecaster remapped SQL 'Holt' from HoltLinearTrend::auto() to ETS::new(ETSSpec::aan(), 1), matching R's holt() definition; model_name stays 'Holt' (17-03 Task 1). | - |
+| RC-02 | air/holt/ETS:AAN; rw/holt/ETS:AAN; air/hw_additive/HoltWinters; air/hw_additive/ETS:AAA; air/ets_AAA/ETS:AAA; air/ets_MAM/ETS:MAM; air/hw_multiplicative/ETS:MAM | reference | At R's own fitted parameters the crate's ETS recursion, likelihood and bounds agree with R to floating-point precision (E5); the residual gap is R's own Nelder-Mead optimiser stopping at an inferior, in-bounds local optimum relative to the crate's own optimiser on the identical objective (E6). | known gap: the crate reaches a better-scoring, in-bounds optimum than R on these AirPassengers / rw fits; nothing to fix extension- or crate-side (R itself is the looser optimum). | - |
+| RC-03 | air/ets_auto/AutoETS | crate | AutoETS's model pool selects ETS(M,A,M) instead of R's ETS(M,Ad,M) because the crate's own optimiser, at R's selected (M,Ad,M) spec, reaches a worse log-likelihood than R under the same objective -- the crate's Nelder-Mead multi-start misses an optimum R's optimiser finds. | known gap: upstream optimiser issue, drafted. | draft: RC-03-autoets-madm-optimum.md |
+| RC-04 | inter/ses/SESOptimized | crate | SimpleExponentialSmoothing::auto() on the zero-inflated intermittent series converges to a different (alpha, l0) optimum than R's ses(): the crate's own optimiser, evaluated at R's fitted parameters, finds a strictly better log-likelihood than its own converged fit, so the crate's optimiser is missing an optimum its own objective scores higher. | known gap: upstream optimiser issue (likely the crate's fixed-l0-to-first-observation heuristic for SES on intermittent/zero-inflated series), drafted. | draft: RC-04-ses-optimized-intermittent-optimum.md |
+| RC-05 | air/auto_arima/AutoARIMA | crate | SARIMA prediction variance differs from R stats::arima KalmanForecast: at R's exact selected order (2,1,1)(0,1,0)[12], explicit ARIMA construction reproduces R's point forecast (rel dev 6.9e-3) but its 95% half-widths are systematically narrower than R's state-space prediction-error variance, especially at longer horizons. | known gap (user decision D-16, 2026-10-15): this is the ONE allowed AutoARIMA known gap; order identity and point forecasts remain hard parity on every series. Being fixed upstream in parallel (separate worktree/PR targeting anofox-forecast 0.16.2); the extension takes a follow-up bump to tighten this check once released. | draft: RC-05-autoarima-sarima-interval-variance.md |
+
+
+Upstream issue drafts (RC-03, RC-04, RC-05) are listed above by RC ID as "draft, not yet
+filed" -- the files live under
+`.planning/phases/17-upstream-consumption-diagnostics-parity/diagnosis/upstream-issues/`
+(not a user-facing path) and are left for the user to file against
+`https://github.com/sipemu/anofox-forecast`. Each draft's minimal Rust reproduction is
+mirrored verbatim by a matching `#[ignore]` `repro_*` test in `r_parity_diagnosis.rs`,
+compiled and run here against the exact anofox-forecast 0.16.1 tree.
+
 
 ### Intentional deviations and tolerance overrides (D-03, D-10)
 

@@ -322,13 +322,32 @@ fn r_forecast_parity_checks() {
             );
         }
 
-        // D-15: every AutoARIMA check is parity with a matching R order.
+        // D-15/D-16: every AutoARIMA check has a matching R order. Status is
+        // "parity" except for the ONE allowed exception (D-16, checkpoint
+        // 2026-10-15): air/auto_arima/AutoARIMA's interval sits outside the
+        // parity tier (RC-05, crate: SARIMA prediction variance differs from
+        // R stats::arima's KalmanForecast). Any OTHER AutoARIMA check must
+        // still be status parity -- a regression on rw/trend (or a second
+        // air gap) is never silently absorbed here.
         if c.surface == "AutoARIMA" {
-            assert_eq!(
-                c.status, "parity",
-                "{}/{}/AutoARIMA must be status parity (D-15)",
-                c.series, c.r_key
-            );
+            let is_allowed_d16_gap = c.series == "air" && c.r_key == "auto_arima";
+            if is_allowed_d16_gap {
+                assert_eq!(
+                    c.status, "known_gap",
+                    "air/auto_arima/AutoARIMA is the D-16 allowed gap and must be status known_gap"
+                );
+                assert!(
+                    cause_is_backed(&c.cause, &root_causes),
+                    "air/auto_arima/AutoARIMA's D-16 gap must cite a crate/reference root_causes row, got cause {:?}",
+                    c.cause
+                );
+            } else {
+                assert_eq!(
+                    c.status, "parity",
+                    "{}/{}/AutoARIMA must be status parity (D-15; only air/auto_arima may be the D-16 gap)",
+                    c.series, c.r_key
+                );
+            }
             let r_order = &c.r_block["fit"]["order"];
             let r_p = r_order["p"].as_u64().unwrap() as usize;
             let r_d = r_order["d"].as_u64().unwrap() as usize;
@@ -389,4 +408,173 @@ fn r_forecast_parity_checks() {
         );
     }
     eprintln!("r_forecast_parity checks: {}", checks.len());
+}
+
+/// D-08 coverage guard: every (series, r_key) R model entry outside the
+/// FCST-04-scoped `{air/arima_airline, rw/arima_010, ar1_l10/*}` exclusion
+/// list has at least one `parity_checks` entry, and the ten FCST-09
+/// surfaces (with their ETS-equivalent alternates) are all represented.
+#[test]
+fn coverage_guard() {
+    let air_fx = air_fixture();
+    let sim_fx = sim_fixture();
+    let checks = all_checks();
+
+    let covered: std::collections::HashSet<(String, String)> = checks
+        .iter()
+        .map(|c| (c.series.clone(), c.r_key.clone()))
+        .collect();
+
+    let mut uncovered = Vec::new();
+
+    for r_key in air_fx["models"].as_object().unwrap().keys() {
+        if r_key == "arima_airline" {
+            continue;
+        }
+        if !covered.contains(&("air".to_string(), r_key.clone())) {
+            uncovered.push(format!("air/{r_key}"));
+        }
+    }
+    for (series, block) in sim_fx["series"].as_object().unwrap() {
+        if series == "ar1_l10" {
+            continue;
+        }
+        for r_key in block["models"].as_object().unwrap().keys() {
+            if series == "rw" && r_key == "arima_010" {
+                continue;
+            }
+            if !covered.contains(&(series.clone(), r_key.clone())) {
+                uncovered.push(format!("{series}/{r_key}"));
+            }
+        }
+    }
+
+    assert!(
+        uncovered.is_empty(),
+        "D-08 coverage guard: these (series, r_key) R entries have no parity_checks row: {uncovered:?}"
+    );
+
+    let surfaces: std::collections::HashSet<String> =
+        checks.iter().map(|c| c.surface.clone()).collect();
+    let required_families: [&[&str]; 10] = [
+        &["Naive"],
+        &["SeasonalNaive"],
+        &["RandomWalkDrift"],
+        &["SESOptimized", "ETS:ANN"],
+        &["Holt", "ETS:AAN"],
+        &["HoltWinters", "ETS:AAA", "ETS:MAM"],
+        &["AutoETS"],
+        &["AutoARIMA"],
+        &["Theta"],
+        &["CrostonClassic"],
+    ];
+    for family in &required_families {
+        assert!(
+            family.iter().any(|s| surfaces.contains(*s)),
+            "D-08 coverage guard: none of {family:?} appear in parity_checks"
+        );
+    }
+}
+
+/// UPST-01 (D-15): the crate's AutoARIMA selection frequencies on the
+/// seeded `auto_arima_selection` simulation match R `auto.arima`'s, within
+/// the fixture's `share_abs` / `exact_agreement_min` bounds. A miss here
+/// follows the interfaces D-15 "Miss" rule (never loosened).
+#[test]
+fn autoarima_selection_matches_r() {
+    let sim_fx = sim_fixture();
+    let selection = &sim_fx["auto_arima_selection"];
+    let rw_series = selection["rw"]
+        .as_array()
+        .expect("auto_arima_selection.rw missing");
+    let ar07_series = selection["ar07"]
+        .as_array()
+        .expect("auto_arima_selection.ar07 missing");
+    assert_eq!(
+        rw_series.len() + ar07_series.len(),
+        60,
+        "auto_arima_selection must hold 30 rw + 30 ar07 series"
+    );
+
+    let tol = &sim_fx["tolerance"]["auto_arima_selection"];
+    let share_abs = common::num(&tol["share_abs"]);
+    let exact_agreement_min = common::num(&tol["exact_agreement_min"]);
+
+    let run = |values: &[f64]| -> (usize, usize, usize) {
+        let opts: Vec<Option<f64>> = values.iter().map(|v| Some(*v)).collect();
+        let options = ForecastOptions {
+            model: ModelType::AutoARIMA,
+            horizon: H,
+            confidence_level: LEVEL,
+            seasonal_period: 0,
+            auto_detect_seasonality: false,
+            ..Default::default()
+        };
+        let out = forecast(&opts, &options).expect("AutoARIMA forecast() must succeed");
+        parse_autoarima_order(&out.model_name)
+            .map(|(p, d, q, _)| (p, d, q))
+            .unwrap_or((usize::MAX, usize::MAX, usize::MAX))
+    };
+
+    let mut rw_crate_010 = 0usize;
+    let mut rw_r_010 = 0usize;
+    let mut ar07_crate_d_ge1 = 0usize;
+    let mut ar07_r_d_ge1 = 0usize;
+    let mut exact_agreement = 0usize;
+
+    for s in rw_series {
+        let values = common::f64_vec(&s["values"]);
+        let (cp, cd, cq) = run(&values);
+        let rp = s["order"]["p"].as_u64().unwrap() as usize;
+        let rd = s["order"]["d"].as_u64().unwrap() as usize;
+        let rq = s["order"]["q"].as_u64().unwrap() as usize;
+        if (cp, cd, cq) == (0, 1, 0) {
+            rw_crate_010 += 1;
+        }
+        if (rp, rd, rq) == (0, 1, 0) {
+            rw_r_010 += 1;
+        }
+        if (cp, cd, cq) == (rp, rd, rq) {
+            exact_agreement += 1;
+        }
+    }
+    for s in ar07_series {
+        let values = common::f64_vec(&s["values"]);
+        let (cp, cd, cq) = run(&values);
+        let rp = s["order"]["p"].as_u64().unwrap() as usize;
+        let rd = s["order"]["d"].as_u64().unwrap() as usize;
+        let rq = s["order"]["q"].as_u64().unwrap() as usize;
+        if cd >= 1 {
+            ar07_crate_d_ge1 += 1;
+        }
+        if rd >= 1 {
+            ar07_r_d_ge1 += 1;
+        }
+        if (cp, cd, cq) == (rp, rd, rq) {
+            exact_agreement += 1;
+        }
+    }
+
+    let rw_share_crate = rw_crate_010 as f64 / rw_series.len() as f64;
+    let rw_share_r = rw_r_010 as f64 / rw_series.len() as f64;
+    let ar07_share_crate = ar07_crate_d_ge1 as f64 / ar07_series.len() as f64;
+    let ar07_share_r = ar07_r_d_ge1 as f64 / ar07_series.len() as f64;
+    let agreement = exact_agreement as f64 / 60.0;
+
+    eprintln!(
+        "autoarima selection: rw_share crate={rw_share_crate:.4} r={rw_share_r:.4} ar07_d_share crate={ar07_share_crate:.4} r={ar07_share_r:.4} exact_agreement={exact_agreement}/60"
+    );
+
+    assert!(
+        (rw_share_crate - rw_share_r).abs() <= share_abs,
+        "rw (0,1,0) share mismatch: crate={rw_share_crate:.4} r={rw_share_r:.4} share_abs={share_abs}"
+    );
+    assert!(
+        (ar07_share_crate - ar07_share_r).abs() <= share_abs,
+        "ar07 d>=1 share mismatch: crate={ar07_share_crate:.4} r={ar07_share_r:.4} share_abs={share_abs}"
+    );
+    assert!(
+        agreement >= exact_agreement_min,
+        "exact (p,d,q) agreement {exact_agreement}/60 ({agreement:.4}) below exact_agreement_min={exact_agreement_min}"
+    );
 }

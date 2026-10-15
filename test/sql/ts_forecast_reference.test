@@ -156,3 +156,144 @@ FROM trend150, (
 );
 ----
 1
+
+#######################################
+# 17-03 Task 3: AirPassengers (R forecast, D-08/D-12/D-15)
+#######################################
+
+statement ok
+CREATE TABLE air17r AS
+SELECT 'air' AS id, DATE '1949-01-01' + INTERVAL (i) MONTH AS ds, v
+FROM (SELECT unnest(range(144)) AS i, unnest([
+    112,118,132,129,121,135,148,148,136,119,104,118,115,126,141,135,125,149,
+    170,170,158,133,114,140,145,150,178,163,172,178,199,199,184,162,146,166,
+    171,180,193,181,183,218,230,242,209,191,172,194,196,196,236,235,229,243,
+    264,272,237,211,180,201,204,188,235,227,234,264,302,293,259,229,203,229,
+    242,233,267,269,270,315,364,347,312,274,237,278,284,277,317,313,318,374,
+    413,405,355,306,271,306,315,301,356,348,355,422,465,467,404,347,305,336,
+    340,318,362,348,363,435,491,505,404,359,310,337,360,342,406,396,420,472,
+    548,559,463,407,362,405,417,391,419,461,472,535,622,606,508,461,390,432
+]::DOUBLE[]) AS v);
+
+statement ok
+CREATE TEMP TABLE air17r_snaive AS
+SELECT list(yhat ORDER BY forecast_step) AS yhat,
+       list(yhat_lower ORDER BY forecast_step) AS lo,
+       list(yhat_upper ORDER BY forecast_step) AS up
+FROM ts_forecast_by('air17r', id, ds, v, 'SeasonalNaive', 12, '1mo', MAP{'seasonal_period': '12', 'confidence_level': '0.95'});
+
+# SeasonalNaive: closed-form point within 1e-8 absolute.
+query I
+SELECT max(abs(c - r)) <= 1e-8
+FROM air17r_snaive, (
+    SELECT
+        unnest(yhat) AS c,
+        unnest([417, 391, 419, 461, 472, 535, 622, 606, 508, 461, 390, 432]::DOUBLE[]) AS r
+    FROM air17r_snaive
+);
+----
+1
+
+# SeasonalNaive: both 95% bounds within 5e-4 of R snaive()'s half-width at
+# every step.
+query I
+SELECT max(abs(c_lo - r_lo) / ((r_up - r_lo) / 2.0)) <= 5e-4
+   AND max(abs(c_up - r_up) / ((r_up - r_lo) / 2.0)) <= 5e-4
+FROM air17r_snaive, (
+    SELECT
+        unnest(air17r_snaive.lo) AS c_lo,
+        unnest(air17r_snaive.up) AS c_up,
+        unnest([
+            345.822447770672, 319.822447770672, 347.822447770672, 389.822447770672,
+            400.822447770672, 463.822447770672, 550.822447770672, 534.822447770672,
+            436.822447770672, 389.822447770672, 318.822447770672, 360.822447770672
+        ]::DOUBLE[]) AS r_lo,
+        unnest([
+            488.177552229328, 462.177552229328, 490.177552229328, 532.177552229328,
+            543.177552229328, 606.177552229328, 693.177552229328, 677.177552229328,
+            579.177552229328, 532.177552229328, 461.177552229328, 503.177552229328
+        ]::DOUBLE[]) AS r_up
+    FROM air17r_snaive
+);
+----
+1
+
+statement ok
+CREATE TEMP TABLE air17r_theta AS
+SELECT list(yhat ORDER BY forecast_step) AS yhat
+FROM ts_forecast_by('air17r', id, ds, v, 'Theta', 12, '1mo', MAP{'seasonal_period': '12', 'confidence_level': '0.95'});
+
+# Theta: matches R thetaf(AirPassengers) within 1e-5 relative.
+query I
+SELECT max(abs(c - r) / abs(r)) <= 1e-5
+FROM air17r_theta, (
+    SELECT
+        unnest(yhat) AS c,
+        unnest([
+            440.078191081586, 428.384280556983, 489.707098669638, 475.704627661373,
+            479.670388669209, 545.366272154216, 602.752001822396, 601.100763091486,
+            523.951492158653, 456.62714491283, 397.953734665557, 447.644908742896
+        ]::DOUBLE[]) AS r
+    FROM air17r_theta
+);
+----
+1
+
+statement ok
+CREATE TEMP TABLE air17r_autoarima AS
+SELECT list(yhat ORDER BY forecast_step) AS yhat,
+       list(DISTINCT model_name) AS model_names
+FROM ts_forecast_by('air17r', id, ds, v, 'AutoARIMA', 12, '1mo', MAP{'seasonal_period': '12', 'confidence_level': '0.95'});
+
+# AutoARIMA (D-15/D-16): selects R's order (2,1,1)(0,1,0)[12] exactly; point
+# forecast within the fixture's air/auto_arima point_tol (6e-4 rel, D-16 --
+# the 95% interval is the one allowed AutoARIMA known gap, not asserted here).
+query I
+SELECT model_names = ['AutoARIMA(2,1,1)(0,1,0)[12]']
+FROM air17r_autoarima;
+----
+1
+
+query I
+SELECT max(abs(c - r) / abs(r)) <= 6e-4
+FROM air17r_autoarima, (
+    SELECT
+        unnest(yhat) AS c,
+        unnest([
+            445.634887784004, 420.394974836189, 449.198286908251, 491.839912726707,
+            503.394438676722, 566.862409535257, 654.260131942912, 638.597441074953,
+            540.883692604289, 494.12656975935, 423.332656278755, 465.507522264099
+        ]::DOUBLE[]) AS r
+    FROM air17r_autoarima
+);
+----
+1
+
+#######################################
+# 17-03 Task 3: intermittent (R forecast, D-08)
+#######################################
+
+statement ok
+CREATE TABLE inter17r AS SELECT [
+    4, 3, 0, 4, 0, 4, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4,
+    0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 2, 0, 3, 0, 5, 0, 0, 3, 0, 0, 5, 4,
+    0, 3, 0, 0, 0, 0, 0, 0, 3, 3, 0, 0, 0, 0, 0, 5, 2, 0, 0, 0, 0, 0, 5, 0, 0, 0,
+    8, 0, 5, 0, 0, 0, 0, 0, 3, 0, 4, 0, 5, 0, 4, 0, 7, 3, 5, 0, 0, 0, 0, 0, 0, 5,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 0, 3, 4, 7, 0
+]::DOUBLE[] AS v;
+
+# CrostonClassic: closed-form (alpha 0.1) point within 1e-8 absolute.
+query I
+SELECT max(abs(c - r)) <= 1e-8
+FROM inter17r, (
+    SELECT
+        unnest((_ts_forecast(v, 12, 'CrostonClassic')).point) AS c,
+        unnest([
+            1.55126868840256, 1.55126868840256, 1.55126868840256, 1.55126868840256,
+            1.55126868840256, 1.55126868840256, 1.55126868840256, 1.55126868840256,
+            1.55126868840256, 1.55126868840256, 1.55126868840256, 1.55126868840256
+        ]::DOUBLE[]) AS r
+    FROM inter17r
+);
+----
+1
