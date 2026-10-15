@@ -105,17 +105,19 @@ SELECT length((_ts_forecast(LIST(value ORDER BY idx), 6, 'SeasonalNaive')).point
 ----
 6
 
-# Without explicit seasonal_period, SeasonalNaive falls back to Naive behavior
-# The scalar _ts_forecast doesn't support params for seasonal_period
-# Data is [10, 20, 30] repeated 6 times, last value is 30.0
+# Re-pinned (Phase 18, 18-01, class D): with 6 full cycles of [10, 20, 30], period
+# detection succeeds (period=3), so SeasonalNaive repeats the detected seasonal
+# pattern rather than falling back to flat last-value repetition -- the "falls back to
+# Naive behavior" comment described the OLD silent-fallback this milestone removed
+# (FCST-01..08); confirmed directly against the query output.
 query I
-SELECT ABS((_ts_forecast(LIST(value ORDER BY idx), 3, 'SeasonalNaive')).point[1] - 30.0) < 0.01
+SELECT ABS((_ts_forecast(LIST(value ORDER BY idx), 3, 'SeasonalNaive')).point[1] - 10.0) < 0.01
 FROM seasonal_data;
 ----
 true
 
 query I
-SELECT ABS((_ts_forecast(LIST(value ORDER BY idx), 3, 'SeasonalNaive')).point[2] - 30.0) < 0.01
+SELECT ABS((_ts_forecast(LIST(value ORDER BY idx), 3, 'SeasonalNaive')).point[2] - 20.0) < 0.01
 FROM seasonal_data;
 ----
 true
@@ -170,10 +172,16 @@ SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'SeasonalNaiv
 ----
 6
 
-# MAP with multiple parameters should not error (syntax accepted)
+# MAP with multiple parameters should not error (syntax accepted). Re-pinned
+# (Phase 18, 18-01): seasonal_period 7 -> 3. HoltWinters requires >= 2*period
+# observations for seasonal initialization (confirmed directly: the crate's
+# error_message field reports "need at least 14, got 10" for period=7 against this
+# 10-point-per-group fixture, so BOTH groups produce 0 rows, not an error row -- not a
+# Phase 9-17 change, a pre-existing data-sizing mismatch in the test). period=3 needs
+# only 6 observations, well within this fixture's 10 points per group.
 query I
 SELECT COUNT(*) FROM ts_forecast_by('grouped_data', id, ds, value, 'HoltWinters', 3, '1d',
-    MAP(['confidence_level', 'seasonal_period'], [0.95, 7]));
+    MAP(['confidence_level', 'seasonal_period'], [0.95, 3]));
 ----
 6
 
@@ -309,11 +317,16 @@ SELECT length((_ts_forecast(LIST(value ORDER BY idx), 24, 'Naive')).point) FROM 
 ----
 24
 
-# Zero horizon should produce empty forecast
+# Zero horizon should produce a NULL point array, not an empty one. Re-pinned
+# (Phase 18, 18-01): fitted/residuals/model/aic/bic/mse are all still populated for
+# horizon=0 (confirmed directly -- only point/lower/upper are NULL), so this is a
+# well-formed "no forecast points requested" result, not an error or a missing
+# computation; `length(NULL)` is NULL, not 0, so the original assertion could never
+# have passed. Not attributable to any Phase 9-17 change.
 query I
-SELECT length((_ts_forecast(LIST(value ORDER BY idx), 0, 'Naive')).point) FROM trend_data;
+SELECT (_ts_forecast(LIST(value ORDER BY idx), 0, 'Naive')).point IS NULL FROM trend_data;
 ----
-0
+true
 
 # Minimum 3 observations required
 query I
@@ -321,9 +334,12 @@ SELECT length((_ts_forecast([10.0, 20.0, 30.0], 1, 'Naive')).point);
 ----
 1
 
-# Short series with seasonal model
+# Short series with seasonal model. Lengthened (Phase 18, 18-01, class D) from 2 cycles
+# to 3 -- 2 cycles of period 2 is ambiguous for the period-detection pipeline (same
+# root cause as the other SeasonalNaive fixtures fixed in this phase), so detection now
+# correctly errors instead of silently guessing; 3 cycles detects period 2 unambiguously.
 query I
-SELECT length((_ts_forecast([10.0, 20.0, 10.0, 20.0], 2, 'SeasonalNaive')).point);
+SELECT length((_ts_forecast([10.0, 20.0, 10.0, 20.0, 10.0, 20.0], 2, 'SeasonalNaive')).point);
 ----
 2
 
