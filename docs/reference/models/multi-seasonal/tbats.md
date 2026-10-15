@@ -50,6 +50,16 @@ for calibration caveats shared across all models.
 > [07-forecasting.md's prediction-intervals section](../../api/07-forecasting.md#prediction-intervals)
 > for the models that ARE R-parity-tested (FCST-09, Phase 17 plan 17-03).
 
+> **Known limitation (v0.10.0):** the interval *formula* is verified (20,000-path Monte Carlo
+> self-consistency within 3% at every horizon, 97.6% empirical coverage on a known data-generating
+> process). On some series, though, the width still differs from `statsforecast`'s TBATS by up to
+> ~6x (2 of 4 reference fixtures: multiplicative-seasonal and trend+seasonal). The cause is the
+> crate's parameter optimiser, not the interval formula: it does not enforce the
+> `D = F - g·w'` eigenvalue admissibility check that `statsforecast` applies, so it can settle on
+> near-unstable parameters (e.g. alpha ≈ 0.999) that widen the interval. This is tracked as an
+> upstream follow-up. Validate TBATS intervals on your own data, for example with
+> `ts_cv_folds_by` and conformal calibration, before relying on them.
+
 ## SQL Example
 
 ```sql
