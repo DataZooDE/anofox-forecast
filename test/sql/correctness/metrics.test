@@ -228,3 +228,98 @@ SELECT abs(ts_smape([10.0, 20.0, 30.0], [10.0, 20.0, 30.0]));
 
 statement ok
 DROP TABLE probe10;
+
+# =============================================================================
+# Remaining scalar-only forms (closed form, independently hand-derived):
+# ts_bias/ts_mse/ts_rmse/ts_r2/ts_coverage/ts_quantile_loss/ts_rmae/ts_mase.
+# =============================================================================
+
+# bias = mean(forecast - actual): errors 1, 1, 2 -> mean 4/3.
+query I
+SELECT abs(ts_bias([1.0,2.0,3.0],[2.0,3.0,5.0]) - 4.0/3.0) < 1e-9;
+----
+true
+
+# mse = mean(error^2): 1^2 + 1^2 + 2^2 = 6 -> mean 2.0.
+query I
+SELECT abs(ts_mse([1.0,2.0,3.0],[2.0,3.0,5.0]) - 2.0) < 1e-9;
+----
+true
+
+# rmse = sqrt(mse) = sqrt(2).
+query I
+SELECT abs(ts_rmse([1.0,2.0,3.0],[2.0,3.0,5.0]) - sqrt(2.0)) < 1e-9;
+----
+true
+
+# r2 = 1 - SS_res/SS_tot: actual mean 2, SS_tot = 1+0+1 = 2;
+# residuals -0.1,-0.1,0.1 -> SS_res = 0.03; r2 = 1 - 0.03/2 = 0.985.
+query I
+SELECT abs(ts_r2([1.0,2.0,3.0],[1.1,2.1,2.9]) - 0.985) < 1e-9;
+----
+true
+
+# coverage: actual in [lower, upper] for every row -> 1.0.
+query I
+SELECT abs(ts_coverage([1.0,2.0,3.0],[0.0,1.0,2.0],[2.0,3.0,4.0]) - 1.0) < 1e-9;
+----
+true
+
+# quantile_loss (pinball, q=0.5) = half the MAE: |1-1.1|=0.1, |2-2.2|=0.2 ->
+# mean 0.15; half -> 0.075.
+query I
+SELECT abs(ts_quantile_loss([1.0,2.0],[1.1,2.2],0.5) - 0.075) < 1e-9;
+----
+true
+
+# rmae: MAE(actual,pred1) = mean(.1,.2,.3) = 0.2; MAE(actual,pred2) =
+# mean(.2,.4,.6) = 0.4; rmae = 0.2/0.4 = 0.5.
+query I
+SELECT abs(ts_rmae([1.0,2.0,3.0],[1.1,2.2,3.3],[1.2,2.4,3.6]) - 0.5) < 1e-9;
+----
+true
+
+# mase: MAE(actual,forecast) = mean(1,1) = 1; in-sample seasonal-naive
+# (lag 1) MAE = mean(|diff([10,11,12,13])|) = mean(1,1,1) = 1; mase = 1/1 = 1.
+query I
+SELECT abs(ts_mase([15.0,20.0],[16.0,19.0],[10.0,11.0,12.0,13.0],1) - 1.0) < 1e-9;
+----
+true
+
+# ts_mape_by (the _by form, pairwise-complete, no zero actuals): same probe
+# data as the earlier scalar ts_mape pin -- 10%/10%/10% errors -> MAPE ~10%.
+statement ok
+CREATE TABLE mape_probe AS
+SELECT * FROM (VALUES
+('A', 1, 100.0, 110.0), ('A', 2, 200.0, 180.0), ('A', 3, 300.0, 330.0)
+) t(id, ds, y, forecast);
+
+query I
+SELECT abs(mape - 10.0) < 0.1
+FROM ts_mape_by((SELECT id, ds, y, forecast FROM mape_probe), 'ds', 'y', 'forecast');
+----
+true
+
+statement ok
+DROP TABLE mape_probe;
+
+# ts_mqloss (multi-quantile loss, averaged pinball across levels): a single
+# level 0.5 reduces to the ts_quantile_loss closed form above (0.075).
+query I
+SELECT abs(ts_mqloss([1.0,2.0], [[1.1,2.2]], [0.5]) - 0.075) < 1e-9;
+----
+true
+
+# _ts_metrics_native (the table function backing ts_mae_by/ts_mse_by/.../
+# ts_bias_by): parity with ts_mae_by on a single-row group.
+statement ok
+CREATE TABLE mm2 AS SELECT 'A' id, 1 ds, 10.0 y, 11.0 f;
+
+query I
+SELECT (SELECT mae FROM _ts_metrics_native((SELECT id, ds, y, f FROM mm2), 'ds', 'y', 'f', 'mae'))
+     = (SELECT mae FROM ts_mae_by((SELECT id, ds, y, f FROM mm2), 'ds', 'y', 'f'));
+----
+true
+
+statement ok
+DROP TABLE mm2;

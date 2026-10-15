@@ -1,0 +1,246 @@
+# name: test/sql/correctness/diagnostics.test
+# description: Correctness-suite value pins for statistical diagnostics functions
+#   fixed this milestone (DIAG-01..05, UPST-01/06) -- Phase 18, 18-02, TEST-03. Not
+#   json-gated (D-02): runs on every native build. Reused, with citation, from
+#   test/sql/ts_diagnostics_reference.test (Phase 17 17-01/17-02) and
+#   test/sql/ts_diagnostics.test, with two closed-form additions (Durbin-Watson,
+#   Jarque-Bera) that need no fixture.
+# group: [sql]
+#
+# air17/ts17/arma17 literals are copied from
+# validation/reference/fixtures/statsmodels_stationarity and r_diagnostics via the
+# python3 one-liners documented in ts_diagnostics_reference.test's own header.
+
+require anofox_forecast
+
+statement ok
+CREATE TABLE air17 AS
+SELECT 'air' AS id, DATE '1949-01-01' + INTERVAL (i) MONTH AS ds, v
+FROM (SELECT unnest(range(144)) AS i, unnest([
+    112,118,132,129,121,135,148,148,136,119,104,118,115,126,141,135,125,149,
+    170,170,158,133,114,140,145,150,178,163,172,178,199,199,184,162,146,166,
+    171,180,193,181,183,218,230,242,209,191,172,194,196,196,236,235,229,243,
+    264,272,237,211,180,201,204,188,235,227,234,264,302,293,259,229,203,229,
+    242,233,267,269,270,315,364,347,312,274,237,278,284,277,317,313,318,374,
+    413,405,355,306,271,306,315,301,356,348,355,422,465,467,404,347,305,336,
+    340,318,362,348,363,435,491,505,404,359,310,337,360,342,406,396,420,472,
+    548,559,463,407,362,405,417,391,419,461,472,535,622,606,508,461,390,432
+]::DOUBLE[]) AS v);
+
+statement ok
+CREATE TABLE ts17 AS
+SELECT 'ts' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, v
+FROM (SELECT unnest(range(100)) AS i, unnest([
+    11.6868,11.6724,11.7833,11.1672,11.9244,11.9678,11.7347,11.9132,13.0209,
+    13.9755,12.6389,11.3045,11.1077,12.8573,12.3706,12.1477,13.7922,14.5765,
+    13.4204,10.7194,11.9456,13.974,14.2568,12.7642,12.7654,14.6512,15.689,
+    12.7434,11.9204,13.6517,15.4728,16.7095,15.8291,15.5605,16.3353,17.4651,
+    17.2086,18.1492,19.4742,19.7893,19.7197,20.1087,18.5176,19.301,17.9914,
+    19.8214,19.0297,17.6203,17.5362,19.0964,19.0789,20.4123,21.7995,20.9125,
+    21.1322,22.2103,21.8015,24.1885,23.4572,22.7352,22.3906,22.7709,23.1019,
+    24.8245,23.6303,23.6606,24.6127,23.1483,23.5438,24.2914,22.9941,23.6819,
+    25.4222,27.0908,27.1649,26.4485,25.8,27.1473,27.7016,27.4023,26.4704,
+    26.2581,26.9843,26.2706,28.1165,28.9246,28.1264,27.9331,27.9118,30.5434,
+    29.5322,28.9346,27.1721,27.8209,27.5195,28.6054,28.6876,29.5953,31.4823,
+    29.888
+]::DOUBLE[]) AS v);
+
+# =============================================================================
+# ts_adf / ts_adf_by (DIAG-03, UPST-01): augmented ADF with MacKinnon critical
+# values for 'c' and 'ct' regressions.
+# =============================================================================
+
+query I
+SELECT abs((ts_adf(LIST(v ORDER BY ds), -1, 'c')).statistic - (-0.986479461317597)) < 1e-8
+FROM air17;
+----
+true
+
+query I
+SELECT abs((ts_adf(LIST(v ORDER BY ds), -1, 'c')).p_value - 0.7581636095609505) < 1e-8
+   AND abs((ts_adf(LIST(v ORDER BY ds), -1, 'c')).cv_5pct - (-2.882567574015525)) < 1e-10
+   AND (ts_adf(LIST(v ORDER BY ds), -1, 'c')).lags = 4
+FROM air17;
+----
+true
+
+query I
+SELECT abs((ts_adf(LIST(v ORDER BY ds), -1, 'ct')).statistic - (-7.318571346919129)) < 1e-8
+   AND abs((ts_adf(LIST(v ORDER BY ds), -1, 'ct')).cv_5pct - (-3.4427962380330523)) < 1e-10
+   AND (ts_adf(LIST(v ORDER BY ds), -1, 'ct')).lags = 5
+FROM air17;
+----
+true
+
+query I
+SELECT abs((adf).statistic - (SELECT (ts_adf(LIST(v ORDER BY ds), -1, 'ct')).statistic FROM air17)) < 1e-12
+FROM ts_adf_by('air17', id, ds, v, regression := 'ct');
+----
+true
+
+statement error
+SELECT (ts_adf(LIST(v ORDER BY ds), -1, 'n')).statistic FROM air17;
+----
+expected one of: c, ct
+
+# =============================================================================
+# ts_kpss / ts_kpss_by (DIAG-03, UPST-01): bounded p-values, 'c'/'ct' regressions.
+# =============================================================================
+
+query I
+SELECT abs((ts_kpss(LIST(v ORDER BY ds), -1, 'c')).statistic - 2.739473620962186) < 1e-10
+   AND (ts_kpss(LIST(v ORDER BY ds), -1, 'c')).p_value = 0.01
+   AND (ts_kpss(LIST(v ORDER BY ds), -1, 'c')).lags = 4
+FROM air17;
+----
+true
+
+query I
+SELECT abs((ts_kpss(LIST(v ORDER BY ds), -1, 'ct')).statistic - 0.09614984853532407) < 1e-10
+   AND (ts_kpss(LIST(v ORDER BY ds), -1, 'ct')).p_value = 0.1
+FROM air17;
+----
+true
+
+query I
+SELECT abs((kpss).statistic - (SELECT (ts_kpss(LIST(v ORDER BY ds), -1, 'ct')).statistic FROM air17)) < 1e-12
+FROM ts_kpss_by('air17', id, ds, v, regression := 'ct');
+----
+true
+
+# =============================================================================
+# ts_stationarity / ts_stationarity_by (DIAG-03): four-way verdict combining
+# ADF + KPSS, plus 'constant' and NULL (too-short) special cases.
+# =============================================================================
+
+query I
+SELECT (ts_stationarity(LIST(v ORDER BY ds))).verdict FROM air17;
+----
+non_stationary
+
+query I
+SELECT (ts_stationarity(LIST(v ORDER BY ds), 'ct')).verdict FROM air17;
+----
+stationary
+
+query I
+SELECT (ts_stationarity(LIST(v ORDER BY ds), 'ct')).verdict FROM ts17;
+----
+trend_stationary
+
+query I
+SELECT stationarity.verdict FROM ts_stationarity_by('ts17', id, ds, v, regression := 'ct') AS stationarity;
+----
+trend_stationary
+
+statement ok
+CREATE TABLE const30 AS
+SELECT 'k' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, 5.0 AS v
+FROM range(30) t(i);
+
+query I
+SELECT (ts_stationarity(LIST(v ORDER BY ds))).verdict FROM const30;
+----
+constant
+
+query I
+SELECT stationarity.verdict FROM ts_stationarity_by('const30', id, ds, v) AS stationarity;
+----
+constant
+
+query I
+SELECT (ts_stationarity([1.0, 2.0, 3.0]::DOUBLE[])).verdict IS NULL;
+----
+true
+
+statement ok
+DROP TABLE const30;
+
+# =============================================================================
+# ts_ljung_box / ts_ljung_box_by (DIAG-04, UPST-01): model-aware fitted_params
+# gate, R Box.test(fitdf) exact to 1e-9.
+# =============================================================================
+
+statement ok
+CREATE TABLE arma17 AS
+SELECT 'r' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, v
+FROM (SELECT unnest(range(120)) AS i, unnest([
+    1.53910491144803,0.0927059968283129,-0.0267057793636747,0.269454013410025,-0.183735208410877,0.477597885378358,
+    -1.43104100808103,0.653795761217683,2.24691684877356,-0.505707832827451,-0.742503309652352,1.15481863815736,
+    0.297651600073974,0.902555788556166,-0.305116594275331,-1.26248951971874,-0.42306290690825,0.388323779678506,
+    0.174392224304195,0.0633957660258668,-0.11352470721297,1.26573218017238,-0.216120229093852,1.22011953776963,
+    -0.835824915145522,0.502330310352944,0.940407330204003,0.162016133805973,-0.947080103930614,0.189399561382151,
+    -1.41975069281159,-0.270996417814145,-0.437087802010838,-1.81647195713291,1.05474741579535,-0.870678711514882,
+    0.509701028382605,0.43447401602889,-0.276801385755237,0.503343537564977,0.00388156865526174,-0.918974140037249,
+    -0.182528787552765,2.12368527966838,1.24638395324344,0.697403237881655,-0.2894353604561,-1.41539101926921,
+    0.264525011450585,0.0106024113034849,-1.47879153733757,1.46011670985537,1.91972901403436,-0.0967424746482399,
+    -0.689201745657934,1.05421887667808,-0.407352392941386,0.93958811596761,0.404648339874869,-0.806014867316359,
+    -1.49600820119219,-0.835999463517051,0.0662113187260109,0.467482081506365,-0.12677428250455,0.671838146768535,
+    -1.20299185678584,-1.22552491171624,0.888157008452704,-0.941968239380464,-0.364582445126387,0.0200179559701344,
+    -0.950699722680909,-0.976949371115777,-1.69357412688932,1.51259530102636,-1.77173305711962,1.53138883460201,
+    1.08886403067656,0.761757184525572,-1.04495550583131,-1.35807200614954,-0.735249911869923,0.205613278968548,
+    1.6956858268712,-0.464826592113979,0.797698925637374,-1.07944478911051,-1.08951612690628,0.585593449225705,
+    0.761005192531296,0.867925997036568,1.17466971600245,-0.083431138000067,-1.10180306159788,0.763404938148435,
+    -0.475918435505009,1.04323813085357,0.751323529246389,-0.0174455373071992,-0.371163746107245,1.6929606086793,
+    -1.66930140209172,1.24511808918733,0.245048567232462,1.67851425946291,-0.989946797432704,0.586243077619852,
+    -0.517105152437977,-0.382375542401837,-1.37768385164801,-1.74418388241314,-1.58972940551,-1.62408740259292,
+    0.422972049810822,-0.735478965525293,-1.34651459278904,0.119230549917018,0.28426217241873,0.716911598802572
+]::DOUBLE[]) AS v);
+
+query I
+SELECT (ts_ljung_box(LIST(v ORDER BY ds), 10, 2)).df = 8
+   AND abs((ts_ljung_box(LIST(v ORDER BY ds), 10, 2)).statistic - 6.40542007298888) < 1e-9
+   AND abs((ts_ljung_box(LIST(v ORDER BY ds), 10, 2)).p_value - 0.601916478272279) < 1e-9
+FROM arma17;
+----
+true
+
+query I
+SELECT abs((ljung_box).statistic - (SELECT (ts_ljung_box(LIST(v ORDER BY ds), 10, 2)).statistic FROM arma17)) < 1e-12
+FROM ts_ljung_box_by('arma17', id, ds, v, lags := 10, fitted_params := 2);
+----
+true
+
+statement error
+SELECT (ts_ljung_box(LIST(v ORDER BY ds), 5, 5)).df FROM arma17;
+----
+fitted_params
+
+# =============================================================================
+# ts_residual_diagnostics (DIAG-04): bundles Ljung-Box/Durbin-Watson/Jarque-Bera;
+# its Ljung-Box gate (fitted_params 0) equals the standalone scalar.
+# =============================================================================
+
+query I
+SELECT abs((ts_residual_diagnostics(LIST(v ORDER BY ds))).lb_p_value - (ts_ljung_box(LIST(v ORDER BY ds))).p_value) < 1e-12
+FROM arma17;
+----
+true
+
+statement ok
+DROP TABLE air17;
+
+statement ok
+DROP TABLE ts17;
+
+statement ok
+DROP TABLE arma17;
+
+# =============================================================================
+# ts_durbin_watson / ts_jarque_bera (closed form, no fixture needed): a
+# strictly alternating [1,-1,1,-1,...] 8-point residual series.
+# DW = sum((e_t - e_{t-1})^2) / sum(e_t^2) = (7 diffs of magnitude 2, each
+# squared = 4) / (8 * 1) = 28 / 8 = 3.5.
+# JB = n/6 * (S^2 + (K-3)^2/4), S=0 (symmetric), population kurtosis
+# K = mean(x^4)/mean(x^2)^2 = 1/1 = 1 -> JB = 8/6 * (1-3)^2/4 = 8/6 = 1.3333...
+# =============================================================================
+
+query I
+SELECT abs(ts_durbin_watson([1.0,-1.0,1.0,-1.0,1.0,-1.0,1.0,-1.0]::DOUBLE[]).statistic - 3.5) < 1e-9;
+----
+true
+
+query I
+SELECT abs(ts_jarque_bera([1.0,-1.0,1.0,-1.0,1.0,-1.0,1.0,-1.0]::DOUBLE[]).statistic - 1.3333333333333333) < 1e-9;
+----
+true

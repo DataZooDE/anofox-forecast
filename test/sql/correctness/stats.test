@@ -1,0 +1,200 @@
+# name: test/sql/correctness/stats.test
+# description: Correctness-suite value pins for ts_stats / ts_stats_by / ts_stats_agg
+#   (STAT-01..04) -- Phase 18, 18-02, TEST-03. Not json-gated (D-02): runs on every
+#   native build. A fuller sweep already lives in test/sql/ts_stats_reference.test
+#   (Phase 13 13-01/13-02) -- cited, with the load-bearing blocks reused here so this
+#   file independently covers the three surfaces.
+# group: [sql]
+#
+# x20 moments are copied from validation/reference/fixtures/moments/scipy_moments.json
+# (vectors.x20) via:
+#   python3 -c "import json; d=json.load(open('validation/reference/fixtures/moments/scipy_moments.json')); print(d['vectors']['x20'])"
+# det84/det60 are formula-generated series matching r_stl_strength/cases.json cases
+# det_seasonal84/det_trend60 exactly (same formula as the fixture generator), avoiding a
+# large literal dump; expected trend/seasonal strengths are the fixture's own values.
+
+require anofox_forecast
+
+# =============================================================================
+# Moments (skewness, kurtosis, bimodality_coef): scipy_moments x20
+# skew=0.30292879825084273, kurt=0.2765286546322532, bc=0.2861213328957609
+# =============================================================================
+
+statement ok
+CREATE TABLE x20_tbl AS SELECT * FROM (VALUES
+    (DATE '2024-01-01' + INTERVAL (0) DAY, 3.337),
+    (DATE '2024-01-01' + INTERVAL (1) DAY, 2.674),
+    (DATE '2024-01-01' + INTERVAL (2) DAY, 2.292),
+    (DATE '2024-01-01' + INTERVAL (3) DAY, 3.491),
+    (DATE '2024-01-01' + INTERVAL (4) DAY, 2.217),
+    (DATE '2024-01-01' + INTERVAL (5) DAY, 4.765),
+    (DATE '2024-01-01' + INTERVAL (6) DAY, 3.613),
+    (DATE '2024-01-01' + INTERVAL (7) DAY, 3.258),
+    (DATE '2024-01-01' + INTERVAL (8) DAY, 0.928),
+    (DATE '2024-01-01' + INTERVAL (9) DAY, 0.481),
+    (DATE '2024-01-01' + INTERVAL (10) DAY, 1.015),
+    (DATE '2024-01-01' + INTERVAL (11) DAY, 3.755),
+    (DATE '2024-01-01' + INTERVAL (12) DAY, 3.21),
+    (DATE '2024-01-01' + INTERVAL (13) DAY, 0.738),
+    (DATE '2024-01-01' + INTERVAL (14) DAY, 3.727),
+    (DATE '2024-01-01' + INTERVAL (15) DAY, 1.651),
+    (DATE '2024-01-01' + INTERVAL (16) DAY, 1.653),
+    (DATE '2024-01-01' + INTERVAL (17) DAY, 6.178),
+    (DATE '2024-01-01' + INTERVAL (18) DAY, 3.053),
+    (DATE '2024-01-01' + INTERVAL (19) DAY, 3.501)
+) t(ds, v);
+
+statement ok
+CREATE TABLE x20_grp AS SELECT 'x20' AS id, ds, v FROM x20_tbl;
+
+query I
+SELECT abs(skewness - 0.30292879825084273) < 1e-10 AND abs(kurtosis - 0.2765286546322532) < 1e-10 AND abs(bimodality_coef - 0.2861213328957609) < 1e-10
+FROM ts_stats_by('x20_grp', id, ds, v, '1d');
+----
+true
+
+query I
+SELECT abs(skewness - 0.30292879825084273) < 1e-10 AND abs(kurtosis - 0.2765286546322532) < 1e-10 AND abs(bimodality_coef - 0.2861213328957609) < 1e-10
+FROM ts_stats('x20_grp', id, ds, v, '1d');
+----
+true
+
+query I
+SELECT abs((s).skewness - 0.30292879825084273) < 1e-10 AND abs((s).kurtosis - 0.2765286546322532) < 1e-10 AND abs((s).bimodality_coef - 0.2861213328957609) < 1e-10
+FROM (SELECT ts_stats_agg(ds, v) AS s FROM x20_tbl);
+----
+true
+
+# =============================================================================
+# n_gaps / n_gap_runs semantics (D-04, STAT-03): 60 daily dates, days 20..39
+# missing (one 20-day run) -> n_gaps 20, n_gap_runs 1, expected_length 60.
+# =============================================================================
+
+statement ok
+CREATE TABLE gap_daily AS
+SELECT (DATE '2024-01-01' + CAST(i AS INTEGER))::TIMESTAMP AS ds, i::DOUBLE AS v
+FROM range(0, 60) t(i)
+WHERE i < 20 OR i >= 40;
+
+statement ok
+CREATE TABLE gap_daily_grp AS SELECT 'g' AS id, ds, v FROM gap_daily;
+
+query I
+SELECT n_gaps = 20 AND n_gap_runs = 1 AND expected_length = 60
+FROM ts_stats_by('gap_daily_grp', id, ds, v, '1d');
+----
+true
+
+query I
+SELECT n_gaps = 20 AND n_gap_runs = 1 AND expected_length = 60
+FROM ts_stats('gap_daily_grp', id, ds, v, '1d');
+----
+true
+
+query I
+SELECT (s).n_gaps = 20 AND (s).n_gap_runs = 1 AND (s).expected_length = 60
+FROM (SELECT ts_stats_agg(ds, v) AS s FROM gap_daily);
+----
+true
+
+# =============================================================================
+# Entropy (D-03, Pincus approximate entropy m=2, r=0.2*sample sd) NULL policy:
+# NULL for a series with an interior NULL, and for a 2-value series (not enough
+# points for the m=2 embedding). Closed-form (not a numeric fixture pin).
+# =============================================================================
+
+statement ok
+CREATE TABLE entropy_interior_null AS SELECT * FROM (VALUES
+    (DATE '2024-01-01', 1.0),
+    (DATE '2024-01-02', 2.0),
+    (DATE '2024-01-03', NULL),
+    (DATE '2024-01-04', 4.0),
+    (DATE '2024-01-05', 5.0)
+) t(ds, v);
+
+statement ok
+CREATE TABLE entropy_interior_null_grp AS SELECT 'g' AS id, ds, v FROM entropy_interior_null;
+
+query I
+SELECT entropy IS NULL FROM ts_stats_by('entropy_interior_null_grp', id, ds, v, '1d');
+----
+true
+
+statement ok
+CREATE TABLE entropy_two_values AS SELECT * FROM (VALUES
+    (DATE '2024-01-01', 1.0),
+    (DATE '2024-01-02', 2.0)
+) t(ds, v);
+
+statement ok
+CREATE TABLE entropy_two_values_grp AS SELECT 'g' AS id, ds, v FROM entropy_two_values;
+
+query I
+SELECT entropy IS NULL FROM ts_stats_by('entropy_two_values_grp', id, ds, v, '1d');
+----
+true
+
+# =============================================================================
+# STL-based trend_strength / seasonality_strength (D-02, STAT-02): det84 is a
+# formula-generated series matching r_stl_strength/cases.json's det_seasonal84
+# exactly (t=1..84, v = 10 + 3*sin(2*pi*t/7) + 0.1*t + 0.5*cos(2.1*t)); fixture
+# values: trend 0.97998340937427, seasonal_strength 0.973887333793987.
+# =============================================================================
+
+statement ok
+CREATE TABLE det84 AS
+SELECT DATE '2024-01-01' + INTERVAL (t - 1) DAY AS ds,
+       10 + 3 * sin(2 * pi() * t / 7) + 0.1 * t + 0.5 * cos(2.1 * t) AS v
+FROM (SELECT UNNEST(generate_series(1, 84)) AS t);
+
+statement ok
+CREATE TABLE det84_grp AS SELECT 'g' AS id, ds, v FROM det84;
+
+query I
+SELECT abs(trend_strength - 0.97998340937427) < 1e-8
+  AND abs(seasonality_strength - 0.973887333793987) < 1e-8
+FROM ts_stats_by('det84_grp', id, ds, v, '1d', seasonal_period := 7);
+----
+true
+
+# ts_stats macro agrees with ts_stats_by (both call the same body).
+query I
+SELECT
+  (SELECT trend_strength FROM ts_stats('det84_grp', id, ds, v, '1d', seasonal_period := 7))
+    IS NOT DISTINCT FROM
+  (SELECT trend_strength FROM ts_stats_by('det84_grp', id, ds, v, '1d', seasonal_period := 7));
+----
+true
+
+# ts_stats_agg auto-detects its own period (no seasonal_period argument) --
+# still produces non-NULL, in-[0,1] strengths, agreeing in shape though not
+# necessarily in the explicit-period value.
+query I
+SELECT (s).trend_strength BETWEEN 0 AND 1 AND (s).seasonality_strength BETWEEN 0 AND 1
+FROM (SELECT ts_stats_agg(ds, v) AS s FROM det84_grp);
+----
+true
+
+# det60 (fixture det_trend60, trend 0.974173889872301): seasonal_period := 1
+# forces non-seasonal -> seasonality_strength NULL.
+statement ok
+CREATE TABLE det60 AS
+SELECT DATE '2024-01-01' + INTERVAL (t - 1) DAY AS ds,
+       0.5 * t + 2 * sin(1.3 * t) AS v
+FROM (SELECT UNNEST(generate_series(1, 60)) AS t);
+
+statement ok
+CREATE TABLE det60_grp AS SELECT 'g' AS id, ds, v FROM det60;
+
+query I
+SELECT seasonality_strength IS NULL AND abs(trend_strength - 0.974173889872301) < 1e-8
+FROM ts_stats_by('det60_grp', id, ds, v, '1d', seasonal_period := 1);
+----
+true
+
+# seasonal_period := -1 is a bind-time error (full cross-reference in
+# ts_stats_reference.test).
+statement error
+SELECT trend_strength FROM ts_stats_by('det84_grp', id, ds, v, '1d', seasonal_period := -1);
+----
+seasonal_period must be >= 0
