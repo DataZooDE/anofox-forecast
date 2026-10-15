@@ -13,7 +13,7 @@ use anofox_fcst_core::list_models;
 use anofox_forecast::core::TimeSeries;
 use anofox_forecast::models::arima::{AutoARIMA, AutoARIMAConfig};
 use anofox_forecast::models::exponential::{
-    AutoETS, AutoETSConfig, HoltLinearTrend, HoltWinters, SeasonalType, SimpleExponentialSmoothing,
+    AutoETS, AutoETSConfig, ETSSpec, HoltWinters, SeasonalType, SimpleExponentialSmoothing, ETS,
 };
 use anofox_forecast::models::intermittent::Croston;
 use anofox_forecast::models::laplace::LaplaceForecaster;
@@ -348,7 +348,9 @@ fn mse_is_crate_residual_mse() {
                 mean_sq_finite_residuals(m.residuals().expect("SES residuals"))
             }
             "Holt" => {
-                let mut m = HoltLinearTrend::auto();
+                // D-12/D-13 (17-03 Task 1): 'Holt' is ETS(A,A,N) (R's holt()),
+                // not HoltLinearTrend — see forecast.rs::forecast_holt_lib.
+                let mut m = ETS::new(ETSSpec::aan(), 1);
                 m.fit(&ts).unwrap();
                 mean_sq_finite_residuals(m.residuals().expect("Holt residuals"))
             }

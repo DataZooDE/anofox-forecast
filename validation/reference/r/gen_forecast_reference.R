@@ -83,15 +83,24 @@ air_models <- list(
     "rwf(air, h = 12, drift = TRUE, level = c(80, 95))"
   ),
   ses = fc_block(ses(air, h = h, level = levels), "ses(air, h = 12, level = c(80, 95))"),
-  holt = fc_block(holt(air, h = h, level = levels), "holt(air, h = 12, level = c(80, 95))"),
-  hw_additive = fc_block(
-    hw(air, h = h, level = levels, seasonal = "additive"),
-    "hw(air, h = 12, level = c(80, 95), seasonal = \"additive\")"
-  ),
-  hw_multiplicative = fc_block(
-    hw(air, h = h, level = levels, seasonal = "multiplicative"),
-    "hw(air, h = 12, level = c(80, 95), seasonal = \"multiplicative\")"
-  ),
+  holt = local({
+    f <- holt(air, h = h, level = levels)
+    c(fc_block(f, "holt(air, h = 12, level = c(80, 95))"), list(fit = ets_fit_block(f$model)))
+  }),
+  hw_additive = local({
+    f <- hw(air, h = h, level = levels, seasonal = "additive")
+    c(
+      fc_block(f, "hw(air, h = 12, level = c(80, 95), seasonal = \"additive\")"),
+      list(fit = ets_fit_block(f$model))
+    )
+  }),
+  hw_multiplicative = local({
+    f <- hw(air, h = h, level = levels, seasonal = "multiplicative")
+    c(
+      fc_block(f, "hw(air, h = 12, level = c(80, 95), seasonal = \"multiplicative\")"),
+      list(fit = ets_fit_block(f$model))
+    )
+  }),
   ets_auto = c(
     fc_block(forecast(ets_auto_fit, h = h, level = levels), "forecast(ets(air), h = 12, level = c(80, 95))"),
     list(fit = ets_fit_block(ets_auto_fit))
@@ -127,6 +136,61 @@ air_models <- list(
   thetaf = fc_block(thetaf(air, h = h, level = levels), "thetaf(air, h = 12, level = c(80, 95))")
 )
 
+ets_defaults_formals <- formals(forecast::ets)
+ets_defaults <- list(
+  allow.multiplicative.trend = eval(ets_defaults_formals$allow.multiplicative.trend),
+  restrict = eval(ets_defaults_formals$restrict),
+  bounds = eval(ets_defaults_formals$bounds),
+  opt.crit = eval(ets_defaults_formals$opt.crit),
+  nmse = eval(ets_defaults_formals$nmse),
+  ic = eval(ets_defaults_formals$ic),
+  lower = as.numeric(eval(ets_defaults_formals$lower)),
+  upper = as.numeric(eval(ets_defaults_formals$upper))
+)
+
+errors <- c("A", "M")
+trends <- c("N", "A", "Ad")
+seasons <- c("N", "A", "M")
+ets_candidates <- list()
+for (e in errors) {
+  for (tr in trends) {
+    for (s in seasons) {
+      trend_letter <- if (tr == "Ad") "A" else tr
+      damped <- tr == "Ad"
+      spec <- paste0(e, trend_letter, s)
+      key <- paste0(e, tr, s)
+      result <- tryCatch(
+        {
+          fit <- ets(air, model = spec, damped = damped)
+          list(
+            spec = paste0(e, tr, s),
+            fitted = TRUE,
+            aicc = as.numeric(fit$aicc),
+            loglik = as.numeric(fit$loglik),
+            par = as.list(fit$par)
+          )
+        },
+        error = function(err) {
+          list(spec = paste0(e, tr, s), fitted = FALSE, error = conditionMessage(err))
+        }
+      )
+      ets_candidates[[key]] <- result
+    }
+  }
+}
+# jsonlite serialises a named list as an object; the diagnosis consumer
+# (r_parity_diagnosis.rs) needs an ordered array, so drop the names here.
+ets_candidates <- unname(ets_candidates)
+
+diagnosis <- list(
+  ets_defaults = ets_defaults,
+  ets_candidates = ets_candidates,
+  selected = list(
+    method = ets_auto_fit$method,
+    aicc = as.numeric(ets_auto_fit$aicc)
+  )
+)
+
 air_fixture <- c(
   provenance("r_forecast", GENERATOR_PATH),
   list(
@@ -138,7 +202,8 @@ air_fixture <- c(
       values = as.numeric(air)
     ),
     parameters = REF_PARAMETERS,
-    models = air_models
+    models = air_models,
+    diagnosis = diagnosis
   )
 )
 
@@ -157,7 +222,10 @@ rw_models <- list(
     "rwf(rw, h = 12, drift = TRUE, level = c(80, 95))"
   ),
   ses = fc_block(ses(rw, h = h, level = levels), "ses(rw, h = 12, level = c(80, 95))"),
-  holt = fc_block(holt(rw, h = h, level = levels), "holt(rw, h = 12, level = c(80, 95))"),
+  holt = local({
+    f <- holt(rw, h = h, level = levels)
+    c(fc_block(f, "holt(rw, h = 12, level = c(80, 95))"), list(fit = ets_fit_block(f$model)))
+  }),
   ets_auto = c(
     fc_block(forecast(rw_ets_fit, h = h, level = levels), "forecast(ets(rw), h = 12, level = c(80, 95))"),
     list(fit = ets_fit_block(rw_ets_fit))
@@ -182,7 +250,10 @@ rw_models <- list(
 inter_models <- list(
   croston = fc_block(croston(inter, h = h, alpha = 0.1), "croston(inter, h = 12, alpha = 0.1)"),
   naive = fc_block(naive(inter, h = h, level = levels), "naive(inter, h = 12, level = c(80, 95))"),
-  ses = fc_block(ses(inter, h = h, level = levels), "ses(inter, h = 12, level = c(80, 95))")
+  ses = local({
+    f <- ses(inter, h = h, level = levels)
+    c(fc_block(f, "ses(inter, h = 12, level = c(80, 95))"), list(fit = ets_fit_block(f$model)))
+  })
 )
 
 # ---- ar1_l10 family (D-09: non-seasonal arima_order parity, d=0) ---------

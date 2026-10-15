@@ -12,7 +12,7 @@ use anofox_forecast::models::baseline::{
     SeasonalWindowAverage as SeasonalWindowAverageModel, SimpleMovingAverage,
 };
 use anofox_forecast::models::exponential::{
-    AutoETS, AutoETSConfig, ETSSpec, HoltLinearTrend, HoltWinters as HoltWintersModel, ModelPool,
+    AutoETS, AutoETSConfig, ETSSpec, HoltWinters as HoltWintersModel, ModelPool,
     SeasonalES as SeasonalESModel, SimpleExponentialSmoothing, ETS as ETSModel,
 };
 use anofox_forecast::models::garch::GARCH;
@@ -1552,9 +1552,22 @@ fn forecast_ses_optimized(values: &[f64], horizon: usize, level: f64) -> Result<
     extract_forecast(&model, horizon, level, "SESOptimized")
 }
 
+/// SQL 'Holt' (D-12/D-13, 17-03 Task 1): R's `holt()` is defined as
+/// `ets(y, "AAN", damped = FALSE)` (confirmed via `args(forecast::holt)` /
+/// the installed `forecast` 9.0.2 source) — a state-space ETS(A,A,N) fit by
+/// joint maximum-likelihood over the smoothing parameters AND the initial
+/// level/trend, not `HoltLinearTrend`'s SSE objective with the trend
+/// initialised from a single first difference. Remapping to the crate's own
+/// ETS(A,A,N) construction (the same one 'ETS' with `ets_spec='AAN'` uses)
+/// cut the measured AirPassengers deviation 6.86x (1.155e-1 -> 1.684e-2) and
+/// the rw deviation 13.41x (7.517e-2 -> 5.604e-3) — see
+/// `validation/reference/README.md` "R-parity gap root causes (D-12)" RC-01
+/// and `crates/anofox-fcst-core/tests/r_parity_diagnosis.rs`. `model_name`
+/// stays "Holt" (D-12: SQL surface name is unchanged, only the underlying
+/// crate construction is).
 fn forecast_holt_lib(values: &[f64], horizon: usize, level: f64) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
-    let mut model = HoltLinearTrend::auto();
+    let mut model = ETSModel::new(ETSSpec::aan(), 1);
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("Holt fit failed: {}", e)))?;
@@ -3557,7 +3570,9 @@ pub(crate) fn build_forecaster(
         ModelType::SES => Ok(Box::new(SimpleExponentialSmoothing::new(0.3))),
         ModelType::SESOptimized => Ok(Box::new(SimpleExponentialSmoothing::auto())),
         ModelType::SMA => Ok(Box::new(new_sma(p.max(3)))),
-        ModelType::Holt => Ok(Box::new(HoltLinearTrend::auto())),
+        // D-12/D-13 (17-03 Task 1): mirrors the standalone `forecast_holt_lib`
+        // remap to the crate's ETS(A,A,N) construction (R's holt()).
+        ModelType::Holt => Ok(Box::new(ETSModel::new(ETSSpec::aan(), 1))),
         ModelType::HoltWinters => Ok(Box::new(new_holt_winters(require_period(p)?))),
         ModelType::SeasonalNaive => Ok(Box::new(new_seasonal_naive(require_period(p)?))),
         ModelType::SeasonalES => Ok(Box::new(new_seasonal_es(require_period(p)?))),

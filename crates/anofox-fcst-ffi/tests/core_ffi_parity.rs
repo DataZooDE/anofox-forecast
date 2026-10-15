@@ -22,8 +22,7 @@ use anofox_forecast::models::baseline::{
 };
 use anofox_forecast::models::ensemble::{AutoEnsemble, AutoEnsembleConfig};
 use anofox_forecast::models::exponential::{
-    AutoETS, AutoETSConfig, ETSSpec, HoltLinearTrend, HoltWinters, SeasonalES,
-    SimpleExponentialSmoothing, ETS,
+    AutoETS, AutoETSConfig, ETSSpec, HoltWinters, SeasonalES, SimpleExponentialSmoothing, ETS,
 };
 use anofox_forecast::models::garch::GARCH;
 use anofox_forecast::models::intermittent::{Croston, ADIDA, IMAPA, TSB};
@@ -489,8 +488,10 @@ fn parity_ses_optimized() {
 fn parity_holt() {
     let data = seasonal_data();
     let ts = make_timeseries(&data);
-    // forecast.rs: HoltLinearTrend::auto()
-    let mut model = HoltLinearTrend::auto();
+    // forecast.rs: ETS::new(ETSSpec::aan(), 1) (D-12/D-13, 17-03 Task 1 —
+    // 'Holt' remapped from HoltLinearTrend to the crate's ETS(A,A,N), R's
+    // holt() definition; see forecast_holt_lib's doc comment).
+    let mut model = ETS::new(ETSSpec::aan(), 1);
     let ffi_opts = make_ffi_options("Holt", HORIZON as i32, 0);
     assert_full_parity("Holt", &mut model, &ts, HORIZON, 0.95, &data, ffi_opts);
 }
