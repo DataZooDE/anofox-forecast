@@ -464,3 +464,82 @@ SELECT abs((ts_residual_diagnostics(LIST(v ORDER BY ds))).lb_p_value - (ts_ljung
 FROM arma17;
 ----
 true
+
+#######################################
+# WR-01 (review fix): ts_ljung_box / ts_residual_diagnostics NULL-optional-arg
+# SPECIAL_HANDLING -- a NULL lags/fitted_params/alpha means the documented
+# "auto"/default, not SQL NULL (mirrors ts_adf's "a NULL regression means 'c'"
+# fix at line 113-118 above).
+#######################################
+
+# a NULL lags means the default (min(10, n/5) = 10 for arma17's 120 rows),
+# matching the pinned 10-lag/fitdf=2 reference values above
+query I
+SELECT (ts_ljung_box(LIST(v ORDER BY ds), NULL, 2)).df
+FROM arma17;
+----
+8
+
+query I
+SELECT abs((ts_ljung_box(LIST(v ORDER BY ds), NULL, 2)).statistic - 6.40542007298888) < 1e-9
+FROM arma17;
+----
+true
+
+query I
+SELECT abs((ts_ljung_box(LIST(v ORDER BY ds), NULL, 2)).p_value - 0.601916478272279) < 1e-9
+FROM arma17;
+----
+true
+
+# ts_ljung_box(x, NULL, 2) equals ts_ljung_box(x, <default lags>, 2) exactly
+query I
+SELECT (ts_ljung_box(LIST(v ORDER BY ds), NULL, 2)).statistic = (ts_ljung_box(LIST(v ORDER BY ds), 10, 2)).statistic
+   AND (ts_ljung_box(LIST(v ORDER BY ds), NULL, 2)).df = (ts_ljung_box(LIST(v ORDER BY ds), 10, 2)).df
+FROM arma17;
+----
+true
+
+# a NULL fitted_params (3-arg overload) means fitted_params = 0, equal to the
+# 2-arg (lags-only) overload and to the 1-arg overload's implicit default lags
+query I
+SELECT (ts_ljung_box(LIST(v ORDER BY ds), 10, NULL)).statistic = (ts_ljung_box(LIST(v ORDER BY ds), 10)).statistic
+   AND (ts_ljung_box(LIST(v ORDER BY ds), 10, NULL)).df = (ts_ljung_box(LIST(v ORDER BY ds), 10)).df
+FROM arma17;
+----
+true
+
+# a NULL series still yields SQL NULL for every overload, even with
+# SPECIAL_HANDLING set on the 2-arg/3-arg forms
+query II
+SELECT ts_ljung_box(NULL::DOUBLE[], 2) IS NULL, ts_ljung_box(NULL::DOUBLE[], 10, 2) IS NULL
+----
+true	true
+
+# anofox_fcst_ts_ljung_box alias set gets the same NULL-lags fix
+query I
+SELECT abs((anofox_fcst_ts_ljung_box(LIST(v ORDER BY ds), NULL, 2)).statistic - 6.40542007298888) < 1e-9
+FROM arma17;
+----
+true
+
+# a NULL alpha means the default 0.05, equal to the 1-arg overload
+query I
+SELECT (ts_residual_diagnostics(LIST(v ORDER BY ds), NULL)).lb_p_value = (ts_residual_diagnostics(LIST(v ORDER BY ds))).lb_p_value
+   AND (ts_residual_diagnostics(LIST(v ORDER BY ds), NULL)).adequate = (ts_residual_diagnostics(LIST(v ORDER BY ds))).adequate
+FROM arma17;
+----
+true
+
+# a NULL series still yields SQL NULL for ts_residual_diagnostics's 2-arg form
+query I
+SELECT ts_residual_diagnostics(NULL::DOUBLE[], 0.05) IS NULL
+----
+true
+
+# anofox_fcst_ts_residual_diagnostics alias set gets the same NULL-alpha fix
+query I
+SELECT (anofox_fcst_ts_residual_diagnostics(LIST(v ORDER BY ds), NULL)).lb_p_value = (ts_residual_diagnostics(LIST(v ORDER BY ds))).lb_p_value
+FROM arma17;
+----
+true

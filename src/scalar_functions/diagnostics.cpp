@@ -853,11 +853,20 @@ void RegisterTsLjungBoxFunction(ExtensionLoader &loader) {
     auto rt = LogicalType::STRUCT(LjungBoxStructChildren());
     ScalarFunctionSet s("ts_ljung_box");
     s.AddFunction(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))}, rt, TsLjungBoxFunction));
-    s.AddFunction(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
-                                  LogicalType(LogicalTypeId::INTEGER)}, rt, TsLjungBoxFunction));
-    s.AddFunction(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
-                                  LogicalType(LogicalTypeId::INTEGER),
-                                  LogicalType(LogicalTypeId::INTEGER)}, rt, TsLjungBoxFunction));
+    // 2-arg and 3-arg overloads take a nullable lags / fitted_params: a NULL
+    // means "auto lags" / "fitted_params 0" respectively, not SQL NULL (same
+    // SPECIAL_HANDLING fix as ts_adf/ts_kpss -- WR-01 review fix).
+    ScalarFunction ljung_box_2arg(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+         LogicalType(LogicalTypeId::INTEGER)}, rt, TsLjungBoxFunction);
+    ljung_box_2arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    s.AddFunction(ljung_box_2arg);
+    ScalarFunction ljung_box_3arg(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+         LogicalType(LogicalTypeId::INTEGER),
+         LogicalType(LogicalTypeId::INTEGER)}, rt, TsLjungBoxFunction);
+    ljung_box_3arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    s.AddFunction(ljung_box_3arg);
     {
         CreateScalarFunctionInfo info(s);
         FunctionDescription desc;
@@ -881,11 +890,17 @@ void RegisterTsLjungBoxFunction(ExtensionLoader &loader) {
     auto rt2 = LogicalType::STRUCT(LjungBoxStructChildren());
     ScalarFunctionSet a("anofox_fcst_ts_ljung_box");
     a.AddFunction(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))}, rt2, TsLjungBoxFunction));
-    a.AddFunction(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
-                                  LogicalType(LogicalTypeId::INTEGER)}, rt2, TsLjungBoxFunction));
-    a.AddFunction(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
-                                  LogicalType(LogicalTypeId::INTEGER),
-                                  LogicalType(LogicalTypeId::INTEGER)}, rt2, TsLjungBoxFunction));
+    ScalarFunction anofox_ljung_box_2arg(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+         LogicalType(LogicalTypeId::INTEGER)}, rt2, TsLjungBoxFunction);
+    anofox_ljung_box_2arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    a.AddFunction(anofox_ljung_box_2arg);
+    ScalarFunction anofox_ljung_box_3arg(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+         LogicalType(LogicalTypeId::INTEGER),
+         LogicalType(LogicalTypeId::INTEGER)}, rt2, TsLjungBoxFunction);
+    anofox_ljung_box_3arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    a.AddFunction(anofox_ljung_box_3arg);
     {
         CreateScalarFunctionInfo info(a);
         info.alias_of = "ts_ljung_box";
@@ -928,8 +943,13 @@ void RegisterTsResidualDiagnosticsFunction(ExtensionLoader &loader) {
     auto rt = LogicalType::STRUCT(ResidualDiagnosticsStructChildren());
     ScalarFunctionSet s("ts_residual_diagnostics");
     s.AddFunction(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))}, rt, TsResidualDiagnosticsFunction));
-    s.AddFunction(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
-                                  LogicalType(LogicalTypeId::DOUBLE)}, rt, TsResidualDiagnosticsFunction));
+    // 2-arg overload takes a nullable alpha: NULL means 0.05 (same
+    // SPECIAL_HANDLING fix as ts_adf/ts_kpss -- WR-01 review fix).
+    ScalarFunction residual_diag_2arg(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+         LogicalType(LogicalTypeId::DOUBLE)}, rt, TsResidualDiagnosticsFunction);
+    residual_diag_2arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    s.AddFunction(residual_diag_2arg);
     {
         CreateScalarFunctionInfo info(s);
         FunctionDescription desc;
@@ -951,8 +971,11 @@ void RegisterTsResidualDiagnosticsFunction(ExtensionLoader &loader) {
     auto rt2 = LogicalType::STRUCT(ResidualDiagnosticsStructChildren());
     ScalarFunctionSet a("anofox_fcst_ts_residual_diagnostics");
     a.AddFunction(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))}, rt2, TsResidualDiagnosticsFunction));
-    a.AddFunction(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
-                                  LogicalType(LogicalTypeId::DOUBLE)}, rt2, TsResidualDiagnosticsFunction));
+    ScalarFunction anofox_residual_diag_2arg(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
+         LogicalType(LogicalTypeId::DOUBLE)}, rt2, TsResidualDiagnosticsFunction);
+    anofox_residual_diag_2arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    a.AddFunction(anofox_residual_diag_2arg);
     {
         CreateScalarFunctionInfo info(a);
         info.alias_of = "ts_residual_diagnostics";
