@@ -69,7 +69,7 @@ Phase artifacts (plans, summaries, verification): [milestones/v0.9.0-phases/](mi
 
 - [x] **Phase 9: Reference Fixtures & Safe Dependency Bumps** - Checked-in R/Python fixture harness + anofox-regression 0.5.15, anofox-forecast 0.15.10, honest MSRV (completed 2026-10-09)
 - [x] **Phase 10: Forecast Wrapper Delegates to Crate Models** - Intervals, fitted values, residuals and model identity come from the crate; real ARIMA; no silent fallbacks (completed 2026-10-09)
-- [ ] **Phase 11: Upstream anofox-forecast Correctness Fixes** - Augmented ADF + MacKinnon, bounded KPSS, AutoARIMA order selection, ETS likelihood/intervals, Theta — as PR(s) in the upstream repo
+- [x] **Phase 11: Upstream anofox-forecast Correctness Fixes** - Augmented ADF + MacKinnon, bounded KPSS, AutoARIMA order selection, ETS likelihood/intervals, Theta — as PR(s) in the upstream repo (completed 2026-10-16)
 - [x] **Phase 12: Statistics Marshalling Moves to Rust** - ToUnifiedFormat + validity for list args, Rust-owned NULL policy, diff/fill/backtest/hierarchy/agg delegated to Rust (completed 2026-10-10)
 - [x] **Phase 13: Core Statistics, Metrics & Data Quality** - scipy-exact moments, STL F_T/F_S strengths, Hyndman-Koehler MASE, MAPE zero policy, real gap/frequency data quality (completed 2026-10-11)
 - [x] **Phase 14: tsfresh Feature Parity** - All 117 features match tsfresh on reference series or carry a documented deviation (completed 2026-10-12)
@@ -174,7 +174,7 @@ Plans:
 
 Plans:
 
-- [ ] 11-11-PLAN.md
+- [x] 11-11-PLAN.md
 
 **Waves 1-10** *(strictly sequential — all plans share one upstream working tree; each fix branch starts from the base ref chosen in 11-01, never from a sibling branch)*
 
@@ -431,7 +431,7 @@ Phases execute in numeric order: 9 → 10 → 11 → 12 → 13 → 14 → 15 →
 |-------|----------------|--------|-----------|
 | 9. Reference Fixtures & Safe Dependency Bumps | 3/3 | Complete    | 2026-10-09 |
 | 10. Forecast Wrapper Delegates to Crate Models | 10/10 | Complete    | 2026-10-09 |
-| 11. Upstream anofox-forecast Correctness Fixes | 10/11 | In Progress|  |
+| 11. Upstream anofox-forecast Correctness Fixes | 11/11 | Complete    | 2026-10-16 |
 | 12. Statistics Marshalling Moves to Rust | 8/8 | Complete    | 2026-10-10 |
 | 13. Core Statistics, Metrics & Data Quality | 4/4 | Complete    | 2026-10-11 |
 | 14. tsfresh Feature Parity | 4/4 | Complete    | 2026-10-12 |

@@ -6,16 +6,16 @@ current_phase: 18
 current_phase_name: Correctness Regression Suite, Audit & Docs
 current_plan: Not started
 status: planning
-stopped_at: Phase 17 complete, ready to execute Phase 18
-last_updated: "2026-10-15T17:08:56.533Z"
-last_activity: 2026-10-15
-last_activity_desc: Phase 17 complete, transitioned to Phase 11
-state_head: f6fe428881e4a94f0c74e4d04aa51d9047f59d1a
+stopped_at: Phase 18 plans 4/4 + review fixes done; awaiting anofox-forecast v0.16.2 publish for the RC-05 gap item, then Phase 18 verification
+last_updated: "2026-10-15T22:04:15.703Z"
+last_activity: 2026-10-16
+last_activity_desc: Phase 11 complete, transitioned to Phase 12
+state_head: f507f08852f561bab305784fb637352ca048e592
 progress:
   total_phases: 10
   completed_phases: 1
   total_plans: 55
-  completed_plans: 51
+  completed_plans: 55
   percent: 10
 ---
 
@@ -33,8 +33,8 @@ See: .planning/PROJECT.md (updated 2026-10-08 — started v0.10.0 Statistical Co
 Phase: 18 — Correctness Regression Suite, Audit & Docs
 Current Plan: Not started
 Total Plans in Phase: 4
-Status: Ready to execute
-Last activity: 2026-10-15 — Phase 17 complete, transitioned to Phase 11
+Status: Executed — awaiting v0.16.2 gap item + verification
+Last activity: 2026-10-16 — Phase 11 complete, transitioned to Phase 12
 
 Progress: [█░░░░░░░░░] 10%
 
@@ -42,7 +42,7 @@ Progress: [█░░░░░░░░░] 10%
 
 **Velocity:**
 
-- Total plans completed: 40 (this milestone)
+- Total plans completed: 51 (this milestone)
 - Average duration: -
 - Total execution time: 0 hours
 
@@ -58,6 +58,7 @@ Progress: [█░░░░░░░░░] 10%
 | 15 | 5 | - | - |
 | 16 | 3 | - | - |
 | 17 | 3 | - | - |
+| 11 | 11 | - | - |
 
 *Updated after each plan completion*
 **Per-Plan Metrics:**
@@ -123,8 +124,12 @@ Recent decisions affecting current work:
 ### Pending Todos
 
 None yet.
+- [Phase 11, 2026-10-16]: Deferred verification passed after user sign-off — ETS MAM optimum (α≈0.79/γ≈0.21, better loglik than R) accepted; TBATS width divergence vs statsforecast on 2/4 fixtures accepted + documented as known limitation; untracked 11-12 AutoARIMA work backfilled (11-12-ADDENDUM.md)
+- [Phase 18, 2026-10-15]: User publishes anofox-forecast v0.16.2 (PR #230, R KalmanForecast ARIMA intervals); fold the bump into v0.10.0 as a Phase 18 gap item — RC-05 AutoARIMA AirPassengers interval flips from known gap to hard parity
 
 ### Blockers/Concerns
+
+- [Phase 18] Waiting on user to merge PR #230 and publish anofox-forecast v0.16.2 (crates.io) before the RC-05 gap item can run.
 
 - [Phase 13/15] STL is shared: STAT-02 uses the crate `seasonality::stl::STL` — validate vs R `stats::stl` in Phase 13; DET-04 reuses or fixes it.
 - [Phase 15] fdars 0.47 bump: ~30 mechanical compile errors in 4 files plus a WASM (`js` feature) build check — use the local wasm_eh recipe.
@@ -143,7 +148,6 @@ None yet.
 | Phase | State | Resume |
 |-------|-------|--------|
 | 8 (v0.9.0, parked) | verification_deferred_human | Operator pushes branch, observes `wasm-runtime-test` green → red → green + badge flip, then `/gsd-verify-work 8` and `/gsd-complete-milestone v0.9.0` (phase dirs in `milestones/v0.9.0-phases/`) |
-| 11 | verification_deferred_upstream | Upstream release is a user action; verify when Phase 17 consumes the released crate (user decision 2026-10-10: phases 9/10/12 'stale' accepted as passed — staleness from downstream edits to shared covered files) |
 
 ## Deferred Items
 
@@ -159,6 +163,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-15T04:59:02.258Z
-Stopped at: Phase 17 complete (verified, code review 0 critical/0 warning), ready to execute Phase 18
+Stopped at: Phase 11 complete, ready to plan Phase 12
 Resume file: None
 Next: `/gsd-plan-phase 9`

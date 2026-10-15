@@ -91,19 +91,19 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 
 ### Diagnostics (upstream anofox-forecast + core validation.rs)
 
-- [ ] **DIAG-01**: ADF is augmented (lagged differences in the regression), supports constant and constant+trend, selects lags by AIC/BIC, and reports MacKinnon p-values; statistic matches `urca::ur.df`/statsmodels `adfuller` on fixtures; size ≈ 5% on a unit-root simulation [C1, C2, H1].
-- [ ] **DIAG-02**: KPSS p-values are bounded to [0.01, 0.10] with interpolation inside the table (matches `tseries::kpss.test`) [C3, H2].
+- [x] **DIAG-01**: ADF is augmented (lagged differences in the regression), supports constant and constant+trend, selects lags by AIC/BIC, and reports MacKinnon p-values; statistic matches `urca::ur.df`/statsmodels `adfuller` on fixtures; size ≈ 5% on a unit-root simulation [C1, C2, H1].
+- [x] **DIAG-02**: KPSS p-values are bounded to [0.01, 0.10] with interpolation inside the table (matches `tseries::kpss.test`) [C3, H2].
 - [x] **DIAG-03**: `classify_stationarity` uses the standard ADF/KPSS four-way mapping, can produce trend-stationary (trend variants), and handles constant series explicitly [C4].
 - [x] **DIAG-04**: Ljung-Box accepts `fitted_params` (df = lags − p − q) from SQL [C5].
 - [x] **DIAG-05**: docs/api/10-diagnostics.md claims match verified behaviour [C6].
 
 ### Upstream Models (anofox-forecast branch + PR)
 
-- [ ] **UPST-01**: AutoARIMA selects d by KPSS and D by a seasonal test (OCSB or seasonal-strength), compares candidates by AICc on a common likelihood basis; random-walk and stationary-AR selection frequencies are close to R `auto.arima` in simulation [H3].
-- [ ] **UPST-02**: ETS likelihood is correct for multiplicative error (Σ ln|ŷ|), includes all observations, applies usual parameter constraints; AutoETS AICc comparisons valid; AirPassengers parameters/forecasts near R `ets` [H4].
-- [ ] **UPST-03**: ETS prediction intervals use Hyndman et al. analytic variances (class 1/2) or simulation for class 3; coverage verified [H5].
-- [ ] **UPST-04**: Theta (STM) estimates α (SES optimisation) and its intervals follow the standard formula; random-walk bias removed vs R `thetaf` [H6].
-- [ ] **UPST-05**: TBATS/MSTL/GARCH interval gaps from upstream's own validation report are fixed or the affected models return NULL intervals with documentation [H7].
+- [x] **UPST-01**: AutoARIMA selects d by KPSS and D by a seasonal test (OCSB or seasonal-strength), compares candidates by AICc on a common likelihood basis; random-walk and stationary-AR selection frequencies are close to R `auto.arima` in simulation [H3].
+- [x] **UPST-02**: ETS likelihood is correct for multiplicative error (Σ ln|ŷ|), includes all observations, applies usual parameter constraints; AutoETS AICc comparisons valid; AirPassengers parameters/forecasts near R `ets` [H4].
+- [x] **UPST-03**: ETS prediction intervals use Hyndman et al. analytic variances (class 1/2) or simulation for class 3; coverage verified [H5].
+- [x] **UPST-04**: Theta (STM) estimates α (SES optimisation) and its intervals follow the standard formula; random-walk bias removed vs R `thetaf` [H6].
+- [x] **UPST-05**: TBATS/MSTL/GARCH interval gaps from upstream's own validation report are fixed or the affected models return NULL intervals with documentation [H7].
 - [x] **UPST-06**: Upstream changes land as PR(s) in `~/projects/rust/anofox-forecast` with tests + CHANGELOG; the extension consumes them (interim `[patch]`, final released version after user publishes).
 
 ### Docs & Skills
@@ -180,16 +180,16 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 | CONF-03 | Phase 16 | Complete |
 | CONF-04 | Phase 16 | Complete |
 | CONF-05 | Phase 16 | Complete |
-| DIAG-01 | Phase 11 | Pending |
-| DIAG-02 | Phase 11 | Pending |
+| DIAG-01 | Phase 11 | Complete |
+| DIAG-02 | Phase 11 | Complete |
 | DIAG-03 | Phase 17 | Complete |
 | DIAG-04 | Phase 17 | Complete |
 | DIAG-05 | Phase 17 | Complete |
-| UPST-01 | Phase 17 | Pending |
-| UPST-02 | Phase 11 | Pending |
-| UPST-03 | Phase 11 | Pending |
-| UPST-04 | Phase 11 | Pending |
-| UPST-05 | Phase 11 | Pending |
+| UPST-01 | Phase 17 | Complete |
+| UPST-02 | Phase 11 | Complete |
+| UPST-03 | Phase 11 | Complete |
+| UPST-04 | Phase 11 | Complete |
+| UPST-05 | Phase 11 | Complete |
 | UPST-06 | Phase 17 | Complete |
 | DOCS-01 | Phase 18 | Pending |
 | DOCS-02 | Phase 18 | Pending |

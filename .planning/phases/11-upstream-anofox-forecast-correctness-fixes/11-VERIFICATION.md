@@ -1,7 +1,7 @@
 ---
 phase: 11-upstream-anofox-forecast-correctness-fixes
 verified: 2026-10-15T22:10:00Z
-status: human_needed
+status: passed
 score: 5/7 must-haves verified, 2 flagged for human sign-off (no must-have FAILED)
 covered_files:
   - ".planning/phases/11-upstream-anofox-forecast-correctness-fixes/11-01-PLAN.md"
@@ -49,6 +49,12 @@ human_verification:
   - test: "Accept or reject that TBATS's prediction-interval formula fix does not make TBATS interval widths match statsforecast within tolerance on 2 of 4 fixtures, and does not fall back to NULL intervals either"
     expected: "ROADMAP success criterion 4: 'TBATS/MSTL/GARCH interval widths match statsforecast/arch within tolerance, or those models return NULL intervals with documentation.' TBATS's `forecast_variance` formula is proven correct two independent ways (20000-path Monte-Carlo self-consistency <3% at every h, 97.6% empirical coverage against a true DGP) — but on 2 of 4 real-series fixtures (`multiplicative_seasonal`, `trend_seasonal`) the resulting width still diverges from statsforecast's own TBATS fit by up to 5.9x, because the crate's (pre-existing, unchanged) Nelder-Mead optimiser lacks the `D=F-g*w'` eigenvalue admissibility check statsforecast's optimiser enforces and can land on unstable parameter sets (e.g. alpha=0.999). The plan's own must-have assertion (`tbats_width_vs_statsforecast`, a `[0.5,2.0]` ratio bound) was demoted to a diagnostic print plus a finiteness/positivity sanity check; this is documented in the test's doc comment, CHANGELOG.md, and the PR #225 body."
     why_human: "Neither disjunct of the literal ROADMAP criterion holds for TBATS on these 2 fixtures (not 'within tolerance', not 'NULL with documentation' — it returns a non-null, formula-correct-but-statsforecast-divergent interval). The team's own root-cause (separate optimizer admissibility gap, not an interval-formula bug) is well-evidenced, but whether this satisfies 'within tolerance' as the ROADMAP intended, or requires a follow-up optimizer fix or a NULL-interval fallback for the affected fit shapes, is a product decision a verifier cannot make unilaterally."
+human_acceptance:
+  date: 2026-10-16
+  decisions:
+    - "ETS AirPassengers MAM alpha/gamma: ACCEPTED. The likelihood is exact at R's parameters and the crate finds a better local optimum; RC-03 multi-start stays a future upstream enhancement."
+    - "TBATS interval width vs statsforecast on 2/4 fixtures: ACCEPTED + DOCUMENTED (known-limitation notes in docs/reference/models/multi-seasonal/tbats.md, auto_tbats.md, docs/release-notes/v0.10.0.md); the optimiser admissibility check is an upstream follow-up."
+    - "Untracked 11-12 AutoARIMA follow-up: BACKFILLED as 11-12-ADDENDUM.md."
 ---
 
 # Phase 11: Upstream anofox-forecast Correctness Fixes Verification Report
@@ -166,3 +172,8 @@ A separate **process finding (F1)** is reported for UPST-01/AutoARIMA: the track
 
 *Verified: 2026-10-15T22:10:00Z*
 *Verifier: Claude (gsd-verifier)*
+
+
+## Human Acceptance (2026-10-16)
+
+Both human_verification items were accepted by the user (see the frontmatter `human_acceptance`). The TBATS divergence is now documented as a known limitation, and the untracked 11-12 AutoARIMA work is backfilled in `11-12-ADDENDUM.md`. Status set to passed.
