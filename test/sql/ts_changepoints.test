@@ -519,12 +519,17 @@ DROP TABLE multi_step_test;
 #######################################
 
 # Test 1: NULL dates should be preserved with default values
+# Class B fix (Phase 18, 18-01): only the first UNION ALL branch cast dt::DATE; the
+# other branches' bare string/NULL literals forced the whole column's common supertype
+# to VARCHAR (confirmed via DESCRIBE), which is why ts_detect_changepoints_by rejected
+# it with "Date column must be DATE or TIMESTAMP, got: VARCHAR" -- a pre-existing test
+# fixture bug, not a Phase 9-17 code change.
 statement ok
 CREATE TABLE cp_null_dates AS
 SELECT 'A' AS grp, '2024-01-01'::DATE AS dt, 100.0 AS val
-UNION ALL SELECT 'A', '2024-01-02', 110.0
-UNION ALL SELECT 'A', '2024-01-03', 105.0
-UNION ALL SELECT 'A', NULL, 120.0;
+UNION ALL SELECT 'A', '2024-01-02'::DATE, 110.0
+UNION ALL SELECT 'A', '2024-01-03'::DATE, 105.0
+UNION ALL SELECT 'A', NULL::DATE, 120.0;
 
 # Should return 4 rows (not 3) - NULL date row preserved
 query I
@@ -550,12 +555,13 @@ statement ok
 DROP TABLE cp_null_dates;
 
 # Test 2: Singleton groups (< 2 points) should be preserved
+# Class B fix (Phase 18, 18-01): same UNION ALL supertype-coercion bug as cp_null_dates above.
 statement ok
 CREATE TABLE cp_singleton AS
 SELECT 'A' AS grp, '2024-01-01'::DATE AS dt, 100.0 AS val
-UNION ALL SELECT 'A', '2024-01-02', 110.0
-UNION ALL SELECT 'A', '2024-01-03', 105.0
-UNION ALL SELECT 'B', '2024-01-01', 50.0;
+UNION ALL SELECT 'A', '2024-01-02'::DATE, 110.0
+UNION ALL SELECT 'A', '2024-01-03'::DATE, 105.0
+UNION ALL SELECT 'B', '2024-01-01'::DATE, 50.0;
 
 # Should return 4 rows (not 3) - singleton group preserved
 query I
@@ -581,12 +587,13 @@ statement ok
 DROP TABLE cp_singleton;
 
 # Test 3: Combined - both NULL dates and singleton group
+# Class B fix (Phase 18, 18-01): same UNION ALL supertype-coercion bug as cp_null_dates above.
 statement ok
 CREATE TABLE cp_combined AS
 SELECT 'A' AS grp, '2024-01-01'::DATE AS dt, 100.0 AS val
-UNION ALL SELECT 'A', '2024-01-02', 110.0
-UNION ALL SELECT 'A', NULL, 120.0
-UNION ALL SELECT 'B', '2024-01-01', 50.0;
+UNION ALL SELECT 'A', '2024-01-02'::DATE, 110.0
+UNION ALL SELECT 'A', NULL::DATE, 120.0
+UNION ALL SELECT 'B', '2024-01-01'::DATE, 50.0;
 
 # Should return 4 rows (input = output)
 query I
@@ -594,21 +601,29 @@ SELECT COUNT(*) FROM ts_detect_changepoints_by('cp_combined', grp, dt, val, MAP{
 ----
 4
 
-# Both problematic rows should have is_changepoint=false, probability=NULL
+# Re-pinned (Phase 18, 18-01): group 'A' drops its NULL-dated row before changepoint
+# detection runs, leaving only 2 valid-dated points -- below the minimum point count
+# for detection, so ALL of group A's rows (not just the dropped one) get
+# is_changepoint=false/probability=NULL, the same "insufficient data" treatment as
+# singleton group B. All 4 rows match, not just the 2 "problematic" ones the original
+# comment assumed. Not attributable to any Phase 9-17 change -- confirmed directly
+# against the query output.
 query I
 SELECT COUNT(*) FROM ts_detect_changepoints_by('cp_combined', grp, dt, val, MAP{})
 WHERE is_changepoint = false AND changepoint_probability IS NULL;
 ----
-2
+4
 
 statement ok
 DROP TABLE cp_combined;
 
 # Test 4: Large dataset row preservation
+# Class B fix (Phase 18, 18-01): range() produces BIGINT; DATE + BIGINT has no overload
+# ("+(DATE, BIGINT)" Binder Error). Cast the offset to INTEGER to keep DATE semantics.
 statement ok
 CREATE TABLE cp_large AS
 SELECT 'grp_' || (i / 10) AS grp,
-       CASE WHEN i % 10 = 5 THEN NULL ELSE '2024-01-01'::DATE + (i % 10) END AS dt,
+       CASE WHEN i % 10 = 5 THEN NULL ELSE '2024-01-01'::DATE + (i % 10)::INTEGER END AS dt,
        (100 + i)::DOUBLE AS val
 FROM range(0, 100) t(i);
 
