@@ -346,3 +346,22 @@ Duplicate (group, date) pair detected
 
 statement ok
 DROP TABLE dup_test;
+
+# ==============================================================================
+# WR-02 (Phase 18 review): a SQL NULL frequency must not stringify to the
+# literal text "NULL" (which previously failed ParseFrequencyWithType with a
+# confusing "Invalid frequency 'NULL'" message). It must be treated like the
+# sibling _ts_fill_forward_native's NULL-guarded optional arguments and fall
+# back to the bind_data default (1-day FIXED frequency).
+# ==============================================================================
+
+query III
+SELECT * FROM _ts_fill_gaps_native(
+    (SELECT group_col, date_col, value FROM test_date ORDER BY group_col, date_col),
+    NULL::VARCHAR
+);
+----
+A	2024-01-01	10.0
+A	2024-01-02	20.0
+A	2024-01-03	NULL
+A	2024-01-04	40.0

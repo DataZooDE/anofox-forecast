@@ -204,8 +204,16 @@ static unique_ptr<FunctionData> TsFillGapsNativeBind(
 
     auto bind_data = make_uniq<TsFillGapsNativeBindData>();
 
-    // Parse frequency from second argument (index 1, since index 0 is TABLE placeholder)
-    if (input.inputs.size() >= 2) {
+    // Parse frequency from second argument (index 1, since index 0 is TABLE placeholder).
+    // WR-02 (Phase 18 review): a SQL NULL frequency must not fall through to
+    // GetValue<string>(), which stringifies a NULL Value to the literal text
+    // "NULL" instead of throwing -- that then fails ParseFrequencyWithType with a
+    // confusing "Invalid frequency 'NULL'" message. Guard with IsNull() the same
+    // way the sibling _ts_fill_forward_native already guards its optional
+    // frequency/target_date arguments, so a NULL frequency here keeps the
+    // bind_data defaults (1-day FIXED frequency) instead of erroring on a
+    // stringified "NULL".
+    if (input.inputs.size() >= 2 && !input.inputs[1].IsNull()) {
         string freq_str = input.inputs[1].GetValue<string>();
         auto parsed = ParseFrequencyWithType(freq_str);
         bind_data->frequency_seconds = parsed.seconds;
