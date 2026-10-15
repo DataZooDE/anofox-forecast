@@ -3,19 +3,18 @@ gsd_state_version: "1.0"
 milestone: v0.10.0
 milestone_name: Statistical Correctness
 current_phase: 18
-current_phase_name: Correctness Regression Suite, Audit & Docs
 current_plan: Not started
-status: planning
-stopped_at: Phase 18 plans 4/4 + review fixes done; awaiting anofox-forecast v0.16.2 publish for the RC-05 gap item, then Phase 18 verification
-last_updated: "2026-10-15T22:04:15.703Z"
+status: completed
+stopped_at: Phase 18 complete — all phases complete
+last_updated: "2026-10-15T23:50:20.368Z"
 last_activity: 2026-10-16
-last_activity_desc: Phase 11 complete, transitioned to Phase 12
-state_head: f507f08852f561bab305784fb637352ca048e592
+last_activity_desc: Phase 18 complete
+state_head: 44bfba0b4384c672aeda9fc14b87574dba5a7e5d
 progress:
   total_phases: 10
   completed_phases: 1
-  total_plans: 55
-  completed_plans: 55
+  total_plans: 56
+  completed_plans: 56
   percent: 10
 ---
 
@@ -30,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-08 — started v0.10.0 Statistical Co
 
 ## Current Position
 
-Phase: 18 — Correctness Regression Suite, Audit & Docs
+Phase: 18
 Current Plan: Not started
 Total Plans in Phase: 4
-Status: Executed — awaiting v0.16.2 gap item + verification
-Last activity: 2026-10-16 — Phase 11 complete, transitioned to Phase 12
+Status: All phases complete
+Last activity: 2026-10-16 — Phase 18 complete
 
 Progress: [█░░░░░░░░░] 10%
 
@@ -42,7 +41,7 @@ Progress: [█░░░░░░░░░] 10%
 
 **Velocity:**
 
-- Total plans completed: 51 (this milestone)
+- Total plans completed: 56 (this milestone)
 - Average duration: -
 - Total execution time: 0 hours
 
@@ -59,6 +58,7 @@ Progress: [█░░░░░░░░░] 10%
 | 16 | 3 | - | - |
 | 17 | 3 | - | - |
 | 11 | 11 | - | - |
+| 18 | 5 | - | - |
 
 *Updated after each plan completion*
 **Per-Plan Metrics:**
@@ -124,12 +124,11 @@ Recent decisions affecting current work:
 ### Pending Todos
 
 None yet.
+
 - [Phase 11, 2026-10-16]: Deferred verification passed after user sign-off — ETS MAM optimum (α≈0.79/γ≈0.21, better loglik than R) accepted; TBATS width divergence vs statsforecast on 2/4 fixtures accepted + documented as known limitation; untracked 11-12 AutoARIMA work backfilled (11-12-ADDENDUM.md)
 - [Phase 18, 2026-10-15]: User publishes anofox-forecast v0.16.2 (PR #230, R KalmanForecast ARIMA intervals); fold the bump into v0.10.0 as a Phase 18 gap item — RC-05 AutoARIMA AirPassengers interval flips from known gap to hard parity
 
 ### Blockers/Concerns
-
-- [Phase 18] Waiting on user to merge PR #230 and publish anofox-forecast v0.16.2 (crates.io) before the RC-05 gap item can run.
 
 - [Phase 13/15] STL is shared: STAT-02 uses the crate `seasonality::stl::STL` — validate vs R `stats::stl` in Phase 13; DET-04 reuses or fixes it.
 - [Phase 15] fdars 0.47 bump: ~30 mechanical compile errors in 4 files plus a WASM (`js` feature) build check — use the local wasm_eh recipe.
@@ -163,6 +162,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-15T04:59:02.258Z
-Stopped at: Phase 11 complete, ready to plan Phase 12
+Stopped at: Phase 18 complete — all phases complete
 Resume file: None
 Next: `/gsd-plan-phase 9`

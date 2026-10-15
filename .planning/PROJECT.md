@@ -61,16 +61,18 @@ v0.9.0 (WASM Runtime Verification) is parked with only the operator live-CI nega
 - ✓ Forecast wrapper delegates intervals/fitted/residuals/model identity to the crate (no fabricated ±z·sd(series)·√h bands, no SES stand-in residuals); real ARIMA/SARIMA via arima_order/seasonal_order; crate exog fits; silent fallbacks → SQL errors on every surface incl. ts_forecast_agg — v0.10.0 Phase 10 (FCST-01..08)
 - ✓ anofox-regression =0.5.15 + anofox-forecast 0.15.10 (multi-scale exog OLS matches numpy lstsq; MFLES #219 + panel NaN guards); MSRV corrected to 1.89 — v0.10.0 Phase 9 (DEP-01/02/04)
 - ✓ anofox-forecast 0.16.1 consumed with no [patch]/git/path override; ADF/KPSS `regression := 'c'|'ct'` (statsmodels/R-tseries exact, local trend KPSS), standard four-way `ts_stationarity` verdict with explicit `constant`/NULL; model-aware Ljung-Box `fitted_params` (R `Box.test(fitdf)` exact); 36-check R `forecast` parity suite + Monte Carlo interval coverage (±3pp) — v0.10.0 Phase 17 (UPST-06, UPST-01, DIAG-03..05, FCST-09)
+- ✓ anofox-forecast 0.16.2 (R KalmanForecast ARIMA/SARIMA intervals) published and consumed — AutoARIMA AirPassengers interval at R parity, zero AutoARIMA R-parity exceptions — v0.10.0 Phase 18 gap plan 18-05
+- ✓ Regression-proofing: json statically linked (50 gated tests run), `test/sql/correctness/*` pins every fixed function (inventory gate), length-only Rust-test sweep, `make audit` no-stats-in-C++/SQL guard + CI workflow, permanent `make check-docs` snippet checker, v0.10.0 breaking-changes CHANGELOG + release notes — v0.10.0 Phase 18 (TEST-02, TEST-03, RUST-10, DOCS-01, DOCS-02)
 
 ### Active
 
 <!-- v0.10.0 Statistical Correctness — see REQUIREMENTS.md for REQ-IDs. -->
 
-- [ ] All wrapper-level statistical bugs from the 2026-10-08 audit fixed with value-asserting tests
-- [ ] No statistical computation remains in C++ or SQL macros
-- [ ] Core statistics, features, detection and conformal outputs match R/scipy/tsfresh references
+- [x] All wrapper-level statistical bugs from the 2026-10-08 audit fixed with value-asserting tests — Phases 10-18
+- [x] No statistical computation remains in C++ or SQL macros — enforced by `make audit` (Phase 18)
+- [x] Core statistics, features, detection and conformal outputs match R/scipy/tsfresh references — Phases 13-16, pinned in Phase 18
 - [x] Upstream anofox-forecast diagnostics/model-selection fixes merged and consumed — anofox-forecast 0.16.1, Phase 17
-- [ ] Dependencies bumped — anofox-regression 0.5.15 + anofox-forecast 0.15.10 done (Phase 9); fdars-core 0.47 pending (Phase 15)
+- [x] Dependencies bumped — anofox-regression 0.5.15 (Phase 9), fdars-core 0.47 (Phase 15), anofox-forecast 0.16.2 (Phase 18)
 
 Parked from v0.9.0: Phase 08 live-CI negative-control push (operator action).
 
@@ -138,6 +140,7 @@ Deferred from v0.7.0 (candidates for a future milestone):
 | MSRV 1.89 (v0.10.0) | trueno (via anofox-forecast) needs AVX-512 intrinsics stabilised in 1.89; 1.86 claim was false | ✓ Good — `cargo +1.88.0` refused, `+1.89.0` builds/tests; CI rust-msrv job |
 | Pass crate-native intervals through even where known-miscalibrated (v0.10.0 P10) | No fabrication; calibration fixed at the source (Phase 11 upstream) rather than masked in the wrapper | ✓ Good — 0.16.1 intervals reach R parity except one documented AutoARIMA AirPassengers interval gap (RC-05, crate SARIMA variance; upstream issue drafted) |
 | SQL `'Holt'` = ETS(A,A,N), R `holt()`'s definition (v0.10.0 P17, D-13) | `HoltLinearTrend::auto()` diverged from R by 3–13x on parity fixtures | ✓ Good — R-parity point deviation cut 6.86x (AirPassengers), 13.41x (rw), 3.01x (trend) |
+| Upstream fixes ship as crate releases, never local [patch] (v0.10.0 P18, user 2026-10-16) | Extension must consume what crates.io serves; a local patch hides release drift | ✓ Good — v0.16.2 merged + published upstream, then consumed from crates.io |
 | Every R-parity known gap must cite an evidenced root cause, never a loosened tolerance (v0.10.0 P17, D-12) | Prevents tolerance-widening from masking real bugs | ✓ Good — RC-01..RC-05 table; extension-side cause fixed, 3 crate-side causes drafted as upstream issues with repros |
 
 ## Evolution
@@ -158,4 +161,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-15 after v0.10.0 Phase 17*
+*Last updated: 2026-10-16 after v0.10.0 Phase 18 (all phases complete)*

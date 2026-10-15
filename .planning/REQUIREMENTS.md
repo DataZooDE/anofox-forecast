@@ -13,8 +13,8 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 ### Test Foundation
 
 - [x] **TEST-01**: A reference-fixture harness exists: `validation/reference/` generator scripts (R + Python) produce versioned fixture files (JSON/CSV) that Rust tests load; a README documents regeneration and tolerances.
-- [ ] **TEST-02**: The existing length-only tests for every module touched in this milestone are upgraded to value assertions.
-- [ ] **TEST-03**: A SQL-level regression suite (`test/sql/correctness/*.test`) pins the corrected results of each user-facing function fixed in this milestone.
+- [x] **TEST-02**: The existing length-only tests for every module touched in this milestone are upgraded to value assertions.
+- [x] **TEST-03**: A SQL-level regression suite (`test/sql/correctness/*.test`) pins the corrected results of each user-facing function fixed in this milestone.
 
 ### Dependencies
 
@@ -52,7 +52,7 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 - [x] **RUST-07**: Hierarchy aggregation keeps SQL `SUM` NULL semantics (all-NULL → NULL, no NULL→0 imputation) [D9].
 - [x] **RUST-08**: `ts_forecast_agg` uses Rust frequency detection with calendar-aware month/year stepping; `ts_forecast_agg` and `ts_features_agg` pass validity instead of splicing NULL rows [D10, D11].
 - [x] **RUST-09**: Per-step conformal validates that the residual count is a multiple of horizon; drop_constant uses the Rust tolerance; `ts_forecast_exog_by` future-date generation is calendar-correct; dead `ts_filter.cpp`/`ts_imputation.cpp` scalar bodies removed or registered [D12–D15].
-- [ ] **RUST-10**: An audit script (grep-based, run in CI or as a test) confirms no statistical arithmetic remains in `src/**/*.cpp` or macro SQL beyond documented marshalling.
+- [x] **RUST-10**: An audit script (grep-based, run in CI or as a test) confirms no statistical arithmetic remains in `src/**/*.cpp` or macro SQL beyond documented marshalling.
 
 ### Core Statistics (stats.rs, quality.rs, metrics.rs)
 
@@ -108,8 +108,8 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 
 ### Docs & Skills
 
-- [ ] **DOCS-01**: `docs/` and `plugins/anofox-forecast/skills/` describe the corrected definitions (intervals source, MASE, strengths, features, diagnostics, conformal variants); every changed SQL snippet run against the built extension.
-- [ ] **DOCS-02**: CHANGELOG / release notes list all behaviour changes that alter numerical outputs (breaking-change section).
+- [x] **DOCS-01**: `docs/` and `plugins/anofox-forecast/skills/` describe the corrected definitions (intervals source, MASE, strengths, features, diagnostics, conformal variants); every changed SQL snippet run against the built extension.
+- [x] **DOCS-02**: CHANGELOG / release notes list all behaviour changes that alter numerical outputs (breaking-change section).
 
 ## v2 Requirements
 
@@ -129,8 +129,8 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | TEST-01 | Phase 9 | Complete |
-| TEST-02 | Phase 18 | Pending |
-| TEST-03 | Phase 18 | Pending |
+| TEST-02 | Phase 18 | Complete |
+| TEST-03 | Phase 18 | Complete |
 | DEP-01 | Phase 9 | Complete |
 | DEP-02 | Phase 9 | Complete |
 | DEP-03 | Phase 15 | Complete |
@@ -156,7 +156,7 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 | RUST-07 | Phase 12 | Complete |
 | RUST-08 | Phase 12 | Complete |
 | RUST-09 | Phase 12 | Complete |
-| RUST-10 | Phase 18 | Pending |
+| RUST-10 | Phase 18 | Complete |
 | STAT-01 | Phase 13 | Complete |
 | STAT-02 | Phase 13 | Complete |
 | STAT-03 | Phase 13 | Complete |
@@ -191,8 +191,8 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 | UPST-04 | Phase 11 | Complete |
 | UPST-05 | Phase 11 | Complete |
 | UPST-06 | Phase 17 | Complete |
-| DOCS-01 | Phase 18 | Pending |
-| DOCS-02 | Phase 18 | Pending |
+| DOCS-01 | Phase 18 | Complete |
+| DOCS-02 | Phase 18 | Complete |
 
 **Coverage:**
 

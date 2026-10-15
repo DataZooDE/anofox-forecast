@@ -76,7 +76,7 @@ Phase artifacts (plans, summaries, verification): [milestones/v0.9.0-phases/](mi
 - [x] **Phase 15: Detection & Decomposition on fdars 0.47** - fdars 0.47 bump fixes detrend/seasonality no-ops; scipy peaks, correct BOCPD/PELT, STL-based MSTL, robust period detection (completed 2026-10-14)
 - [x] **Phase 16: Conformal & Bootstrap Correctness** - Horizon-ordered, per-group conformal surface computed in Rust; correct split/asymmetric/adaptive/jackknife+ and bootstrap sign (completed 2026-10-14)
 - [x] **Phase 17: Upstream Consumption & Diagnostics Parity** - Extension consumes the released upstream fixes; stationarity verdicts, model-aware Ljung-Box and R `forecast` parity verified from SQL (completed 2026-10-15)
-- [ ] **Phase 18: Correctness Regression Suite, Audit & Docs** - Value-asserting tests everywhere, SQL correctness suite, no-stats-in-C++ audit, docs/skills/CHANGELOG synced
+- [x] **Phase 18: Correctness Regression Suite, Audit & Docs** - Value-asserting tests everywhere, SQL correctness suite, no-stats-in-C++ audit, docs/skills/CHANGELOG synced (completed 2026-10-16)
 
 ## Phase Details
 
@@ -441,7 +441,7 @@ Phases execute in numeric order: 9 → 10 → 11 → 12 → 13 → 14 → 15 →
 | 15. Detection & Decomposition on fdars 0.47 | 5/5 | Complete    | 2026-10-14 |
 | 16. Conformal & Bootstrap Correctness | 3/3 | Complete    | 2026-10-14 |
 | 17. Upstream Consumption & Diagnostics Parity | 3/3 | Complete    | 2026-10-15 |
-| 18. Correctness Regression Suite, Audit & Docs | 5/5 | In Progress|  |
+| 18. Correctness Regression Suite, Audit & Docs | 5/5 | Complete    | 2026-10-16 |
 
 ## Next
 
