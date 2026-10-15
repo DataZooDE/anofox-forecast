@@ -33,7 +33,7 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 - [x] **FCST-06**: Silent fallbacks become errors or are explicitly reported: AutoETS crate error, "ETS" without spec, AutoMFLES/AutoMSTL aliases, default period 12 / period 2, unknown kalman_model, panel Croston variant, invalid UTF-8 model name, unparsable seasonal periods; the returned model name always identifies the model that actually ran [A7–A12].
 - [x] **FCST-07**: Ensemble members built by `build_forecaster` use the same defaults as the standalone model; "ETS" means the same model everywhere [A8, A14].
 - [x] **FCST-08**: Series input handling is explicit and documented: all-NULL series → error; valid NaN treated as missing; regressor NULLs handled via validity [A13].
-- [ ] **FCST-09**: AirPassengers + simulated-series fixtures: point forecasts and 95% intervals for Naive, SNaive, RWD, SES, Holt, HW, AutoETS, AutoARIMA, Theta, Croston are within documented tolerance of R `forecast`, and Monte-Carlo interval coverage is within ±3pp of nominal for the local-level case [A1, H].
+- [x] **FCST-09**: AirPassengers + simulated-series fixtures: point forecasts and 95% intervals for Naive, SNaive, RWD, SES, Holt, HW, AutoETS, AutoARIMA, Theta, Croston are within documented tolerance of R `forecast`, and Monte-Carlo interval coverage is within ±3pp of nominal for the local-level case [A1, H].
 
 ### Wrapper Bug Fixes
 
@@ -93,9 +93,9 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 
 - [ ] **DIAG-01**: ADF is augmented (lagged differences in the regression), supports constant and constant+trend, selects lags by AIC/BIC, and reports MacKinnon p-values; statistic matches `urca::ur.df`/statsmodels `adfuller` on fixtures; size ≈ 5% on a unit-root simulation [C1, C2, H1].
 - [ ] **DIAG-02**: KPSS p-values are bounded to [0.01, 0.10] with interpolation inside the table (matches `tseries::kpss.test`) [C3, H2].
-- [ ] **DIAG-03**: `classify_stationarity` uses the standard ADF/KPSS four-way mapping, can produce trend-stationary (trend variants), and handles constant series explicitly [C4].
-- [ ] **DIAG-04**: Ljung-Box accepts `fitted_params` (df = lags − p − q) from SQL [C5].
-- [ ] **DIAG-05**: docs/api/10-diagnostics.md claims match verified behaviour [C6].
+- [x] **DIAG-03**: `classify_stationarity` uses the standard ADF/KPSS four-way mapping, can produce trend-stationary (trend variants), and handles constant series explicitly [C4].
+- [x] **DIAG-04**: Ljung-Box accepts `fitted_params` (df = lags − p − q) from SQL [C5].
+- [x] **DIAG-05**: docs/api/10-diagnostics.md claims match verified behaviour [C6].
 
 ### Upstream Models (anofox-forecast branch + PR)
 
@@ -104,7 +104,7 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 - [ ] **UPST-03**: ETS prediction intervals use Hyndman et al. analytic variances (class 1/2) or simulation for class 3; coverage verified [H5].
 - [ ] **UPST-04**: Theta (STM) estimates α (SES optimisation) and its intervals follow the standard formula; random-walk bias removed vs R `thetaf` [H6].
 - [ ] **UPST-05**: TBATS/MSTL/GARCH interval gaps from upstream's own validation report are fixed or the affected models return NULL intervals with documentation [H7].
-- [ ] **UPST-06**: Upstream changes land as PR(s) in `~/projects/rust/anofox-forecast` with tests + CHANGELOG; the extension consumes them (interim `[patch]`, final released version after user publishes).
+- [x] **UPST-06**: Upstream changes land as PR(s) in `~/projects/rust/anofox-forecast` with tests + CHANGELOG; the extension consumes them (interim `[patch]`, final released version after user publishes).
 
 ### Docs & Skills
 
@@ -143,7 +143,7 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 | FCST-06 | Phase 10 | Complete |
 | FCST-07 | Phase 10 | Complete |
 | FCST-08 | Phase 10 | Complete |
-| FCST-09 | Phase 17 | Pending |
+| FCST-09 | Phase 17 | Complete |
 | WRAP-01 | Phase 15 | Complete |
 | WRAP-02 | Phase 13 | Complete |
 | WRAP-03 | Phase 13 | Complete |
@@ -182,15 +182,15 @@ Scope decision (user, 2026-10-08): **fix all** audit findings. Upstream anofox-f
 | CONF-05 | Phase 16 | Complete |
 | DIAG-01 | Phase 11 | Pending |
 | DIAG-02 | Phase 11 | Pending |
-| DIAG-03 | Phase 17 | Pending |
-| DIAG-04 | Phase 17 | Pending |
-| DIAG-05 | Phase 17 | Pending |
+| DIAG-03 | Phase 17 | Complete |
+| DIAG-04 | Phase 17 | Complete |
+| DIAG-05 | Phase 17 | Complete |
 | UPST-01 | Phase 17 | Pending |
 | UPST-02 | Phase 11 | Pending |
 | UPST-03 | Phase 11 | Pending |
 | UPST-04 | Phase 11 | Pending |
 | UPST-05 | Phase 11 | Pending |
-| UPST-06 | Phase 17 | Pending |
+| UPST-06 | Phase 17 | Complete |
 | DOCS-01 | Phase 18 | Pending |
 | DOCS-02 | Phase 18 | Pending |
 
