@@ -1227,12 +1227,16 @@ fn autoarima_air_e3_timestamp_probe() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// Upstream issue reproductions (RC-03, RC-04, RC-05). Each body below is
-// mirrored verbatim (modulo the fn signature) in its matching draft under
-// diagnosis/upstream-issues/ — these are the exact minimal reproductions,
-// compiled and run here against anofox-forecast 0.16.1. #[ignore]d because
-// they assert the UPSTREAM discrepancy and are expected to start failing
-// once the crate fixes it (a signal to tighten the corresponding tolerance).
+// Upstream issue reproductions (RC-03, RC-04, RC-05). RC-03/RC-04 bodies are
+// mirrored verbatim (modulo the fn signature) in their matching drafts under
+// diagnosis/upstream-issues/ — exact minimal reproductions, compiled and run
+// here against anofox-forecast 0.16.2 (RC-03/RC-04 themselves unaffected by
+// the 0.16.2 bump). #[ignore]d because they assert the UPSTREAM discrepancy
+// and are expected to start failing once the crate fixes it (a signal to
+// tighten the corresponding tolerance). RC-05 is RESOLVED as of 0.16.2
+// (upstream PR #230/#229, 18-05 gap closure): its repro is inverted to
+// assert the fix holds and is no longer #[ignore]d — see the comment on
+// repro_rc_05 below.
 // ══════════════════════════════════════════════════════════════════════════
 
 #[test]
@@ -1334,8 +1338,16 @@ fn repro_rc_04() {
     );
 }
 
+/// RC-05 RESOLVED (18-05 gap closure, anofox-forecast 0.16.2, upstream PR
+/// #230/#229): this test used to assert the crate's SARIMA interval was
+/// systematically narrower than R's KalmanForecast variance
+/// (worst_ratio < 0.90, measured 0.818 on 0.16.1). The upstream fix brings
+/// the worst-horizon ratio to 0.9951 on 0.16.2. Inverted (not deleted) to
+/// assert the fix holds, so a future crate bump regressing this exact
+/// defect fails loudly instead of silently reappearing. No longer
+/// `#[ignore]` -- it runs as part of the normal suite now that the gap is
+/// closed.
 #[test]
-#[ignore = "upstream repro RC-05"]
 fn repro_rc_05() {
     use anofox_forecast::core::TimeSeries;
     use anofox_forecast::models::arima::SARIMA;
@@ -1392,8 +1404,10 @@ fn repro_rc_05() {
 
     println!("RC-05 repro: worst crate/R half-width ratio={worst_ratio:.4}");
     assert!(
-        worst_ratio < 0.90,
-        "expected the crate's SARIMA interval to be systematically narrower than R's \
-         at some horizon (ratio < 0.90): worst_ratio={worst_ratio}"
+        worst_ratio >= 0.95,
+        "RC-05 regression: expected the crate's SARIMA interval to stay at parity with R's \
+         stats::arima KalmanForecast variance (ratio >= 0.95, anofox-forecast 0.16.2 measured \
+         0.9951 at the worst horizon) but worst_ratio={worst_ratio} -- the upstream fix from \
+         PR #230/#229 may have regressed in a later anofox-forecast release"
     );
 }

@@ -6,12 +6,19 @@ which share a single `tolerance` object (REF_TOLERANCE in
 gen_forecast_reference.R), and checks the `root_causes` table and, at
 --stage final, the `parity_checks` table's cause-integrity.
 
-D-16 (user decision, 2026-10-15): AutoARIMA is hard parity (order + point) on
-every series, with exactly ONE allowed interval known gap:
-air/auto_arima/AutoARIMA, cited by a crate-located root_causes row. Any OTHER
-AutoARIMA check (rw, trend, or a second air row) cited by a crate/reference
-root_causes row, or carrying parity_checks status "known_gap", is a
-violation, counted in `autoarima_gaps`.
+D-16 (user decision, 2026-10-15) carved out exactly ONE allowed AutoARIMA
+interval known gap, air/auto_arima/AutoARIMA, cited by a crate-located
+root_causes row (RC-05). RC-05 was RESOLVED by anofox-forecast 0.16.2
+(upstream PR #230/#229, 18-05 gap closure): the AirPassengers AutoARIMA
+interval is now at hard parity, so D-16's exception is retired. As of
+18-05, NO AutoARIMA check may be `status = "known_gap"`, and no
+AutoARIMA check may be cited by an *unresolved* crate/reference
+root_causes row. A root_causes row is "resolved" when its `resolution`
+field starts with `resolved:` (or, for extension-located rows, `fixed:`)
+— such rows are historical record of a cause that no longer applies and
+are exempt from `autoarima_gaps`. Any AutoARIMA check cited by an
+unresolved crate/reference root_causes row, or carrying parity_checks
+status "known_gap", is a violation, counted in `autoarima_gaps`.
 
 Usage:
     python3 check_root_causes.py --stage diagnosis|final
@@ -61,10 +68,17 @@ TASK1_CHECK_IDS = [
 ]
 TASK2_ADDED_CHECK_ID = "trend/holt/Holt"
 
-# D-16: the one allowed AutoARIMA known gap.
-ALLOWED_AUTOARIMA_GAP_CHECK = "air/auto_arima/AutoARIMA"
-
 VALID_LOCATIONS = {"extension", "crate", "reference"}
+
+
+def is_resolved_row(row: dict) -> bool:
+    """A root_causes row is resolved once it no longer describes an active
+    gap — either an extension-side fix (`resolution` starts with `fixed:`)
+    or a crate-side issue closed by an upstream release (`resolution`
+    starts with `resolved:`, e.g. RC-05 / anofox-forecast 0.16.2). Resolved
+    rows are historical record and are exempt from `autoarima_gaps`."""
+    resolution = row.get("resolution", "") or ""
+    return resolution.startswith("fixed:") or resolution.startswith("resolved:")
 
 
 def load(path: Path) -> dict:
@@ -157,10 +171,12 @@ def main() -> int:
         if location not in VALID_LOCATIONS:
             invalid += 1
 
+        resolved = is_resolved_row(row)
+
         for check_id in checks:
             all_checks_in_rows.add(check_id)
             if is_autoarima_check(check_id) and location in ("crate", "reference"):
-                if check_id != ALLOWED_AUTOARIMA_GAP_CHECK:
+                if not resolved:
                     autoarima_gaps += 1
 
         if location == "extension":
@@ -168,11 +184,12 @@ def main() -> int:
                 invalid += 1
         elif location == "crate":
             has_tracked = upstream.startswith("tracked:")
+            has_fixed = upstream.startswith("fixed:")
             draft_match = re.match(r"draft:\s*(\S+)", upstream)
             draft_path = None
             if draft_match:
                 draft_path = UPSTREAM_DIR / draft_match.group(1)
-            if not has_tracked and not (draft_path and draft_path.exists()):
+            if not has_tracked and not has_fixed and not (draft_path and draft_path.exists()):
                 invalid += 1
                 missing_drafts += 1
             elif draft_path and draft_path.exists():
@@ -209,8 +226,10 @@ def main() -> int:
 
             if check.get("status") == "known_gap":
                 if is_autoarima_check(check.get("surface", "")):
-                    if check_id != ALLOWED_AUTOARIMA_GAP_CHECK:
-                        autoarima_gaps += 1
+                    # D-16's one allowed AutoARIMA gap (air/auto_arima/AutoARIMA,
+                    # RC-05) was retired on 18-05: no AutoARIMA check may be
+                    # known_gap anymore.
+                    autoarima_gaps += 1
                 if not cited_ids:
                     uncaused += 1
                     continue

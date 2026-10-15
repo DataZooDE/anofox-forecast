@@ -6,7 +6,11 @@
 //! hard-coded here. D-12: a `known_gap` check's `cause` must cite an
 //! existing `tolerance.root_causes` row located `crate` or `reference`.
 //! D-15: every `AutoARIMA` check must be `status = "parity"` with its order
-//! (parsed from `model_name`) matching R's `fit.order` exactly.
+//! (parsed from `model_name`) matching R's `fit.order` exactly. D-16's one
+//! allowed AutoARIMA known_gap (air/auto_arima/AutoARIMA's interval, RC-05)
+//! is retired as of anofox-forecast 0.16.2 (18-05 gap closure): the fix
+//! shipped upstream in PR #230/#229, so no AutoARIMA check may be
+//! `status = "known_gap"` anymore.
 
 mod common;
 
@@ -322,32 +326,22 @@ fn r_forecast_parity_checks() {
             );
         }
 
-        // D-15/D-16: every AutoARIMA check has a matching R order. Status is
-        // "parity" except for the ONE allowed exception (D-16, checkpoint
-        // 2026-10-15): air/auto_arima/AutoARIMA's interval sits outside the
-        // parity tier (RC-05, crate: SARIMA prediction variance differs from
-        // R stats::arima's KalmanForecast). Any OTHER AutoARIMA check must
-        // still be status parity -- a regression on rw/trend (or a second
-        // air gap) is never silently absorbed here.
+        // D-15/D-16 (RC-05 resolved by anofox-forecast 0.16.2, upstream PR
+        // #230/#229): every AutoARIMA check has a matching R order and must
+        // be status "parity" -- there is no longer an allowed AutoARIMA
+        // known_gap. D-16's checkpoint (2026-10-15) carved out exactly ONE
+        // exception, air/auto_arima/AutoARIMA's 95% interval; that gap is
+        // now closed (measured interval_dev dropped from 1.846662e-1 on
+        // 0.16.1 to 4.592775e-3 on 0.16.2), so the exception is retired and
+        // every AutoARIMA check -- including air/auto_arima -- must be hard
+        // parity. A regression on any series is never silently absorbed
+        // here.
         if c.surface == "AutoARIMA" {
-            let is_allowed_d16_gap = c.series == "air" && c.r_key == "auto_arima";
-            if is_allowed_d16_gap {
-                assert_eq!(
-                    c.status, "known_gap",
-                    "air/auto_arima/AutoARIMA is the D-16 allowed gap and must be status known_gap"
-                );
-                assert!(
-                    cause_is_backed(&c.cause, &root_causes),
-                    "air/auto_arima/AutoARIMA's D-16 gap must cite a crate/reference root_causes row, got cause {:?}",
-                    c.cause
-                );
-            } else {
-                assert_eq!(
-                    c.status, "parity",
-                    "{}/{}/AutoARIMA must be status parity (D-15; only air/auto_arima may be the D-16 gap)",
-                    c.series, c.r_key
-                );
-            }
+            assert_eq!(
+                c.status, "parity",
+                "{}/{}/AutoARIMA must be status parity (D-15; RC-05 resolved on 0.16.2, no AutoARIMA known_gap is allowed anymore)",
+                c.series, c.r_key
+            );
             let r_order = &c.r_block["fit"]["order"];
             let r_p = r_order["p"].as_u64().unwrap() as usize;
             let r_d = r_order["d"].as_u64().unwrap() as usize;

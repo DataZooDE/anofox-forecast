@@ -128,8 +128,9 @@ FROM trend150;
 ----
 1
 
-# Sanity: AutoARIMA's lower <= point <= upper holds at every step (the
-# interval is a known gap only on AirPassengers per D-16, not here).
+# Sanity: AutoARIMA's lower <= point <= upper holds at every step. (D-16's
+# AirPassengers-only known interval gap, RC-05, was retired in 18-05 --
+# anofox-forecast 0.16.2 brings every AutoARIMA interval to hard parity.)
 query I
 SELECT bool_and(lo <= pt AND pt <= up)
 FROM trend150, (
@@ -245,9 +246,11 @@ SELECT list(yhat ORDER BY forecast_step) AS yhat,
        list(DISTINCT model_name) AS model_names
 FROM ts_forecast_by('air17r', id, ds, v, 'AutoARIMA', 12, '1mo', MAP{'seasonal_period': '12', 'confidence_level': '0.95'});
 
-# AutoARIMA (D-15/D-16): selects R's order (2,1,1)(0,1,0)[12] exactly; point
-# forecast within the fixture's air/auto_arima point_tol (6e-4 rel, D-16 --
-# the 95% interval is the one allowed AutoARIMA known gap, not asserted here).
+# AutoARIMA (D-15; RC-05 resolved on anofox-forecast 0.16.2, 18-05 gap
+# closure): selects R's order (2,1,1)(0,1,0)[12] exactly; point forecast
+# within the fixture's air/auto_arima point_tol (6e-4 rel). The 95% interval
+# is now hard parity too (interval_dev=4.592775e-3, tol=7e-3 -- D-16's prior
+# known-gap exception is retired) but is not asserted by literal here.
 query I
 SELECT model_names = ['AutoARIMA(2,1,1)(0,1,0)[12]']
 FROM air17r_autoarima;

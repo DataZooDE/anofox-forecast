@@ -177,7 +177,7 @@ REF_ROOT_CAUSES <- list(
       "interval_dev=2.489813e-1, with crate/R half-width ratio falling",
       "from 1.040 (h=1) to 0.818 (h=6) and recovering only to 0.879",
       "(h=12) -- a systematic underestimate of multi-step SARIMA forecast",
-      "variance, not a one-off numerical difference. E3",
+      "variance, not a one-off numerical difference (0.16.1). E3",
       "(autoarima_air_e3_timestamp_probe): synthetic-hourly and",
       "real-monthly timestamps give bit-identical intervals",
       "(same_bits=true), ruling out the wrapper's synthetic index as the",
@@ -186,17 +186,32 @@ REF_ROOT_CAUSES <- list(
       "closely (point ratios near 1.0, interval ratios following the",
       "same h-dependent pattern), so this is an estimation/variance-",
       "formula difference, not a selection difference. Reproduced",
-      "standalone in repro_rc_05 (r_parity_diagnosis.rs)."
+      "standalone in repro_rc_05 (r_parity_diagnosis.rs), which asserted",
+      "the discrepancy on 0.16.1. RESOLVED on 0.16.2: re-running the same",
+      "repro gives a worst crate/R half-width ratio of 0.9951 (was 0.818),",
+      "and the AutoARIMA interval re-measured via autoarima_report is",
+      "interval_dev=4.592775e-3 (down from 1.846662e-1) -- inside the",
+      "parity tier. repro_rc_05 is inverted (asserts ratio >= 0.90, i.e.",
+      "the fix holds) rather than deleted, to keep a standing regression",
+      "guard against this exact defect re-appearing in a future crate bump."
     ),
     resolution = paste(
-      "known gap (user decision D-16, 2026-10-15): this is the ONE",
-      "allowed AutoARIMA known gap; order identity and point forecasts",
-      "remain hard parity on every series. Being fixed upstream in",
-      "parallel (separate worktree/PR targeting anofox-forecast 0.16.2);",
-      "the extension takes a follow-up bump to tighten this check once",
-      "released."
+      "resolved: fixed in anofox-forecast 0.16.2 (upstream PR #230,",
+      "shipping the SARIMA/ARIMA/AutoARIMA KalmanForecast prediction-",
+      "interval fix from PR #229). D-16's one-allowed-AutoARIMA-gap",
+      "exception (user decision 2026-10-15) is retired now that the",
+      "AirPassengers 95% interval is at hard parity; order identity and",
+      "point forecasts were already hard parity on every series and are",
+      "unaffected. air/auto_arima/AutoARIMA's parity_checks row moves to",
+      "status=parity (tol = 1.5x measured per the D-15 tolerance rule,",
+      "rounded up to 1 significant digit)."
     ),
-    upstream = "draft: RC-05-autoarima-sarima-interval-variance.md"
+    upstream = paste(
+      "fixed: anofox-forecast 0.16.2 (upstream PR #230 / #229,",
+      "https://github.com/sipemu/anofox-forecast/releases/tag/v0.16.2);",
+      "draft RC-05-autoarima-sarima-interval-variance.md retained",
+      "(marked resolved) for historical record"
+    )
   )
 )
 
@@ -337,10 +352,10 @@ AIR_PARITY_CHECKS <- list(
   list(
     series = "air", r_key = "auto_arima", surface = "AutoARIMA", ets_spec = "",
     seasonal_period = 12, point_tol_kind = "rel", point_tol = 6e-4,
-    interval_tol = 0.3, status = "known_gap", cause = "RC-05",
-    reason = "D-16 (user decision 2026-10-15): order_match=true (R ARIMA(2,1,1)(0,1,0)[12]) and the point forecast is in parity (3.982169e-4), but the 95% interval is outside the parity tier (1.846662e-1) -- the ONE allowed AutoARIMA known gap. Cause RC-05 (crate: SARIMA prediction variance differs from R stats::arima KalmanForecast). tol = 1.5x measured per the D-15 tolerance rule, with no tier cap on this one exception (capping would make the tolerance stricter than the measured value).",
-    follow_up = "draft: RC-05-autoarima-sarima-interval-variance.md (pending user filing); being fixed upstream in parallel (separate worktree/PR, anofox-forecast 0.16.2) -- a follow-up bump will tighten this check to the parity tier.",
-    measured_point = 3.982169e-4, measured_interval = 1.846662e-1
+    interval_tol = 7e-3, status = "parity", cause = "",
+    reason = "RESOLVED on anofox-forecast 0.16.2 (upstream PR #230/#229, RC-05): order_match=true (R ARIMA(2,1,1)(0,1,0)[12]), point forecast in parity (3.982169e-4, unchanged from 0.16.1), and the 95% interval is now in parity too (4.592775e-3, down from the 0.16.1 known-gap measurement of 1.846662e-1). tol = max(1e-6, 1.5x measured, rounded up to 1 significant digit) = 7e-3, the D-15 tolerance rule applied the same as every other parity-tier AutoARIMA row. D-16's one-allowed-AutoARIMA-gap exception (user decision 2026-10-15) is retired.",
+    follow_up = "none -- resolved. Historical record: draft/RC-05-autoarima-sarima-interval-variance.md (marked resolved), repro_rc_05 (r_parity_diagnosis.rs) inverted to assert the fix holds.",
+    measured_point = 3.982169e-4, measured_interval = 4.592775e-3
   ),
   list(
     series = "air", r_key = "thetaf", surface = "Theta", ets_spec = "",
@@ -659,8 +674,8 @@ RW_PARITY_CHECKS <- list(
     series = "rw", r_key = "auto_arima", surface = "AutoARIMA", ets_spec = "",
     seasonal_period = 0, point_tol_kind = "rel", point_tol = 1e-6,
     interval_tol = 1e-6, status = "parity", cause = "",
-    reason = "D-15 tolerance rule on the 0.16.1 measurement (autoarima_report, diagnosis/harness-output.txt): order_match=true (R (0,1,0)), point=0.000000e0, interval=3.276619e-8, both inside the parity tier; tol = max(1e-6, 1.5x measured, rounded up to 1 significant digit) -- the 1e-6 floor binds on both.",
-    follow_up = "", measured_point = 0, measured_interval = 3.276619e-8
+    reason = "D-15 tolerance rule, re-measured on anofox-forecast 0.16.2 (RC-05 fix, KalmanForecast prediction-interval change): order_match=true (R (0,1,0)), point=0.000000e0, interval=8.062277e-10 (down from the 0.16.1 measurement of 3.276619e-8). tol = max(1e-6, 1.5x measured, rounded up to 1 significant digit) -- the 1e-6 floor still binds on both; tolerance unchanged, not loosened.",
+    follow_up = "", measured_point = 0, measured_interval = 8.062277e-10
   ),
   list(
     series = "rw", r_key = "thetaf", surface = "Theta", ets_spec = "",
@@ -753,9 +768,9 @@ TREND_PARITY_CHECKS <- list(
   list(
     series = "trend", r_key = "auto_arima", surface = "AutoARIMA", ets_spec = "",
     seasonal_period = 0, point_tol_kind = "rel", point_tol = 1e-6,
-    interval_tol = 6e-3, status = "parity", cause = "",
-    reason = "D-15 tolerance rule on the 0.16.1 measurement (autoarima_report, diagnosis/harness-output.txt): order_match=true (R (0,1,0) with drift), point=2.232548e-14, interval=3.361326e-3, both inside the parity tier; tol = max(1e-6, 1.5x measured, rounded up to 1 significant digit).",
-    follow_up = "", measured_point = 2.232548e-14, measured_interval = 3.361326e-3
+    interval_tol = 1e-6, status = "parity", cause = "",
+    reason = "D-15 tolerance rule, re-measured and re-tiered on anofox-forecast 0.16.2 (RC-05 fix, KalmanForecast prediction-interval change): order_match=true (R (0,1,0) with drift), point=2.232548e-14 (unchanged), interval=8.064310e-10 (down from the 0.16.1 measurement of 3.361326e-3). tol = max(1e-6, 1.5x measured, rounded up to 1 significant digit) -- the 1e-6 floor now binds (was 6e-3); tightened, never loosened.",
+    follow_up = "", measured_point = 2.232548e-14, measured_interval = 8.064310e-10
   ),
   list(
     series = "trend", r_key = "thetaf", surface = "Theta", ets_spec = "",

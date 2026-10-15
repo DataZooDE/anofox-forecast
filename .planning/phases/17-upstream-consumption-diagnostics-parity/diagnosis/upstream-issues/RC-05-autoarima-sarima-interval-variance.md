@@ -1,3 +1,14 @@
+> **RESOLVED (2026-10-16, Phase 18 plan 18-05):** Fixed upstream in anofox-forecast 0.16.2
+> (PR #230, shipping the SARIMA/ARIMA/AutoARIMA KalmanForecast prediction-interval fix from
+> PR #229 — https://github.com/sipemu/anofox-forecast/releases/tag/v0.16.2). Re-running this
+> draft's own minimal reproduction (mirrored as `repro_rc_05` in `r_parity_diagnosis.rs`, now
+> inverted to assert the fix instead of the defect) on 0.16.2 gives a worst crate/R half-width
+> ratio of `0.9951` (was `0.818` on 0.16.1). The AirPassengers AutoARIMA 95% interval
+> (`air/auto_arima/AutoARIMA` in `r_forecast_parity.rs`) re-measures at `interval_dev=4.592775e-3`
+> (was `1.846662e-1`), now inside the parity tier (`interval_tol=7e-3`). D-16's one-allowed
+> AutoARIMA known-gap exception (user decision 2026-10-15) is retired; every AutoARIMA check is
+> hard parity. Left below unmodified as the historical record of the original diagnosis.
+
 # RC-05: SARIMA 95% prediction intervals are systematically narrower than R `stats::arima`'s
 KalmanForecast variance at the correct selected order
 
