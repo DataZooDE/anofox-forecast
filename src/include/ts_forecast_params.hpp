@@ -210,6 +210,21 @@ inline void ApplyForecastParamSet(const ForecastParamSet &p, const string &metho
     strncpy(opts.model, method.c_str(), sizeof(opts.model) - 1);
     opts.model[sizeof(opts.model) - 1] = '\0';
 
+    // Validate 'model' param is only used with ETS method (#177). This mirrors
+    // src/table_functions/ts_forecast_native.cpp's identical check -- that
+    // function is not reached by ts_forecast_by/ts_forecast_agg (they call
+    // _ts_forecast_scalar / this shared header instead), so without this check
+    // here the param was silently accepted and ignored for non-ETS methods,
+    // the exact "silent model/parameter fallback" this milestone eliminates
+    // elsewhere (Phase 18, 18-01, Rule 2 fix; surfaced by
+    // test/sql/ts_forecast_ets_model.test under the json gate).
+    if (!p.model_spec.empty() && method != "ETS") {
+        throw InvalidInputException(
+            "Parameter 'model' (value: '%s') is only valid when method='ETS'. "
+            "Current method is '%s'. Remove the 'model' parameter or change method to 'ETS'.",
+            p.model_spec, method);
+    }
+
     if (!p.model_spec.empty()) {
         strncpy(opts.ets_model, p.model_spec.c_str(), sizeof(opts.ets_model) - 1);
         opts.ets_model[sizeof(opts.ets_model) - 1] = '\0';
