@@ -393,9 +393,12 @@ Plans:
   4. `docs/` and `plugins/anofox-forecast/skills/` (bodies and frontmatter descriptions) describe the corrected definitions — interval source, MASE, strengths, features, diagnostics, conformal variants — with every changed SQL snippet executed against the built extension.
   5. CHANGELOG / release notes contain a breaking-change section listing every behaviour change that alters numerical output.
 
-**Plans**: 4/4 plans executed
+**Plans**: 5/5 plans executed
 
 Plans:
+
+- [x] 18-05-PLAN.md
+
 **Wave 1**
 
 - [x] 18-01-PLAN.md — Phase 17 start guard, json statically linked into the test/release build (D-01, OpenSSL + WASM LINKED_LIBS untouched), the 50 json-gated SQL test files run and are repaired with an attributed ledger (stale API, DATE+BIGINT, cascades, Phase 9-17 numeric shifts), assertion-count jump (TEST-03 prerequisite) (wave 1)
@@ -438,7 +441,7 @@ Phases execute in numeric order: 9 → 10 → 11 → 12 → 13 → 14 → 15 →
 | 15. Detection & Decomposition on fdars 0.47 | 5/5 | Complete    | 2026-10-14 |
 | 16. Conformal & Bootstrap Correctness | 3/3 | Complete    | 2026-10-14 |
 | 17. Upstream Consumption & Diagnostics Parity | 3/3 | Complete    | 2026-10-15 |
-| 18. Correctness Regression Suite, Audit & Docs | 4/4 | In Progress|  |
+| 18. Correctness Regression Suite, Audit & Docs | 5/5 | In Progress|  |
 
 ## Next
 
