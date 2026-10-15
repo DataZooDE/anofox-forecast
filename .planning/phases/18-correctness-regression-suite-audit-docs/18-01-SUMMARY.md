@@ -293,3 +293,13 @@ None — no external service configuration required.
 
 - The full SQL suite is green with json statically linked (5236 assertions, 0 skipped) — plan 18-02 (correctness suite + length-only sweep + D-08 fixes) can build on a fully-executing baseline as the ROADMAP requires.
 - Two genuine production bugs and one incomplete feature were fixed; no known blockers for 18-02/18-03/18-04.
+
+## Self-Check: PASSED
+
+- All 7 key files (5 production, 1 deferred-items.md, 1 this SUMMARY) confirmed present on disk.
+- All 26 commits (D-01 through the final `docs(18-01)` metadata commit) confirmed present in `git log`.
+- Re-ran Task 1's additions-only-diff check: 0 removed lines in `extension_config.cmake`.
+- Re-ran `json loaded` check: `true`.
+- Re-ran scratch-file check: 0 `test/sql/zz_scratch_*` files remain.
+- Re-ran gated-file-count check: 50 files still carry `require json` (none accidentally dropped the directive).
+- Re-ran `make test_release`: **All tests passed (5236 assertions in 85 test cases)** — matches the number recorded above, confirms no regression since the last per-task commit.
