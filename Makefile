@@ -8,7 +8,7 @@ EXT_CONFIG=${PROJ_DIR}extension_config.cmake
 include extension-ci-tools/makefiles/duckdb_extension.Makefile
 
 # Rust targets (for local development)
-.PHONY: rust rust_debug rust_test fmt check header benchmark-setup benchmark-m4 benchmark-m5
+.PHONY: rust rust_debug rust_test fmt check header audit benchmark-setup benchmark-m4 benchmark-m5
 
 rust:
 	cargo build --release
@@ -29,6 +29,12 @@ check:
 header:
 	cargo build --release
 	@echo "Header generated at src/include/anofox_fcst_ffi.h"
+
+# Phase 18 (RUST-10, D-04/D-05): no-statistics-in-C++/SQL audit + D-03 length-only sweep
+audit:
+	python3 scripts/audit_no_stats_in_cpp.py --self-test
+	python3 scripts/audit_no_stats_in_cpp.py
+	python3 scripts/check_length_only_tests.py
 
 # Benchmark targets
 benchmark-setup:
