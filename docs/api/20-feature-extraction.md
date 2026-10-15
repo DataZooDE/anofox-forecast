@@ -159,8 +159,8 @@ ts_features_config_template() → STRUCT
 
 **Example:**
 ```sql
--- Get template to customize
-SELECT ts_features_config_template();
+-- Get template to customize (table function, call from FROM not SELECT)
+SELECT * FROM ts_features_config_template();
 ```
 
 ---

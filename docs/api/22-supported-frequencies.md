@@ -132,12 +132,21 @@ Preparation](04-data-preparation.md#ts_fill_gaps_by) for worked examples.
 ## Common Use Cases
 
 ```sql
+-- Setup: weekly_sales(store_id, date, amount), monthly_data(region_id, date, value) --
+-- sensor_data and sales are already-shared fixtures (reused as-is).
+CREATE OR REPLACE TABLE weekly_sales AS
+SELECT store_id, date, revenue AS amount FROM weekly_data;
+CREATE OR REPLACE TABLE monthly_data AS
+SELECT product_id AS region_id, date, quantity AS value FROM monthly_sales;
+```
+
+```sql
 -- Daily sales data: fill gaps and compute stats
 SELECT * FROM ts_fill_gaps_by('sales', product_id, date, quantity, '1d');
 SELECT * FROM ts_stats_by('sales', product_id, date, quantity, '1d');
 
 -- Hourly sensor data
-SELECT * FROM ts_fill_gaps_by('sensors', sensor_id, timestamp, reading, '1h');
+SELECT * FROM ts_fill_gaps_by('sensor_data', sensor_id, timestamp, reading, '1h');
 
 -- Weekly aggregated data
 SELECT * FROM ts_stats_by('weekly_sales', store_id, date, amount, '1w');

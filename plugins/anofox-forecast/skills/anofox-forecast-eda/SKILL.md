@@ -15,7 +15,7 @@ user-invocable: false
 
 # Anofox Forecast — EDA & Data Quality Cheat Sheet
 
-**Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.15.10) | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
+**Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.16.1) | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
 
 Understand your data before modelling it: per-series statistics, data-quality scores, feature vectors for ML.
 
@@ -78,10 +78,13 @@ FROM sales GROUP BY product_id;
 
 ### `ts_stats_summary` — aggregate stats across all groups
 
-Summarise the per-group stats into panel-level statistics (mean, std, min, max of each metric).
+Summarise the per-group stats into panel-level statistics (mean, std, min, max of each metric). Signature is `(stats_table)` — a single argument naming an already-materialized `ts_stats_by` output table, not a raw source:
 
 ```sql
-SELECT * FROM ts_stats_summary('sales', product_id, ds, y, '1d');
+CREATE OR REPLACE TABLE sales_stats AS
+SELECT * FROM ts_stats_by('sales', product_id, ds, y, '1d');
+
+SELECT * FROM ts_stats_summary('sales_stats');
 ```
 
 ## Data quality
@@ -133,6 +136,11 @@ FROM sales GROUP BY product_id;
 ```
 
 ### `ts_data_quality_summary` — panel-level roll-up
+
+Returns `n_total`, `n_good`/`n_fair`/`n_poor` (`overall_score` buckets: `>=0.8`, `0.5-0.8`,
+`<0.5`), `n_unassessed` (groups with no usable dates, e.g. all-NULL `date_col` — excluded
+from the other buckets and from `avg_score`; D-10) and `avg_score` (mean over assessed
+groups only). Invariant: `n_good + n_fair + n_poor + n_unassessed = n_total`.
 
 ```sql
 SELECT * FROM ts_data_quality_summary('sales', product_id, ds, y, 14);
@@ -360,25 +368,40 @@ SELECT * FROM ts_features_config_template();
 
 ### Custom feature subsets
 
-Configure via JSON or CSV:
+`ts_features_by`/`ts_features_table` take no config argument (4/3 positional args
+only). Configure via JSON or CSV against the `ts_features_agg` aggregate's
+`feature_selection`/`feature_params` arguments instead, unpacking the config
+scalar's `feature_names`/`overrides` fields:
 
 ```sql
 -- Load a JSON config
-SELECT * FROM ts_features_by('sales', id, ds, y,
-    ts_features_config_from_json('{"features": ["mean", "std", "autocorrelation_lag1"]}'));
+SELECT product_id,
+    ts_features_agg(ds, y,
+        (ts_features_config_from_json('{"features": ["mean", "std", "autocorrelation_lag1"]}')).feature_names,
+        (ts_features_config_from_json('{"features": ["mean", "std", "autocorrelation_lag1"]}')).overrides
+    ) AS feats
+FROM sales GROUP BY product_id;
 
 -- Or CSV
-SELECT * FROM ts_features_by('sales', id, ds, y,
-    ts_features_config_from_csv('mean,std,skewness'));
+SELECT product_id,
+    ts_features_agg(ds, y,
+        (ts_features_config_from_csv('mean,std,skewness')).feature_names,
+        (ts_features_config_from_csv('mean,std,skewness')).overrides
+    ) AS feats
+FROM sales GROUP BY product_id;
 ```
+
+> **Note:** in this build, the `"features"` allow-list in the JSON/CSV config did not
+> actually narrow the returned feature set (every call above still returned all 117
+> features) — logged as a deferred finding, not fixed by this docs sweep.
 
 ### `ts_features_agg` — aggregate variant
 
 For custom GROUP BY:
 
 ```sql
-SELECT id, ts_features_agg(ds, y).mean, ts_features_agg(ds, y).autocorrelation_lag1
-FROM sales GROUP BY id;
+SELECT product_id, ts_features_agg(ds, y).mean, ts_features_agg(ds, y).autocorrelation_lag1
+FROM sales GROUP BY product_id;
 ```
 
 ## Gotchas

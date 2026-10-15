@@ -35,11 +35,11 @@ As of v0.4.0, all table macros support STRUCT syntax for parameters with mixed t
 
 ```sql
 -- STRUCT allows mixed types (recommended)
-SELECT * FROM ts_cv_folds_by('sales', id, date, value, 3, 7,
+SELECT * FROM ts_cv_folds_by('sales', product_id, date, value, 3, 7,
     {'gap': 2, 'clip_horizon': true});
 
 -- MAP requires homogeneous string values (legacy)
-SELECT * FROM ts_cv_folds_by('sales', id, date, value, 3, 7,
+SELECT * FROM ts_cv_folds_by('sales', product_id, date, value, 3, 7,
     MAP{'gap': '2', 'clip_horizon': 'true'});
 ```
 

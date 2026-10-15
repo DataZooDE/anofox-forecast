@@ -1,10 +1,38 @@
+docs/api/02-hierarchical.md	ts_aggregate_hierarchy(
+docs/api/02-hierarchical.md	ts_combine_keys(
+docs/api/02-hierarchical.md	ts_split_keys(
+docs/api/02-hierarchical.md	ts_validate_separator(
+docs/api/03-statistics.md	ts_data_quality_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, n_short INTEGER, frequency VARCHAR) → TABLE
+docs/api/03-statistics.md	ts_data_quality_summary(source VARCHAR, unique_id_col COLUMN, date_col COLUMN, value_col COLUMN, n_short INTEGER) → TABLE
 docs/api/03-statistics.md	ts_stats_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, frequency VARCHAR,
 docs/api/04-data-preparation.md	ts_diff_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, diff_order INTEGER, seasonal_lag := 1) → TABLE
+docs/api/04-data-preparation.md	ts_drop_constant_by(source VARCHAR, group_col COLUMN, value_col COLUMN) → TABLE
+docs/api/04-data-preparation.md	ts_drop_edge_zeros_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
+docs/api/04-data-preparation.md	ts_drop_gappy_by(source VARCHAR, group_col COLUMN, value_col COLUMN, max_gap_ratio DOUBLE) → TABLE
+docs/api/04-data-preparation.md	ts_drop_leading_zeros_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
+docs/api/04-data-preparation.md	ts_drop_short_by(source VARCHAR, group_col COLUMN, min_length INTEGER) → TABLE
+docs/api/04-data-preparation.md	ts_drop_trailing_zeros_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
+docs/api/04-data-preparation.md	ts_drop_zeros_by(source VARCHAR, group_col COLUMN, value_col COLUMN) → TABLE
+docs/api/04-data-preparation.md	ts_fill_forward_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, target_date DATE, frequency VARCHAR) → TABLE
+docs/api/04-data-preparation.md	ts_fill_gaps_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, frequency VARCHAR) → TABLE
+docs/api/04-data-preparation.md	ts_fill_nulls_backward_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
+docs/api/04-data-preparation.md	ts_fill_nulls_const_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, fill_value DOUBLE) → TABLE
+docs/api/04-data-preparation.md	ts_fill_nulls_forward_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
+docs/api/04-data-preparation.md	ts_fill_nulls_mean_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
+docs/api/04-data-preparation.md	ts_fill_unknown_by(
+docs/api/04-data-preparation.md	ts_mark_unknown_by(
+docs/api/04-data-preparation.md	ts_validate_timestamps_by(
+docs/api/04-data-preparation.md	ts_validate_timestamps_summary_by(
+docs/api/05-period-detection.md	ts_detect_periods_by(source, group_col, date_col, value_col, params) → TABLE(id, periods)
+docs/api/05a-decomposition.md	ts_classify_seasonality(source VARCHAR, date_col COLUMN, value_col COLUMN, period DOUBLE) → TABLE
+docs/api/05a-decomposition.md	ts_classify_seasonality_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, period DOUBLE) → TABLE
 docs/api/05a-decomposition.md	ts_decompose_seasonal(values DOUBLE[], period DOUBLE[, method VARCHAR]) → STRUCT(trend DOUBLE[], seasonal DOUBLE[], remainder DOUBLE[], period DOUBLE, method VARCHAR)
+docs/api/05a-decomposition.md	ts_detrend_by(source, group_col, date_col, value_col, method)
 docs/api/05a-decomposition.md	ts_mstl_decomposition_by(source, group_col, date_col, value_col, params)
 docs/api/05a-decomposition.md	ts_seasonal_strength(values LIST(DOUBLE), period DOUBLE[, method VARCHAR]) → DOUBLE
 docs/api/05b-peak-detection.md	ts_analyze_peak_timing_by(source, group_col, date_col, value_col, period, params) → TABLE(group_col, n_peaks, peak_times, variability_score, is_stable)
 docs/api/05b-peak-detection.md	ts_detect_peaks_by(source, group_col, date_col, value_col, params) → TABLE(group_col, peaks, n_peaks, inter_peak_distances, mean_period)
+docs/api/06-changepoint-detection.md	ts_detect_changepoints_by(source, group_col, date_col, value_col, params)
 docs/api/07-forecasting.md	ts_auto_ensemble_inspect_by(
 docs/api/07-forecasting.md	ts_ensemble_inspect_by(
 docs/api/07-forecasting.md	ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, frequency, params?) → TABLE
@@ -23,18 +51,27 @@ docs/api/11-conformal-prediction.md	ts_bootstrap_intervals(residuals DOUBLE[], f
 docs/api/11-conformal-prediction.md	ts_conformal_apply_by(forecast_results, group_col, date_col, forecast_col, calibration,
 docs/api/11-conformal-prediction.md	ts_conformal_by(backtest_results, group_col, date_col, actual_col, forecast_col,
 docs/api/11-conformal-prediction.md	ts_conformal_calibrate(backtest_results, group_col, actual_col, forecast_col,
+docs/api/11-conformal-prediction.md	ts_conformal_coverage(actuals DOUBLE[], lower DOUBLE[], upper DOUBLE[]) → DOUBLE
+docs/api/11-conformal-prediction.md	ts_conformal_evaluate(actuals DOUBLE[], lower DOUBLE[], upper DOUBLE[], alpha DOUBLE)
 docs/api/11-conformal-prediction.md	ts_conformal_intervals(forecasts DOUBLE[], conformity_score DOUBLE)
 docs/api/11-conformal-prediction.md	ts_conformal_learn(residuals DOUBLE[], alphas DOUBLE[], method VARCHAR, strategy VARCHAR)
-docs/api/11-conformal-prediction.md	ts_conformal_predict_asymmetric(residuals DOUBLE[], forecasts DOUBLE[], alpha DOUBLE)
 docs/api/11-conformal-prediction.md	ts_conformal_predict(residuals DOUBLE[], forecasts DOUBLE[], alpha DOUBLE)
+docs/api/11-conformal-prediction.md	ts_conformal_predict_asymmetric(residuals DOUBLE[], forecasts DOUBLE[], alpha DOUBLE)
+docs/api/11-conformal-prediction.md	ts_conformal_quantile(residuals DOUBLE[], alpha DOUBLE) → DOUBLE
 docs/api/11-conformal-prediction.md	ts_interval_width_by(results, group_col, date_col, lower_col, upper_col)
+docs/api/11-conformal-prediction.md	ts_mean_interval_width(lower DOUBLE[], upper DOUBLE[]) → DOUBLE
+docs/api/20-feature-extraction.md	ts_features_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
+docs/api/20-feature-extraction.md	ts_features_config_from_csv(path VARCHAR) → STRUCT(
+docs/api/20-feature-extraction.md	ts_features_config_from_json(path VARCHAR) → STRUCT(
+docs/api/20-feature-extraction.md	ts_features_config_template() → STRUCT
+docs/api/20-feature-extraction.md	ts_features_list() → TABLE(
 docs/reference/models/baseline/naive.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'Naive', horizon, params);
 docs/reference/models/baseline/random_walk_drift.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'RandomWalkDrift', horizon, params);
 docs/reference/models/baseline/seasonal_naive.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'SeasonalNaive', horizon, params);
 docs/reference/models/baseline/seasonal_window_average.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'SeasonalWindowAverage', horizon, params);
 docs/reference/models/baseline/sma.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'SMA', horizon, params);
-docs/reference/models/classical/garch.md	params := MAP{'garch_p': '1', 'garch_q': '1'}
 docs/reference/models/classical/garch.md	SELECT * FROM ts_forecast_by(
+docs/reference/models/classical/garch.md	params := MAP{'garch_p': '1', 'garch_q': '1'}
 docs/reference/models/distributional/laplace.md	SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col,
 docs/reference/models/ensemble/autoensemble.md	SELECT * FROM ts_forecast_by(
 docs/reference/models/ensemble/ensemble_explicit.md	SELECT * FROM ts_forecast_ensemble_by(
@@ -64,16 +101,20 @@ docs/reference/models/multi-seasonal/mstl.md	CREATE OR REPLACE TABLE trend_only 
 docs/reference/models/multi-seasonal/mstl.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'MSTL', horizon, params);
 docs/reference/models/multi-seasonal/tbats.md	CREATE OR REPLACE TABLE trend_only AS
 docs/reference/models/multi-seasonal/tbats.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'TBATS', horizon, params);
-docs/reference/models/state-space/arima.md	SELECT * FROM ts_forecast_by('sales_data', product_id, date, revenue, 'ARIMA', 7, '1d', MAP{});
+docs/reference/models/multivariate/var.md	CREATE OR REPLACE TABLE macro AS
+docs/reference/models/multivariate/var.md	SELECT variable, forecast_step, ROUND(forecast_value, 4) AS fv
+docs/reference/models/multivariate/var.md	ts_forecast_var_by(
 docs/reference/models/state-space/arima.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'ARIMA', horizon, params);
+docs/reference/models/state-space/arima.md	SELECT * FROM ts_forecast_by('sales_data', product_id, date, revenue, 'ARIMA', 7, '1d', MAP{});
 docs/reference/models/state-space/auto_arima.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'AutoARIMA', horizon, params);
 docs/reference/models/state-space/auto_ets.md	SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'AutoETS', horizon, frequency, params);
 docs/reference/models/state-space/ets.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'ETS', horizon, params);
-docs/reference/models/state-space/kalman.md	params := MAP{'kalman_model': 'local_linear_trend'}
 docs/reference/models/state-space/kalman.md	SELECT * FROM ts_forecast_by(
+docs/reference/models/state-space/kalman.md	params := MAP{'kalman_model': 'local_linear_trend'}
 docs/reference/models/theta/auto_theta.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'AutoTheta', horizon, params);
 docs/reference/models/theta/dynamic_optimized_theta.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'DynamicOptimizedTheta', horizon, params);
 docs/reference/models/theta/dynamic_theta.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'DynamicTheta', horizon, params);
+docs/reference/models/theta/global_theta.md	SELECT * FROM ts_forecast_panel_by(
 docs/reference/models/theta/optimized_theta.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'OptimizedTheta', horizon, params);
 docs/reference/models/theta/theta.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'Theta', horizon, params);
 plugins/anofox-forecast/skills/anofox-forecast-backtest/SKILL.md	CREATE OR REPLACE TABLE calib AS
@@ -81,16 +122,27 @@ plugins/anofox-forecast/skills/anofox-forecast-backtest/SKILL.md	CREATE OR REPLA
 plugins/anofox-forecast/skills/anofox-forecast-backtest/SKILL.md	ts_bootstrap_intervals(residuals DOUBLE[], forecasts DOUBLE[],
 plugins/anofox-forecast/skills/anofox-forecast-backtest/SKILL.md	ts_bootstrap_quantiles(residuals DOUBLE[], forecasts DOUBLE[],
 plugins/anofox-forecast/skills/anofox-forecast-backtest/SKILL.md	ts_conformal_by(backtest_results VARCHAR, group_col COLUMN, date_col COLUMN,
+plugins/anofox-forecast/skills/anofox-forecast-backtest/SKILL.md	ts_cv_folds_by(source VARCHAR, group_col COLUMN, date_col COLUMN, target_col COLUMN,
+plugins/anofox-forecast/skills/anofox-forecast-backtest/SKILL.md	ts_cv_forecast_by(cv_folds_table VARCHAR, group_col COLUMN, date_col COLUMN, target_col COLUMN,
+plugins/anofox-forecast/skills/anofox-forecast-data-prep/SKILL.md	ts_fill_gaps_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN,
+plugins/anofox-forecast/skills/anofox-forecast-detection/SKILL.md	ts_analyze_peak_timing_by(source, group_col, date_col, value_col, period, params) → TABLE
+plugins/anofox-forecast/skills/anofox-forecast-detection/SKILL.md	ts_classify_seasonality_by(source, group_col, date_col, value_col, period DOUBLE) → TABLE
+plugins/anofox-forecast/skills/anofox-forecast-detection/SKILL.md	ts_detect_changepoints_by(source, group_col, date_col, value_col, params) → TABLE
 plugins/anofox-forecast/skills/anofox-forecast-detection/SKILL.md	ts_detect_peaks_by(source, group_col, date_col, value_col, params) → TABLE(group_col, peaks, n_peaks, inter_peak_distances, mean_period)
+plugins/anofox-forecast/skills/anofox-forecast-detection/SKILL.md	ts_detect_periods_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN,
+plugins/anofox-forecast/skills/anofox-forecast-detection/SKILL.md	ts_detrend_by(source, group_col, date_col, value_col, method) → TABLE
 plugins/anofox-forecast/skills/anofox-forecast-detection/SKILL.md	ts_mstl_decomposition_by(source, group_col, date_col, value_col, params) → TABLE(group_col, trend, seasonal, remainder, periods)
+plugins/anofox-forecast/skills/anofox-forecast-eda/SKILL.md	ts_data_quality(source VARCHAR, unique_id_col COLUMN, date_col COLUMN, value_col COLUMN,
+plugins/anofox-forecast/skills/anofox-forecast-eda/SKILL.md	ts_features_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
 plugins/anofox-forecast/skills/anofox-forecast-eda/SKILL.md	ts_stats(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN,
+plugins/anofox-forecast/skills/anofox-forecast-eda/SKILL.md	ts_stats_agg(date_col TIMESTAMP, value_col DOUBLE)
 plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_auto_ensemble_inspect_by(
 plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_ensemble_inspect_by(
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast(source VARCHAR, date_col COLUMN, target_col COLUMN,
 plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_agg(date_col TIMESTAMP, value_col DOUBLE, method VARCHAR, horizon INTEGER, params MAP)
 plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_by(
 plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_ensemble_by(
-plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_exog_by(
 plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_exog(source, date_col, target_col, xreg_cols,
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_exog_by(
 plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_panel_by(
-plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast(source VARCHAR, date_col COLUMN, target_col COLUMN,
 plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_var_by(

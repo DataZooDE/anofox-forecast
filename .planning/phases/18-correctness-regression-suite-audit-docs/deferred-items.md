@@ -54,3 +54,27 @@ scope boundary). Not fixed here.
     `(source, date_col, actual_col, forecast_col)`, 4 args, not 3).
   - `docs/API_REFERENCE.md`'s metric table (cited in 18-RESEARCH.md) likely has the
     same stale table-name-form examples; not independently re-checked by 18-02.
+
+## Plan 18-04
+
+- **`examples/backtesting/m5_backtest_examples.sql` and `examples/metrics/README.md`
+  still use the deprecated metric `_by` table-name form (carried over from 18-02,
+  above).** `scripts/check_doc_snippets.py` only scans `README.md`, `docs/**/*.md`
+  and `plugins/anofox-forecast/skills/**/*.md` — `examples/**/*.sql` and
+  `examples/**/README.md` outside those directories are not part of its scan set
+  (`examples/metrics/README.md` IS a `.md` file but lives in `examples/`, which the
+  checker's `DEFAULT_SCAN_DIRS` does not include). Left unfixed; a future plan
+  should either widen the checker's scan dirs or port these two files directly.
+- **`ts_features_config_from_json`/`ts_features_config_from_csv`'s `"features"`
+  allow-list does not narrow the returned feature set.** Discovered while fixing
+  `plugins/anofox-forecast/skills/anofox-forecast-eda/SKILL.md`'s "Custom feature
+  subsets" example: `ts_features_config_from_json('{"features": ["mean", "std",
+  "autocorrelation_lag1"]}')` returns a `feature_names` list containing all 117
+  tsfresh feature names (not just the 3 requested), and piping that unfiltered list
+  into `ts_features_agg`'s `feature_selection` argument computes all 117 features
+  regardless of the JSON/CSV config's `"features"` key. Out of scope for this
+  docs-only plan (no C++/Rust file in 18-04's remit); the SKILL.md documents the
+  observed behaviour with a note rather than claiming the filter works. Fix:
+  investigate `ts_features_config_from_json`/`_csv`'s native implementation
+  (likely in `src/table_functions/` or the FFI boundary) for why the `"features"`
+  key is not applied before returning `feature_names`.

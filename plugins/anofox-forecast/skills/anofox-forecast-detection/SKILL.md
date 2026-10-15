@@ -12,7 +12,7 @@ user-invocable: false
 
 # Anofox Forecast — Detection & Decomposition Cheat Sheet
 
-**Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.15.10) | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
+**Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.16.1) | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
 
 Detect signal structure. When both `seasonal_period` and `seasonal_periods` are omitted,
 `ts_forecast_by` / `ts_cv_forecast_by` / the scalar paths / `ts_forecast_agg` all auto-detect
@@ -89,6 +89,15 @@ FROM ts_detect_periods_by('sales', product_id, ds, y,
 The `GROUP BY` aggregate form of period detection — and the reliable path while the `_by` macro FFT bug (above) is open. Overloads: `ts_detect_periods_agg(ts TIMESTAMP, value DOUBLE)` and `ts_detect_periods_agg(ts, value, method VARCHAR)`. Returns the same STRUCT as `ts_detect_multiple_periods` (`periods[]`, `n_periods`, `primary_period`, `method`).
 
 ```sql
+-- Setup: sea(id, ts, y) -- same shape as the blockquoted known-bug repro above
+-- (restated here as a runnable fence; the blockquoted one above is narrative only).
+CREATE OR REPLACE TABLE sea AS
+SELECT 'A' AS id, TIMESTAMP '2024-01-01' + INTERVAL (g) HOUR AS ts,
+       10 + 5*sin(2*pi()*g/12) AS y
+FROM range(0,48) t(g);
+```
+
+```sql
 SELECT id, ts_detect_periods_agg(ts, y, 'fft').primary_period AS sp
 FROM sea GROUP BY id;
 ```
@@ -141,6 +150,18 @@ ORDER BY product_id;
 ```
 
 Alternatively, use the `ts_detect_periods_by` table macro with `MAP{'method': 'multi'}` — same result, one-liner:
+
+```sql
+-- Setup: dual_seasonal(series_id, ds, value), 120 days, weekly + monthly pattern
+-- (deterministic variant of examples/period_detection/synthetic_period_examples.sql's
+-- Section 4 fixture -- that one uses RANDOM(), this one doesn't).
+CREATE OR REPLACE TABLE dual_seasonal AS
+SELECT
+    'dual_pattern' AS series_id,
+    DATE '2024-01-01' + INTERVAL (i) DAY AS ds,
+    100.0 + 30.0 * sin(2 * pi() * i / 7.0) + 15.0 * sin(2 * pi() * i / 30.0) AS value
+FROM range(0, 120) t(i);
+```
 
 ```sql
 -- Table-macro form via ts_detect_periods_by (source: synthetic_period_examples.sql lines 175-179)
@@ -254,8 +275,7 @@ Numeric measures over `LIST(y ORDER BY ds)`. `windowed` variant tracks strength 
 
 `method` is `'variance'` (default, alias `var`) or `'spectral'` (alias `spec`, `fft`). Both
 LINEARLY DETREND the series first (D-12) — a trend + seasonal series previously measured
-`variance` strength `~0.003` on the raw series; detrended it reports `>= 0.95`. `'wavelet'` is
-**removed** (it returned `1.0` even for white noise in fdars-core 0.47) and now raises an
+`variance` strength `~0.003` on the raw series; detrended it reports `>= 0.95`. `'wavelet'` is **removed** (it returned `1.0` even for white noise in fdars-core 0.47) and now raises an
 error naming the two remaining methods; any other unrecognized method name, or a non-positive
 `period`, also raises. `ts_analyze_seasonality`'s `trend_strength` is `|r|` (absolute
 correlation with time, the square root of the linear-fit `R^2`).
@@ -368,8 +388,8 @@ The array-level primitive behind `ts_detrend_by`. Signature `ts_detrend(DOUBLE[]
   series** — position 1 is the first non-NULL input value, not the original row 0; the
   single-series `ts_detect_changepoints` macro shifts its row-level output back by the
   leading-NULL row count so those rows get NULL flags. Impute interior gaps first
-  (`ts_fill_nulls_by`) if your series has them; wrap in `try(...)` to convert the error to NULL
-  instead of failing the query.
+  (e.g. `ts_fill_nulls_mean_by`) if your series has them; wrap in `try(...)` to convert the error
+  to NULL instead of failing the query.
 - **Seasonality auto-detection applies uniformly across surfaces.** `AutoETS` / `AutoARIMA` / `AutoTheta` (and other models) via `ts_forecast_by`, `ts_cv_forecast_by`, the scalar paths, and `ts_forecast_agg` all auto-detect when `seasonal_period`/`seasonal_periods` are both omitted (10-10, FCST-06). Run detection first and pass `seasonal_period` explicitly if you want control/reproducibility rather than relying on silent auto-detection.
 - **`ts_detect_periods_by` returns one row per group** with a `periods` STRUCT. Access fields with `primary_period`.
 - **Detection needs sufficient history**: FFT-family methods need ≥ 2 full cycles; ACF-family needs ≥ 3. On short-history panels, `ts_detect_periods` may return `primary_period = 1` (no seasonality) even when a period exists.
@@ -388,11 +408,15 @@ The array-level primitive behind `ts_detrend_by`. Signature `ts_detrend(DOUBLE[]
 ## Canonical detection pipeline
 
 ```sql
--- 1. Detect periods across the panel (periods is a LIST of structs -- index into it,
--- it is not itself a struct; group_col output is named after the group_col you pass in)
+-- 1. Detect periods across the panel (use the aggregate form, not ts_detect_periods_by --
+-- see the KNOWN BUG callout above: the _by macro returns all-NULL on this build for every
+-- method, not just 'fft'; ts_detect_periods_agg is the reliable path)
 CREATE OR REPLACE TABLE detected AS
-SELECT product_id, primary_period AS sp, periods[1].confidence AS conf
-FROM ts_detect_periods_by('sales', product_id, ds, y, MAP{'method': 'autoperiod'});
+SELECT product_id,
+       ts_detect_periods_agg(ds, y, 'fft').primary_period AS sp,
+       ts_detect_periods_agg(ds, y, 'fft').periods[1].confidence AS conf
+FROM sales
+GROUP BY product_id;
 
 -- 2. Classify seasonality mode at the modal period (real column names are
 -- timing_classification / modulation_type, not classification / confidence)

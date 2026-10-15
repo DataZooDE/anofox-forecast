@@ -283,14 +283,14 @@ ts_classify_seasonality(source VARCHAR, date_col COLUMN, value_col COLUMN, perio
 **Example:**
 ```sql
 -- Classify weekly seasonality for a single series
-SELECT * FROM ts_classify_seasonality('daily_sales', date, amount, 7.0);
+SELECT * FROM ts_classify_seasonality('daily_sales', date, value, 7.0);
 
 -- Check if seasonality is strong and stable
 SELECT
     is_seasonal,
     seasonal_strength,
     has_stable_timing
-FROM ts_classify_seasonality('daily_sales', date, amount, 7.0);
+FROM ts_classify_seasonality('daily_sales', date, value, 7.0);
 ```
 
 ---

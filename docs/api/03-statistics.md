@@ -236,10 +236,13 @@ GROUP BY product_id;
 
 ### ts_quality_report
 
-Generate quality report from a stats table.
+Generate quality report from a stats table (`ts_stats_by`'s output).
 
 ```sql
-SELECT * FROM ts_quality_report(stats_table, min_length);
+CREATE OR REPLACE TABLE sales_stats AS
+SELECT * FROM ts_stats_by('sales', product_id, date, value, '1d');
+
+SELECT * FROM ts_quality_report('sales_stats', 20);
 ```
 
 **Returns:**
@@ -255,10 +258,10 @@ SELECT * FROM ts_quality_report(stats_table, min_length);
 
 ### ts_stats_summary
 
-Generate summary statistics across all series.
+Generate summary statistics across all series (`ts_stats_by`'s output).
 
 ```sql
-SELECT * FROM ts_stats_summary(stats_table);
+SELECT * FROM ts_stats_summary('sales_stats');
 ```
 
 **Returns:**
@@ -299,6 +302,16 @@ ts_data_quality_summary(source VARCHAR, unique_id_col COLUMN, date_col COLUMN, v
 | `date_col` | COLUMN | Date/timestamp column (used for auto-detected gap/temporal scoring) |
 | `value_col` | COLUMN | Value column |
 | `n_short` | INTEGER | Minimum "not short" present-value count; drives each series' `structural_score`/`is_short` before averaging |
+
+**Returns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `n_total` | BIGINT | Total number of groups |
+| `n_good` | BIGINT | Groups with `overall_score >= 0.8` |
+| `n_fair` | BIGINT | Groups with `0.5 <= overall_score < 0.8` |
+| `n_poor` | BIGINT | Groups with `overall_score < 0.5` |
+| `n_unassessed` | BIGINT | Groups with no usable dates (all-NULL `date_col`), excluded from `n_good`/`n_fair`/`n_poor` and from `avg_score` (D-10) — `n_good + n_fair + n_poor + n_unassessed = n_total` always holds |
+| `avg_score` | DOUBLE | Mean `overall_score` over assessed groups only (excludes `n_unassessed` groups) |
 
 **Example:**
 ```sql

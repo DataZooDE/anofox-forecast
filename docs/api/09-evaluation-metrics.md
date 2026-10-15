@@ -47,6 +47,17 @@ FROM backtest_results
 GROUP BY product_id;
 
 -- Multiple metrics at once
+-- Setup: cv_results(unique_id, fold_id, ds, y, forecast), 2 folds x 20 rows.
+CREATE TABLE cv_results AS
+SELECT
+    'A' AS unique_id,
+    fold_id,
+    DATE '2024-01-01' + INTERVAL (i) DAY AS ds,
+    100.0 + i AS y,
+    100.0 + i + 1 AS forecast
+FROM range(0, 20) t(i)
+CROSS JOIN (SELECT unnest([1, 2]) AS fold_id);
+
 SELECT
     unique_id,
     fold_id,
@@ -65,7 +76,7 @@ Use scalar functions with `LIST()` aggregation and `GROUP BY` for best performan
 
 ### Pattern
 
-```sql
+```text
 SELECT
     <group_columns>,
     ts_<metric>(
@@ -96,6 +107,23 @@ GROUP BY <group_columns>
 
 ## Examples
 
+Self-contained setup shared by the examples below (200 daily rows per series):
+
+```sql
+CREATE TABLE results AS
+SELECT
+    'A' AS unique_id,
+    DATE '2024-01-01' + INTERVAL (i) DAY AS ds,
+    100.0 + i AS y,
+    100.0 + i + 1 AS forecast,
+    100.0 + i + 1 AS ets_forecast,
+    100.0 + i + 2 AS naive_forecast,
+    100.0 + i - 1.5 AS yhat_lower,
+    100.0 + i + 1.5 AS yhat_upper,
+    100.0 + i + 0.8 AS forecast_p50
+FROM range(0, 200) t(i);
+```
+
 ### Basic Metrics by Series
 
 ```sql
@@ -110,6 +138,20 @@ GROUP BY unique_id;
 ### Cross-Validation Metrics (by series, fold, model)
 
 ```sql
+-- Setup: cv_forecasts_by_model(unique_id, fold_id, model_name, ds, y, forecast),
+-- 2 folds x 2 models x 20 rows (illustrative shape, named distinctly from the real
+-- `ts_cv_forecast_by` output further down -- see the Cross-Validation Workflow
+-- Example below, whose forecast column is named `yhat`).
+CREATE TABLE cv_forecasts_by_model AS
+SELECT
+    'A' AS unique_id, fold_id, model_name,
+    DATE '2024-01-01' + INTERVAL (i) DAY AS ds,
+    100.0 + i AS y,
+    100.0 + i + 1 AS forecast
+FROM range(0, 20) t(i)
+CROSS JOIN (SELECT unnest([1, 2]) AS fold_id)
+CROSS JOIN (SELECT unnest(['AutoETS', 'Naive']) AS model_name);
+
 SELECT
     unique_id,
     fold_id,
@@ -117,7 +159,7 @@ SELECT
     ts_mae(LIST(y ORDER BY ds), LIST(forecast ORDER BY ds)) AS mae,
     ts_rmse(LIST(y ORDER BY ds), LIST(forecast ORDER BY ds)) AS rmse,
     ts_mape(LIST(y ORDER BY ds), LIST(forecast ORDER BY ds)) AS mape
-FROM cv_forecasts
+FROM cv_forecasts_by_model
 GROUP BY unique_id, fold_id, model_name;
 ```
 
@@ -133,19 +175,8 @@ FROM results;
 
 `ts_mase(actual, forecast, insample, seasonal_period)` is the Hyndman & Koehler
 (2006) MASE: the out-of-sample forecast MAE, scaled by the IN-SAMPLE
-seasonal-naive MAE at lag `seasonal_period`. Self-contained setup for the
-examples below (200 daily rows per series, `forecast` NULL before 2024-06-01
-so those rows supply the in-sample scale for `ts_mase_by` further down):
-
-```sql
-CREATE TABLE results AS
-SELECT
-    'A' AS unique_id,
-    DATE '2024-01-01' + INTERVAL (i) DAY AS ds,
-    100.0 + i AS y,
-    100.0 + i + 1 AS forecast
-FROM range(0, 200) t(i);
-```
+seasonal-naive MAE at lag `seasonal_period`. Uses the `results` table defined
+under [Examples](#examples) above (200 daily rows per series).
 
 ```sql
 SELECT
@@ -238,6 +269,15 @@ GROUP BY unique_id;
 ## Cross-Validation Workflow Example
 
 ```sql
+-- Setup: data(unique_id, ds, y), 2 series x 130 daily rows.
+CREATE TABLE data AS
+SELECT
+    unique_id,
+    (DATE '2020-01-01' + INTERVAL (i) DAY) AS ds,
+    100.0 + unique_id * 10.0 + 0.3 * i + 5.0 * sin(2 * pi() * i / 7.0) AS y
+FROM range(0, 130) t(i)
+CROSS JOIN (SELECT unnest([1, 2]) AS unique_id);
+
 -- Step 1: Generate CV folds
 CREATE TABLE cv_folds AS
 SELECT * FROM ts_cv_folds_by('data', unique_id, ds, y, 3, 12, MAP{});
@@ -246,13 +286,14 @@ SELECT * FROM ts_cv_folds_by('data', unique_id, ds, y, 3, 12, MAP{});
 CREATE TABLE cv_forecasts AS
 SELECT * FROM ts_cv_forecast_by('cv_folds', unique_id, ds, y, 'Naive', MAP{});
 
--- Step 3: Compute metrics per series/fold/model
+-- Step 3: Compute metrics per series/fold/model (ts_cv_forecast_by's forecast column
+-- is named yhat, not forecast)
 SELECT
     unique_id,
     fold_id,
     model_name,
-    ts_mae(LIST(y ORDER BY ds), LIST(forecast ORDER BY ds)) AS mae,
-    ts_rmse(LIST(y ORDER BY ds), LIST(forecast ORDER BY ds)) AS rmse
+    ts_mae(LIST(y ORDER BY ds), LIST(yhat ORDER BY ds)) AS mae,
+    ts_rmse(LIST(y ORDER BY ds), LIST(yhat ORDER BY ds)) AS rmse
 FROM cv_forecasts
 GROUP BY unique_id, fold_id, model_name;
 ```

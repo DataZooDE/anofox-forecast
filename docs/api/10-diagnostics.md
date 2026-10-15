@@ -14,7 +14,7 @@ ordering is supplied via `ORDER BY` in `LIST()`).
 after trimming — is a hard error naming its 1-based position in the original list
 (e.g. `ts_adf: Invalid input: interior NULL at position 6`), not a silent splice. A list
 with no non-NULL value returns SQL `NULL`. If your series has interior gaps, impute them
-first (e.g. `ts_fill_nulls_by`) rather than relying on this function to handle them.
+first (e.g. `ts_fill_nulls_mean_by`) rather than relying on this function to handle them.
 Verified by `test/sql/ts_series_null_policy.test`.
 
 ```sql

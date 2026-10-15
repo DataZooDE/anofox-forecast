@@ -20,7 +20,7 @@ The extension provides 36 forecasting models ranging from simple baselines to so
 Generate forecasts for multiple series with a single call:
 
 ```sql
-CREATE OR REPLACE TABLE sales_data AS
+CREATE OR REPLACE TABLE forecast_sales_data AS
 SELECT product_id,
        (DATE '2024-01-01' + INTERVAL (i) DAY) AS date,
        100.0 + product_id * 10.0 + 0.5 * i + 15.0 * sin(2 * pi() * i / 7.0) AS revenue
@@ -29,7 +29,7 @@ CROSS JOIN (SELECT unnest([1, 2]) AS product_id);
 
 -- Forecast 14 days ahead for all products using HoltWinters with weekly seasonality
 SELECT * FROM ts_forecast_by(
-    'sales_data',              -- source: table name (quoted string)
+    'forecast_sales_data',              -- source: table name (quoted string)
     product_id,                -- group_col: series identifier (unquoted)
     date,                      -- date_col: timestamp column (unquoted)
     revenue,                   -- target_col: value to forecast (unquoted)
@@ -44,10 +44,10 @@ Compare multiple models:
 
 ```sql
 -- Naive baseline (no params needed)
-SELECT *, 'Naive' AS model FROM ts_forecast_by('sales_data', product_id, date, revenue, 'Naive', 7, '1d', MAP{})
+SELECT *, 'Naive' AS model FROM ts_forecast_by('forecast_sales_data', product_id, date, revenue, 'Naive', 7, '1d', MAP{})
 UNION ALL
 -- HoltWinters with weekly seasonality
-SELECT *, 'HoltWinters' AS model FROM ts_forecast_by('sales_data', product_id, date, revenue, 'HoltWinters', 7, '1d', MAP{'seasonal_period': '7'});
+SELECT *, 'HoltWinters' AS model FROM ts_forecast_by('forecast_sales_data', product_id, date, revenue, 'HoltWinters', 7, '1d', MAP{'seasonal_period': '7'});
 ```
 
 ### Handling Seasonality
@@ -227,7 +227,7 @@ documented in their own sections because of their distinct parameter/output shap
 `ARIMA` without `arima_order` is a hard SQL error naming `AutoARIMA` as the alternative:
 
 ```sql
-SELECT * FROM ts_forecast_by('sales_data', product_id, date, revenue, 'ARIMA', 7, '1d', MAP{});
+SELECT * FROM ts_forecast_by('forecast_sales_data', product_id, date, revenue, 'ARIMA', 7, '1d', MAP{});
 -- Invalid Input Error: Invalid input: ARIMA requires arima_order=[p,d,q] (e.g. [1,1,1]);
 --                       use 'AutoARIMA' for automatic order selection
 ```

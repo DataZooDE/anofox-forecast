@@ -50,6 +50,19 @@ Not every operation needs all three tiers. Use this decision guide:
 ### When to Use Each (User Perspective)
 
 ```sql
+-- Setup: results(product_id, date, actual, forecast), 2 groups x 20 daily rows
+-- (shared by the SCALAR example below and the later "Scalar Functions" section).
+CREATE OR REPLACE TABLE results AS
+SELECT
+    product_id,
+    (DATE '2020-01-01' + INTERVAL (i) DAY) AS date,
+    100.0 + product_id * 10.0 + i * 1.5 AS actual,
+    100.0 + product_id * 10.0 + i * 1.5 + (i % 3) * 0.2 AS forecast
+FROM range(0, 20) t(i)
+CROSS JOIN (SELECT unnest([1, 2]) AS product_id);
+```
+
+```sql
 -- SCALAR: Simple metrics, composable in expressions
 SELECT product_id, ts_mae(LIST(actual ORDER BY date), LIST(forecast ORDER BY date)) AS mae
 FROM results GROUP BY product_id;
@@ -89,18 +102,18 @@ Both forms are identical in functionality.
 
 ### Standard Order by API Type
 
-```sql
+```text
 -- Scalar Functions (array-based)
-ts_function(values DOUBLE[], ...additional_params)
+ts_<operation>(values DOUBLE[], ...additional_params)
 
 -- Aggregate Functions
-ts_function_agg(date_col TIMESTAMP, value_col DOUBLE, ...additional_params)
+ts_<operation>_agg(date_col TIMESTAMP, value_col DOUBLE, ...additional_params)
 
 -- Table Macro (single series, no grouping)
-ts_function(source VARCHAR, date_col COLUMN, value_col COLUMN, ...params)
+ts_<operation>(source VARCHAR, date_col COLUMN, value_col COLUMN, ...params)
 
 -- Table Macro (multi-series with grouping)
-ts_function_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, ...params)
+ts_<operation>_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, ...params)
 ```
 
 ### Column Parameter Order
@@ -120,11 +133,11 @@ The `params` parameter supports both MAP and STRUCT syntax in **table macros** (
 
 ```sql
 -- STRUCT allows mixed types (recommended for table macros)
-SELECT * FROM ts_cv_folds_by('sales', id, date, value, 3, 7,
+SELECT * FROM ts_cv_folds_by('sales', product_id, date, value, 3, 7,
     {'gap': 2, 'clip_horizon': true});
 
 -- MAP requires homogeneous string values (legacy, also works)
-SELECT * FROM ts_cv_folds_by('sales', id, date, value, 3, 7,
+SELECT * FROM ts_cv_folds_by('sales', product_id, date, value, 3, 7,
     MAP{'gap': '2', 'clip_horizon': 'true'});
 ```
 
@@ -145,7 +158,7 @@ The following table shows which API variants exist for each functionality:
 |---------------|--------|-----------|-------------|-------------|
 | **Forecasting** | - | `ts_forecast_agg` | `ts_forecast` | `ts_forecast_by` |
 | **Statistics** | `_ts_stats`* | `ts_stats_agg` | `ts_stats` | `ts_stats_by` |
-| **Features** | `_ts_features`* | `ts_features_agg` | `ts_features_table` | `ts_features_by` |
+| **Features** | `_ts_features_native`* | `ts_features_agg` | `ts_features_table` | `ts_features_by` |
 | **Data Quality** | `_ts_data_quality`* | `ts_data_quality_agg` | `ts_data_quality` | `ts_data_quality_by` |
 | **Changepoints** | - | `ts_detect_changepoints_agg` | `ts_detect_changepoints` | `ts_detect_changepoints_by` |
 | **Seasonality** | - | `ts_classify_seasonality_agg` | `ts_classify_seasonality` | `ts_classify_seasonality_by` |
@@ -191,10 +204,10 @@ SELECT
 FROM results
 GROUP BY product_id;
 
--- Detect seasonality
+-- Detect seasonality (internal scalar -- see the API Coverage Matrix above)
 SELECT
     product_id,
-    (ts_detect_periods(LIST(value ORDER BY date))).primary_period AS season
+    (_ts_detect_periods(LIST(value ORDER BY date))).primary_period AS season
 FROM sales
 GROUP BY product_id;
 ```
@@ -224,14 +237,24 @@ GROUP BY product_id;
 Operate on entire tables:
 
 ```sql
--- Single series forecast
-SELECT * FROM ts_forecast('single_series', date, value, 'AutoETS', 12, '1d');
+-- Setup: single_series(date, value), 130 daily rows, trend + period-7 seasonality.
+CREATE OR REPLACE TABLE single_series AS
+SELECT
+    (DATE '2020-01-01' + INTERVAL (i) DAY) AS date,
+    100.0 + 0.5 * i + 10.0 * sin(2 * pi() * i / 7.0) AS value
+FROM range(0, 130) t(i);
+```
+
+```sql
+-- Single series forecast (params is a MAP/STRUCT, not a frequency string -- ts_forecast
+-- has no frequency parameter; it infers the step from the input dates)
+SELECT * FROM ts_forecast('single_series', date, value, 'AutoETS', 12, MAP{});
 
 -- Multi-series forecast
 SELECT * FROM ts_forecast_by('sales', product_id, date, value, 'AutoETS', 12, '1d');
 
 -- Statistics per series
-SELECT * FROM ts_stats_by('sales', product_id, date, value);
+SELECT * FROM ts_stats_by('sales', product_id, date, value, '1d');
 
 -- Cross-validation folds (two-step backtest)
 SELECT * FROM ts_cv_folds_by('sales', product_id, date, value, 3, 7, MAP{});
@@ -246,7 +269,7 @@ SELECT * FROM ts_cv_folds_by('sales', product_id, date, value, 3, 7, MAP{});
 - Simple metrics: Return `DOUBLE`
 - Complex results: Return `STRUCT` with named fields
 
-```sql
+```text
 -- Simple metric
 ts_mae(actual[], forecast[]) → DOUBLE
 
@@ -259,7 +282,7 @@ ts_detect_periods(values[]) → STRUCT(periods[], confidences[], primary_period,
 
 Always return `STRUCT` with operation-specific fields:
 
-```sql
+```text
 ts_forecast_agg(...) → STRUCT(
     forecast_step[], forecast_timestamp[], yhat[],
     yhat_lower[], yhat_upper[], model_name, ...
@@ -270,7 +293,7 @@ ts_forecast_agg(...) → STRUCT(
 
 Return tables with operation-specific columns:
 
-```sql
+```text
 -- ts_forecast_by returns:
 | group_col | ds | forecast | lower | upper |
 

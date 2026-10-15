@@ -132,7 +132,7 @@ ts_cv_folds_by(
 ```sql
 -- Shared fixture reused by every example on this page (store_id, date, revenue, plus
 -- two extra feature columns used later by the ts_cv_hydrate_by examples)
-CREATE OR REPLACE TABLE sales_data AS
+CREATE OR REPLACE TABLE cv_sales_data AS
 SELECT store_id, (DATE '2024-01-01' + INTERVAL (i) DAY) AS date,
        100.0 + store_id * 10.0 + 0.5 * i AS revenue,
        90.0 + 0.4 * i AS competitor_sales,
@@ -141,25 +141,25 @@ FROM range(0, 300) t(i) CROSS JOIN (SELECT unnest([1, 2]) AS store_id);
 
 -- Basic ML backtesting with 3 folds, 6-period horizon
 SELECT * FROM ts_cv_folds_by(
-    'sales_data', store_id, date, revenue,
+    'cv_sales_data', store_id, date, revenue,
     3, 6, MAP{}
 );
 
 -- With gap between train and test (e.g., for "next week" predictions)
 SELECT * FROM ts_cv_folds_by(
-    'sales_data', store_id, date, revenue,
+    'cv_sales_data', store_id, date, revenue,
     3, 7, MAP{'gap': '1'}
 );
 
 -- Fixed window with custom initial training size
 SELECT * FROM ts_cv_folds_by(
-    'sales_data', store_id, date, revenue,
+    'cv_sales_data', store_id, date, revenue,
     5, 12, MAP{'window_type': 'fixed', 'min_train_size': '24', 'initial_train_size': '24'}
 );
 
 -- Dense overlapping folds (skip_length=1)
 SELECT * FROM ts_cv_folds_by(
-    'sales_data', store_id, date, revenue,
+    'cv_sales_data', store_id, date, revenue,
     10, 3, MAP{'skip_length': '1'}
 );
 ```
@@ -300,7 +300,7 @@ ts_cv_hydrate_by(
 ```sql
 -- Create folds
 CREATE TABLE cv_folds AS
-SELECT * FROM ts_cv_folds_by('sales_data', store_id, date, revenue, 3, 30, MAP{});
+SELECT * FROM ts_cv_folds_by('cv_sales_data', store_id, date, revenue, 3, 30, MAP{});
 
 -- Hydrate with unknown features (masking applied automatically)
 -- Unknown features are direct columns - no MAP extraction needed!
@@ -309,7 +309,7 @@ SELECT
     competitor_sales,  -- Direct column access
     actual_temp        -- Direct column access
 FROM ts_cv_hydrate_by(
-    'cv_folds', 'sales_data', store_id, date,
+    'cv_folds', 'cv_sales_data', store_id, date,
     ['competitor_sales', 'actual_temp'],
     MAP{'strategy': 'last_value'}
 );
@@ -338,7 +338,7 @@ Unknown features:   ✓ Train: actual values
 ```sql
 -- Step 1: Create folds
 CREATE TABLE cv_folds AS
-SELECT * FROM ts_cv_folds_by('sales_data', store_id, date, revenue, 3, 30, MAP{});
+SELECT * FROM ts_cv_folds_by('cv_sales_data', store_id, date, revenue, 3, 30, MAP{});
 
 -- Step 2: Build ML-ready dataset (unknown features already masked)
 -- Unknown features are direct columns - no extraction needed!
@@ -351,7 +351,7 @@ SELECT
     competitor_sales::DOUBLE AS competitor_sales,
     actual_temp::DOUBLE AS actual_temp
 FROM ts_cv_hydrate_by(
-    'cv_folds', 'sales_data', store_id, date,
+    'cv_folds', 'cv_sales_data', store_id, date,
     ['competitor_sales', 'actual_temp'],
     MAP{'strategy': 'last_value'}
 );
@@ -410,7 +410,7 @@ ts_cv_split_folds_by(
 ```sql
 -- View boundaries for quarterly backtests (group_col/date_col are unquoted identifiers)
 SELECT * FROM ts_cv_split_folds_by(
-    'sales_data', store_id, date,
+    'cv_sales_data', store_id, date,
     ['2024-03-31'::DATE, '2024-06-30'::DATE, '2024-09-30'::DATE],
     30, '1d', MAP{}
 );
@@ -468,7 +468,7 @@ Fold 3:             [==TRAIN==][TEST]
 -- Quarterly backtests with explicit fiscal quarter end dates
 CREATE TABLE cv_splits AS
 SELECT * FROM ts_cv_split_by(
-    'sales_data', store_id, date, revenue,
+    'cv_sales_data', store_id, date, revenue,
     ['2024-03-31'::DATE, '2024-06-30'::DATE, '2024-09-30'::DATE],
     30, MAP{}
 );

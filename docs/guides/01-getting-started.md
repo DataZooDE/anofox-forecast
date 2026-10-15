@@ -25,8 +25,8 @@ SET autoload_known_extensions = 1;
 ## Your First Forecast
 
 ```sql
--- Create sample data
-CREATE TABLE sales AS
+-- Create sample data (overrides the shared `sales` fixture for this walkthrough)
+CREATE OR REPLACE TABLE sales AS
 SELECT
     'product_' || (i % 3) AS product_id,
     '2024-01-01'::DATE + (i * INTERVAL '1 day') AS date,

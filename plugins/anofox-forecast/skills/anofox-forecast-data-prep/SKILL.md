@@ -12,7 +12,7 @@ user-invocable: false
 
 # Anofox Forecast — Data Preparation Cheat Sheet
 
-**Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.15.10) | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*` (identical)
+**Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.16.1) | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*` (identical)
 
 Prep raw time series so downstream forecasting / CV has clean input: no gaps, no unwanted NULLs, no degenerate series, correct hierarchy.
 
@@ -21,13 +21,15 @@ Prep raw time series so downstream forecasting / CV has clean input: no gaps, no
 `_by` table functions **do not chain in CTEs** — under parallel execution they silently return 0 rows. Always `CREATE TABLE` between pipeline steps.
 
 ```sql
--- BROKEN (silent 0 rows under parallelism):
-WITH step1 AS (SELECT * FROM ts_fill_gaps_by('raw', id, ds, y, '1d', MAP{}))
-SELECT * FROM ts_fill_nulls_const_by('step1', id, ds, y, 0.0);
+-- BROKEN (silent 0 rows under parallelism) -- `raw` is (product_id, ds, y):
+WITH step1 AS (SELECT * FROM ts_fill_gaps_by('raw', product_id, ds, y, '1d'))
+SELECT * FROM ts_fill_nulls_const_by('step1', product_id, ds, y, 0.0);
+```
 
+```sql
 -- CORRECT:
-CREATE TABLE step1 AS SELECT * FROM ts_fill_gaps_by('raw', id, ds, y, '1d', MAP{});
-CREATE TABLE step2 AS SELECT * FROM ts_fill_nulls_const_by('step1', id, ds, y, 0.0);
+CREATE OR REPLACE TABLE step1 AS SELECT * FROM ts_fill_gaps_by('raw', product_id, ds, y, '1d');
+CREATE OR REPLACE TABLE step2 AS SELECT * FROM ts_fill_nulls_const_by('step1', product_id, ds, y, 0.0);
 ```
 
 ## Gap filling
@@ -105,7 +107,8 @@ SELECT * FROM ts_fill_nulls_const_by('gaps_filled', product_id, ds, y, 0.0);
 | `ts_drop_edge_zeros_by` | Trim both leading and trailing zeros |
 
 ```sql
-CREATE TABLE clean AS
+-- Named distinctly from the global `clean` fixture used elsewhere in this skill.
+CREATE OR REPLACE TABLE short_filtered AS
 SELECT * FROM ts_drop_short_by('nulls_filled', product_id, 24);   -- ≥ 2 years monthly
 ```
 
@@ -141,13 +144,29 @@ Retail and IoT panels usually have composite keys (region × store × item). The
 | `ts_validate_separator` | Verify separator string isn't present in the source columns |
 
 ```sql
+-- Setup: raw_hierarchy(ds, y, region_id, store_id, item_id) -- ts_combine_keys /
+-- ts_aggregate_hierarchy take a subquery source (date_col, value_col, id_cols...)
+-- and a params MAP, not bare positional group columns.
+CREATE OR REPLACE TABLE raw_hierarchy AS
+SELECT
+    (DATE '2024-01-01' + INTERVAL (i) DAY) AS ds,
+    10.0 + (i % 7) AS y,
+    'R1' AS region_id, 'STORE01' AS store_id, 'SKU01' AS item_id
+FROM range(0, 60) t(i);
+
 -- Combine two IDs for grouping
-CREATE TABLE with_combined AS
-SELECT * FROM ts_combine_keys('raw', region_id, store_id, ds, y, MAP{'sep': '|'});
+CREATE OR REPLACE TABLE with_combined AS
+SELECT * FROM ts_combine_keys(
+    (SELECT ds, y, region_id, store_id FROM raw_hierarchy),
+    MAP{'separator': '|'}
+);
 
 -- Aggregate to store level
-CREATE TABLE store_level AS
-SELECT * FROM ts_aggregate_hierarchy('raw', region_id, store_id, item_id, ds, y, 2);
+CREATE OR REPLACE TABLE store_level AS
+SELECT * FROM ts_aggregate_hierarchy(
+    (SELECT ds, y, region_id, store_id, item_id FROM raw_hierarchy),
+    MAP{}
+);
 ```
 
 ## Canonical prep pipeline

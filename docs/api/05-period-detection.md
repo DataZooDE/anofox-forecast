@@ -124,23 +124,25 @@ ts_detect_periods_by(source, group_col, date_col, value_col, params) → TABLE(i
 | `'auto'` | — | Auto-select best method | Unknown characteristics |
 | `'multi'` | `'multiple'` | Multiple periods | Complex seasonality |
 
-**Returns:** TABLE with `id` and `periods` STRUCT containing detected periods.
+**Returns:** TABLE with flattened columns (not one nested STRUCT) — the group column
+(named after whatever `group_col` you pass, e.g. `product_id`), `periods`, `n_periods`,
+`primary_period`, `method`.
 
 **Output Structure:**
-```sql
-STRUCT(
-    periods STRUCT(
-        period      DOUBLE,   -- Detected period length (in samples/observations)
-        confidence  DOUBLE,   -- Detection confidence (see interpretation below)
-        strength    DOUBLE,   -- Seasonal strength at this period
-        amplitude   DOUBLE,   -- Amplitude of the sinusoidal component
-        phase       DOUBLE,   -- Phase offset (radians)
-        iteration   BIGINT    -- Iteration number (for multi-period detection)
-    )[],
-    n_periods       BIGINT,   -- Number of periods detected
-    primary_period  DOUBLE,   -- Dominant period (strongest signal)
-    method          VARCHAR   -- Method used for detection
-)
+```text
+<group_col>     ANY,       -- preserved group column (named after the group_col argument)
+periods         STRUCT(
+                    period      DOUBLE,   -- Detected period length (in samples/observations)
+                    confidence  DOUBLE,   -- Detection confidence (see interpretation below)
+                    strength    DOUBLE,   -- Seasonal strength at this period
+                    amplitude   DOUBLE,   -- Amplitude of the sinusoidal component
+                    phase       DOUBLE,   -- Phase offset (radians)
+                    iteration   BIGINT    -- Iteration number (for multi-period detection)
+                )[],
+n_periods       BIGINT,    -- Number of periods detected
+primary_period  DOUBLE,    -- Dominant period (strongest signal); top-level column,
+                           -- not nested under `periods`
+method          VARCHAR    -- Method used for detection
 ```
 
 **Understanding Confidence:**
@@ -172,11 +174,12 @@ By default, periods with confidence below the method-specific threshold are auto
 
 **Example:**
 ```sql
--- Detect periods for each product (default FFT method)
+-- Detect periods for each product (default FFT method) -- primary_period/n_periods
+-- are top-level output columns, not nested under `periods`
 SELECT
-    id,
-    (periods).primary_period,
-    (periods).n_periods
+    product_id,
+    primary_period,
+    n_periods
 FROM ts_detect_periods_by('sales', product_id, date, value, MAP{});
 
 -- With different methods
@@ -189,10 +192,11 @@ SELECT * FROM ts_detect_periods_by('sales', product_id, date, value,
 SELECT * FROM ts_detect_periods_by('sales', product_id, date, value,
     MAP{'method': 'auto'});  -- Auto-select best method
 
--- Filter by confidence (only keep reliable detections)
-SELECT id, (periods).primary_period, (periods).periods[1].confidence
+-- Filter by confidence (only keep reliable detections) -- periods is a LIST of
+-- structs, index into it with [1], it is not itself a struct
+SELECT product_id, primary_period, periods[1].confidence
 FROM ts_detect_periods_by('sales', product_id, date, value, MAP{'method': 'acf'})
-WHERE (periods).periods[1].confidence > 0.3;
+WHERE periods[1].confidence > 0.3;
 
 -- Limit max_period for faster computation on long series
 SELECT * FROM ts_detect_periods_by('sales', product_id, date, value,
@@ -216,11 +220,12 @@ SELECT * FROM ts_detect_periods_by('sales', product_id, date, value,
 Before forecasting, identify what periods exist in your data:
 
 ```sql
--- Detect periods for multiple products
+-- Detect periods for multiple products (primary_period/n_periods are top-level
+-- output columns, not nested under `periods`)
 SELECT
-    id,
-    (periods).primary_period,      -- Dominant period (e.g., 7 = weekly)
-    (periods).n_periods            -- Number of significant periods found
+    product_id,
+    primary_period,      -- Dominant period (e.g., 7 = weekly)
+    n_periods             -- Number of significant periods found
 FROM ts_detect_periods_by('sales', product_id, date, value, MAP{});
 
 -- Common periods: 7 (weekly), 12 (monthly), 52 (yearly for weekly data), 365 (yearly for daily data)
@@ -231,13 +236,14 @@ FROM ts_detect_periods_by('sales', product_id, date, value, MAP{});
 Not all detected periods are meaningful. Validate before using:
 
 ```sql
--- Check if seasonality is strong enough to model
+-- Check if seasonality is strong enough to model (output columns are flattened,
+-- not nested under a `classification` struct)
 SELECT
-    id,
-    (classification).is_seasonal,         -- Is there significant seasonality?
-    (classification).seasonal_strength    -- 0-1 scale (>0.3 typically meaningful)
+    product_id,
+    is_seasonal,         -- Is there significant seasonality?
+    seasonal_strength    -- 0-1 scale (>0.3 typically meaningful)
 FROM ts_classify_seasonality_by('sales', product_id, date, value, 7.0)
-WHERE (classification).is_seasonal;
+WHERE is_seasonal;
 ```
 
 ### 3. Understand Seasonal Behavior
@@ -246,10 +252,10 @@ Classify how seasonality manifests:
 
 ```sql
 SELECT
-    id,
-    (classification).timing_classification,  -- 'early', 'on_time', 'late', 'variable'
-    (classification).modulation_type,        -- 'stable', 'growing', 'shrinking', 'variable'
-    (classification).has_stable_timing       -- Consistent peak timing?
+    product_id,
+    timing_classification,  -- 'early', 'on_time', 'late', 'variable'
+    modulation_type,        -- 'stable', 'growing', 'shrinking', 'variable'
+    has_stable_timing       -- Consistent peak timing?
 FROM ts_classify_seasonality_by('sales', product_id, date, value, 7.0);
 ```
 
@@ -258,12 +264,13 @@ FROM ts_classify_seasonality_by('sales', product_id, date, value, 7.0);
 Find when peaks occur and how regular they are:
 
 ```sql
--- Find peak timing regularity
+-- Find peak timing regularity (output columns are flattened, not nested under
+-- a `timing` struct)
 SELECT
-    id,
-    (timing).n_peaks,              -- How many peaks per series
-    (timing).is_stable,            -- Are peaks at regular intervals?
-    (timing).variability_score     -- Lower = more regular
+    product_id,
+    n_peaks,              -- How many peaks per series
+    is_stable,            -- Are peaks at regular intervals?
+    variability_score     -- Lower = more regular
 FROM ts_analyze_peak_timing_by('sales', product_id, date, value, 7.0, MAP{});
 ```
 
@@ -272,11 +279,12 @@ FROM ts_analyze_peak_timing_by('sales', product_id, date, value, 7.0, MAP{});
 Separate trend, seasonal, and residual components:
 
 ```sql
--- MSTL decomposition with multiple seasonal periods
+-- MSTL decomposition with multiple seasonal periods (seasonal_periods is a params
+-- MAP key, not a separate positional argument; ts_mstl_decomposition_by has 5
+-- positional args: source, group_col, date_col, value_col, params)
 SELECT * FROM ts_mstl_decomposition_by(
     'sales', product_id, date, value,
-    [7, 365],    -- Weekly and yearly patterns
-    MAP{}
+    MAP{'seasonal_periods': '[7, 30]'}   -- weekly and monthly patterns
 );
 ```
 
@@ -285,17 +293,17 @@ SELECT * FROM ts_mstl_decomposition_by(
 ```sql
 -- Step 1: Detect periods
 WITH detected AS (
-    SELECT id, (periods).primary_period AS period
+    SELECT product_id, primary_period AS period
     FROM ts_detect_periods_by('sales', product_id, date, value, MAP{})
 ),
 -- Step 2: Validate seasonality strength
 validated AS (
-    SELECT id, period
+    SELECT product_id, period
     FROM detected d
     JOIN (
-        SELECT id, (classification).seasonal_strength AS strength
+        SELECT product_id, seasonal_strength AS strength
         FROM ts_classify_seasonality_by('sales', product_id, date, value, 7.0)
-    ) c USING (id)
+    ) c USING (product_id)
     WHERE strength > 0.3
 )
 -- Step 3: Forecast with validated period

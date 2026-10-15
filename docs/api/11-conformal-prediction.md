@@ -906,7 +906,7 @@ removed name). Passing any removed alias now raises a clear error instead of sil
 behaving like `'split'`:
 
 ```sql
-SELECT ts_conformal_learn([1.0, -2.0, 3.0]::DOUBLE[], [0.1]::DOUBLE[], 'symmetric', 'jackknife+');
+SELECT ts_conformal_learn([1.0, -2.0, 3.0]::DOUBLE[], [0.1]::DOUBLE[], 'symmetric', 'jackknife+'); -- 'jackknife+' removed
 -- Invalid Input Error: ts_conformal_learn: conformal strategy 'jackknife+' was removed: it
 -- computed the same quantile as 'split' (no leave-one-out refits). Use 'split' or 'crossval'.
 ```

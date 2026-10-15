@@ -13,7 +13,7 @@ user-invocable: false
 
 # Anofox Forecast — Backtesting, CV, Metrics & Conformal Cheat Sheet
 
-**Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.15.10) | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
+**Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.16.1) | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
 
 Time-series-aware cross-validation, error metrics, and distribution-free intervals.
 
@@ -27,6 +27,18 @@ Time-series-aware cross-validation, error metrics, and distribution-free interva
 - **Metrics use pairwise-complete NULL handling (v0.10.0, Phase 12).** `ts_mae`/`ts_mse`/`ts_rmse`/`ts_mape`/`ts_smape`/`ts_r2`/`ts_bias`/`ts_rmae`/`ts_quantile_loss`/`ts_mqloss`/`ts_coverage` drop a pair (or row, for 3+ input metrics) the moment ANY input is NULL at that position, computed in Rust — not spliced independently per array in C++. No complete pair/row → `NULL`, not an error. `ts_mape` additionally returns `NULL` for the whole call if any pairwise-complete `actual` is exactly `0.0` (D-07) — use `ts_smape`/`ts_mase` for intermittent demand. `ts_mase`'s `insample` argument has its OWN policy (never pairwise-complete-filtered — see below), not this one.
 
 ## The CV two-step workflow (standard)
+
+```sql
+-- Setup: data(unique_id, ds, y), 2 series x 130 daily rows (shared by every example
+-- below in this file).
+CREATE OR REPLACE TABLE data AS
+SELECT
+    unique_id,
+    (DATE '2020-01-01' + INTERVAL (i) DAY) AS ds,
+    100.0 + unique_id * 10.0 + 0.3 * i + 5.0 * sin(2 * pi() * i / 7.0) AS y
+FROM range(0, 130) t(i)
+CROSS JOIN (SELECT unnest([1, 2]) AS unique_id);
+```
 
 ```sql
 -- Step 1: Create fold table (train/test rows with actual dates)
@@ -95,16 +107,31 @@ Params: same shape as `ts_forecast_by`. All model strings work (`'AutoETS'`, `'L
 If your model needs exogenous columns (features, calendar flags, promotions), the folds table lost them. Join them back:
 
 ```sql
+-- Setup: features(unique_id, ds, promo, holiday), the raw source table that carries
+-- the exogenous columns the folds table itself lost.
+CREATE OR REPLACE TABLE features AS
+SELECT unique_id, ds,
+       (CAST(ds AS DATE) - DATE '2020-01-01') % 14 = 0 AS promo,
+       (CAST(ds AS DATE) - DATE '2020-01-01') % 30 = 0 AS holiday
+FROM data;
+
+-- Signature is (cv_folds, source, group_col, date_col, unknown_features, params := MAP{})
 CREATE OR REPLACE TABLE cv_folds_with_features AS
-SELECT * FROM ts_cv_hydrate_by('cv_folds', unique_id, ds, y, 'features', ['promo', 'holiday']);
+SELECT * FROM ts_cv_hydrate_by('cv_folds', 'features', unique_id, ds, ['promo', 'holiday']);
 ```
 
 ## `ts_check_leakage`
 
-Sanity-check that no test-window rows leaked into training:
+Sanity-check that no test-window rows leaked into training. Signature is
+`(source, is_test_col, params)` — `source` is a table name (not a subquery
+string), and `is_test_col` is a boolean column on that table, not a list of
+positional group/date/fold columns:
 
 ```sql
-SELECT * FROM ts_check_leakage('cv_folds', unique_id, ds, fold_id, split);
+CREATE OR REPLACE TABLE cv_folds_flagged AS
+SELECT *, (split = 'test') AS is_test FROM cv_folds;
+
+SELECT * FROM ts_check_leakage('cv_folds_flagged', is_test, MAP{});
 ```
 
 ## Metrics — use scalar functions
@@ -131,9 +158,9 @@ Pattern: `SELECT group, ts_<metric>(LIST(actual ORDER BY ds), LIST(pred ORDER BY
 ```sql
 -- Fit two models
 CREATE OR REPLACE TABLE cv_naive   AS
-SELECT * FROM ts_cv_forecast_by('cv_folds', id, ds, y, 'Naive',   MAP{});
+SELECT * FROM ts_cv_forecast_by('cv_folds', unique_id, ds, y, 'Naive',   MAP{});
 CREATE OR REPLACE TABLE cv_autoets AS
-SELECT * FROM ts_cv_forecast_by('cv_folds', id, ds, y, 'AutoETS', MAP{'seasonal_period': '7'});
+SELECT * FROM ts_cv_forecast_by('cv_folds', unique_id, ds, y, 'AutoETS', MAP{'seasonal_period': '7'});
 
 -- Compare
 SELECT 'Naive' AS model,
@@ -264,10 +291,10 @@ SELECT ts_bootstrap_quantiles(
 
 ## `ts_estimate_backtest_memory`
 
-Pre-flight a CV run's memory footprint:
+Pre-flight a CV run's memory footprint (scalar function: `(n_series, n_dates, folds, horizon) → DOUBLE`, estimated bytes):
 
 ```sql
-SELECT * FROM ts_estimate_backtest_memory(n_series, avg_length, n_folds, horizon);
+SELECT ts_estimate_backtest_memory(1000, 365, 5, 14) AS estimated_bytes;
 ```
 
 ## Full backtest → conformal pipeline

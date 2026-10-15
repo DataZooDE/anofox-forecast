@@ -37,6 +37,22 @@ Data preparation functions help clean and transform time series data before fore
 Common data cleaning pipeline (order matters for intermittent data):
 
 ```sql
+-- Setup: raw_data(product_id, date, value), 2 groups x 130 daily rows with gaps
+-- (every 11th day dropped) for this walkthrough.
+CREATE OR REPLACE TABLE raw_data AS
+SELECT product_id, date, value
+FROM (
+    SELECT
+        product_id, i,
+        (DATE '2020-01-01' + INTERVAL (i) DAY) AS date,
+        50.0 + product_id * 5.0 + 0.4 * i + 6.0 * sin(2 * pi() * i / 7.0) AS value
+    FROM range(0, 130) t(i)
+    CROSS JOIN (SELECT unnest([1, 2]) AS product_id)
+)
+WHERE i % 11 != 0;
+```
+
+```sql
 -- Step 1: Fill gaps in time series (ensures regular intervals)
 CREATE TABLE gaps_filled AS
 SELECT * FROM ts_fill_gaps_by('raw_data', product_id, date, value, '1d');
@@ -406,7 +422,7 @@ SELECT * FROM ts_diff_by('sales', product_id, date, quantity, 1, seasonal_lag :=
 ## Advanced: Native Gap Filling
 
 > **Note:** These functions provide high-performance gap filling with type preservation.
-> For most use cases, use the simpler `ts_fill_gaps` table macro above.
+> For most use cases, use the simpler `ts_fill_gaps_by` table macro above.
 
 ### Supported Frequency Formats
 
@@ -456,9 +472,20 @@ ts_fill_unknown_by(
 
 **Example:**
 ```sql
+-- Setup: weather_data(region, date, temperature), 2 regions x 130 daily rows.
+CREATE OR REPLACE TABLE weather_data AS
+SELECT
+    region,
+    (DATE '2020-01-01' + INTERVAL (i) DAY) AS date,
+    15.0 + region * 3.0 + 8.0 * sin(2 * pi() * i / 365.0) AS temperature
+FROM range(0, 130) t(i)
+CROSS JOIN (SELECT unnest([1, 2]) AS region);
+```
+
+```sql
 -- Fill unknown temperatures with last known value
 SELECT * FROM ts_fill_unknown_by(
-    'weather_data', region, date, temperature, '2024-06-01'::DATE,
+    'weather_data', region, date, temperature, '2020-03-01'::DATE,
     MAP{'strategy': 'last_value'}
 );
 ```
@@ -487,11 +514,24 @@ ts_mark_unknown_by(
 
 **Example:**
 ```sql
+-- Setup: future_value_data(product_id, date, competitor_price), 2 groups x 130 daily
+-- rows (named distinctly from the global `sales_data` diagnostics fixture, which has
+-- different columns, to avoid the checker's fixture-name shadowing).
+CREATE OR REPLACE TABLE future_value_data AS
+SELECT
+    product_id,
+    (DATE '2020-01-01' + INTERVAL (i) DAY) AS date,
+    20.0 + product_id * 2.0 + 0.1 * i AS competitor_price
+FROM range(0, 130) t(i)
+CROSS JOIN (SELECT unnest([1, 2]) AS product_id);
+```
+
+```sql
 -- Mark future rows and apply custom logic
 SELECT
     *,
     CASE WHEN is_unknown THEN 0.0 ELSE competitor_price END AS price_masked
-FROM ts_mark_unknown_by('sales_data', product_id, date, '2024-06-15'::DATE);
+FROM ts_mark_unknown_by('future_value_data', product_id, date, '2020-03-01'::DATE);
 ```
 
 ---
@@ -528,7 +568,7 @@ ts_validate_timestamps_by(
 ```sql
 -- Validate that specific dates exist for each series
 SELECT * FROM ts_validate_timestamps_by(
-    'sales_data', product_id, date,
+    'future_value_data', product_id, date,
     ['2024-01-01'::DATE, '2024-01-02'::DATE, '2024-01-03'::DATE]
 ) WHERE NOT is_valid;  -- Show only invalid series
 ```
@@ -562,7 +602,7 @@ ts_validate_timestamps_summary_by(
 ```sql
 -- Quick check: are all series complete?
 SELECT * FROM ts_validate_timestamps_summary_by(
-    'sales_data', product_id, date,
+    'future_value_data', product_id, date,
     ['2024-01-01'::DATE, '2024-01-02'::DATE, '2024-01-03'::DATE]
 );
 ```
