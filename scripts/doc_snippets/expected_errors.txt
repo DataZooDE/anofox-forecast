@@ -1,0 +1,9 @@
+docs/api/07-forecasting.md	SELECT * FROM ts_forecast_by('sales_data', product_id, date, revenue, 'ARIMA', 7, '1d', MAP{});
+docs/api/09-evaluation-metrics.md	SELECT ts_mase([1.0, 2.0, 3.0], [1.1, 2.1, 3.1], [1.5, 2.5, 3.5]);
+docs/api/10-diagnostics.md	SELECT ts_adf([1.0, 2.0, NULL, 1.5, 2.5]::DOUBLE[]);
+docs/api/11-conformal-prediction.md	SELECT ts_conformal_learn([1.0, -2.0, 3.0]::DOUBLE[], [0.1]::DOUBLE[], 'bogus', 'typo');
+docs/api/11-conformal-prediction.md	SELECT ts_conformal_learn([1.0, -2.0, 3.0]::DOUBLE[], [0.1]::DOUBLE[], 'symmetric', 'jackknife+');
+docs/api/11-conformal-prediction.md	SELECT ts_conformal_predict_per_step(
+docs/api/11-conformal-prediction.md	SELECT ts_conformal_quantile([1.0, 2.0, 3.0]::DOUBLE[], 0.0);
+README.md	INSTALL anofox_forecast FROM 'http://get.erpl.io';
+README.md	LOAD httpfs;

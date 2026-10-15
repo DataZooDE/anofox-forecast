@@ -1,0 +1,10 @@
+# name<TAB>reason
+# Function/macro names that legitimately still appear in docs/skills migration notes
+# (explaining what to use instead) but are no longer registered. Each confirmed
+# unregistered via `SELECT DISTINCT function_name FROM duckdb_functions()` against a
+# fresh build (Phase 18 plan 18-04).
+ts_backtest_auto_by	removed (CHANGELOG RUST-06/D-07, phase 12 plan 12-08): use ts_cv_folds_by + ts_cv_forecast_by two-step CV workflow instead
+_ts_backtest_native	removed (CHANGELOG RUST-06/D-07, phase 12 plan 12-08): orphaned internal function once ts_backtest_auto_by was removed
+ts_hydrate_features_by	removed (commit 88839f1, phase 18-01): ported to ts_cv_hydrate_by
+ts_prepare_regression_input_by	removed (commit 88839f1, phase 18-01): ported to ts_cv_hydrate_by + CASE WHEN split='test' pattern
+ts_hydrate_split	removed: superseded by ts_cv_hydrate_by's split column output

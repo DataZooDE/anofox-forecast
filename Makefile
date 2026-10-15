@@ -8,7 +8,7 @@ EXT_CONFIG=${PROJ_DIR}extension_config.cmake
 include extension-ci-tools/makefiles/duckdb_extension.Makefile
 
 # Rust targets (for local development)
-.PHONY: rust rust_debug rust_test fmt check header audit benchmark-setup benchmark-m4 benchmark-m5
+.PHONY: rust rust_debug rust_test fmt check header audit check-docs benchmark-setup benchmark-m4 benchmark-m5
 
 rust:
 	cargo build --release
@@ -35,6 +35,10 @@ audit:
 	python3 scripts/audit_no_stats_in_cpp.py --self-test
 	python3 scripts/audit_no_stats_in_cpp.py
 	python3 scripts/check_length_only_tests.py
+
+# Phase 18 (DOCS-01, D-06): docs/skills SQL snippet + function-name checker
+check-docs:
+	python3 scripts/check_doc_snippets.py
 
 # Benchmark targets
 benchmark-setup:
