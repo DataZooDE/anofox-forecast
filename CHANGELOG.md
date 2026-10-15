@@ -10,7 +10,65 @@ use the semver numbering this project started with.
 
 ## [Unreleased] — v0.10.0 Statistical Correctness
 
-### Breaking changes
+### Breaking changes in v0.10.0
+
+Every row below changes a function's NUMERIC OUTPUT or its SQL usage (required
+arguments, signature, error behavior) somewhere on the `ts_*` surface. This is the
+consolidated, at-a-glance index; the full technical record — exact before/after values,
+root causes, and verification methodology — is the detailed per-phase bullets and
+before/after tables in "Breaking changes — details by phase" immediately below.
+
+#### Numerical output changes by area
+
+| Area | Function(s) | Before | After | Phase |
+|---|---|---|---|---|
+| stats | `ts_stats`/`ts_stats_by`/`ts_stats_agg` moments (`skewness`/`kurtosis`/`entropy`) | population-moment mix; 10-bin Shannon histogram entropy | scipy `bias=False` G1/excess-G2; Pincus (1991) approximate entropy | Phase 13 |
+| stats | `ts_stats*` `n_gaps` | gap-*occurrence* count | missing-*period* count (old meaning preserved as new `n_gap_runs`) | Phase 13 |
+| stats | `trend_strength`/`seasonality_strength` | ad-hoc `\|r\|`/max-ACF-lag formula | Wang/Hyndman STL `F_T`/`F_S` from an R-faithful STL (`stats::stl`/`forecast::mstl` port) | Phase 13 |
+| metrics | `ts_mae`/`ts_mse`/`ts_rmse`/`ts_mape`/`ts_smape`/`ts_r2`/`ts_bias`/`ts_rmae`/`ts_quantile_loss`/`ts_mqloss`/`ts_coverage` | each array's NULLs spliced out independently in C++ before the FFI call | pairwise-complete observations via a Rust validity bitmask (`anofox-fcst-core::missing`) | Phase 12 |
+| metrics | `ts_mase` | 3-arg relative-MAE (`MAE(actual,forecast)/MAE(actual,baseline)`) | Hyndman-Koehler MASE: out-of-sample MAE scaled by in-sample seasonal-naive MAE | Phase 13 |
+| metrics | `ts_mape`/`ts_mape_by` | silently excluded zero-actual pairs from both sum and divisor | `NULL` for the whole call when any pairwise-complete `actual` is exactly `0.0` | Phase 13 |
+| data quality | `ts_data_quality*` `temporal_score`/`n_gaps`/`n_short`/`frequency` | `temporal_score` always `1.0`; `n_gaps` always `0`; `n_short`/`frequency` silently ignored | real date-driven scoring; missing-period `n_gaps`; both arguments honored | Phase 13 |
+| data quality | `ts_data_quality_summary` | all-NULL-dated groups silently undercounted (excluded from every bucket, inflating `n_total`'s implied denominator) | new `n_unassessed` column; `n_good+n_fair+n_poor+n_unassessed=n_total` always holds | Phase 18 (WR-05/D-10) |
+| features | all 117 tsfresh-inspired features | partial/incorrect match vs tsfresh 0.21.2 (PACF/ACF, moments, FFT/spectral, entropy/complexity families — see the detailed table below) | 117/117 match tsfresh 0.21.2 (or a documented, intentional deviation) | Phase 14 |
+| features | `autocorrelation_lag10` | never reached any SQL surface (output schema derived from a 10-point dummy series, which can't compute a lag-10 value) | present on every `ts_features*` surface unconditionally | Phase 14 |
+| detection | `ts_detect_peaks(_by)` | fdars derivative zero-crossing detector — missed peaks, reported local minima, every plateau `prominence=0`, 0-1-normalised prominence scale | direct `scipy.signal.find_peaks` 1.18.1 port; real-data-scale prominence | Phase 15 |
+| detection | BOCPD (`ts_detect_changepoints*`, `_ts_detect_changepoints_bocpd`) | unnormalised predictive density (no normalising constant); posterior-MEAN update; no run-length truncation | normalised Student-t predictive (log domain); posterior sample-mean update; truncation at 500; standardised input (scale/shift invariant) | Phase 15 |
+| detection | PELT (Rust/FFI changepoint detector) | not scale-invariant (unscaled series vs. `*100` gave wildly different changepoints); `L1` cost used the mean | sigma-normalised cost (scale-invariant); `L1` uses the segment median; real exact-safe pruning | Phase 15 |
+| detection | `ts_mstl_decomposition_by`/`_ts_mstl_decomposition` | `seasonal_periods`/`periods` argument silently ignored (always `nullptr`/`0` to the FFI); classical-MA approximation, periods sorted descending | real R `forecast::mstl` port; requested periods honored and returned ascending | Phase 15 |
+| detection | period estimators (`ts_estimate_period_fft`/`_acf`, `_ts_detect_periods(..,'regression')`, `ts_lomb_scargle`) | undetected trend bias (FFT reported `period=n`); unreachable short lags (ACF); coarse 50-point regression grid; unsafe Lomb-Scargle ranges (div-by-zero / inverted grid) | linearly detrended first (FFT); lag-2-reachable with a significance bound (ACF); every-integer grid (regression); explicit range-validation errors (Lomb-Scargle) | Phase 15 |
+| detection | `ts_seasonal_strength(_windowed)` | measured on the raw (possibly trend-contaminated) series; `'wavelet'` method always returned `1.0` regardless of input | detrends LINEARLY first, then measures strength on the residual; `'wavelet'` removed | Phase 15 |
+| conformal | `ts_conformal_by`/`ts_conformal_apply_by`/`ts_interval_width_by` | value-sorted per-column lists, paired independently (silent mispairing across lower/upper/actual) | row-per-`(group,date)`, paired by a required `date_col` | Phase 16 |
+| conformal | `ts_conformal_predict_asymmetric` | positive/negative residual-SUBSET quantiles (over-covered nominal by 5-6pp) | full signed-residual-array quantiles (hits nominal coverage within ~0.2pp) | Phase 16 |
+| conformal | `ts_bootstrap_intervals` | residuals/forecasts arguments swapped internally — a right-skewed residual's long tail landed on the wrong (lower) side | correct tail placement; `n_paths`/`coverage` validated, never silently clamped | Phase 16 |
+| diagnostics | `ts_adf`/`ts_adf_by` | fixed-lag, non-augmented regression; fixed asymptotic critical-value table | AIC-selected lags (statsmodels `adfuller(autolag="AIC")`-exact); MacKinnon (1994/2010) finite-sample p-values and critical values | Phase 17 |
+| diagnostics | `ts_kpss` under `regression := 'ct'` | not available (constant-only) | new trend-KPSS implemented in this extension's Rust core, matching R `tseries::kpss.test(null="Trend")` | Phase 17 |
+| diagnostics | `ts_stationarity`/`ts_stationarity_by` verdict | 3 of 4 four-way labels were swapped | standard ADF+KPSS mapping; explicit `'constant'` verdict; SQL `NULL` (not a mislabeled string) for a degenerate series | Phase 17 |
+| diagnostics | `ts_ljung_box`/`ts_ljung_box_by` | `df` always `= lags`, ignoring any fitted model; Wilson-Hilferty approximation for `df > 30` | `fitted_params` parameter, `df = lags - fitted_params`, exact chi-square survival function matching R `Box.test(fitdf=...)` | Phase 17 |
+| forecasts | prediction intervals (`yhat_lower`/`yhat_upper`) across every forecast surface | fabricated `point ± z·SD(history)·√h` band | each model's own crate `predict_with_intervals` bounds; `NULL` where a model has no native interval support | Phase 10 |
+| forecasts | fitted values / residuals / MSE | SES(α=0.3) surrogate, independent of the actual fitted model | crate-native `fitted_values()`/`residuals()` per model | Phase 10 |
+| forecasts | `MFLES`/`AutoMFLES`/`Laplace` point forecasts | `anofox-forecast` 0.15.3 (issue-219 runaway: MFLES/AutoMFLES could diverge unboundedly) | `anofox-forecast` 0.15.10 (issue-219 bounded; `max_abs_diff=12279.87` on the repro case; 15 other ALLOWED-CHANGE lines are sub-`1e-9`-to-`0.108` floating-point drift across MFLES/AutoMFLES/Laplace); every other model byte-for-byte unchanged across a 125-entry snapshot | Phase 9 (DEP-02) |
+| forecasts | `ETS`/`Theta`/`AutoARIMA`/`Holt`/`HoltWinters`/`TBATS`/`MSTL`/`GARCH` fits, intervals, and point forecasts | `anofox-forecast` 0.15.10 formulas and search | `anofox-forecast` 0.16.1 — upstream fixes developed independently in Phase 11 (ADF/KPSS augmentation + MacKinnon p-values, bounded KPSS p-values, `auto.arima`-parity AutoARIMA order selection, corrected ETS likelihood/intervals, Theta alpha optimisation; PRs #222-#225) and consumed here in Phase 17 | Phase 17 (consumes Phase 11) |
+
+#### SQL signature and semantics changes
+
+| Function(s) | Before | After | Migration |
+|---|---|---|---|
+| `ts_conformal_by`/`ts_conformal_apply_by`/`ts_interval_width_by` | no `date_col` argument; lower/upper/actual each sorted independently by value, one row per group | a required `date_col` orders and pairs every row; one row per `(group, date)` | add the date column as the new argument; downstream consumers expecting one-row-per-group output must re-aggregate |
+| `ts_conformal_apply_by` | took a literal conformity-score argument | takes a calibration TABLE — `ts_conformal_calibrate`'s own output, matched per group (or pooled fallback) | run `ts_conformal_calibrate` first and pass its output table name instead of a literal score |
+| `ts_mase` | 3-arg `(actual, forecast, baseline)` — computed a relative MAE, not MASE | 4-arg `(actual, forecast, insample, seasonal_period)` — Hyndman-Koehler MASE; `seasonal_period` is a required positional argument (no `:=` defaulting on scalar functions) | the pre-v0.10.0 3-arg call now raises an error naming `ts_rmae`; use `ts_rmae(actual, forecast, baseline)` for the old relative-MAE result |
+| `ts_mase_by` | `(source, date_col, actual_col, forecast_col, baseline_col)` | `(source, date_col, actual_col, forecast_col, seasonal_period := 1)`; `source` must include each group's HISTORY rows (dated before the first forecast, `forecast` NULL) | drop the baseline column; ensure `source` carries pre-forecast history rows for the in-sample scale |
+| `'jackknife+'` conformal strategy (and legacy aliases `JackknifePlus`/`jackknifeplus`/`jackknife_plus`/`jk+`) | silently computed the identical quantile as `'split'` (no real leave-one-out refits) | REMOVED — every spelling now raises a hard SQL error naming the replacement | use `'split'` or `'crossval'` |
+| `'wavelet'` seasonal-strength method (`ts_seasonal_strength(_windowed)`) | always returned `1.0`, regardless of input (could not discriminate signal from noise) | REMOVED — raises a hard SQL error naming the remaining methods | use `'variance'` (default) or `'spectral'` |
+| `ts_adf(_by)`/`ts_kpss(_by)`/`ts_stationarity(_by)` | no `regression` parameter (constant-only test) | `regression := 'c'` (default) or `'ct'` (constant + linear trend) | pass `regression := 'ct'` for a trend-stationarity test; re-check any branching logic keyed on the four-way verdict strings (3 of 4 swapped meaning) |
+| `ts_data_quality_summary` | 5 output columns: `n_total`, `n_good`, `n_fair`, `n_poor`, `avg_score` | adds a 6th column, `n_unassessed` (groups with no usable dates); `avg_score` now covers assessed groups only | a positional consumer expecting exactly 5 columns must account for the new one |
+| `ts_stats*`/`ts_data_quality*` `n_gaps` | counted gap *occurrences* | counts missing *periods*; the old occurrence-count meaning is preserved under a new `n_gap_runs` column | read `n_gap_runs` for pre-v0.10.0 `n_gaps` semantics |
+| deprecated metric `_by` family (`ts_mae_by`, `ts_mse_by`, `ts_rmse_by`, `ts_mape_by`, `ts_smape_by`, `ts_r2_by`, `ts_bias_by`, `ts_mase_by`, `ts_rmae_by`, `ts_coverage_by`, `ts_quantile_loss_by`) | some docs/examples called these with a bare table name and/or an extra group-column argument | `source` MUST be a subquery, e.g. `(SELECT group_col, date_col, actual, forecast FROM table)` — a bare table name fails to bind (the native function's first parameter is `TABLE`-typed); there is no separate positional `group` argument | wrap the source in a subquery selecting exactly the columns the macro needs, in the documented order |
+| `ts_diff_by` `diff_order` | lag-k difference, `y[t] - y[t-k]` | true d-th order differencing (numpy `diff(n=diff_order)`) | pass the old `k` as the new named `seasonal_lag` parameter with `diff_order := 1` |
+| `ts_backtest_auto_by` / `_ts_backtest_native` | one-step backtest table macro | REMOVED (orphaned internal function removed alongside it) | use the two-step `ts_cv_folds_by` + `ts_cv_forecast_by` workflow |
+| `'ARIMA'`/`'SARIMA'` without `arima_order` | ran a fixed-coefficient AR(1)-on-differences stand-in | hard error naming `AutoARIMA` as the alternative | pass `arima_order := [p,d,q]` (and `seasonal_order` for SARIMA), or switch to `'AutoARIMA'` |
+
+### Breaking changes — details by phase
 
 - **Prediction intervals are now crate-native, not fabricated.** `yhat_lower`/`yhat_upper`
   across every forecast surface (`ts_forecast_by`, `ts_forecast_exog_by`, `ts_forecast_agg`,
@@ -630,6 +688,14 @@ use the semver numbering this project started with.
   | `ts_forecast_by('AutoARIMA', air_passengers, seasonal_period=12)` `.model_name` / `.yhat[1]` | `'AutoARIMA(1,1,3)(0,1,1)[12]'` / `444.4025123655398` | `'AutoARIMA(2,1,1)(0,1,0)[12]'` / `445.5968786698059` | 0.16.1 PR #223 (UPST-01): AutoARIMA ports R `forecast::auto.arima`'s stepwise search and estimation — `(2,1,1)(0,1,0)[12]` is the order R itself selects on this series |
   | `ts_forecast_by('Holt', air_passengers)` `.yhat[1]` | `437.9429629258883` | `434.233746360747` | D-12/D-13 (plan 17-03 Task 1): SQL `'Holt'` remapped from `HoltLinearTrend::auto()` to the crate's `ETS(A,A,N)` — R `holt()`'s actual definition. Cuts the AirPassengers R-parity point deviation 6.86x (rw 13.41x); root cause `RC-01` (`validation/reference/fixtures/r_forecast/air_passengers.json` `tolerance.root_causes`, rendered in `validation/reference/README.md` by plan 17-03 Task 3). `model_name` stays `'Holt'`; `build_forecaster`'s CV/ensemble construction changed identically |
   | `ETS`/`SES`/`Holt`/`HoltWinters`/`Theta`/`TBATS`/`MSTL`/`GARCH` prediction intervals | pre-0.16.0 crate interval formulas | 0.16.0's corrected formulas | summary row; plan 17-03 documents the measured R parity per model |
+- **`ts_data_quality_summary` gains `n_unassessed` (Phase 18, WR-05/D-10).** A group whose
+  `date_col` values are all `NULL` previously contributed `0` to `n_good`/`n_fair`/`n_poor`
+  (SQL three-valued logic: `NULL >= 0.8` is `NULL`, not `TRUE`, so `SUM(CASE WHEN ... THEN 1
+  ELSE 0 END)` took the `ELSE 0` branch for every bucket) while still counting toward
+  `n_total` and being skipped by `AVG()` — silently undercounting the classified total. A
+  new final column, `n_unassessed`, counts these groups explicitly: the invariant
+  `n_good + n_fair + n_poor + n_unassessed = n_total` now always holds, and `avg_score`
+  is documented as covering assessed groups only.
 
 ### Added
 
