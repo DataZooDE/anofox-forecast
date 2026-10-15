@@ -561,6 +561,21 @@ fn wrapper_equals_direct_crate_construction() {
             "inter/ses/SESOptimized",
         );
     }
+    // trend/holt -> Holt (D-12/D-13, 17-03 Task 2: same remap as air/rw above)
+    {
+        let trend = trend_values();
+        let (p, l, u) = direct_ets(&trend, ETSSpec::aan(), 1);
+        assert_wrapper_equals_direct(
+            ModelType::Holt,
+            None,
+            0,
+            &trend,
+            &p,
+            &l,
+            &u,
+            "trend/holt/Holt",
+        );
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -574,6 +589,7 @@ fn diagnosis_report() {
     let air = air_values();
     let rw = rw_values();
     let inter = inter_values();
+    let trend = trend_values();
 
     let mut rows = 0usize;
 
@@ -888,10 +904,38 @@ fn diagnosis_report() {
         rows += 1;
     }
 
+    // ---- trend/holt/Holt (E4 mapping check, 17-03 Task 2) ----
+    {
+        let block = &sim_fx["series"]["trend"]["models"]["holt"];
+        let r_pt = r_point(block);
+        let r_lo = r_lower95(block);
+        let r_up = r_upper95(block);
+        let (hp, hl, hu) = direct_holt(&trend);
+        let holt_point_dev = max_rel_dev(&hp, &r_pt);
+        let holt_interval_dev = max_interval_dev(&hl, &hu, &r_lo, &r_up);
+        let (ep, el, eu) = direct_ets(&trend, ETSSpec::aan(), 1);
+        let ets_point_dev = max_rel_dev(&ep, &r_pt);
+        let ets_interval_dev = max_interval_dev(&el, &eu, &r_lo, &r_up);
+        println!("=== trend/holt/Holt (E4 mapping check) ===");
+        println!(
+            "  HoltLinearTrend: point_dev={:.3e} interval_dev={:.3e}",
+            holt_point_dev, holt_interval_dev
+        );
+        println!(
+            "  ETS(A,A,N) R-faithful: point_dev={:.3e} interval_dev={:.3e} cut={:.2}x",
+            ets_point_dev,
+            ets_interval_dev,
+            holt_point_dev / ets_point_dev.max(1e-300)
+        );
+        assert!(holt_point_dev.is_finite());
+        assert!(ets_point_dev.is_finite());
+        rows += 1;
+    }
+
     println!("diagnosis rows: {rows}");
     assert_eq!(
-        rows, 11,
-        "Task 1 diagnosis scope must cover exactly 11 checks"
+        rows, 12,
+        "17-03 Task 2 diagnosis scope must cover exactly 12 checks (11 from Task 1 + trend/holt/Holt)"
     );
 }
 
@@ -940,6 +984,7 @@ fn autoarima_report() {
     let sim_fx = sim_fixture();
     let air = air_values();
     let rw = rw_values();
+    let trend = trend_values();
 
     let mut rows = 0usize;
 
@@ -955,11 +1000,17 @@ fn autoarima_report() {
         run_autoarima_block("rw", &rw, order, 0, block);
         rows += 1;
     }
+    {
+        let block = &sim_fx["series"]["trend"]["models"]["auto_arima"];
+        let order = &block["fit"]["order"];
+        run_autoarima_block("trend", &trend, order, 0, block);
+        rows += 1;
+    }
 
     println!("autoarima rows: {rows}");
     assert_eq!(
-        rows, 2,
-        "Task 1 autoarima scope must cover exactly 2 series"
+        rows, 3,
+        "17-03 Task 2 autoarima scope must cover exactly 3 series"
     );
 }
 

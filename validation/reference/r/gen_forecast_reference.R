@@ -23,6 +23,7 @@ series <- reference_series()
 air <- series$air
 rw <- series$rw
 inter <- series$inter
+trend <- series$trend
 # Deterministic level shift of the existing seeded ar1 series (D-09, FCST-04:
 # non-seasonal arima_order parity targets). Consumes no RNG draws, so rw/inter
 # and air_passengers.json stay byte-identical to the pre-existing fixture.
@@ -38,14 +39,14 @@ levels <- c(80, 95)
 REF_ROOT_CAUSES <- list(
   list(
     id = "RC-01",
-    checks = list("air/holt/Holt", "rw/holt/Holt"),
+    checks = list("air/holt/Holt", "rw/holt/Holt", "trend/holt/Holt"),
     location = "extension",
     cause = paste(
       "Wrapper's SQL 'Holt' dispatched to HoltLinearTrend::auto() (SSE",
       "objective, trend seeded from a single first difference) instead of",
       "ETS(A,A,N), R holt()'s actual definition; the R-faithful ETS(A,A,N)",
       "construction cuts the point deviation 6.86x on AirPassengers and",
-      "13.41x on rw."
+      "13.41x on rw, and brings trend into the parity tier (3.01x cut)."
     ),
     evidence = paste(
       "E4 mapping check (diagnosis/harness-output.txt): air",
@@ -53,7 +54,9 @@ REF_ROOT_CAUSES <- list(
       "ETS(A,A,N) R-faithful point_dev=1.684e-2 interval_dev=3.334e-2",
       "(cut 6.86x); rw HoltLinearTrend point_dev=7.517e-2",
       "interval_dev=3.262e-1 -> ETS(A,A,N) R-faithful point_dev=5.604e-3",
-      "interval_dev=1.960e-2 (cut 13.41x)."
+      "interval_dev=1.960e-2 (cut 13.41x); trend HoltLinearTrend",
+      "point_dev=1.653e-3 interval_dev=2.483e-1 -> ETS(A,A,N) R-faithful",
+      "point_dev=5.495e-4 interval_dev=6.532e-3 (cut 3.01x, parity tier)."
     ),
     resolution = paste(
       "fixed: forecast() dispatch and build_forecaster remapped SQL",
@@ -208,6 +211,18 @@ REF_TOLERANCE <- list(
     "phases (Phase 10 FCST-01, Phase 17 FCST-09), not asserted in Phase 9."
   )
 )
+# D-08/D-09/D-12: parity_checks differs per fixture (air's own rows vs
+# rw/inter/trend's own rows), so each fixture gets its own tolerance object
+# built from the shared REF_TOLERANCE base plus its own parity_checks list.
+# root_causes (and everything else in REF_TOLERANCE) stays identical across
+# both fixtures -- only parity_checks differs.
+#
+# 17-03 Task 2 writes ONLY the 9 trend rows (defined where the trend fits
+# are available, just above sim_fixture); Task 3 adds the 15 air rows here
+# and the 9 rw / 3 inter rows next to SIM's definition.
+AIR_PARITY_CHECKS <- list()
+AIR_TOLERANCE <- c(REF_TOLERANCE, list(parity_checks = AIR_PARITY_CHECKS))
+
 REF_PARAMETERS <- list(horizon = h, levels = levels)
 
 # ---- fit-metadata extractors (feed Phase 10/11 consumers) ----------------
@@ -361,7 +376,7 @@ diagnosis <- list(
 air_fixture <- c(
   provenance("r_forecast", GENERATOR_PATH),
   list(
-    tolerance = REF_TOLERANCE,
+    tolerance = AIR_TOLERANCE,
     inputs = list(
       name = "AirPassengers",
       frequency = 12,
@@ -423,6 +438,111 @@ inter_models <- list(
   })
 )
 
+# ---- trend family (D-08 Task 2: random walk with drift, non-seasonal) ---
+
+trend_ets_fit <- ets(trend)
+trend_auto_arima_fit <- auto.arima(trend)
+
+trend_models <- list(
+  naive = fc_block(naive(trend, h = h, level = levels), "naive(trend, h = 12, level = c(80, 95))"),
+  rwf_drift = fc_block(
+    rwf(trend, h = h, drift = TRUE, level = levels),
+    "rwf(trend, h = 12, drift = TRUE, level = c(80, 95))"
+  ),
+  ses = local({
+    f <- ses(trend, h = h, level = levels)
+    c(fc_block(f, "ses(trend, h = 12, level = c(80, 95))"), list(fit = ets_fit_block(f$model)))
+  }),
+  holt = local({
+    f <- holt(trend, h = h, level = levels)
+    c(fc_block(f, "holt(trend, h = 12, level = c(80, 95))"), list(fit = ets_fit_block(f$model)))
+  }),
+  ets_auto = c(
+    fc_block(forecast(trend_ets_fit, h = h, level = levels), "forecast(ets(trend), h = 12, level = c(80, 95))"),
+    list(fit = ets_fit_block(trend_ets_fit))
+  ),
+  auto_arima = c(
+    fc_block(
+      forecast(trend_auto_arima_fit, h = h, level = levels),
+      "forecast(auto.arima(trend), h = 12, level = c(80, 95))"
+    ),
+    list(fit = arima_fit_block(trend_auto_arima_fit))
+  ),
+  thetaf = fc_block(thetaf(trend, h = h, level = levels), "thetaf(trend, h = 12, level = c(80, 95))")
+)
+
+# D-08/D-09/D-12 (17-03 Task 2): the 9 trend parity_checks rows. Every
+# tolerance/measured value here is read from diagnosis/harness-output.txt
+# (r_parity_diagnosis.rs's diagnosis_report / autoarima_report), never
+# computed in R.
+TREND_PARITY_CHECKS <- list(
+  list(
+    series = "trend", r_key = "naive", surface = "Naive", ets_spec = "",
+    seasonal_period = 0, point_tol_kind = "abs", point_tol = 1e-8,
+    interval_tol = 5e-4, status = "parity", cause = "",
+    reason = "Naive is closed-form; bounds use the crate's Abramowitz-Stegun 26.2.23 normal-quantile approximation (constant ~2.2e-4 relative half-width error on every series).",
+    follow_up = "", measured_point = 0, measured_interval = 2.20e-4
+  ),
+  list(
+    series = "trend", r_key = "rwf_drift", surface = "RandomWalkDrift", ets_spec = "",
+    seasonal_period = 0, point_tol_kind = "abs", point_tol = 1e-8,
+    interval_tol = 5e-3, status = "parity", cause = "",
+    reason = "RandomWalkDrift is closed-form; bounds combine the z approximation with the crate's drift-interval formula, which differs slightly from R's rwf().",
+    follow_up = "", measured_point = 7.1e-14, measured_interval = 3.14e-3
+  ),
+  list(
+    series = "trend", r_key = "ses", surface = "SESOptimized", ets_spec = "",
+    seasonal_period = 0, point_tol_kind = "rel", point_tol = 1e-6,
+    interval_tol = 1e-6, status = "parity", cause = "",
+    reason = "SimpleExponentialSmoothing::auto() on a non-intermittent series converges to R ses()'s optimum (contrast inter/ses, RC-04).",
+    follow_up = "", measured_point = 1.96e-10, measured_interval = 5.95e-8
+  ),
+  list(
+    series = "trend", r_key = "ses", surface = "ETS:ANN", ets_spec = "ANN",
+    seasonal_period = 0, point_tol_kind = "rel", point_tol = 1e-6,
+    interval_tol = 1e-6, status = "parity", cause = "",
+    reason = "Same ETS(A,N,N) construction as SESOptimized above.",
+    follow_up = "", measured_point = 1.96e-10, measured_interval = 1.87e-8
+  ),
+  list(
+    series = "trend", r_key = "holt", surface = "ETS:AAN", ets_spec = "AAN",
+    seasonal_period = 0, point_tol_kind = "rel", point_tol = 2e-3,
+    interval_tol = 1e-2, status = "parity", cause = "",
+    reason = "ETS(A,A,N) direct construction, R's own holt() definition; measured by diagnosis_report's trend/holt/Holt E4 block (the 'ETS(A,A,N) R-faithful' line).",
+    follow_up = "", measured_point = 5.495e-4, measured_interval = 6.532e-3
+  ),
+  list(
+    series = "trend", r_key = "holt", surface = "Holt", ets_spec = "",
+    seasonal_period = 0, point_tol_kind = "rel", point_tol = 2e-3,
+    interval_tol = 1e-2, status = "parity", cause = "RC-01",
+    reason = "D-12/D-13 fix (RC-01): SQL 'Holt' now dispatches to ETS(A,A,N) (R's holt() definition) instead of HoltLinearTrend::auto(), so this check is identical to the ETS:AAN row above and is in the parity tier post-fix.",
+    follow_up = "fixed: forecast() dispatch and build_forecaster remapped SQL 'Holt' to ETS::new(ETSSpec::aan(), 1) (17-03 Task 1).",
+    measured_point = 5.495e-4, measured_interval = 6.532e-3
+  ),
+  list(
+    series = "trend", r_key = "ets_auto", surface = "AutoETS", ets_spec = "",
+    seasonal_period = 0, point_tol_kind = "rel", point_tol = 2e-3,
+    interval_tol = 1e-2, status = "parity", cause = "",
+    reason = "AutoETS selects ETS(A,A,N), matching R's ets() selection on this series (contrast air/ets_auto, RC-03, where R and the crate's selection diverge).",
+    follow_up = "", measured_point = 5.63e-4, measured_interval = 6.69e-3
+  ),
+  list(
+    series = "trend", r_key = "auto_arima", surface = "AutoARIMA", ets_spec = "",
+    seasonal_period = 0, point_tol_kind = "rel", point_tol = 1e-6,
+    interval_tol = 6e-3, status = "parity", cause = "",
+    reason = "D-15 tolerance rule on the 0.16.1 measurement (autoarima_report, diagnosis/harness-output.txt): order_match=true (R (0,1,0) with drift), point=2.232548e-14, interval=3.361326e-3, both inside the parity tier; tol = max(1e-6, 1.5x measured, rounded up to 1 significant digit).",
+    follow_up = "", measured_point = 2.232548e-14, measured_interval = 3.361326e-3
+  ),
+  list(
+    series = "trend", r_key = "thetaf", surface = "Theta", ets_spec = "",
+    seasonal_period = 0, point_tol_kind = "rel", point_tol = 1e-6,
+    interval_tol = 1e-6, status = "parity", cause = "",
+    reason = "Theta matches R thetaf() to numerical precision on this non-seasonal series.",
+    follow_up = "", measured_point = 2.79e-10, measured_interval = 1.86e-8
+  )
+)
+SIM_TOLERANCE <- c(REF_TOLERANCE, list(parity_checks = TREND_PARITY_CHECKS))
+
 # ---- ar1_l10 family (D-09: non-seasonal arima_order parity, d=0) ---------
 
 ar1_l10_arima100_fit <- Arima(ar1_l10, order = c(1, 0, 0))
@@ -448,7 +568,7 @@ ar1_l10_models <- list(
 sim_fixture <- c(
   provenance("r_forecast", GENERATOR_PATH),
   list(
-    tolerance = REF_TOLERANCE,
+    tolerance = SIM_TOLERANCE,
     parameters = REF_PARAMETERS,
     series = list(
       rw = list(
@@ -474,6 +594,18 @@ sim_fixture <- c(
           seed_note = "10 + arima.sim(list(ar = 0.7), n = 300) from common.R reference_series()"
         ),
         models = ar1_l10_models
+      ),
+      trend = list(
+        inputs = list(
+          values = as.numeric(trend),
+          frequency = 1,
+          seed_note = paste(
+            "trend <- cumsum(rnorm(150, mean = 0.3, sd = 1)), appended LAST in",
+            "common.R reference_series() (D-08 Task 2) -- random walk with",
+            "drift, true model rwf(drift) / ARIMA(0,1,0) with drift"
+          )
+        ),
+        models = trend_models
       )
     )
   )

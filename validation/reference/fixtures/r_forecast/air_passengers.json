@@ -18,11 +18,12 @@
         "id": "RC-01",
         "checks": [
           "air/holt/Holt",
-          "rw/holt/Holt"
+          "rw/holt/Holt",
+          "trend/holt/Holt"
         ],
         "location": "extension",
-        "cause": "Wrapper's SQL 'Holt' dispatched to HoltLinearTrend::auto() (SSE objective, trend seeded from a single first difference) instead of ETS(A,A,N), R holt()'s actual definition; the R-faithful ETS(A,A,N) construction cuts the point deviation 6.86x on AirPassengers and 13.41x on rw.",
-        "evidence": "E4 mapping check (diagnosis/harness-output.txt): air HoltLinearTrend point_dev=1.155e-1 interval_dev=2.312e-1 -> ETS(A,A,N) R-faithful point_dev=1.684e-2 interval_dev=3.334e-2 (cut 6.86x); rw HoltLinearTrend point_dev=7.517e-2 interval_dev=3.262e-1 -> ETS(A,A,N) R-faithful point_dev=5.604e-3 interval_dev=1.960e-2 (cut 13.41x).",
+        "cause": "Wrapper's SQL 'Holt' dispatched to HoltLinearTrend::auto() (SSE objective, trend seeded from a single first difference) instead of ETS(A,A,N), R holt()'s actual definition; the R-faithful ETS(A,A,N) construction cuts the point deviation 6.86x on AirPassengers and 13.41x on rw, and brings trend into the parity tier (3.01x cut).",
+        "evidence": "E4 mapping check (diagnosis/harness-output.txt): air HoltLinearTrend point_dev=1.155e-1 interval_dev=2.312e-1 -> ETS(A,A,N) R-faithful point_dev=1.684e-2 interval_dev=3.334e-2 (cut 6.86x); rw HoltLinearTrend point_dev=7.517e-2 interval_dev=3.262e-1 -> ETS(A,A,N) R-faithful point_dev=5.604e-3 interval_dev=1.960e-2 (cut 13.41x); trend HoltLinearTrend point_dev=1.653e-3 interval_dev=2.483e-1 -> ETS(A,A,N) R-faithful point_dev=5.495e-4 interval_dev=6.532e-3 (cut 3.01x, parity tier).",
         "resolution": "fixed: forecast() dispatch and build_forecaster remapped SQL 'Holt' from HoltLinearTrend::auto() to ETS::new(ETSSpec::aan(), 1), matching R's holt() definition; model_name stays 'Holt' (17-03 Task 1).",
         "upstream": ""
       },
@@ -77,7 +78,8 @@
         "upstream": "draft: RC-05-autoarima-sarima-interval-variance.md"
       }
     ],
-    "notes": "closed_form_abs is exact (naive/snaive/rwf drift are closed-form); model_point_rel and interval_rel are parity targets for later phases (Phase 10 FCST-01, Phase 17 FCST-09), not asserted in Phase 9."
+    "notes": "closed_form_abs is exact (naive/snaive/rwf drift are closed-form); model_point_rel and interval_rel are parity targets for later phases (Phase 10 FCST-01, Phase 17 FCST-09), not asserted in Phase 9.",
+    "parity_checks": []
   },
   "inputs": {
     "name": "AirPassengers",

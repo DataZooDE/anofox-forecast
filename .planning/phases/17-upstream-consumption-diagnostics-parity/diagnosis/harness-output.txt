@@ -1,5 +1,4 @@
-   Compiling anofox-fcst-core v0.1.0 (/home/simonm/projects/duckdb/anofox-forecast/crates/anofox-fcst-core)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.66s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.04s
      Running tests/r_parity_diagnosis.rs (target/debug/deps/r_parity_diagnosis-382c3a50434319e2)
 
 running 9 tests
@@ -78,7 +77,10 @@ test repro_rc_03 ... ok
   E6 inter/ses/ETS:ANN: crate_loglik=-380.625612 r_loglik=-374.538408 gap=-6.087205 alpha=Some(0.13911309509277336) beta=None gamma=None phi=None in_r_bounds=true -> crate (crate optimiser misses an optimum its own objective scores higher)
   SES own fit: alpha=Some(0.13911437988281217) l0_fixed_to_values[0]=4
   R ses(inter) par: alpha=0.000100000835353129 l0=1.24173768106333
-diagnosis rows: 11
+=== trend/holt/Holt (E4 mapping check) ===
+  HoltLinearTrend: point_dev=1.653e-3 interval_dev=2.483e-1
+  ETS(A,A,N) R-faithful: point_dev=5.495e-4 interval_dev=6.532e-3 cut=3.01x
+diagnosis rows: 12
 test diagnosis_report ... ok
 test wrapper_equals_direct_crate_construction ... ok
 === D-15 Miss E8: air/auto_arima interval ===
@@ -98,8 +100,9 @@ test wrapper_equals_direct_crate_construction ... ok
 test autoarima_air_interval_e8_probe ... ok
 autoarima air: r_order=(2,1,1)(0,1,0)[12) crate=AutoARIMA(2,1,1)(0,1,0)[12] order_match=true point=3.982169e-4 interval=1.846662e-1 tier=outside
 autoarima rw: r_order=(0,1,0) crate=AutoARIMA(0,1,0) order_match=true point=0.000000e0 interval=3.276619e-8 tier=parity
-autoarima rows: 2
+autoarima trend: r_order=(0,1,0) crate=AutoARIMA(0,1,0) order_match=true point=2.232548e-14 interval=3.361326e-3 tier=parity
+autoarima rows: 3
 test autoarima_report ... ok
 
-test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.10s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 20.81s
 

@@ -56,8 +56,17 @@ reference_series <- function() {
   rw <- cumsum(rnorm(200))
   ar1 <- as.numeric(arima.sim(list(ar = 0.7), n = 300))
   inter <- ifelse(runif(120) < 0.3, rpois(120, 3) + 1, 0)
+  # Phase 17 plan 17-03 (D-08, Task 2): appended LAST, after every existing
+  # draw, so the RNG stream every other series/generator consumes is
+  # unchanged — air_passengers.json, simulated_series.json and the
+  # r_diagnostics / r_mase / r_stl_strength / r_entropy fixtures regenerate
+  # byte-identical for everything except this new key. A random walk with
+  # drift (mean 0.3 per step): its TRUE model is rwf(drift) /
+  # ARIMA(0,1,0) with drift, unlike `rw` above (no drift) — gives the
+  # parity suite a trending, non-seasonal series distinct from `rw`.
+  trend <- cumsum(rnorm(150, mean = 0.3, sd = 1))
 
-  list(air = air, rw = rw, ar1 = ar1, inter = inter)
+  list(air = air, rw = rw, ar1 = ar1, inter = inter, trend = trend)
 }
 
 #' Extract a fixture-ready block from a `forecast` object: the R call that

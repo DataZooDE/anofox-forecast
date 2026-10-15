@@ -1,0 +1,158 @@
+# name: test/sql/ts_forecast_reference.test
+# description: Phase 17 plan 17-03 (FCST-09) R `forecast` parity SQL assertions
+# group: [sql]
+#
+# Non-json-gated so it runs on every native build (Phase 13 lesson, D-12) --
+# every function used here (_ts_forecast / ts_forecast_by) is json-free. This
+# file stays free of any json-extension require directive.
+#
+# Literals below are copied from fixture JSON via a one-line python3 snippet,
+# e.g. for validation/reference/fixtures/r_forecast/simulated_series.json:
+#   python3 -c "import json; d=json.load(open('validation/reference/fixtures/r_forecast/simulated_series.json')); print(d['series']['trend']['inputs']['values'])"
+
+require anofox_forecast
+
+#######################################
+# 17-03 Task 2: trend series (R forecast parity, D-08/D-12/D-15)
+#######################################
+
+statement ok
+CREATE TABLE trend150 AS SELECT [
+    0.7263229012, 0.7265715077, 3.165171386, 3.999932053, 3.975486731, 5.690245654,
+    5.604937161, 5.9718721, 7.506427038, 9.210870045, 10.66177102, 10.3291756,
+    10.37801024, 9.566091886, 10.15704549, 12.27434225, 13.35423611, 13.22994827,
+    13.83297754, 15.59281768, 16.29315875, 17.02128848, 17.41655408, 17.85317668,
+    17.54811469, 16.68426636, 18.90653427, 17.4372657, 17.76044708, 17.29783439,
+    16.94075567, 16.30522454, 18.33523399, 17.96735194, 18.18135258, 17.36935543,
+    16.2654032, 16.15090741, 13.82658949, 15.12768375, 15.58090884, 15.30310917,
+    15.67546883, 13.52686419, 12.95274417, 13.29127375, 13.62962613, 16.68732125,
+    18.38844388, 18.44352439, 20.33305425, 20.65485223, 21.39084981, 22.14656139,
+    21.90705025, 21.15891275, 21.42157686, 21.97135997, 21.30770532, 22.99540665,
+    24.89242777, 25.19435865, 25.32212427, 25.51201041, 25.10063934, 27.58080025,
+    26.74739475, 26.90752322, 27.07524641, 27.78819147, 27.25445047, 28.9977274,
+    29.7314086, 29.49745906, 30.13601958, 28.41658306, 28.69821458, 29.58424304,
+    30.18766265, 30.37508863, 31.10061403, 31.02875945, 31.99839069, 31.72478498,
+    33.39596281, 34.52619309, 35.7118881, 37.64729462, 37.49817014, 38.8712191,
+    41.10910885, 41.45880525, 42.28920346, 40.90923189, 41.13276121, 41.87997289,
+    42.96486026, 43.14425251, 44.37662083, 43.50759387, 44.39178697, 44.73380876,
+    46.4015718, 47.02569449, 49.19250123, 48.61156881, 48.77259132, 48.65623389,
+    50.34810624, 50.00500161, 48.34974396, 49.2769302, 51.91526374, 51.9398618,
+    51.87166618, 52.03166712, 53.45293222, 54.93421828, 55.8234064, 57.87797592,
+    58.38752228, 58.68779367, 59.81061601, 58.95311056, 58.52908593, 57.78408661,
+    58.51247882, 57.30839695, 59.06104665, 57.06468582, 56.6322522, 58.9188432,
+    56.96922223, 59.88348625, 61.22834721, 63.73215412, 63.08529828, 64.49210953,
+    65.85949585, 66.21296653, 68.22203825, 67.89799167, 68.9292759, 68.64605306,
+    69.18975897, 69.1482499, 70.81876751, 71.20477763, 70.08565613, 69.56646658
+]::DOUBLE[] AS v;
+
+# RandomWalkDrift: closed-form point within 1e-8 absolute; both 95% bounds
+# within 5e-3 of R rwf(trend, drift=TRUE)'s half-width at every step.
+query I
+SELECT max(abs(c - r)) <= 1e-8
+FROM trend150, (
+    SELECT
+        unnest((_ts_forecast(v, 12, 'RandomWalkDrift')).point) AS c,
+        unnest([
+            70.0284809647611, 70.4904953518514, 70.9525097389417, 71.414524126032,
+            71.8765385131223, 72.3385529002125, 72.8005672873028, 73.2625816743931,
+            73.7245960614834, 74.1866104485736, 74.6486248356639, 75.1106392227542
+        ]::DOUBLE[]) AS r
+    FROM trend150
+);
+----
+1
+
+query I
+SELECT max(abs(lo - r_lo) / ((r_up - r_lo) / 2.0)) <= 5e-3
+   AND max(abs(up - r_up) / ((r_up - r_lo) / 2.0)) <= 5e-3
+FROM trend150, (
+    SELECT
+        unnest((_ts_forecast(v, 12, 'RandomWalkDrift')).lower) AS lo,
+        unnest((_ts_forecast(v, 12, 'RandomWalkDrift')).upper) AS up,
+        unnest([
+            67.8930233437945, 67.4604523006884, 67.2292121517388, 67.1011111683089,
+            67.0382619444619, 67.0213063048537, 67.0387876189299, 67.0832693398442,
+            67.1496056205053, 67.2340641481157, 67.3338382214775, 67.4467558238393
+        ]::DOUBLE[]) AS r_lo,
+        unnest([
+            72.1639385857278, 73.5205384030145, 74.6758073261446, 75.727937083755,
+            76.7148150817826, 77.6557994955714, 78.5623469556757, 79.441894008942,
+            80.2995865024614, 81.1391567490315, 81.9634114498504, 82.7745226216691
+        ]::DOUBLE[]) AS r_up
+    FROM trend150
+);
+----
+1
+
+# SESOptimized: matches R ses(trend) within 1e-6 relative.
+query I
+SELECT max(abs(c - r) / abs(r)) <= 1e-6
+FROM trend150, (
+    SELECT
+        unnest((_ts_forecast(v, 12, 'SESOptimized')).point) AS c,
+        unnest([
+            69.5665185214605, 69.5665185214605, 69.5665185214605, 69.5665185214605,
+            69.5665185214605, 69.5665185214605, 69.5665185214605, 69.5665185214605,
+            69.5665185214605, 69.5665185214605, 69.5665185214605, 69.5665185214605
+        ]::DOUBLE[]) AS r
+    FROM trend150
+);
+----
+1
+
+# Theta: matches R thetaf(trend) within 1e-6 relative.
+query I
+SELECT max(abs(c - r) / abs(r)) <= 1e-6
+FROM trend150, (
+    SELECT
+        unnest((_ts_forecast(v, 12, 'Theta')).point) AS c,
+        unnest([
+            69.789338521525, 70.0121362337364, 70.2349339459479, 70.4577316581594,
+            70.6805293703709, 70.9033270825824, 71.1261247947939, 71.3489225070053,
+            71.5717202192168, 71.7945179314283, 72.0173156436398, 72.2401133558513
+        ]::DOUBLE[]) AS r
+    FROM trend150
+);
+----
+1
+
+# AutoARIMA (D-15): selects R auto.arima's order (0,1,0) with drift on this
+# non-seasonal trending series -- model_name shows no constant, but the
+# point forecast's drift is evidence R's selection matches (a drift-free
+# (0,1,0) forecast would be flat). point_tol below is
+# simulated_series.json tolerance.parity_checks trend/auto_arima/AutoARIMA
+# point_tol = 1e-6 (rel).
+query I
+SELECT (_ts_forecast(v, 12, 'AutoARIMA')).model = 'AutoARIMA(0,1,0)'
+FROM trend150;
+----
+1
+
+# Sanity: AutoARIMA's lower <= point <= upper holds at every step (the
+# interval is a known gap only on AirPassengers per D-16, not here).
+query I
+SELECT bool_and(lo <= pt AND pt <= up)
+FROM trend150, (
+    SELECT
+        unnest((_ts_forecast(v, 12, 'AutoARIMA')).point) AS pt,
+        unnest((_ts_forecast(v, 12, 'AutoARIMA')).lower) AS lo,
+        unnest((_ts_forecast(v, 12, 'AutoARIMA')).upper) AS up
+    FROM trend150
+);
+----
+1
+
+query I
+SELECT max(abs(c - r) / abs(r)) <= 1e-6
+FROM trend150, (
+    SELECT
+        unnest((_ts_forecast(v, 12, 'AutoARIMA')).point) AS c,
+        unnest([
+            70.0284809647612, 70.4904953518516, 70.952509738942, 71.4145241260324,
+            71.8765385131228, 72.3385529002131, 72.8005672873035, 73.2625816743939,
+            73.7245960614842, 74.1866104485746, 74.648624835665, 75.1106392227554
+        ]::DOUBLE[]) AS r
+    FROM trend150
+);
+----
+1
