@@ -160,13 +160,17 @@ closed-form points / `1e-6` relative otherwise, capped at the PRE-fix planned to
 **`'SES'` is a fixed alpha=0.3 model**, not R's `ses()` -- R `ses()` parity is asserted on
 `'SESOptimized'` / `ETS 'ANN'` only.
 
-**AutoARIMA (D-15, narrowed by D-16, user checkpoint 2026-10-15):** since anofox-forecast
-0.16.1 (upstream PR #223), AutoARIMA reproduces R `auto.arima`'s stepwise search and
-estimation. Order identity (parsed from `model_name`) is hard parity on every series: air
-`AutoARIMA(2,1,1)(0,1,0)[12]`, rw `AutoARIMA(0,1,0)`, trend `AutoARIMA(0,1,0)` (R's drift is
-evidenced by the point forecast, since a drift-free `(0,1,0)` would be flat). Point forecasts
-are hard parity everywhere too. The ONE allowed exception is the AirPassengers 95% interval
-(RC-05 below) -- rw and trend's AutoARIMA intervals are full parity. UPST-01's seeded
+**AutoARIMA (D-15; D-16's one allowed gap RESOLVED on anofox-forecast 0.16.2, Phase 18 plan
+18-05):** since anofox-forecast 0.16.1 (upstream PR #223), AutoARIMA reproduces R
+`auto.arima`'s stepwise search and estimation. Order identity (parsed from `model_name`) is
+hard parity on every series: air `AutoARIMA(2,1,1)(0,1,0)[12]`, rw `AutoARIMA(0,1,0)`, trend
+`AutoARIMA(0,1,0)` (R's drift is evidenced by the point forecast, since a drift-free `(0,1,0)`
+would be flat). Point forecasts are hard parity everywhere too. D-16 (user checkpoint
+2026-10-15) carved out exactly ONE exception, the AirPassengers 95% interval (RC-05 below);
+anofox-forecast 0.16.2 (upstream PR #230, shipping the SARIMA/ARIMA/AutoARIMA KalmanForecast
+prediction-interval fix from PR #229) resolved it -- interval_dev dropped from `1.846662e-1`
+(0.16.1) to `4.592775e-3` (0.16.2), inside the parity tier. The D-16 exception is retired:
+every AutoARIMA check (air, rw, trend) is now hard parity, point and interval. UPST-01's seeded
 selection-frequency simulation (`auto_arima_selection`: 30 random walks + 30 AR(0.7) series,
 seed 170015, `auto_arima_selection_matches_r` in `r_forecast_parity.rs`) measured
 `rw_share crate=0.7667 r=0.7667`, `ar07_d_share crate=0.2333 r=0.2333`,
@@ -195,7 +199,7 @@ failures.
 | air | ets_auto | AutoETS | rel 0.07 | 0.7 | known_gap | 0.0514 | 0.516 | RC-03 |
 | air | ets_MAM | ETS:MAM | rel 0.1 | 1.2 | known_gap | 0.0726 | 0.903 | RC-02 |
 | air | ets_AAA | ETS:AAA | rel 0.3 | 2.5 | known_gap | 0.206 | 1.87 | RC-02 |
-| air | auto_arima | AutoARIMA | rel 0.0006 | 0.3 | known_gap | 0.000398 | 0.185 | RC-05 |
+| air | auto_arima | AutoARIMA | rel 0.0006 | 0.007 | parity | 0.000398 | 0.00459 | - |
 | air | thetaf | Theta | rel 1e-05 | 0.0005 | parity | 3.27e-06 | 0.00018 | - |
 | rw | naive | Naive | abs 1e-08 | 0.0005 | parity | 0 | 0.00022 | - |
 | rw | rwf_drift | RandomWalkDrift | abs 1e-08 | 0.005 | parity | 6.6e-14 | 0.0023 | - |
@@ -204,7 +208,7 @@ failures.
 | rw | holt | ETS:AAN | rel 0.01 | 0.03 | known_gap | 0.0056 | 0.0196 | RC-02 |
 | rw | holt | Holt | rel 0.009 | 0.03 | known_gap | 0.0056 | 0.0196 | RC-01,RC-02 |
 | rw | ets_auto | AutoETS | rel 1e-05 | 0.0001 | parity | 2.92e-07 | 3.19e-05 | - |
-| rw | auto_arima | AutoARIMA | rel 1e-06 | 1e-06 | parity | 0 | 3.28e-08 | - |
+| rw | auto_arima | AutoARIMA | rel 1e-06 | 1e-06 | parity | 0 | 8.06e-10 | - |
 | rw | thetaf | Theta | rel 1e-06 | 1e-06 | parity | 3.76e-10 | 5.77e-08 | - |
 | inter | croston | CrostonClassic | abs 1e-08 | NA | parity | 2.2e-15 | NA | - |
 | inter | naive | Naive | abs 1e-08 | 0.0005 | parity | 0 | 0.00022 | - |
@@ -216,7 +220,7 @@ failures.
 | trend | holt | ETS:AAN | rel 0.002 | 0.01 | parity | 0.000549 | 0.00653 | - |
 | trend | holt | Holt | rel 0.002 | 0.01 | parity | 0.000549 | 0.00653 | RC-01 |
 | trend | ets_auto | AutoETS | rel 0.002 | 0.01 | parity | 0.000563 | 0.00669 | - |
-| trend | auto_arima | AutoARIMA | rel 1e-06 | 0.006 | parity | 2.23e-14 | 0.00336 | - |
+| trend | auto_arima | AutoARIMA | rel 1e-06 | 1e-06 | parity | 2.23e-14 | 8.06e-10 | - |
 | trend | thetaf | Theta | rel 1e-06 | 1e-06 | parity | 2.79e-10 | 1.86e-08 | - |
 
 
@@ -241,16 +245,18 @@ gap (D-12) -- it stops the plan instead.
 | RC-02 | air/holt/ETS:AAN; rw/holt/ETS:AAN; air/hw_additive/HoltWinters; air/hw_additive/ETS:AAA; air/ets_AAA/ETS:AAA; air/ets_MAM/ETS:MAM; air/hw_multiplicative/ETS:MAM | reference | At R's own fitted parameters the crate's ETS recursion, likelihood and bounds agree with R to floating-point precision (E5); the residual gap is R's own Nelder-Mead optimiser stopping at an inferior, in-bounds local optimum relative to the crate's own optimiser on the identical objective (E6). | known gap: the crate reaches a better-scoring, in-bounds optimum than R on these AirPassengers / rw fits; nothing to fix extension- or crate-side (R itself is the looser optimum). | - |
 | RC-03 | air/ets_auto/AutoETS | crate | AutoETS's model pool selects ETS(M,A,M) instead of R's ETS(M,Ad,M) because the crate's own optimiser, at R's selected (M,Ad,M) spec, reaches a worse log-likelihood than R under the same objective -- the crate's Nelder-Mead multi-start misses an optimum R's optimiser finds. | known gap: upstream optimiser issue, drafted. | draft: RC-03-autoets-madm-optimum.md |
 | RC-04 | inter/ses/SESOptimized | crate | SimpleExponentialSmoothing::auto() on the zero-inflated intermittent series converges to a different (alpha, l0) optimum than R's ses(): the crate's own optimiser, evaluated at R's fitted parameters, finds a strictly better log-likelihood than its own converged fit, so the crate's optimiser is missing an optimum its own objective scores higher. | known gap: upstream optimiser issue (likely the crate's fixed-l0-to-first-observation heuristic for SES on intermittent/zero-inflated series), drafted. | draft: RC-04-ses-optimized-intermittent-optimum.md |
-| RC-05 | air/auto_arima/AutoARIMA | crate | SARIMA prediction variance differs from R stats::arima KalmanForecast: at R's exact selected order (2,1,1)(0,1,0)[12], explicit ARIMA construction reproduces R's point forecast (rel dev 6.9e-3) but its 95% half-widths are systematically narrower than R's state-space prediction-error variance, especially at longer horizons. | known gap (user decision D-16, 2026-10-15): this is the ONE allowed AutoARIMA known gap; order identity and point forecasts remain hard parity on every series. Being fixed upstream in parallel (separate worktree/PR targeting anofox-forecast 0.16.2); the extension takes a follow-up bump to tighten this check once released. | draft: RC-05-autoarima-sarima-interval-variance.md |
+| RC-05 | air/auto_arima/AutoARIMA | crate | SARIMA prediction variance differs from R stats::arima KalmanForecast: at R's exact selected order (2,1,1)(0,1,0)[12], explicit ARIMA construction reproduces R's point forecast (rel dev 6.9e-3) but its 95% half-widths are systematically narrower than R's state-space prediction-error variance, especially at longer horizons (0.16.1). | resolved: fixed in anofox-forecast 0.16.2 (upstream PR #230, shipping the SARIMA/ARIMA/AutoARIMA KalmanForecast prediction-interval fix from PR #229). D-16's one-allowed-AutoARIMA-gap exception (user decision 2026-10-15) is retired now that the AirPassengers 95% interval is at hard parity (interval_dev=4.592775e-3, down from 1.846662e-1); order identity and point forecasts were already hard parity on every series. | fixed: anofox-forecast 0.16.2 (upstream PR #230/#229); draft retained (marked resolved) for historical record |
 
 
-Upstream issue drafts (RC-03, RC-04, RC-05) are listed above by RC ID as "draft, not yet
-filed" -- the files live under
+RC-03 and RC-04 are listed above by RC ID as "draft, not yet filed" -- the files live under
 `.planning/phases/17-upstream-consumption-diagnostics-parity/diagnosis/upstream-issues/`
 (not a user-facing path) and are left for the user to file against
 `https://github.com/sipemu/anofox-forecast`. Each draft's minimal Rust reproduction is
 mirrored verbatim by a matching `#[ignore]` `repro_*` test in `r_parity_diagnosis.rs`,
-compiled and run here against the exact anofox-forecast 0.16.1 tree.
+compiled and run here against the exact anofox-forecast 0.16.2 tree. RC-05's draft
+(`RC-05-autoarima-sarima-interval-variance.md`) is RESOLVED (Phase 18 plan 18-05, anofox-forecast
+0.16.2) and marked so at the top of the file; its repro (`repro_rc_05`) is inverted to assert the
+fix holds and is no longer `#[ignore]`d.
 
 
 ### Intentional deviations and tolerance overrides (D-03, D-10)

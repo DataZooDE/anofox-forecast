@@ -24,7 +24,7 @@ user-invocable: false
 
 # Anofox Forecast — Models & `ts_forecast_by` Cheat Sheet
 
-**Extension:** `anofox_forecast` (Rust crate `anofox-forecast` v0.16.1) | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
+**Extension:** `anofox_forecast` (Rust crate `anofox-forecast` v0.16.2) | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
 
 36 forecasting models exposed by SQL via three call surfaces (table macro, aggregate, scalar) + `ts_forecast_var_by` for multivariate VAR.
 
@@ -37,8 +37,9 @@ of the ten core models, `Naive`/`SeasonalNaive`/`RandomWalkDrift`/`CrostonClassi
 `HoltWinters`/`ETS 'AAA'`/`ETS 'MAM'` and `AutoETS` are known gaps on AirPassengers with an
 identified root cause (mostly R's own optimiser reaching a looser fit, not a defect — see
 `validation/reference/README.md`); `AutoARIMA` matches R `auto.arima`'s selected order and
-point forecast on every series since 0.16.1 (PR #223), with one known interval gap on
-AirPassengers only. `'SES'` (fixed `alpha=0.3`) is a different, non-optimised model from
+point forecast on every series since 0.16.1 (PR #223), and since 0.16.2 (PR #230/#229) its
+95% prediction intervals are full R parity too, including AirPassengers — the prior known
+interval gap there is resolved. `'SES'` (fixed `alpha=0.3`) is a different, non-optimised model from
 `SESOptimized` — R `ses()` parity is checked against the latter. Some paths return `NULL`
 bounds regardless (panel models; `MSTL`/`AutoMSTL` with regressors). See
 `docs/api/07-forecasting.md`'s "Prediction intervals, fitted values and input handling"

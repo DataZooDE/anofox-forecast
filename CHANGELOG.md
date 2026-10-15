@@ -48,7 +48,7 @@ before/after tables in "Breaking changes — details by phase" immediately below
 | forecasts | prediction intervals (`yhat_lower`/`yhat_upper`) across every forecast surface | fabricated `point ± z·SD(history)·√h` band | each model's own crate `predict_with_intervals` bounds; `NULL` where a model has no native interval support | Phase 10 |
 | forecasts | fitted values / residuals / MSE | SES(α=0.3) surrogate, independent of the actual fitted model | crate-native `fitted_values()`/`residuals()` per model | Phase 10 |
 | forecasts | `MFLES`/`AutoMFLES`/`Laplace` point forecasts | `anofox-forecast` 0.15.3 (issue-219 runaway: MFLES/AutoMFLES could diverge unboundedly) | `anofox-forecast` 0.15.10 (issue-219 bounded; `max_abs_diff=12279.87` on the repro case; 15 other ALLOWED-CHANGE lines are sub-`1e-9`-to-`0.108` floating-point drift across MFLES/AutoMFLES/Laplace); every other model byte-for-byte unchanged across a 125-entry snapshot | Phase 9 (DEP-02) |
-| forecasts | `ETS`/`Theta`/`AutoARIMA`/`Holt`/`HoltWinters`/`TBATS`/`MSTL`/`GARCH` fits, intervals, and point forecasts | `anofox-forecast` 0.15.10 formulas and search | `anofox-forecast` 0.16.1 — upstream fixes developed independently in Phase 11 (ADF/KPSS augmentation + MacKinnon p-values, bounded KPSS p-values, `auto.arima`-parity AutoARIMA order selection, corrected ETS likelihood/intervals, Theta alpha optimisation; PRs #222-#225) and consumed here in Phase 17 | Phase 17 (consumes Phase 11) |
+| forecasts | `ETS`/`Theta`/`AutoARIMA`/`Holt`/`HoltWinters`/`TBATS`/`MSTL`/`GARCH` fits, intervals, and point forecasts | `anofox-forecast` 0.15.10 formulas and search | `anofox-forecast` 0.16.2 — upstream fixes developed independently in Phase 11 (ADF/KPSS augmentation + MacKinnon p-values, bounded KPSS p-values, `auto.arima`-parity AutoARIMA order selection, corrected ETS likelihood/intervals, Theta alpha optimisation; PRs #222-#225) and consumed in Phase 17 (0.16.1); AutoARIMA/SARIMA 95% prediction intervals now follow R `stats::arima`'s `KalmanForecast` state-space variance (PR #230/#229) consumed in Phase 18 plan 18-05 (0.16.2) | Phase 17 (consumes Phase 11), Phase 18 plan 18-05 |
 
 #### SQL signature and semantics changes
 
@@ -715,25 +715,42 @@ before/after tables in "Breaking changes — details by phase" immediately below
   intermittent-demand series (3) and a new seeded random-walk-with-drift series (9), covering
   all ten FCST-09 models (`Naive`, `SeasonalNaive`, `RandomWalkDrift`, `SESOptimized`/`ETS
   'ANN'`, `Holt`/`ETS 'AAN'`, `HoltWinters`/`ETS 'AAA'`/`ETS 'MAM'`, `AutoETS`, `AutoARIMA`,
-  `Theta`, `CrostonClassic`). 24 of 36 checks are `parity`; the 12 `known_gap` checks each
-  cite an identified root cause (D-12) — 1 extension cause already fixed (`RC-01`, the
+  `Theta`, `CrostonClassic`). At the time of this suite's original authorship (Phase 17 plan
+  17-03, anofox-forecast 0.16.1), 24 of 36 checks were `parity`; the 12 `known_gap` checks each
+  cited an identified root cause (D-12) — 1 extension cause already fixed (`RC-01`, the
   `'Holt'` remap, see Breaking changes), 1 upstream `AutoETS` optimiser gap (`RC-03`), 1
   upstream `SESOptimized` optimiser gap on the intermittent series (`RC-04`), 1 upstream
   `AutoARIMA` interval-variance gap on AirPassengers only (`RC-05`, D-16), and 9 checks where
   R's own optimiser reaches a looser, in-bounds fit than the crate's (`RC-02`, not a defect).
-  **AutoARIMA's R `auto.arima` parity (D-15/D-16):** since anofox-forecast 0.16.1 (PR #223),
-  AutoARIMA's selected order and point forecast are hard parity on every series (air
-  `AutoARIMA(2,1,1)(0,1,0)[12]`, rw/trend `AutoARIMA(0,1,0)`); the AirPassengers 95% interval
-  is the one allowed exception. A seeded selection-frequency simulation (UPST-01, 30 random
-  walks + 30 AR(0.7) series) measured 0 share deviation and 60/60 exact `(p,d,q)` agreement
-  with R `auto.arima`, closing UPST-01. **Monte Carlo interval coverage (D-10):** a seeded
-  2,000-replication local-level simulation measured `ETS(A,N,N)`/`SESOptimized` 95% coverage
-  within [0.935, 0.957] per horizon and 80% coverage within [0.787, 0.809] per horizon — both
-  within ±3pp of nominal. See `validation/reference/README.md`'s "r_forecast parity
-  tolerances" and "R-parity gap root causes" sections for the full tables; upstream drafts
-  for `RC-03`/`RC-04`/`RC-05` are under
+  **RC-05 is now RESOLVED** (Phase 18 plan 18-05, anofox-forecast 0.16.2, upstream PR
+  #230/#229): the suite is currently 25 of 36 `parity` / 11 `known_gap` — see the Phase 18
+  plan 18-05 entry below. **AutoARIMA's R `auto.arima` parity (D-15/D-16):** since
+  anofox-forecast 0.16.1 (PR #223), AutoARIMA's selected order and point forecast are hard
+  parity on every series (air `AutoARIMA(2,1,1)(0,1,0)[12]`, rw/trend `AutoARIMA(0,1,0)`); the
+  AirPassengers 95% interval was the one allowed exception under D-16, now resolved (see
+  below). A seeded selection-frequency simulation (UPST-01, 30 random walks + 30 AR(0.7)
+  series) measured 0 share deviation and 60/60 exact `(p,d,q)` agreement with R `auto.arima`,
+  closing UPST-01. **Monte Carlo interval coverage (D-10):** a seeded 2,000-replication
+  local-level simulation measured `ETS(A,N,N)`/`SESOptimized` 95% coverage within [0.935,
+  0.957] per horizon and 80% coverage within [0.787, 0.809] per horizon — both within ±3pp of
+  nominal. See `validation/reference/README.md`'s "r_forecast parity tolerances" and
+  "R-parity gap root causes" sections for the full tables; upstream drafts for `RC-03`/`RC-04`
+  (RC-05 resolved, see below) are under
   `.planning/phases/17-upstream-consumption-diagnostics-parity/diagnosis/upstream-issues/`
   (not filed — left for the user).
+- **RC-05 resolved: AutoARIMA's AirPassengers 95% interval is now hard R parity (Phase 18
+  plan 18-05, anofox-forecast 0.16.2).** `anofox-forecast` bumps `0.16.1` → `0.16.2` (no
+  `[patch]`/git/path override), shipping the SARIMA/ARIMA/AutoARIMA `KalmanForecast`
+  prediction-interval fix (upstream PR #230, shipping PR #229). D-16's one allowed AutoARIMA
+  known gap (`air/auto_arima/AutoARIMA`'s 95% interval, `RC-05`) is retired: the measured
+  interval deviation drops from `1.846662e-1` (0.16.1) to `4.592775e-3` (0.16.2), inside the
+  parity tier (`interval_tol=7e-3`). `rw`/`trend`'s already-parity AutoARIMA intervals
+  re-measure tighter too (`rw`: `3.276619e-8` → `8.062277e-10`; `trend`: `3.361326e-3` →
+  `8.064310e-10`, tolerance tightened `6e-3` → `1e-6`) — never loosened. Every other R-parity
+  check is unaffected (point/interval deviations unchanged). The FCST-09 suite is now 25 of 36
+  `parity` / 11 `known_gap`. `repro_rc_05` (`r_parity_diagnosis.rs`) is inverted (asserts the
+  fix holds, worst-horizon ratio `>= 0.95`, measured `0.9951`) rather than deleted, as a
+  standing regression guard, and is no longer `#[ignore]`d.
 
 ### Fixed
 

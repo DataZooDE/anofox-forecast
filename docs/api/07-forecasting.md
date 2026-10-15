@@ -320,7 +320,7 @@ seeded simulated series (a driftless random walk, an intermittent-demand series,
 random walk with drift) — 36 checks total, asserted by
 `crates/anofox-fcst-core/tests/r_forecast_parity.rs` against
 `validation/reference/fixtures/r_forecast/{air_passengers,simulated_series}.json`
-`tolerance.parity_checks`. 24 of 36 checks are in parity; the other 12 are documented known
+`tolerance.parity_checks`. 25 of 36 checks are in parity; the other 11 are documented known
 gaps, each with an identified root cause (D-12) — see `validation/reference/README.md`'s
 "r_forecast parity tolerances" and "R-parity gap root causes" sections for the full table
 and per-check numbers.
@@ -333,7 +333,7 @@ and per-check numbers.
 | `Holt` / `ETS 'AAN'` | Known gap, but tightened: `'Holt'` now dispatches to the crate's `ETS(A,A,N)`, R `holt()`'s own definition (D-12/D-13 fix) | `RC-01` (the fix) plus `RC-02` (the residual — see next row); parity on `trend` after the fix |
 | `HoltWinters` / `ETS 'AAA'` / `ETS 'MAM'` | Known gap on AirPassengers | `RC-02`: R's own optimiser reaches a looser, in-bounds fit than the crate's on these specs — not a defect |
 | `AutoETS` | Parity on `rw`/`trend` (selects R's spec); known gap on AirPassengers | `RC-03`: the crate's optimiser scores R's selected `ETS(M,Ad,M)` worse than R does, so `AutoETS` picks `ETS(M,A,M)` instead — upstream draft filed |
-| `AutoARIMA` | Parity (order + point) on every series; the AirPassengers 95% interval is the one allowed exception (D-15/D-16, see below) | `RC-05` on that one check — upstream draft filed |
+| `AutoARIMA` | Parity (order + point + 95% interval) on every series, including AirPassengers (D-15; D-16's prior exception resolved, see below) | — |
 | `Theta` | Parity (point within 1e-5, 95% bounds within 5e-4 on AirPassengers; 1e-6 on rw/trend) | — |
 
 Interval-formula changes 0.16.0 made for models not covered by the R-parity suite above (no
@@ -351,18 +351,20 @@ and PR #211/pre-0.16 history for GARCH):
 non-optimised baseline. R `ses()` parity is checked against `'SESOptimized'` / `ETS 'ANN'`
 above, not `'SES'`.
 
-**`AutoARIMA` and R `auto.arima` (D-15, since anofox-forecast 0.16.1, PR #223).** `AutoARIMA`
-now ports R's `stats::arima` estimation path and the Hyndman-Khandakar stepwise search with R
-defaults, so it selects the SAME order R `auto.arima` selects — `AutoARIMA(2,1,1)(0,1,0)[12]`
-on AirPassengers, `AutoARIMA(0,1,0)` on both seeded non-seasonal series (R's drift on the
-random-walk-with-drift series is evidenced by the point forecast — a drift-free `(0,1,0)`
-would be flat). A seeded selection-frequency simulation (30 random walks + 30 AR(0.7) series)
-measured 0 share deviation from R and 60/60 exact `(p,d,q)` agreement. Selected models
-differ from pre-0.16.1 releases of this extension (see Breaking changes in the CHANGELOG).
-The one interval exception: on AirPassengers, `AutoARIMA`'s 95% interval is up to ~18% off
-R's (the point forecast and order are still exact) — the crate's seasonal-ARIMA
-prediction-variance computation differs from R `stats::arima`'s `KalmanForecast` at longer
-horizons; tracked as `RC-05`, with an upstream fix in progress for a follow-up release.
+**`AutoARIMA` and R `auto.arima` (D-15, since anofox-forecast 0.16.1, PR #223; interval parity
+since 0.16.2, PR #230/#229).** `AutoARIMA` now ports R's `stats::arima` estimation path and the
+Hyndman-Khandakar stepwise search with R defaults, so it selects the SAME order R `auto.arima`
+selects — `AutoARIMA(2,1,1)(0,1,0)[12]` on AirPassengers, `AutoARIMA(0,1,0)` on both seeded
+non-seasonal series (R's drift on the random-walk-with-drift series is evidenced by the point
+forecast — a drift-free `(0,1,0)` would be flat). A seeded selection-frequency simulation (30
+random walks + 30 AR(0.7) series) measured 0 share deviation from R and 60/60 exact `(p,d,q)`
+agreement. Selected models differ from pre-0.16.1 releases of this extension (see Breaking
+changes in the CHANGELOG). The one former interval exception is resolved: on AirPassengers,
+`AutoARIMA`'s 95% interval used to be up to ~18% off R's on 0.16.1 (the point forecast and
+order were always exact) — the crate's seasonal-ARIMA prediction-variance computation differed
+from R `stats::arima`'s `KalmanForecast` at longer horizons, tracked as `RC-05`. anofox-forecast
+0.16.2 fixed it upstream; the interval now re-measures at `4.592775e-3` relative deviation
+(down from `0.1846662`), inside the parity tier on every series.
 
 ### Fitted values, residuals, and MSE
 
