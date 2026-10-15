@@ -268,13 +268,15 @@ FROM stats_table;
 true
 
 # Verify all fields are returned by ts_data_quality_summary
+# (Phase 18, 18-02, WR-05/D-10: added n_unassessed as the final column)
 query I
 SELECT
     n_total IS NOT NULL AND
     n_good IS NOT NULL AND
     n_fair IS NOT NULL AND
     n_poor IS NOT NULL AND
-    avg_score IS NOT NULL
+    avg_score IS NOT NULL AND
+    n_unassessed IS NOT NULL
 FROM ts_data_quality_summary('test_series', id, date, value, 5);
 ----
 true

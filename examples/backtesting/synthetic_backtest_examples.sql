@@ -183,23 +183,25 @@ JOIN reg_input_numbered ri ON ols.fold_id = ri.fold_id AND ols.row_in_fold = ri.
 WHERE ri.split = 'test';
 
 -- Calculate metrics using *_by table macros
+-- (Phase 18, 18-02: ported from the removed extra-group-argument form --
+-- source is a subquery, group columns are implicit GROUP BY ALL columns)
 WITH mae_results AS (
-    SELECT * FROM ts_mae_by('ols_predictions_p2', fold_id, date, actual, forecast)
+    SELECT * FROM ts_mae_by((SELECT fold_id, date, actual, forecast FROM ols_predictions_p2), 'date', 'actual', 'forecast')
 ),
 rmse_results AS (
-    SELECT * FROM ts_rmse_by('ols_predictions_p2', fold_id, date, actual, forecast)
+    SELECT * FROM ts_rmse_by((SELECT fold_id, date, actual, forecast FROM ols_predictions_p2), 'date', 'actual', 'forecast')
 ),
 bias_results AS (
-    SELECT * FROM ts_bias_by('ols_predictions_p2', fold_id, date, actual, forecast)
+    SELECT * FROM ts_bias_by((SELECT fold_id, date, actual, forecast FROM ols_predictions_p2), 'date', 'actual', 'forecast')
 )
 SELECT
-    m.id AS fold_id,
+    m.fold_id AS fold_id,
     ROUND(m.mae, 2) AS mae,
     ROUND(r.rmse, 2) AS rmse,
     ROUND(b.bias, 2) AS bias
 FROM mae_results m
-JOIN rmse_results r ON m.id = r.id
-JOIN bias_results b ON m.id = b.id
+JOIN rmse_results r ON m.fold_id = r.fold_id
+JOIN bias_results b ON m.fold_id = b.fold_id
 ORDER BY fold_id;
 
 -- ============================================================================
@@ -393,23 +395,25 @@ JOIN reg_input_numbered ri ON ols.fold_id = ri.fold_id AND ols.row_in_fold = ri.
 WHERE ri.split = 'test';
 
 -- Calculate metrics using *_by table macros
+-- (Phase 18, 18-02: ported from the removed extra-group-argument form --
+-- source is a subquery, group columns are implicit GROUP BY ALL columns)
 WITH mae_results AS (
-    SELECT * FROM ts_mae_by('ols_predictions_p5', fold_id, date, actual, forecast)
+    SELECT * FROM ts_mae_by((SELECT fold_id, date, actual, forecast FROM ols_predictions_p5), 'date', 'actual', 'forecast')
 ),
 rmse_results AS (
-    SELECT * FROM ts_rmse_by('ols_predictions_p5', fold_id, date, actual, forecast)
+    SELECT * FROM ts_rmse_by((SELECT fold_id, date, actual, forecast FROM ols_predictions_p5), 'date', 'actual', 'forecast')
 ),
 bias_results AS (
-    SELECT * FROM ts_bias_by('ols_predictions_p5', fold_id, date, actual, forecast)
+    SELECT * FROM ts_bias_by((SELECT fold_id, date, actual, forecast FROM ols_predictions_p5), 'date', 'actual', 'forecast')
 )
 SELECT
-    m.id AS fold_id,
+    m.fold_id AS fold_id,
     ROUND(m.mae, 2) AS mae,
     ROUND(r.rmse, 2) AS rmse,
     ROUND(b.bias, 2) AS bias
 FROM mae_results m
-JOIN rmse_results r ON m.id = r.id
-JOIN bias_results b ON m.id = b.id
+JOIN rmse_results r ON m.fold_id = r.fold_id
+JOIN bias_results b ON m.fold_id = b.fold_id
 ORDER BY fold_id;
 
 -- ============================================================================

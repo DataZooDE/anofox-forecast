@@ -189,10 +189,21 @@ SELECT
     SUM(CASE WHEN (_quality).overall_score >= 0.8 THEN 1 ELSE 0 END) AS n_good,
     SUM(CASE WHEN (_quality).overall_score >= 0.5 AND (_quality).overall_score < 0.8 THEN 1 ELSE 0 END) AS n_fair,
     SUM(CASE WHEN (_quality).overall_score < 0.5 THEN 1 ELSE 0 END) AS n_poor,
-    AVG((_quality).overall_score) AS avg_score
+    AVG((_quality).overall_score) AS avg_score,
+    -- WR-05 (Phase 18, D-10): a group whose dates are all NULL has an empty
+    -- FILTERed LIST, so _ts_data_quality returns a NULL struct for it; every
+    -- CASE WHEN above takes its ELSE 0 branch (NULL >= x is NULL, not TRUE) and
+    -- AVG() skips it, silently excluding the group from every bucket while
+    -- COUNT(*) still counts it toward n_total. n_unassessed makes that group
+    -- visible instead of silently dropped, restoring the invariant
+    -- n_good + n_fair + n_poor + n_unassessed = n_total. avg_score remains the
+    -- mean over assessed (non-NULL-struct) groups only.
+    SUM(CASE WHEN (_quality).overall_score IS NULL THEN 1 ELSE 0 END) AS n_unassessed
 FROM quality_data
 )",
-    "Summarizes ts_data_quality output across all groups into aggregate quality metrics (auto-detected frequency per series).",
+    "Summarizes ts_data_quality output across all groups into aggregate quality metrics (auto-detected frequency per series). "
+    "n_unassessed counts groups whose quality struct is NULL (e.g. all dates NULL after filtering), so that "
+    "n_good + n_fair + n_poor + n_unassessed = n_total; avg_score is the mean overall_score over assessed groups only.",
     "SELECT * FROM ts_data_quality_summary('sales', product_id, date, qty, 10)",
     "data-quality"},
 
@@ -2400,8 +2411,11 @@ FROM timing_data
 R"(
 SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'mae')
 )",
-    "Computes Mean Absolute Error between actual and forecast columns per group.",
-    "SELECT * FROM ts_mae_by('results', product_id, date, actual, forecast)",
+    "Computes Mean Absolute Error between actual and forecast columns per group. "
+    "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
+    "(the first native-function parameter is TABLE-typed); date_col/actual_col/forecast_col "
+    "are quoted column-name string literals.",
+    "SELECT * FROM ts_mae_by((SELECT product_id, date, actual, forecast FROM results), 'date', 'actual', 'forecast')",
     "metrics"},
 
     // ts_mse_by: Compute Mean Squared Error grouped by selected columns
@@ -2410,8 +2424,11 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'ma
 R"(
 SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'mse')
 )",
-    "Computes Mean Squared Error between actual and forecast columns per group.",
-    "SELECT * FROM ts_mse_by('results', product_id, date, actual, forecast)",
+    "Computes Mean Squared Error between actual and forecast columns per group. "
+    "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
+    "(the first native-function parameter is TABLE-typed); date_col/actual_col/forecast_col "
+    "are quoted column-name string literals.",
+    "SELECT * FROM ts_mse_by((SELECT product_id, date, actual, forecast FROM results), 'date', 'actual', 'forecast')",
     "metrics"},
 
     // ts_rmse_by: Compute Root Mean Squared Error grouped by selected columns
@@ -2420,8 +2437,11 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'ms
 R"(
 SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'rmse')
 )",
-    "Computes Root Mean Squared Error between actual and forecast columns per group.",
-    "SELECT * FROM ts_rmse_by('results', product_id, date, actual, forecast)",
+    "Computes Root Mean Squared Error between actual and forecast columns per group. "
+    "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
+    "(the first native-function parameter is TABLE-typed); date_col/actual_col/forecast_col "
+    "are quoted column-name string literals.",
+    "SELECT * FROM ts_rmse_by((SELECT product_id, date, actual, forecast FROM results), 'date', 'actual', 'forecast')",
     "metrics"},
 
     // ts_mape_by: Compute Mean Absolute Percentage Error grouped by selected columns
@@ -2430,8 +2450,11 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'rm
 R"(
 SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'mape')
 )",
-    "Computes Mean Absolute Percentage Error between actual and forecast columns per group.",
-    "SELECT * FROM ts_mape_by('results', product_id, date, actual, forecast)",
+    "Computes Mean Absolute Percentage Error between actual and forecast columns per group. "
+    "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
+    "(the first native-function parameter is TABLE-typed); date_col/actual_col/forecast_col "
+    "are quoted column-name string literals.",
+    "SELECT * FROM ts_mape_by((SELECT product_id, date, actual, forecast FROM results), 'date', 'actual', 'forecast')",
     "metrics"},
 
     // ts_smape_by: Compute Symmetric Mean Absolute Percentage Error grouped by selected columns
@@ -2440,8 +2463,11 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'ma
 R"(
 SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'smape')
 )",
-    "Computes Symmetric Mean Absolute Percentage Error between actual and forecast columns per group.",
-    "SELECT * FROM ts_smape_by('results', product_id, date, actual, forecast)",
+    "Computes Symmetric Mean Absolute Percentage Error between actual and forecast columns per group. "
+    "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
+    "(the first native-function parameter is TABLE-typed); date_col/actual_col/forecast_col "
+    "are quoted column-name string literals.",
+    "SELECT * FROM ts_smape_by((SELECT product_id, date, actual, forecast FROM results), 'date', 'actual', 'forecast')",
     "metrics"},
 
     // ts_r2_by: Compute R-squared (coefficient of determination) grouped by selected columns
@@ -2450,8 +2476,11 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'sm
 R"(
 SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'r2')
 )",
-    "Computes R-squared (coefficient of determination) between actual and forecast columns per group.",
-    "SELECT * FROM ts_r2_by('results', product_id, date, actual, forecast)",
+    "Computes R-squared (coefficient of determination) between actual and forecast columns per group. "
+    "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
+    "(the first native-function parameter is TABLE-typed); date_col/actual_col/forecast_col "
+    "are quoted column-name string literals.",
+    "SELECT * FROM ts_r2_by((SELECT product_id, date, actual, forecast FROM results), 'date', 'actual', 'forecast')",
     "metrics"},
 
     // ts_bias_by: Compute bias (mean error) grouped by selected columns
@@ -2460,8 +2489,11 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'r2
 R"(
 SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'bias')
 )",
-    "Computes mean forecast bias between actual and forecast columns per group.",
-    "SELECT * FROM ts_bias_by('results', product_id, date, actual, forecast)",
+    "Computes mean forecast bias between actual and forecast columns per group. "
+    "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
+    "(the first native-function parameter is TABLE-typed); date_col/actual_col/forecast_col "
+    "are quoted column-name string literals.",
+    "SELECT * FROM ts_bias_by((SELECT product_id, date, actual, forecast FROM results), 'date', 'actual', 'forecast')",
     "metrics"},
 
     // ts_mase_by: Compute Hyndman-Koehler Mean Absolute Scaled Error with GROUP BY ALL (D-08)
@@ -2473,8 +2505,11 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'bi
 R"(
 SELECT * FROM _ts_mase_native(source, date_col, actual_col, forecast_col, seasonal_period)
 )",
-    "Computes Hyndman-Koehler Mean Absolute Scaled Error (MASE) per group: the out-of-sample forecast MAE scaled by the in-sample seasonal-naive MAE at lag seasonal_period (default 1). Source rows dated before each group's first forecast (forecast NULL) supply the in-sample scale. The old baseline-column form was removed in v0.10.0 -- use ts_rmae_by for a relative-MAE comparison.",
-    "SELECT * FROM ts_mase_by('results', product_id, date, actual, forecast, seasonal_period := 4)",
+    "Computes Hyndman-Koehler Mean Absolute Scaled Error (MASE) per group: the out-of-sample forecast MAE scaled by the in-sample seasonal-naive MAE at lag seasonal_period (default 1). Source rows dated before each group's first forecast (forecast NULL) supply the in-sample scale. The old baseline-column form was removed in v0.10.0 -- use ts_rmae_by for a relative-MAE comparison. "
+    "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
+    "(the first native-function parameter is TABLE-typed); date_col/actual_col/forecast_col "
+    "are quoted column-name string literals.",
+    "SELECT * FROM ts_mase_by((SELECT product_id, date, actual, forecast FROM results), 'date', 'actual', 'forecast', seasonal_period := 4)",
     "metrics"},
 
     // ts_rmae_by: Compute Relative Mean Absolute Error with GROUP BY ALL
@@ -2483,8 +2518,11 @@ SELECT * FROM _ts_mase_native(source, date_col, actual_col, forecast_col, season
 R"(
 SELECT * FROM _ts_rmae_native(source, date_col, actual_col, pred1_col, pred2_col)
 )",
-    "Computes Relative MAE (MAE ratio between two models) per group.",
-    "SELECT * FROM ts_rmae_by('results', product_id, date, actual, pred1, pred2)",
+    "Computes Relative MAE (MAE ratio between two models) per group. "
+    "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
+    "(the first native-function parameter is TABLE-typed); date_col/actual_col/pred1_col/pred2_col "
+    "are quoted column-name string literals.",
+    "SELECT * FROM ts_rmae_by((SELECT product_id, date, actual, pred1, pred2 FROM results), 'date', 'actual', 'pred1', 'pred2')",
     "metrics"},
 
     // ts_coverage_by: Compute prediction interval coverage with GROUP BY ALL
@@ -2493,8 +2531,11 @@ SELECT * FROM _ts_rmae_native(source, date_col, actual_col, pred1_col, pred2_col
 R"(
 SELECT * FROM _ts_coverage_native(source, date_col, actual_col, lower_col, upper_col)
 )",
-    "Computes prediction interval coverage rate per group.",
-    "SELECT * FROM ts_coverage_by('results', product_id, date, actual, lower, upper)",
+    "Computes prediction interval coverage rate per group. "
+    "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
+    "(the first native-function parameter is TABLE-typed); date_col/actual_col/lower_col/upper_col "
+    "are quoted column-name string literals.",
+    "SELECT * FROM ts_coverage_by((SELECT product_id, date, actual, lower, upper FROM results), 'date', 'actual', 'lower', 'upper')",
     "metrics"},
 
     // ts_quantile_loss_by: Compute quantile loss with GROUP BY ALL
@@ -2503,8 +2544,11 @@ SELECT * FROM _ts_coverage_native(source, date_col, actual_col, lower_col, upper
 R"(
 SELECT * FROM _ts_quantile_loss_native(source, date_col, actual_col, forecast_col, quantile)
 )",
-    "Computes quantile (pinball) loss at a specified quantile level per group.",
-    "SELECT * FROM ts_quantile_loss_by('results', product_id, date, actual, forecast, 0.9)",
+    "Computes quantile (pinball) loss at a specified quantile level per group. "
+    "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
+    "(the first native-function parameter is TABLE-typed); date_col/actual_col/forecast_col "
+    "are quoted column-name string literals.",
+    "SELECT * FROM ts_quantile_loss_by((SELECT product_id, date, actual, forecast FROM results), 'date', 'actual', 'forecast', 0.9)",
     "metrics"},
 
     // ================================================================================
