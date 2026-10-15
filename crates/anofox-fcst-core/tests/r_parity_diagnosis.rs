@@ -296,6 +296,7 @@ fn r_upper95(block: &Value) -> Vec<f64> {
 
 /// E2: forecast() wrapper output must be bit-identical to the same model
 /// built directly from anofox-forecast the way the wrapper builds it.
+#[allow(clippy::too_many_arguments)]
 fn assert_wrapper_equals_direct(
     model: ModelType,
     ets_spec: Option<&str>,
@@ -382,6 +383,7 @@ fn direct_ets(values: &[f64], spec: ETSSpec, period: usize) -> (Vec<f64>, Vec<f6
     (f.primary().to_vec(), lower, upper)
 }
 
+#[allow(clippy::type_complexity)]
 fn direct_auto_ets(
     values: &[f64],
     period: usize,
@@ -897,6 +899,7 @@ fn diagnosis_report() {
 // Test 3: autoarima_report (D-15)
 // ══════════════════════════════════════════════════════════════════════════
 
+#[allow(clippy::type_complexity)]
 fn parse_autoarima_order(
     model_name: &str,
 ) -> Option<(usize, usize, usize, Option<(usize, usize, usize, usize)>)> {
@@ -1169,5 +1172,177 @@ fn autoarima_air_e3_timestamp_probe() {
     println!(
         "E3 timestamp sensitivity: interval_dev synthetic_hourly={:.6e} real_monthly={:.6e} same_bits={}",
         dev_synth, dev_real, lo_synth == lo_real && up_synth == up_real
+    );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Upstream issue reproductions (RC-03, RC-04, RC-05). Each body below is
+// mirrored verbatim (modulo the fn signature) in its matching draft under
+// diagnosis/upstream-issues/ — these are the exact minimal reproductions,
+// compiled and run here against anofox-forecast 0.16.1. #[ignore]d because
+// they assert the UPSTREAM discrepancy and are expected to start failing
+// once the crate fixes it (a signal to tighten the corresponding tolerance).
+// ══════════════════════════════════════════════════════════════════════════
+
+#[test]
+#[ignore = "upstream repro RC-03"]
+fn repro_rc_03() {
+    use anofox_forecast::core::TimeSeries;
+    use anofox_forecast::models::exponential::{ETSSpec, ETS as ETSModel};
+    use anofox_forecast::prelude::Forecaster;
+    use chrono::{Months, TimeZone, Utc};
+
+    let air: Vec<f64> = vec![
+        112.0, 118.0, 132.0, 129.0, 121.0, 135.0, 148.0, 148.0, 136.0, 119.0, 104.0, 118.0, 115.0,
+        126.0, 141.0, 135.0, 125.0, 149.0, 170.0, 170.0, 158.0, 133.0, 114.0, 140.0, 145.0, 150.0,
+        178.0, 163.0, 172.0, 178.0, 199.0, 199.0, 184.0, 162.0, 146.0, 166.0, 171.0, 180.0, 193.0,
+        181.0, 183.0, 218.0, 230.0, 242.0, 209.0, 191.0, 172.0, 194.0, 196.0, 196.0, 236.0, 235.0,
+        229.0, 243.0, 264.0, 272.0, 237.0, 211.0, 180.0, 201.0, 204.0, 188.0, 235.0, 227.0, 234.0,
+        264.0, 302.0, 293.0, 259.0, 229.0, 203.0, 229.0, 242.0, 233.0, 267.0, 269.0, 270.0, 315.0,
+        364.0, 347.0, 312.0, 274.0, 237.0, 278.0, 284.0, 277.0, 317.0, 313.0, 318.0, 374.0, 413.0,
+        405.0, 355.0, 306.0, 271.0, 306.0, 315.0, 301.0, 356.0, 348.0, 355.0, 422.0, 465.0, 467.0,
+        404.0, 347.0, 305.0, 336.0, 340.0, 318.0, 362.0, 348.0, 363.0, 435.0, 491.0, 505.0, 404.0,
+        359.0, 310.0, 337.0, 360.0, 342.0, 406.0, 396.0, 420.0, 472.0, 548.0, 559.0, 463.0, 407.0,
+        362.0, 405.0, 417.0, 391.0, 419.0, 461.0, 472.0, 535.0, 622.0, 606.0, 508.0, 461.0, 390.0,
+        432.0,
+    ];
+    let base = Utc.with_ymd_and_hms(1949, 1, 1, 0, 0, 0).unwrap();
+    let timestamps: Vec<_> = (0..air.len())
+        .map(|i| base + Months::new(i as u32))
+        .collect();
+    let ts = TimeSeries::univariate(timestamps, air).expect("valid timeseries");
+
+    // R's ets(AirPassengers) selects ETS(M,Ad,M) at loglik -679.583216 (R 4.6.1,
+    // forecast 9.0.2). The crate's own optimiser, fitting the same spec on the
+    // same data, converges to a strictly worse log-likelihood.
+    let mut model = ETSModel::new(ETSSpec::madm(), 12);
+    model.fit(&ts).expect("ETS(M,Ad,M) fit");
+    let crate_loglik = model.log_likelihood().expect("log_likelihood available");
+    let r_loglik = -679.583216_f64;
+
+    println!("RC-03 repro: crate_loglik={crate_loglik:.6} r_loglik={r_loglik:.6}");
+    assert!(
+        crate_loglik < r_loglik - 1e-6,
+        "expected the crate's ETS(M,Ad,M) optimiser to score worse than R's: crate={crate_loglik} r={r_loglik}"
+    );
+}
+
+#[test]
+#[ignore = "upstream repro RC-04"]
+fn repro_rc_04() {
+    use anofox_forecast::core::TimeSeries;
+    use anofox_forecast::models::exponential::{ETSSpec, ETS as ETSModel};
+    use anofox_forecast::prelude::Forecaster;
+    use chrono::{Duration, TimeZone, Utc};
+
+    let inter: Vec<f64> = vec![
+        4.0, 3.0, 0.0, 4.0, 0.0, 4.0, 0.0, 0.0, 0.0, 6.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 4.0, 0.0, 0.0, 0.0, 4.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        6.0, 0.0, 0.0, 0.0, 2.0, 0.0, 3.0, 0.0, 5.0, 0.0, 0.0, 3.0, 0.0, 0.0, 5.0, 4.0, 0.0, 3.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.0, 2.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 8.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0,
+        5.0, 0.0, 4.0, 0.0, 7.0, 3.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 4.0, 4.0, 0.0, 3.0, 4.0, 7.0, 0.0,
+    ];
+    let base = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+    let timestamps: Vec<_> = (0..inter.len())
+        .map(|i| base + Duration::hours(i as i64))
+        .collect();
+    let ts = TimeSeries::univariate(timestamps, inter).expect("valid timeseries");
+
+    // R's ses() on this intermittent series converges to alpha=0.000100000835353129,
+    // l0=1.24173768106333 (R 4.6.1, forecast 9.0.2). Evaluating the crate's own
+    // ETS(A,N,N) recursion AT R's parameters scores strictly better than the
+    // crate's own converged optimum, so the crate's optimiser is missing a
+    // higher-likelihood point its own objective can see.
+    let mut own_fit = ETSModel::new(ETSSpec::ann(), 1);
+    own_fit.fit(&ts).expect("own ETS(A,N,N) fit");
+    let own_loglik = own_fit.log_likelihood().expect("log_likelihood available");
+
+    let mut at_r_params = ETSModel::with_params_and_states(
+        ETSSpec::ann(),
+        1,
+        0.000100000835353129,
+        None,
+        None,
+        None,
+        1.24173768106333,
+        0.0,
+        vec![],
+    );
+    at_r_params.fit(&ts).expect("ETS(A,N,N) at R's parameters");
+    let r_params_loglik = at_r_params
+        .log_likelihood()
+        .expect("log_likelihood available");
+
+    println!("RC-04 repro: own_fit_loglik={own_loglik:.6} loglik_at_r_params={r_params_loglik:.6}");
+    assert!(
+        own_loglik < r_params_loglik - 1e-6,
+        "expected the crate's own SES optimum to score worse than R's parameters evaluated \
+         under the crate's own objective: own={own_loglik} at_r_params={r_params_loglik}"
+    );
+}
+
+#[test]
+#[ignore = "upstream repro RC-05"]
+fn repro_rc_05() {
+    use anofox_forecast::core::TimeSeries;
+    use anofox_forecast::models::arima::SARIMA;
+    use anofox_forecast::prelude::Forecaster;
+    use chrono::{Months, TimeZone, Utc};
+
+    let air: Vec<f64> = vec![
+        112.0, 118.0, 132.0, 129.0, 121.0, 135.0, 148.0, 148.0, 136.0, 119.0, 104.0, 118.0, 115.0,
+        126.0, 141.0, 135.0, 125.0, 149.0, 170.0, 170.0, 158.0, 133.0, 114.0, 140.0, 145.0, 150.0,
+        178.0, 163.0, 172.0, 178.0, 199.0, 199.0, 184.0, 162.0, 146.0, 166.0, 171.0, 180.0, 193.0,
+        181.0, 183.0, 218.0, 230.0, 242.0, 209.0, 191.0, 172.0, 194.0, 196.0, 196.0, 236.0, 235.0,
+        229.0, 243.0, 264.0, 272.0, 237.0, 211.0, 180.0, 201.0, 204.0, 188.0, 235.0, 227.0, 234.0,
+        264.0, 302.0, 293.0, 259.0, 229.0, 203.0, 229.0, 242.0, 233.0, 267.0, 269.0, 270.0, 315.0,
+        364.0, 347.0, 312.0, 274.0, 237.0, 278.0, 284.0, 277.0, 317.0, 313.0, 318.0, 374.0, 413.0,
+        405.0, 355.0, 306.0, 271.0, 306.0, 315.0, 301.0, 356.0, 348.0, 355.0, 422.0, 465.0, 467.0,
+        404.0, 347.0, 305.0, 336.0, 340.0, 318.0, 362.0, 348.0, 363.0, 435.0, 491.0, 505.0, 404.0,
+        359.0, 310.0, 337.0, 360.0, 342.0, 406.0, 396.0, 420.0, 472.0, 548.0, 559.0, 463.0, 407.0,
+        362.0, 405.0, 417.0, 391.0, 419.0, 461.0, 472.0, 535.0, 622.0, 606.0, 508.0, 461.0, 390.0,
+        432.0,
+    ];
+    let base = Utc.with_ymd_and_hms(1949, 1, 1, 0, 0, 0).unwrap();
+    let timestamps: Vec<_> = (0..air.len())
+        .map(|i| base + Months::new(i as u32))
+        .collect();
+    let ts = TimeSeries::univariate(timestamps, air).expect("valid timeseries");
+
+    // R's auto.arima(AirPassengers) selects ARIMA(2,1,1)(0,1,0)[12] (R 4.6.1,
+    // forecast 9.0.2). At that exact order the crate's point forecast matches
+    // R within 0.69% relative deviation, but its 95% prediction half-widths
+    // are systematically narrower than R's stats::arima KalmanForecast
+    // variance, worsening with horizon.
+    let mut model = SARIMA::new(2, 1, 1, 0, 1, 0, 12);
+    model.fit(&ts).expect("SARIMA(2,1,1)(0,1,0)[12] fit");
+    let forecast = model.predict_with_intervals(12, 0.95).expect("predict");
+    let lower = forecast
+        .lower()
+        .and_then(|l| l.first())
+        .cloned()
+        .expect("lower bound");
+    let upper = forecast
+        .upper()
+        .and_then(|u| u.first())
+        .cloned()
+        .expect("upper bound");
+
+    // R's 95% half-widths at h=1..12 (forecast(auto.arima(AirPassengers)), R 4.6.1).
+    let r_half: [f64; 12] = [
+        22.5498, 26.4646, 29.7091, 31.8307, 33.3992, 34.5618, 35.4479, 36.1345, 36.6756, 37.1089,
+        37.4612, 37.7520,
+    ];
+    let worst_ratio = (0..12)
+        .map(|h| ((upper[h] - lower[h]) / 2.0) / r_half[h])
+        .fold(f64::INFINITY, f64::min);
+
+    println!("RC-05 repro: worst crate/R half-width ratio={worst_ratio:.4}");
+    assert!(
+        worst_ratio < 0.90,
+        "expected the crate's SARIMA interval to be systematically narrower than R's \
+         at some horizon (ratio < 0.90): worst_ratio={worst_ratio}"
     );
 }

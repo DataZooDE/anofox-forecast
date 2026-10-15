@@ -143,6 +143,16 @@ FROM forecasts;
 #    three; now they all auto-detect, moving hw/mstl/tbats from
 #    19.953912/17.364756/17.46623 to 18.00003/18.18416/17.832329 (verified
 #    against the built extension); the all_distinct=1 invariant still holds.
+#
+#    17-03 Task 1 re-bless (D-12/D-13): SQL 'Holt' remapped from
+#    HoltLinearTrend::auto() to ETS(A,A,N) (R holt()'s definition), moving
+#    holt from 20.330877 to 19.955976 (verified against the built
+#    extension). The mstl value also moved, from 18.18416 to 18.186245 —
+#    deterministic and reproduced on this build, but NOT caused by the
+#    Holt remap (MSTLForecaster's trend component doesn't go through the
+#    'Holt' dispatch arm); it is a pre-existing drift left over from the
+#    0.16.1 bump (17-01) that this section's re-bless never caught, logged
+#    in deferred-items.md. The all_distinct=1 invariant still holds.
 ###############################################################################
 
 query IIIII
@@ -160,7 +170,7 @@ SELECT holt, hw, mstl, tbats,
   (holt != hw AND mstl != hw AND tbats != hw AND mstl != tbats)::INT AS all_distinct
 FROM forecasts;
 ----
-20.330877	18.00003	18.18416	17.832329	1
+19.955976	18.00003	18.186245	17.832329	1
 
 ###############################################################################
 # 5. Sanity check: Auto* models that use the library MUST stay distinct

@@ -1,11 +1,31 @@
    Compiling anofox-fcst-core v0.1.0 (/home/simonm/projects/duckdb/anofox-forecast/crates/anofox-fcst-core)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.77s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.66s
      Running tests/r_parity_diagnosis.rs (target/debug/deps/r_parity_diagnosis-382c3a50434319e2)
 
-running 3 tests
+running 9 tests
+RC-04 repro: own_fit_loglik=-380.625612 loglik_at_r_params=-374.538408
+test repro_rc_04 ... ok
+RC-05 repro: worst crate/R half-width ratio=0.8184
+test repro_rc_05 ... ok
+explicit ARIMA(2,1,1)(0,1,0)[12] on air: model_name=ARIMA(2,1,1)(0,1,0)[12] point_dev=6.883204e-3 interval_dev=2.489813e-1
+  h= 1 r_half= 22.5498 c_half= 23.4523 ratio(c/r)=1.0400
+  h= 2 r_half= 26.4646 c_half= 24.4952 ratio(c/r)=0.9256
+  h= 3 r_half= 29.7091 c_half= 25.4954 ratio(c/r)=0.8582
+  h= 4 r_half= 31.8307 c_half= 26.4578 ratio(c/r)=0.8312
+  h= 5 r_half= 33.3992 c_half= 27.3864 ratio(c/r)=0.8200
+  h= 6 r_half= 34.5618 c_half= 28.2846 ratio(c/r)=0.8184
+  h= 7 r_half= 35.4479 c_half= 29.1551 ratio(c/r)=0.8225
+  h= 8 r_half= 36.1345 c_half= 30.0003 ratio(c/r)=0.8302
+  h= 9 r_half= 36.6756 c_half= 30.8224 ratio(c/r)=0.8404
+  h=10 r_half= 37.1089 c_half= 31.6231 ratio(c/r)=0.8522
+  h=11 r_half= 37.4612 c_half= 32.4041 ratio(c/r)=0.8650
+  h=12 r_half= 37.7520 c_half= 33.1666 ratio(c/r)=0.8785
+test autoarima_air_explicit_arima_e8_probe ... ok
 === air/holt/ETS:AAN ===
   E5: loglik_rel_dev=2.633e-16 point_rel_dev=1.138e-15 interval_dev=8.062e-10
   E6 air/holt/ETS:AAN: crate_loglik=-863.582556 r_loglik=-863.647300 gap=0.064743 alpha=Some(0.9999) beta=Some(0.0001) gamma=None phi=None in_r_bounds=true -> reference (R optimiser stopped at an inferior, in-bounds optimum)
+E3 timestamp sensitivity: interval_dev synthetic_hourly=2.489813e-1 real_monthly=2.489813e-1 same_bits=true
+test autoarima_air_e3_timestamp_probe ... ok
 === air/holt/Holt (E4 mapping check) ===
   HoltLinearTrend: point_dev=1.155e-1 interval_dev=2.312e-1
   ETS(A,A,N) R-faithful: point_dev=1.684e-2 interval_dev=3.334e-2 cut=6.86x
@@ -15,6 +35,8 @@ running 3 tests
 === air/hw_additive/ETS:AAA ===
   E5: loglik_rel_dev=4.453e-16 point_rel_dev=9.915e-16 interval_dev=8.062e-10
   E6 air/hw_additive/ETS:AAA: crate_loglik=-718.500709 r_loglik=-765.935848 gap=47.435139 alpha=Some(0.2527606240458275) beta=Some(0.0001) gamma=Some(0.7472393759541724) phi=None in_r_bounds=true -> reference (R optimiser stopped at an inferior, in-bounds optimum)
+RC-03 repro: crate_loglik=-683.964133 r_loglik=-679.583216
+test repro_rc_03 ... ok
 === air/hw_multiplicative/ETS:MAM ===
   E5: loglik_rel_dev=8.288e-16 point_rel_dev=8.924e-16 interval_dev=6.110e-2
   E6 air/hw_multiplicative/ETS:MAM: crate_loglik=-681.105288 r_loglik=-685.827096 gap=4.721808 alpha=Some(0.789859117685874) beta=Some(0.00010000000053192473) gamma=Some(0.21014088231412598) phi=None in_r_bounds=true -> reference (R optimiser stopped at an inferior, in-bounds optimum)
@@ -59,10 +81,25 @@ running 3 tests
 diagnosis rows: 11
 test diagnosis_report ... ok
 test wrapper_equals_direct_crate_construction ... ok
+=== D-15 Miss E8: air/auto_arima interval ===
+  AutoARIMA == explicit ARIMA at same order? point false lower false upper false
+  h= 1 r_point=  445.635 c_point=  445.597 r_half= 22.5498 c_half= 23.4714 ratio(c/r)=1.0409
+  h= 2 r_point=  420.395 c_point=  420.334 r_half= 26.4646 c_half= 24.5150 ratio(c/r)=0.9263
+  h= 3 r_point=  449.198 c_point=  449.116 r_half= 29.7091 c_half= 25.5161 ratio(c/r)=0.8589
+  h= 4 r_point=  491.840 c_point=  491.740 r_half= 31.8307 c_half= 26.4793 ratio(c/r)=0.8319
+  h= 5 r_point=  503.394 c_point=  503.279 r_half= 33.3992 c_half= 27.4086 ratio(c/r)=0.8206
+  h= 6 r_point=  566.862 c_point=  566.734 r_half= 34.5618 c_half= 28.3075 ratio(c/r)=0.8190
+  h= 7 r_point=  654.260 c_point=  654.121 r_half= 35.4479 c_half= 29.1787 ratio(c/r)=0.8231
+  h= 8 r_point=  638.597 c_point=  638.449 r_half= 36.1345 c_half= 30.0247 ratio(c/r)=0.8309
+  h= 9 r_point=  540.884 c_point=  540.727 r_half= 36.6756 c_half= 30.8474 ratio(c/r)=0.8411
+  h=10 r_point=  494.127 c_point=  493.964 r_half= 37.1089 c_half= 31.6488 ratio(c/r)=0.8529
+  h=11 r_point=  423.333 c_point=  423.164 r_half= 37.4612 c_half= 32.4303 ratio(c/r)=0.8657
+  h=12 r_point=  465.508 c_point=  465.334 r_half= 37.7520 c_half= 33.1935 ratio(c/r)=0.8793
+test autoarima_air_interval_e8_probe ... ok
 autoarima air: r_order=(2,1,1)(0,1,0)[12) crate=AutoARIMA(2,1,1)(0,1,0)[12] order_match=true point=3.982169e-4 interval=1.846662e-1 tier=outside
 autoarima rw: r_order=(0,1,0) crate=AutoARIMA(0,1,0) order_match=true point=0.000000e0 interval=3.276619e-8 tier=parity
 autoarima rows: 2
 test autoarima_report ... ok
 
-test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 17.34s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.10s
 
