@@ -1,12 +1,34 @@
 # This file is included by DuckDB's CMake build system to load this extension
 
-# json is required at test-time only (50 test/sql/*.test files use `require json`
-# to assert JSON-typed intermediate results). This is DuckDB's own in-tree
-# extension (duckdb/extension/json, part of the pinned duckdb submodule) — no
-# download, no GIT_URL. A plain in-tree default-path load, deliberately
+# json is needed by 50 test/sql/*.test files that use `require json` to assert
+# JSON-typed intermediate results. This is DuckDB's own in-tree extension
+# (duckdb/extension/json, part of the pinned duckdb submodule) — no download,
+# no GIT_URL. A plain in-tree default-path load (no DONT_LINK), deliberately
 # independent of the anofox_forecast block below: no LINKED_LIBS, no LOAD_TESTS
 # on it, and it does not touch anofox_forecast's own OpenSSL static linkage or
 # the WASM LINKED_LIBS workaround documented below.
+#
+# WR-05 (Phase 18 review): what this actually statically links, and where.
+# duckdb_extension_load() without DONT_LINK bundles json's registration code
+# (JSONFunctions/JsonExtension) into *this build's own DuckDB core binaries* --
+# the `duckdb` shell and `test/unittest` executables that `make release`/
+# `make debug` produce -- the same way DONT_LINK-less core_functions/icu/
+# parquet always are. DONT_LINK is not an option here: `require json` runs
+# against `test/unittest`, and the sqllogictest harness needs json's functions
+# available there without a separate `LOAD json;` step in every test file.
+# Confirmed live (objdump/nm against a built tree, Phase 18 review): `nm -C
+# build/release/duckdb` and `nm -C build/release/test/unittest` both contain
+# ~94 JSONFunctions/JsonExtension symbols; `nm -C build/release/extension/
+# anofox_forecast/anofox_forecast.duckdb_extension` contains zero -- the json
+# extension's own code is NOT statically linked into the distributed
+# anofox_forecast.duckdb_extension artifact itself, and `objdump -p` on that
+# artifact shows no new NEEDED entries from this line. (The anofox_forecast
+# artifact does contain ~71 `duckdb_yyjson::*` symbols, but that is DuckDB's
+# own internally-vendored yyjson copy used by core -- core_functions.duckdb_
+# extension and parquet.duckdb_extension, which never reference this line at
+# all, carry the identical 71 symbols.) In short: this line affects the dev/
+# test binaries built alongside the extension, not the extension artifact
+# that ships to users.
 duckdb_extension_load(json)
 
 duckdb_extension_load(anofox_forecast
