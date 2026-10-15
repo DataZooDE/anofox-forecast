@@ -115,27 +115,39 @@ SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0
 ----
 SeasonalNaive
 
-# Test SeasonalNaive returns correct horizon length
+# Test SeasonalNaive returns correct horizon length. Re-pinned (Phase 18, 18-01,
+# class D): lengthened from 2 cycles (8 points) to 3 (12 points). A model/parameter
+# fallback that silently guessed a period is now an explicit error
+# ("no seasonal period could be detected ... pass seasonal_period explicitly",
+# src/table_functions/ts_forecast.cpp) per the v0.10.0 goal "silent model/parameter
+# fallbacks become errors" (PROJECT.md) -- 2 cycles of this 4-point pattern is
+# genuinely ambiguous for the period-detection pipeline (FFT aliases to period 2 on
+# this ramp/sawtooth shape; ACF returns NaN; confirmed directly against
+# ts_estimate_period_fft/ts_estimate_period_acf/ts_autoperiod), so it now errors
+# rather than silently guessing wrong. 3 cycles detects period 4 unambiguously.
 query I
-SELECT length((_ts_forecast([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 6, 'SeasonalNaive')).point);
+SELECT length((_ts_forecast([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 6, 'SeasonalNaive')).point);
 ----
 6
 
-# Test SeasonalNaive without explicit period defaults to Naive behavior (last value repeated)
-# Without seasonal_period, SeasonalNaive cannot detect seasonality automatically
-# Data ends with 4.0, so all forecasts should be 4.0
+# Re-pinned (Phase 18, 18-01, class D): with 3 full cycles, period detection now
+# SUCCEEDS (period=4), so SeasonalNaive repeats the detected seasonal pattern
+# [1.0, 2.0, 3.0, 4.0] rather than falling back to flat last-value repetition -- the
+# "defaults to Naive behavior" comment described the OLD silent-fallback behavior this
+# milestone removed (FCST-01..08); the genuine seasonal forecast is the corrected
+# behavior, confirmed directly against the query output.
 query I
-SELECT ABS((_ts_forecast([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4, 'SeasonalNaive')).point[1] - 4.0) < 0.01;
+SELECT ABS((_ts_forecast([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4, 'SeasonalNaive')).point[1] - 1.0) < 0.01;
 ----
 true
 
 query I
-SELECT ABS((_ts_forecast([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4, 'SeasonalNaive')).point[2] - 4.0) < 0.01;
+SELECT ABS((_ts_forecast([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4, 'SeasonalNaive')).point[2] - 2.0) < 0.01;
 ----
 true
 
 query I
-SELECT ABS((_ts_forecast([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4, 'SeasonalNaive')).point[3] - 4.0) < 0.01;
+SELECT ABS((_ts_forecast([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4, 'SeasonalNaive')).point[3] - 3.0) < 0.01;
 ----
 true
 
@@ -144,16 +156,17 @@ SELECT ABS((_ts_forecast([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0,
 ----
 true
 
-# Test SeasonalNaive without explicit period falls back to Naive (last value = 30.0)
-# The scalar _ts_forecast doesn't support params, so seasonal_period cannot be passed
+# Re-pinned (Phase 18, 18-01, class D): same as above -- this 9-point/3-cycle fixture
+# already has enough data for period detection to succeed (period=3), so SeasonalNaive
+# repeats the detected seasonal pattern [10.0, 20.0, 30.0] rather than flat 30.0.
 query I
-SELECT ABS((_ts_forecast([10.0, 20.0, 30.0, 10.0, 20.0, 30.0, 10.0, 20.0, 30.0], 6, 'SeasonalNaive')).point[1] - 30.0) < 0.01;
+SELECT ABS((_ts_forecast([10.0, 20.0, 30.0, 10.0, 20.0, 30.0, 10.0, 20.0, 30.0], 6, 'SeasonalNaive')).point[1] - 10.0) < 0.01;
 ----
 true
 
-# All forecasts should be the last value (30.0) when no period is specified
+# point[4] is the second repetition's first element (10.0), not the series' last value.
 query I
-SELECT ABS((_ts_forecast([10.0, 20.0, 30.0, 10.0, 20.0, 30.0, 10.0, 20.0, 30.0], 6, 'SeasonalNaive')).point[4] - 30.0) < 0.01;
+SELECT ABS((_ts_forecast([10.0, 20.0, 30.0, 10.0, 20.0, 30.0, 10.0, 20.0, 30.0], 6, 'SeasonalNaive')).point[4] - 10.0) < 0.01;
 ----
 true
 
@@ -164,15 +177,17 @@ FROM seasonal_data;
 ----
 SeasonalNaive
 
-# Test SeasonalNaive alternative name 'snaive'
+# Test SeasonalNaive alternative name 'snaive'. Lengthened (Phase 18, 18-01, class D)
+# from 2 cycles to 3 for reliable period detection -- see the horizon-length test above.
 query I
-SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4, 'snaive')).model;
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4, 'snaive')).model;
 ----
 SeasonalNaive
 
-# Test SeasonalNaive with case-insensitive name
+# Test SeasonalNaive with case-insensitive name. Lengthened (Phase 18, 18-01, class D)
+# from 2 cycles to 3 for reliable period detection -- see the horizon-length test above.
 query I
-SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4, 'seasonalnaive')).model;
+SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 4, 'seasonalnaive')).model;
 ----
 SeasonalNaive
 
@@ -502,10 +517,15 @@ SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SM
 ----
 true
 
-query I
+# Re-pinned (Phase 18, 18-01, class D): this fixture is a pure linear trend with no
+# seasonality at all, so period detection correctly finds nothing -- SeasonalNaive
+# without a detectable period is now an explicit error (see the horizon-length test
+# earlier in this file), not a silently-finite fallback value. Converted to the error
+# this model now (correctly) raises on non-seasonal data.
+statement error
 SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SeasonalNaive')).point[1] IS NOT NULL;
 ----
-true
+no seasonal period could be detected
 
 query I
 SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'SES')).point[1] IS NOT NULL;
