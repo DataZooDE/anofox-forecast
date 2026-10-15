@@ -417,7 +417,7 @@ ORDER BY group_col, date_col
 R"(
 SELECT * FROM _ts_fill_gaps_native(
     (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
-    frequency
+    frequency::VARCHAR
 )
 )",
     "Fills missing timestamps in each group's time series to create a regular frequency grid.",
@@ -439,7 +439,7 @@ R"(
 SELECT * FROM _ts_fill_forward_native(
     (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
     target_date,
-    frequency
+    frequency::VARCHAR
 )
 )",
     "Forward-fills missing timestamps in each group's time series using the last known value.",
@@ -666,7 +666,7 @@ FROM (
                LIST(date_col ORDER BY date_col),
                LIST(target_col::DOUBLE ORDER BY date_col),
                horizon,
-               frequency,
+               frequency::VARCHAR,
                method,
                params
            ), recursive := true)

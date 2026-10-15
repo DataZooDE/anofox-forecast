@@ -8,6 +8,14 @@ require json
 
 #######################################
 # ts_validate_separator Tests
+#
+# ts_validate_separator is a TABLE-in function (src/table_functions/ts_validate_separator.cpp):
+# ALL columns of the input TABLE are treated as ID columns to check; it does not accept a
+# VARCHAR source-table-name plus positional column arguments the way ts_combine_keys /
+# ts_aggregate_hierarchy / ts_split_keys below do. Current signature:
+# ts_validate_separator(TABLE, separator := '|'). Ported (Phase 18, 18-01, class A) from the
+# positional-args calling convention this file originally used; values unchanged (same inputs,
+# same outputs -- only the call shape changed).
 #######################################
 
 statement ok
@@ -19,25 +27,25 @@ CREATE TABLE test_ids AS SELECT * FROM (VALUES
 
 # Test valid separator (no conflicts)
 query I
-SELECT is_valid FROM ts_validate_separator('test_ids', region_id, store_id, item_id);
+SELECT is_valid FROM ts_validate_separator((SELECT region_id, store_id, item_id FROM test_ids));
 ----
 true
 
 # Test n_conflicts is 0 for valid data
 query I
-SELECT n_conflicts FROM ts_validate_separator('test_ids', region_id, store_id, item_id);
+SELECT n_conflicts FROM ts_validate_separator((SELECT region_id, store_id, item_id FROM test_ids));
 ----
 0
 
 # Test with 2 columns
 query I
-SELECT is_valid FROM ts_validate_separator('test_ids', region_id, store_id);
+SELECT is_valid FROM ts_validate_separator((SELECT region_id, store_id FROM test_ids));
 ----
 true
 
 # Test with custom separator
 query I
-SELECT is_valid FROM ts_validate_separator('test_ids', region_id, store_id, item_id, separator := '-');
+SELECT is_valid FROM ts_validate_separator((SELECT region_id, store_id, item_id FROM test_ids), separator := '-');
 ----
 true
 
@@ -48,18 +56,18 @@ CREATE TABLE test_conflict AS SELECT * FROM (VALUES
 ) AS t(region_id, store_id, item_id);
 
 query I
-SELECT is_valid FROM ts_validate_separator('test_conflict', region_id, store_id, item_id);
+SELECT is_valid FROM ts_validate_separator((SELECT region_id, store_id, item_id FROM test_conflict));
 ----
 false
 
 query I
-SELECT n_conflicts FROM ts_validate_separator('test_conflict', region_id, store_id, item_id);
+SELECT n_conflicts FROM ts_validate_separator((SELECT region_id, store_id, item_id FROM test_conflict));
 ----
 1
 
 # Test message contains alternative separators
 query I
-SELECT message LIKE '%Try%' FROM ts_validate_separator('test_conflict', region_id, store_id, item_id);
+SELECT message LIKE '%Try%' FROM ts_validate_separator((SELECT region_id, store_id, item_id FROM test_conflict));
 ----
 true
 
@@ -289,9 +297,13 @@ CREATE TABLE workflow_sales AS SELECT * FROM (VALUES
 ) AS t(region, store, item, dt, qty);
 
 # Create aggregated data
+# ts_aggregate_hierarchy's MAP param is a required positional argument (no default for a
+# TABLE-in-out native function) -- unlike ts_split_keys below, whose separator/columns are
+# true named parameters. Added the missing MAP{} (Phase 18, 18-01, class A: the call was
+# incomplete, not a behavior change).
 statement ok
 CREATE TABLE agg_data AS SELECT * FROM ts_aggregate_hierarchy(
-    (SELECT dt, qty, region, store, item FROM workflow_sales)
+    (SELECT dt, qty, region, store, item FROM workflow_sales), MAP{}
 );
 
 # Verify grand total

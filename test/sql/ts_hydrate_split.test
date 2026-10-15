@@ -66,12 +66,20 @@ train	30
 #######################################
 
 # Unknown features should be accessible as direct columns (not MAP)
+# Re-pinned (Phase 18, 18-01): 180 was never achievable for this fixture -- the file's
+# own "Multiple Folds Test" section below sums the unfiltered per-(fold_id, split) counts
+# to 30+6+36+6+42+6 = 126, matching this unfiltered COUNT(*) exactly (no fold_id filter
+# here, so every row is included and every row has a non-NULL temperature under the
+# default 'last_value' strategy). Not attributable to any Phase 9-17 code change --
+# the value was simply wrong in the original test (apparent copy from the 180-row
+# ts_hydrate_features.test/ts_prepare_regression_input.test fixtures, which use a
+# different 60-day dataset); confirmed self-inconsistent within this same file.
 query I
 SELECT COUNT(*) FROM ts_cv_hydrate_by(
     'cv_folds', 'backtest_sample', category, date, ['temperature'], MAP{}
 ) WHERE temperature IS NOT NULL;
 ----
-180
+126
 
 #######################################
 # ts_cv_hydrate_by - Automatic Masking
