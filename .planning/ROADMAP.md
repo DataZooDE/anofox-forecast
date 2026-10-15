@@ -393,7 +393,7 @@ Plans:
   4. `docs/` and `plugins/anofox-forecast/skills/` (bodies and frontmatter descriptions) describe the corrected definitions — interval source, MASE, strengths, features, diagnostics, conformal variants — with every changed SQL snippet executed against the built extension.
   5. CHANGELOG / release notes contain a breaking-change section listing every behaviour change that alters numerical output.
 
-**Plans**: 3/4 plans executed
+**Plans**: 4/4 plans executed
 
 Plans:
 **Wave 1**
@@ -410,7 +410,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 18-04-PLAN.md — permanent `scripts/check_doc_snippets.py` + `make check-docs`, docs/skills sweep to 0 FAIL with corrected definitions and frontmatter, CHANGELOG "Breaking changes in v0.10.0" tables, release notes, final milestone DoD (DOCS-01, DOCS-02) (wave 4)
+- [x] 18-04-PLAN.md — permanent `scripts/check_doc_snippets.py` + `make check-docs`, docs/skills sweep to 0 FAIL with corrected definitions and frontmatter, CHANGELOG "Breaking changes in v0.10.0" tables, release notes, final milestone DoD (DOCS-01, DOCS-02) (wave 4)
 
 ## Execution Notes
 
@@ -438,7 +438,7 @@ Phases execute in numeric order: 9 → 10 → 11 → 12 → 13 → 14 → 15 →
 | 15. Detection & Decomposition on fdars 0.47 | 5/5 | Complete    | 2026-10-14 |
 | 16. Conformal & Bootstrap Correctness | 3/3 | Complete    | 2026-10-14 |
 | 17. Upstream Consumption & Diagnostics Parity | 3/3 | Complete    | 2026-10-15 |
-| 18. Correctness Regression Suite, Audit & Docs | 3/4 | In Progress|  |
+| 18. Correctness Regression Suite, Audit & Docs | 4/4 | In Progress|  |
 
 ## Next
 
