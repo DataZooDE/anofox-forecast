@@ -69,13 +69,6 @@ SELECT *, 'HoltWinters' AS model FROM ts_forecast_by('forecast_sales_data', prod
 
 **Step 1: Detect seasonality**
 
-> `ts_detect_periods_by` has a known bug (tracked by the `anofox-forecast-detection`
-> skill): the `_by` table macro returns an all-NULL row (`periods`, `n_periods`,
-> `primary_period` all `NULL`) on clean, multi-cycle data. The `GROUP BY` aggregate
-> form, `ts_detect_periods_agg`, does not have this bug — use it until the macro is
-> fixed (out of scope for this phase; see `docs/api/05a-decomposition.md` / the
-> detection skill).
-
 ```sql
 CREATE OR REPLACE TABLE daily_sales AS
 SELECT product_id,
@@ -84,7 +77,11 @@ SELECT product_id,
 FROM range(0, 130) t(i)
 CROSS JOIN (SELECT unnest([1, 2]) AS product_id);
 
--- Reliable path (ts_detect_periods_agg, GROUP BY aggregate):
+SELECT product_id, round(primary_period) AS primary_period
+FROM ts_detect_periods_by('daily_sales', product_id, date, value, MAP{});
+-- Returns: primary_period = 7 (weekly pattern detected)
+
+-- Equivalent GROUP BY aggregate form, useful inline in a larger aggregate query:
 SELECT product_id, round(ts_detect_periods_agg(date, value, 'fft').primary_period) AS primary_period
 FROM daily_sales GROUP BY product_id;
 -- Returns: primary_period = 7 (weekly pattern detected)

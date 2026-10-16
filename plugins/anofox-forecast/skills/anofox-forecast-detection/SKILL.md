@@ -67,30 +67,25 @@ FROM ts_detect_periods_by('sales', product_id, ds, y,
     MAP{'method': 'autoperiod'});
 ```
 
-> ⚠️ **KNOWN BUG (build 9061428): `ts_detect_periods_by` returns all-NULL for FFT-based detection.**
-> On clean multi-cycle data (reproduced at 48 points / 4 cycles of a period-12 sine), the `_by` table macro returns a NULL row (`periods = NULL`, `n_periods = NULL`, `primary_period = NULL`) with both `MAP{}` and `MAP{'method': 'fft'}`. The scalar `ts_estimate_period_fft` / `ts_estimate_period_acf` **and** the aggregate `ts_detect_periods_agg` all return `period = 12.0` correctly on the *same* data. **Until the macro is fixed, use the scalar or aggregate path** for period detection.
->
-> ```sql
-> CREATE TABLE sea AS
-> SELECT 'A' AS id, TIMESTAMP '2024-01-01' + INTERVAL (g) HOUR AS ts,
->        10 + 5*sin(2*pi()*g/12) AS y
-> FROM range(0,48) t(g);
->
-> -- BUG: returns a NULL row
-> SELECT * FROM ts_detect_periods_by('sea', id, ts, y, MAP{});
->
-> -- WORKAROUND (reliable): period = 12.0
-> SELECT ts_detect_periods_agg(ts, y, 'fft') FROM sea;                    -- aggregate
-> SELECT ts_estimate_period_fft(LIST(y ORDER BY ts)) FROM sea;           -- scalar
-> ```
+```sql
+-- Both of these return primary_period = 12.0 on a clean period-12 sine
+-- (DET-01 fix, 18-06: the default MAP{} call used to return an all-NULL
+-- row -- fixed via FunctionNullHandling::SPECIAL_HANDLING on the
+-- underlying _ts_detect_periods overloads, see CHANGELOG.md v0.10.0).
+CREATE TABLE sea AS
+SELECT 'A' AS id, TIMESTAMP '2024-01-01' + INTERVAL (g) HOUR AS ts,
+       10 + 5*sin(2*pi()*g/12) AS y
+FROM range(0,48) t(g);
+
+SELECT * FROM ts_detect_periods_by('sea', id, ts, y, MAP{});
+```
 
 ### `ts_detect_periods_agg` — aggregate period detection
 
-The `GROUP BY` aggregate form of period detection — and the reliable path while the `_by` macro FFT bug (above) is open. Overloads: `ts_detect_periods_agg(ts TIMESTAMP, value DOUBLE)` and `ts_detect_periods_agg(ts, value, method VARCHAR)`. Returns the same STRUCT as `ts_detect_multiple_periods` (`periods[]`, `n_periods`, `primary_period`, `method`).
+The `GROUP BY` aggregate form of period detection — an alternative to the `_by` table macro above when you want the result inline in a larger aggregate query rather than as its own table-returning call. Overloads: `ts_detect_periods_agg(ts TIMESTAMP, value DOUBLE)` and `ts_detect_periods_agg(ts, value, method VARCHAR)`. Returns the same STRUCT as `ts_detect_multiple_periods` (`periods[]`, `n_periods`, `primary_period`, `method`).
 
 ```sql
--- Setup: sea(id, ts, y) -- same shape as the blockquoted known-bug repro above
--- (restated here as a runnable fence; the blockquoted one above is narrative only).
+-- Setup: sea(id, ts, y) -- same shape as above.
 CREATE OR REPLACE TABLE sea AS
 SELECT 'A' AS id, TIMESTAMP '2024-01-01' + INTERVAL (g) HOUR AS ts,
        10 + 5*sin(2*pi()*g/12) AS y
@@ -408,9 +403,9 @@ The array-level primitive behind `ts_detrend_by`. Signature `ts_detrend(DOUBLE[]
 ## Canonical detection pipeline
 
 ```sql
--- 1. Detect periods across the panel (use the aggregate form, not ts_detect_periods_by --
--- see the KNOWN BUG callout above: the _by macro returns all-NULL on this build for every
--- method, not just 'fft'; ts_detect_periods_agg is the reliable path)
+-- 1. Detect periods across the panel (aggregate form shown here; the ts_detect_periods_by
+-- table macro returns the same values and is an equally valid alternative -- see its
+-- example above)
 CREATE OR REPLACE TABLE detected AS
 SELECT product_id,
        ts_detect_periods_agg(ds, y, 'fft').primary_period AS sp,

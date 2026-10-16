@@ -331,6 +331,14 @@ FROM ts_detect_periods_by('det01_periods', g, ds, y, MAP{'expected_periods': '[1
 ----
 true	12.0
 
+# ts_detect_periods_agg: the GROUP BY aggregate form, documented as the
+# alternative to the table macros above (18-06). Same closed-form 12.0 on the
+# same fixture, proving the two surfaces agree.
+query I
+SELECT ts_detect_periods_agg(ds, y, 'fft').primary_period FROM det01_periods GROUP BY g;
+----
+12.0
+
 statement ok
 DROP TABLE det01_periods;
 

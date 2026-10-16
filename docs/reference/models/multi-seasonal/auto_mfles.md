@@ -49,8 +49,8 @@ for calibration caveats shared across all models.
 ## SQL Example
 
 ```sql
--- Step 1: Detect seasonality (aggregate form — the _by table-macro form has a known bug
--- that returns an all-NULL row; see docs/api/07-forecasting.md's Handling Seasonality note)
+-- Step 1: Detect seasonality (aggregate form shown here; ts_detect_periods_by is an
+-- equally valid alternative returning the same primary_period, see docs/api/07-forecasting.md)
 SELECT meter_id, round(ts_detect_periods_agg(timestamp, consumption, 'fft').primary_period) AS primary_period
 FROM hourly_energy GROUP BY meter_id;
 

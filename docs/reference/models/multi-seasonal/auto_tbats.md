@@ -64,8 +64,8 @@ for calibration caveats shared across all models.
 ## SQL Example
 
 ```sql
--- Step 1: Detect seasonality (ts_detect_periods_by has a known NULL-row bug;
--- use the aggregate form)
+-- Step 1: Detect seasonality (aggregate form shown here; ts_detect_periods_by is an
+-- equally valid alternative returning the same primary_period)
 SELECT region_id, ts_detect_periods_agg(timestamp, demand, 'fft').primary_period AS period
 FROM hourly_demand GROUP BY region_id;
 

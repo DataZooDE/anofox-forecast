@@ -844,6 +844,22 @@ before/after tables in "Breaking changes — details by phase" immediately below
   last — the same comparator `ts_stats.cpp`'s `StatsValueLess` already uses, so results
   depend only on the data, not on arrival order or thread interleaving, for any group
   containing a duplicate-date row.
+- **`ts_detect_periods` / `ts_detect_periods_by` default call (no `expected_periods`) no
+  longer returns an all-NULL row** (`DET-01`, Phase 18 plan 18-06, milestone-audit gap
+  closure). Both table macros always call the 6-arg `_ts_detect_periods` overload, passing
+  an explicit SQL `NULL` for `expected_periods` when `params` has no `expected_periods` key;
+  without `FunctionNullHandling::SPECIAL_HANDLING`, DuckDB's default null handling
+  short-circuited the whole row to `NULL` before the function body — which already treats a
+  NULL `expected_periods` as "not provided" — ever ran. Same bug class as the Phase 17 WR-01
+  `ts_ljung_box`/`ts_residual_diagnostics` fix. Fixed by setting `SPECIAL_HANDLING` on the
+  5-arg and 6-arg `_ts_detect_periods` overloads. A second, independent macro bug found and
+  fixed alongside it: `expected_periods` was extracted via `json_extract()` (returns a quoted
+  JSON scalar that cannot `CAST` to `DOUBLE[]`) instead of `json_extract_string()`, so the
+  `expected_periods` path was never reachable through the documented `MAP` params form at
+  all — `ts_detect_periods_by(..., MAP{'expected_periods': '[12.0]'})` raised a Conversion
+  Error before this fix. Known since Phase 10 (10-06/10-08 SUMMARY), worked around in docs
+  and the `anofox-forecast-detection` skill via `ts_detect_periods_agg` — those workaround
+  notes are now retired; the aggregate form remains documented as a valid alternative.
 
 ### Removed
 
