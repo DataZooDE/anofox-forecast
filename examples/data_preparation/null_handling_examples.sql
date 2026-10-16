@@ -76,7 +76,7 @@ SELECT CASE WHEN (
 .print ''
 
 CREATE OR REPLACE TABLE series_48 AS
-SELECT list_transform(range(48), i -> (10 + 3 * sin(2 * pi() * i / 12) + 0.05 * i)::DOUBLE) AS v;
+SELECT list_transform(range(48), lambda i: (10 + 3 * sin(2 * pi() * i / 12) + 0.05 * i)::DOUBLE) AS v;
 
 -- Edge trim parity: [NULL] || v || [NULL] gives the same ts_adf result as v
 -- itself — leading/trailing NULLs are trimmed in Rust before the analysis.

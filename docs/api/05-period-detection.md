@@ -60,7 +60,7 @@ non-NULL value returns SQL `NULL`. Impute interior gaps first if your series has
 ```sql
 -- Edge trim: leading/trailing NULLs give the same period as the trimmed series.
 SELECT ts_estimate_period_fft(list_concat([NULL, NULL]::DOUBLE[], v)) = ts_estimate_period_fft(v)
-FROM (SELECT list_transform(range(24), i -> sin(2 * pi() * i / 12)::DOUBLE) AS v) t;
+FROM (SELECT list_transform(range(24), lambda i: sin(2 * pi() * i / 12)::DOUBLE) AS v) t;
 -- true
 ```
 

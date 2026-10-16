@@ -307,7 +307,7 @@ SELECT isnan((ts_stationarity([1.0, 2.0, 3.0]::DOUBLE[])).adf_statistic)
 true
 
 query I
-SELECT (ts_stationarity(list_transform(range(30), i -> (2.0 + 0.5 * i)::DOUBLE), 'ct')).verdict IS NULL
+SELECT (ts_stationarity(list_transform(range(30), lambda i: (2.0 + 0.5 * i)::DOUBLE), 'ct')).verdict IS NULL
 ----
 true
 
@@ -424,7 +424,7 @@ fitted_params
 
 # lags 1000 on a 40-point list clamps to 39, no panic
 query I
-SELECT (ts_ljung_box(list_transform(range(40), i -> sin(i * 0.7)), 1000)).lags
+SELECT (ts_ljung_box(list_transform(range(40), lambda i: sin(i * 0.7)), 1000)).lags
 ----
 39
 

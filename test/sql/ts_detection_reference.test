@@ -319,7 +319,7 @@ SELECT (SELECT ts_detect_peaks(LIST(v ORDER BY ds)) FROM rw150).n_peaks;
 # --- peak indices match scipy exactly ---
 
 query I
-SELECT list_transform((SELECT ts_detect_peaks(LIST(v ORDER BY ds)) FROM rw150).peaks, p -> p.index)
+SELECT list_transform((SELECT ts_detect_peaks(LIST(v ORDER BY ds)) FROM rw150).peaks, lambda p: p.index)
      = [4, 6, 8, 13, 15, 19, 25, 29, 34, 36, 42, 45, 48, 52, 54, 60, 62, 67, 71, 73, 78, 80, 82, 90, 95, 100, 102, 104, 110, 113, 115, 117, 122, 124, 133, 138, 144, 148]::BIGINT[];
 ----
 true
@@ -332,7 +332,7 @@ FROM (
     SELECT unnest(got_list) AS got, unnest(want_list) AS want
     FROM (
         SELECT
-            list_transform((SELECT ts_detect_peaks(LIST(v ORDER BY ds)) FROM rw150).peaks, p -> p.prominence) AS got_list,
+            list_transform((SELECT ts_detect_peaks(LIST(v ORDER BY ds)) FROM rw150).peaks, lambda p: p.prominence) AS got_list,
             [0.023400000000000087, 0.7829000000000002, 0.45480000000000054, 1.1983000000000006, 0.2917000000000005, 0.4533000000000005, 1.9455, 0.14069999999999983, 0.4557, 1.2466, 10.887, 0.8169000000000002, 0.8397000000000001, 0.3037000000000001, 0.03849999999999998, 0.0613999999999999, 0.8507999999999996, 0.19540000000000113, 2.720999999999999, 0.8879000000000001, 0.2920999999999996, 0.08109999999999928, 1.6056000000000008, 1.380700000000001, 0.05349999999999966, 2.8627999999999982, 0.5112000000000005, 1.0938999999999997, 0.46359999999999957, 3.8658, 0.0613000000000028, 0.2723000000000013, 0.005500000000001393, 2.761400000000002, 0.4555999999999987, 1.2727999999999984, 1.5221, 0.39250000000000007] AS want_list
     )
 );
@@ -342,7 +342,7 @@ true
 # --- plateau midpoints: [0,1,1,1,0,2,2,0,3,3,3,3,1,0] -> peak indices [2, 5, 9] ---
 
 query I
-SELECT list_transform((ts_detect_peaks([0, 1, 1, 1, 0, 2, 2, 0, 3, 3, 3, 3, 1, 0]::DOUBLE[])).peaks, p -> p.index);
+SELECT list_transform((ts_detect_peaks([0, 1, 1, 1, 0, 2, 2, 0, 3, 3, 3, 3, 1, 0]::DOUBLE[])).peaks, lambda p: p.index);
 ----
 [2, 5, 9]
 
@@ -361,7 +361,7 @@ FROM (SELECT unnest(range(240)) AS i, unnest(
 # --- min_distance = 8.0 matches scipy's distance=8 filter ---
 
 query I
-SELECT list_transform((SELECT ts_detect_peaks(LIST(v ORDER BY ds), 8.0) FROM sine240_peaks).peaks, p -> p.index)
+SELECT list_transform((SELECT ts_detect_peaks(LIST(v ORDER BY ds), 8.0) FROM sine240_peaks).peaks, lambda p: p.index)
      = [6, 14, 23, 31, 39, 53, 75, 83, 93, 103, 114, 127, 136, 149, 158, 175, 190, 198, 208, 221, 229]::BIGINT[];
 ----
 true
@@ -369,7 +369,7 @@ true
 # --- min_prominence = 2.0 matches scipy's prominence=2.0 filter ---
 
 query I
-SELECT list_transform((SELECT ts_detect_peaks(LIST(v ORDER BY ds), 0.0, 2.0) FROM sine240_peaks).peaks, p -> p.index)
+SELECT list_transform((SELECT ts_detect_peaks(LIST(v ORDER BY ds), 0.0, 2.0) FROM sine240_peaks).peaks, lambda p: p.index)
      = [6, 31, 53, 71, 75, 103, 127, 149, 154, 173, 175, 198, 221, 231]::BIGINT[];
 ----
 true
@@ -403,11 +403,11 @@ FROM (SELECT (SELECT ts_detect_peaks(LIST(v ORDER BY ds), 0.0, 0.0, true) FROM s
 true
 
 query I
-SELECT list_aggregate(list_transform(idx_pairs, p -> CASE WHEN p[2] > p[1] THEN 1 ELSE 0 END), 'min') = 1
+SELECT list_aggregate(list_transform(idx_pairs, lambda p: CASE WHEN p[2] > p[1] THEN 1 ELSE 0 END), 'min') = 1
 FROM (
     SELECT list_zip(idx_list[1:len(idx_list)-1], idx_list[2:]) AS idx_pairs
     FROM (
-        SELECT list_transform((SELECT ts_detect_peaks(LIST(v ORDER BY ds), 0.0, 0.0, true) FROM sine240_peaks).peaks, p -> p.index) AS idx_list
+        SELECT list_transform((SELECT ts_detect_peaks(LIST(v ORDER BY ds), 0.0, 0.0, true) FROM sine240_peaks).peaks, lambda p: p.index) AS idx_list
     )
 );
 ----
@@ -459,7 +459,7 @@ true
 # --- scale/shift invariance: step3 * 100 + 7 flags the same index (D-06) ---
 
 query I
-SELECT (SELECT (_ts_detect_changepoints_bocpd(list_transform(v, x -> x * 100 + 7), 250.0, true)).changepoint_indices FROM cp_step3)
+SELECT (SELECT (_ts_detect_changepoints_bocpd(list_transform(v, lambda x: x * 100 + 7), 250.0, true)).changepoint_indices FROM cp_step3)
      = [100]::UBIGINT[];
 ----
 true
@@ -502,11 +502,11 @@ true
 
 statement ok
 CREATE TABLE det84_v AS
-SELECT list_transform(range(1, 85), t -> 10 + 3 * sin(2 * pi() * t / 7) + 0.1 * t + 0.5 * cos(2.1 * t)) AS v;
+SELECT list_transform(range(1, 85), lambda t: 10 + 3 * sin(2 * pi() * t / 7) + 0.1 * t + 0.5 * cos(2.1 * t)) AS v;
 
 statement ok
 CREATE TABLE msts_v AS
-SELECT list_transform(range(1, 281), t -> sin(2 * pi() * t / 7) + 0.5 * sin(2 * pi() * t / 28) + 0.3 * cos(1.7 * t)) AS v;
+SELECT list_transform(range(1, 281), lambda t: sin(2 * pi() * t / 7) + 0.5 * sin(2 * pi() * t / 28) + 0.3 * cos(1.7 * t)) AS v;
 
 # --- det84, periods [7]: ascending `periods`, trend/seasonal within 1e-8 of R forecast::mstl ---
 
@@ -539,7 +539,7 @@ FROM (SELECT v, _ts_mstl_decomposition(v, 'fail', [7]) AS r FROM det84_v) t;
 query I
 SELECT max(abs(got - want)) <= 1e-10
 FROM (
-    SELECT unnest(list_transform(range(84), i -> trend[i + 1] + seasonal[1][i + 1] + remainder[i + 1])) AS got,
+    SELECT unnest(list_transform(range(84), lambda i: trend[i + 1] + seasonal[1][i + 1] + remainder[i + 1])) AS got,
            unnest(v) AS want
     FROM det84_mstl
 );
@@ -557,7 +557,7 @@ SELECT (_ts_mstl_decomposition(v, 'fail', [28, 7])).periods FROM msts_v;
 
 query I
 SELECT max(abs(t - 1.0)) <= 1e-12
-FROM (SELECT unnest((_ts_mstl_decomposition(list_transform(range(48), i -> 1.0), 'fail', [12])).trend) AS t);
+FROM (SELECT unnest((_ts_mstl_decomposition(list_transform(range(48), lambda i: 1.0), 'fail', [12])).trend) AS t);
 ----
 true
 
@@ -565,7 +565,7 @@ true
 
 query I
 SELECT max(abs(t - 1.0)) <= 1e-12
-FROM (SELECT unnest((_ts_mstl_decomposition(list_transform(range(100), i -> 1.0), 'fail', [])).trend) AS t);
+FROM (SELECT unnest((_ts_mstl_decomposition(list_transform(range(100), lambda i: 1.0), 'fail', [])).trend) AS t);
 ----
 true
 
@@ -579,19 +579,19 @@ true
 # --- classical_additive on constant 1.0 (n 48, period 12): NaN edges, exact 1.0 trend, exact 0.0 seasonal ---
 
 query I
-SELECT isnan((ts_decompose_seasonal(list_transform(range(48), i -> 1.0), 12.0, 'classical_additive')).trend[1]);
+SELECT isnan((ts_decompose_seasonal(list_transform(range(48), lambda i: 1.0), 12.0, 'classical_additive')).trend[1]);
 ----
 true
 
 query I
 SELECT min(t) = 1.0 AND max(t) = 1.0
-FROM (SELECT unnest((ts_decompose_seasonal(list_transform(range(48), i -> 1.0), 12.0, 'classical_additive')).trend[7:42]) AS t);
+FROM (SELECT unnest((ts_decompose_seasonal(list_transform(range(48), lambda i: 1.0), 12.0, 'classical_additive')).trend[7:42]) AS t);
 ----
 true
 
 query I
 SELECT max(abs(s)) <= 1e-12
-FROM (SELECT unnest((ts_decompose_seasonal(list_transform(range(48), i -> 1.0), 12.0, 'classical_additive')).seasonal) AS s);
+FROM (SELECT unnest((ts_decompose_seasonal(list_transform(range(48), lambda i: 1.0), 12.0, 'classical_additive')).seasonal) AS s);
 ----
 true
 
@@ -623,25 +623,25 @@ true
 # --- errors: non-integer period with 'classical'; a zero in a 'classical_multiplicative' series ---
 
 statement error
-SELECT ts_decompose_seasonal(list_transform(range(84), i -> i::DOUBLE), 12.5, 'classical');
+SELECT ts_decompose_seasonal(list_transform(range(84), lambda i: i::DOUBLE), 12.5, 'classical');
 ----
 classical decomposition requires an integer period >= 2
 
 statement error
-SELECT ts_decompose_seasonal(list_transform(range(48), i -> 0.0), 12.0, 'classical_multiplicative');
+SELECT ts_decompose_seasonal(list_transform(range(48), lambda i: 0.0), 12.0, 'classical_multiplicative');
 ----
 multiplicative decomposition requires strictly positive values
 
 # --- _ts_mstl_decomposition insufficient-data modes: n 20, period [12] (needs n > 24) ---
 
 query I
-SELECT (_ts_mstl_decomposition(list_transform(range(20), i -> i::DOUBLE), 'fail', [12])) IS NULL;
+SELECT (_ts_mstl_decomposition(list_transform(range(20), lambda i: i::DOUBLE), 'fail', [12])) IS NULL;
 ----
 true
 
 query I
-SELECT (_ts_mstl_decomposition(list_transform(range(20), i -> i::DOUBLE), 'trend', [12])).periods = []
-   AND (_ts_mstl_decomposition(list_transform(range(20), i -> i::DOUBLE), 'trend', [12])).trend IS NOT NULL;
+SELECT (_ts_mstl_decomposition(list_transform(range(20), lambda i: i::DOUBLE), 'trend', [12])).periods = []
+   AND (_ts_mstl_decomposition(list_transform(range(20), lambda i: i::DOUBLE), 'trend', [12])).trend IS NOT NULL;
 ----
 true
 
@@ -652,19 +652,19 @@ true
 # decomposition applied" result, not a NULL row and not garbage data).
 
 query I
-SELECT (_ts_mstl_decomposition(list_transform(range(20), i -> i::DOUBLE), 'none', [1000])) IS NOT NULL;
+SELECT (_ts_mstl_decomposition(list_transform(range(20), lambda i: i::DOUBLE), 'none', [1000])) IS NOT NULL;
 ----
 true
 
 query I
-SELECT len((_ts_mstl_decomposition(list_transform(range(20), i -> i::DOUBLE), 'none', [1000])).trend) = 0
-   AND len((_ts_mstl_decomposition(list_transform(range(20), i -> i::DOUBLE), 'none', [1000])).remainder) = 0
-   AND (_ts_mstl_decomposition(list_transform(range(20), i -> i::DOUBLE), 'none', [1000])).periods = [];
+SELECT len((_ts_mstl_decomposition(list_transform(range(20), lambda i: i::DOUBLE), 'none', [1000])).trend) = 0
+   AND len((_ts_mstl_decomposition(list_transform(range(20), lambda i: i::DOUBLE), 'none', [1000])).remainder) = 0
+   AND (_ts_mstl_decomposition(list_transform(range(20), lambda i: i::DOUBLE), 'none', [1000])).periods = [];
 ----
 true
 
 statement error
-SELECT _ts_mstl_decomposition(list_transform(range(48), i -> i::DOUBLE), 'fail', [0]);
+SELECT _ts_mstl_decomposition(list_transform(range(48), lambda i: i::DOUBLE), 'fail', [0]);
 ----
 period must be >= 1
 
@@ -686,7 +686,7 @@ period must be >= 1
 
 query I
 SELECT (ts_estimate_period_fft(
-    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12))
+    list_transform(range(120), lambda t: 0.5 * t + 2 * sin(2 * pi() * t / 12))
 )).period;
 ----
 12.0
@@ -695,14 +695,14 @@ SELECT (ts_estimate_period_fft(
 
 query I
 SELECT abs((ts_estimate_period_fft(
-    list_transform(range(121), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12))
+    list_transform(range(121), lambda t: 0.5 * t + 2 * sin(2 * pi() * t / 12))
 )).period - 12.1) <= 1e-9;
 ----
 true
 
 query I
 SELECT (ts_estimate_period_fft(
-    list_transform(range(121), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12))
+    list_transform(range(121), lambda t: 0.5 * t + 2 * sin(2 * pi() * t / 12))
 )).confidence > 5;
 ----
 true
@@ -711,7 +711,7 @@ true
 
 query I
 SELECT (_ts_detect_periods(
-    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12)),
+    list_transform(range(120), lambda t: 0.5 * t + 2 * sin(2 * pi() * t / 12)),
     'fft'
 )).primary_period;
 ----
@@ -721,7 +721,7 @@ SELECT (_ts_detect_periods(
 # scale-relative is_constant check on the detrended series)
 
 query I
-SELECT isnan((ts_estimate_period_fft(list_transform(range(30), i -> 4.25))).period);
+SELECT isnan((ts_estimate_period_fft(list_transform(range(30), lambda i: 4.25))).period);
 ----
 true
 
@@ -735,7 +735,7 @@ true
 
 query I
 SELECT (ts_estimate_period_acf(
-    list_transform(range(40), i -> CASE WHEN i % 2 = 0 THEN 1.0 ELSE -1.0 END)
+    list_transform(range(40), lambda i: CASE WHEN i % 2 = 0 THEN 1.0 ELSE -1.0 END)
 )).period;
 ----
 2.0
@@ -743,7 +743,7 @@ SELECT (ts_estimate_period_acf(
 # ACF: a constant series -> NaN period (c_0 == 0, every acf entry is NaN)
 
 query I
-SELECT isnan((ts_estimate_period_acf(list_transform(range(30), i -> 4.25))).period);
+SELECT isnan((ts_estimate_period_acf(list_transform(range(30), lambda i: 4.25))).period);
 ----
 true
 
@@ -752,7 +752,7 @@ true
 
 query I
 SELECT (_ts_detect_periods(
-    list_transform(range(120), t -> sin(2 * pi() * t / 12)),
+    list_transform(range(120), lambda t: sin(2 * pi() * t / 12)),
     'regression'
 )).primary_period;
 ----
@@ -778,12 +778,12 @@ true
 # (previously division by zero / an inverted frequency grid, G21)
 
 statement error
-SELECT ts_lomb_scargle(list_transform(range(60), t -> sin(2 * pi() * t / 12)), 0.0, 0.0, 1);
+SELECT ts_lomb_scargle(list_transform(range(60), lambda t: sin(2 * pi() * t / 12)), 0.0, 0.0, 1);
 ----
 n_frequencies
 
 statement error
-SELECT ts_lomb_scargle(list_transform(range(60), t -> sin(2 * pi() * t / 12)), 24.0, 6.0, 0);
+SELECT ts_lomb_scargle(list_transform(range(60), lambda t: sin(2 * pi() * t / 12)), 24.0, 6.0, 0);
 ----
 min_period
 
@@ -794,12 +794,12 @@ min_period
 # same way (Rust-side upper bound).
 
 statement error
-SELECT ts_lomb_scargle(list_transform(range(60), t -> sin(2 * pi() * t / 12)), 0.0, 0.0, -1);
+SELECT ts_lomb_scargle(list_transform(range(60), lambda t: sin(2 * pi() * t / 12)), 0.0, 0.0, -1);
 ----
 n_frequencies
 
 statement error
-SELECT ts_lomb_scargle(list_transform(range(60), t -> sin(2 * pi() * t / 12)), 0.0, 0.0, 2000000000);
+SELECT ts_lomb_scargle(list_transform(range(60), lambda t: sin(2 * pi() * t / 12)), 0.0, 0.0, 2000000000);
 ----
 n_frequencies
 
@@ -809,14 +809,14 @@ n_frequencies
 
 query I
 SELECT ts_seasonal_strength(
-    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12)), 12.0
+    list_transform(range(120), lambda t: 0.5 * t + 2 * sin(2 * pi() * t / 12)), 12.0
 ) >= 0.95;
 ----
 true
 
 query I
 SELECT ts_seasonal_strength(
-    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12)), 12.0, 'spectral'
+    list_transform(range(120), lambda t: 0.5 * t + 2 * sin(2 * pi() * t / 12)), 12.0, 'spectral'
 ) >= 0.9;
 ----
 true
@@ -826,14 +826,14 @@ true
 
 statement error
 SELECT ts_seasonal_strength(
-    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12)), 12.0, 'wavelet'
+    list_transform(range(120), lambda t: 0.5 * t + 2 * sin(2 * pi() * t / 12)), 12.0, 'wavelet'
 );
 ----
 removed
 
 statement error
 SELECT ts_seasonal_strength(
-    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12)), 12.0, 'foo'
+    list_transform(range(120), lambda t: 0.5 * t + 2 * sin(2 * pi() * t / 12)), 12.0, 'foo'
 );
 ----
 expected one of
@@ -846,14 +846,14 @@ expected one of
 
 statement error
 SELECT ts_seasonal_strength(
-    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12)), 'nan'::DOUBLE
+    list_transform(range(120), lambda t: 0.5 * t + 2 * sin(2 * pi() * t / 12)), 'nan'::DOUBLE
 );
 ----
 Period must be a positive finite number
 
 statement error
 SELECT ts_decompose_seasonal(
-    list_transform(range(48), i -> (10 + 0.1 * i + 3 * sin(2 * pi() * i / 12))::DOUBLE), 'nan'::DOUBLE
+    list_transform(range(48), lambda i: (10 + 0.1 * i + 3 * sin(2 * pi() * i / 12))::DOUBLE), 'nan'::DOUBLE
 );
 ----
 Period must be a positive finite number
@@ -867,7 +867,7 @@ Period must be a positive finite number
 
 statement error
 SELECT ts_seasonal_strength_windowed(
-    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12)), 12.0, 24.0, 'wavelet'
+    list_transform(range(120), lambda t: 0.5 * t + 2 * sin(2 * pi() * t / 12)), 12.0, 24.0, 'wavelet'
 );
 ----
 removed

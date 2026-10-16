@@ -248,9 +248,9 @@ SELECT list_reduce(
             SELECT '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY as ts, 5.0 as val
             FROM range(0, 10) t(i)
         )),
-        x -> CASE WHEN x.is_changepoint THEN 1 ELSE 0 END
+        lambda x: CASE WHEN x.is_changepoint THEN 1 ELSE 0 END
     ),
-    (a, b) -> a + b
+    lambda a, b: a + b
 ) = 0;
 ----
 true
@@ -470,9 +470,9 @@ query I
 SELECT list_reduce(
     list_transform(
         ts_detect_changepoints_agg(ts, val, MAP(['hazard_lambda'], ['10.0'])),
-        x -> CASE WHEN x.is_changepoint THEN 1 ELSE 0 END
+        lambda x: CASE WHEN x.is_changepoint THEN 1 ELSE 0 END
     ),
-    (a, b) -> a + b
+    lambda a, b: a + b
 ) = 1
 FROM step_change_test;
 ----

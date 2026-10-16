@@ -324,13 +324,13 @@ raises an error (previously an unrecognized name silently fell back to `'varianc
 **Example:**
 ```sql
 -- Strength on the DETRENDED residual (method defaults to 'variance')
-SELECT ts_seasonal_strength(list_transform(range(28), i -> sin(2 * pi() * i / 7)), 7.0);
+SELECT ts_seasonal_strength(list_transform(range(28), lambda i: sin(2 * pi() * i / 7)), 7.0);
 
 -- Spectral method
-SELECT ts_seasonal_strength(list_transform(range(28), i -> sin(2 * pi() * i / 7)), 7.0, 'spectral');
+SELECT ts_seasonal_strength(list_transform(range(28), lambda i: sin(2 * pi() * i / 7)), 7.0, 'spectral');
 
 -- Rolling strength over 3 periods
-SELECT ts_seasonal_strength_windowed(list_transform(range(28), i -> sin(2 * pi() * i / 7)), 7.0, 21.0);
+SELECT ts_seasonal_strength_windowed(list_transform(range(28), lambda i: sin(2 * pi() * i / 7)), 7.0, 21.0);
 ```
 
 **`ts_analyze_seasonality`'s `trend_strength` column** is `|r|` — the absolute Pearson

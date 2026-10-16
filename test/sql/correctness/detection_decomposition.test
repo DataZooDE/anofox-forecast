@@ -31,7 +31,7 @@ require json
 # =============================================================================
 
 query I
-SELECT list_transform((ts_detect_peaks([0, 1, 1, 1, 0, 2, 2, 0, 3, 3, 3, 3, 1, 0]::DOUBLE[])).peaks, p -> p.index);
+SELECT list_transform((ts_detect_peaks([0, 1, 1, 1, 0, 2, 2, 0, 3, 3, 3, 3, 1, 0]::DOUBLE[])).peaks, lambda p: p.index);
 ----
 [2, 5, 9]
 
@@ -46,7 +46,7 @@ SELECT 'g' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, v
 FROM (SELECT unnest(range(14)) AS i, unnest([0, 1, 1, 1, 0, 2, 2, 0, 3, 3, 3, 3, 1, 0]::DOUBLE[]) AS v);
 
 query I
-SELECT list_transform(peaks, p -> p.index) FROM ts_detect_peaks_by('peaks_plateau', id, ds, v, MAP{});
+SELECT list_transform(peaks, lambda p: p.index) FROM ts_detect_peaks_by('peaks_plateau', id, ds, v, MAP{});
 ----
 [2, 5, 9]
 
@@ -125,7 +125,7 @@ FROM ts_detect_changepoints('changepoint_test', date, val, MAP(['hazard_lambda']
 query I
 SELECT list_transform((SELECT ts_detect_changepoints_agg(ts, v, MAP([], [])) FROM (
     SELECT date AS ts, val AS v FROM changepoint_test
-)), s -> s.is_changepoint);
+)), lambda s: s.is_changepoint);
 ----
 [false, false, false, false, false, true, false, false, false, false]
 
@@ -165,7 +165,7 @@ true
 
 query I
 SELECT max(abs(t - 1.0)) <= 1e-12
-FROM (SELECT unnest((_ts_mstl_decomposition(list_transform(range(48), i -> 1.0), 'fail', [12])).trend) AS t);
+FROM (SELECT unnest((_ts_mstl_decomposition(list_transform(range(48), lambda i: 1.0), 'fail', [12])).trend) AS t);
 ----
 true
 
@@ -235,14 +235,14 @@ true
 
 query I
 SELECT ts_seasonal_strength(
-    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12)), 12.0
+    list_transform(range(120), lambda t: 0.5 * t + 2 * sin(2 * pi() * t / 12)), 12.0
 ) >= 0.95;
 ----
 true
 
 statement error
 SELECT ts_seasonal_strength_windowed(
-    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12)), 12.0, 24.0, 'wavelet'
+    list_transform(range(120), lambda t: 0.5 * t + 2 * sin(2 * pi() * t / 12)), 12.0, 24.0, 'wavelet'
 );
 ----
 removed
@@ -255,21 +255,21 @@ removed
 
 query I
 SELECT (ts_estimate_period_fft(
-    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12))
+    list_transform(range(120), lambda t: 0.5 * t + 2 * sin(2 * pi() * t / 12))
 )).period;
 ----
 12.0
 
 query I
 SELECT (ts_estimate_period_acf(
-    list_transform(range(40), i -> CASE WHEN i % 2 = 0 THEN 1.0 ELSE -1.0 END)
+    list_transform(range(40), lambda i: CASE WHEN i % 2 = 0 THEN 1.0 ELSE -1.0 END)
 )).period;
 ----
 2.0
 
 query I
 SELECT (_ts_detect_periods(
-    list_transform(range(120), t -> sin(2 * pi() * t / 12)),
+    list_transform(range(120), lambda t: sin(2 * pi() * t / 12)),
     'regression'
 )).primary_period;
 ----
@@ -277,7 +277,7 @@ SELECT (_ts_detect_periods(
 
 query I
 SELECT (_ts_detect_periods(
-    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12)),
+    list_transform(range(120), lambda t: 0.5 * t + 2 * sin(2 * pi() * t / 12)),
     'fft'
 )).primary_period;
 ----
@@ -405,13 +405,13 @@ true
 
 query I
 SELECT max(abs(t - e)) < 1e-8
-FROM (SELECT unnest((ts_detrend(list_transform(range(20), i -> 2.0 * i + 3.0), 'linear')).trend) AS t,
-             unnest(list_transform(range(20), i -> 2.0 * i + 3.0)) AS e);
+FROM (SELECT unnest((ts_detrend(list_transform(range(20), lambda i: 2.0 * i + 3.0), 'linear')).trend) AS t,
+             unnest(list_transform(range(20), lambda i: 2.0 * i + 3.0)) AS e);
 ----
 true
 
 query I
-SELECT (ts_detrend(list_transform(range(20), i -> 2.0 * i + 3.0), 'linear')).method;
+SELECT (ts_detrend(list_transform(range(20), lambda i: 2.0 * i + 3.0), 'linear')).method;
 ----
 linear
 
@@ -425,7 +425,7 @@ FROM (
     FROM (
         SELECT
             (SELECT trend FROM ts_detrend_by('lin20', id, ds, v, 'linear')) AS by_trend,
-            (ts_detrend(list_transform(range(20), i -> 2.0 * i + 3.0), 'linear')).trend AS scalar_trend
+            (ts_detrend(list_transform(range(20), lambda i: 2.0 * i + 3.0), 'linear')).trend AS scalar_trend
     )
 );
 ----
