@@ -34,7 +34,14 @@ jobs:
       #   halting portfile") — not fixable here (vcpkg comes from extension-ci-tools).
       #   Excluded on the LTS line only; the v1.5.6 (variegata) windows_amd64 build
       #   uses a newer, working baseline and still ships.
-      exclude_archs: 'windows_amd64;windows_amd64_rtools;windows_amd64_mingw'
+      # osx_arm64 / osx_amd64: since GitHub's macos-26 runner image (20261013),
+      #   the v1.4-andium toolchain's linker cannot read the image's MacOSX27.0.sdk
+      #   .tbd stubs ("tapi error: malformed file ... unknown architecture"), so
+      #   DuckDB core's own libduckdb.dylib fails to link. Not our code, and the
+      #   reusable workflow has no runner/SDK override. Excluded on the LTS line only
+      #   (first hit at v2026.10.16); the v1.5.6 macOS builds still ship. Re-enable
+      #   once the runner image or extension-ci-tools is fixed.
+      exclude_archs: 'windows_amd64;windows_amd64_rtools;windows_amd64_mingw;osx_arm64;osx_amd64'
 
   duckdb-lts-smoke-test:
     name: Smoke test (v1.4.5)
@@ -43,8 +50,8 @@ jobs:
     with:
       duckdb_version: v1.4.5
       extension_name: anofox_forecast
-      # windows_amd64 excluded on the LTS line (dead vcpkg OpenSSL baseline — see build job).
-      exclude_archs: 'windows_amd64;windows_amd64_rtools;windows_amd64_mingw'
+      # windows_amd64 and osx_* excluded on the LTS line (dead vcpkg OpenSSL baseline; macos-26 SDK linker break — see build job).
+      exclude_archs: 'windows_amd64;windows_amd64_rtools;windows_amd64_mingw;osx_arm64;osx_amd64'
 
   duckdb-lts-deploy:
     name: Deploy extension binaries (v1.4.5 LTS)
@@ -59,8 +66,8 @@ jobs:
       duckdb_version: v1.4.5
       ci_tools_version: v1.4-andium
       extension_name: anofox_forecast
-      # windows_amd64 excluded on the LTS line (dead vcpkg OpenSSL baseline — see build job).
-      exclude_archs: 'windows_amd64;windows_amd64_rtools;windows_amd64_mingw'
+      # windows_amd64 and osx_* excluded on the LTS line (dead vcpkg OpenSSL baseline; macos-26 SDK linker break — see build job).
+      exclude_archs: 'windows_amd64;windows_amd64_rtools;windows_amd64_mingw;osx_arm64;osx_amd64'
       deploy_latest: ${{ startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' }}
       deploy_versioned: ${{ startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' }}
 
