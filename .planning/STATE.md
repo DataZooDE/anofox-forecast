@@ -3,7 +3,7 @@ gsd_state_version: "1.0"
 milestone: v0.10.0
 milestone_name: Statistical Correctness
 status: Awaiting next milestone
-stopped_at: Milestone v0.10.0 complete and archived — ready for /gsd-new-milestone
+stopped_at: v2026.10.16 released; next = DuckDB 2.0 compat per .planning/HANDOVER-duckdb2-compat.md
 last_updated: "2026-10-16T06:12:23.776Z"
 last_activity: 2026-10-16
 last_activity_desc: Milestone v0.10.0 completed and archived
@@ -125,6 +125,8 @@ None yet.
 - [Phase 18, 2026-10-15]: User publishes anofox-forecast v0.16.2 (PR #230, R KalmanForecast ARIMA intervals); fold the bump into v0.10.0 as a Phase 18 gap item — RC-05 AutoARIMA AirPassengers interval flips from known gap to hard parity
 
 ### Blockers/Concerns
+
+- [Next] DuckDB 2.0 compat needed before community-extensions PR #3112 can pass (registry default build = DuckDB 2.0-dev). See .planning/HANDOVER-duckdb2-compat.md (branch chore/duckdb2-compat).
 
 - [Phase 13/15] STL is shared: STAT-02 uses the crate `seasonality::stl::STL` — validate vs R `stats::stl` in Phase 13; DET-04 reuses or fixes it.
 - [Phase 15] fdars 0.47 bump: ~30 mechanical compile errors in 4 files plus a WASM (`js` feature) build check — use the local wasm_eh recipe.
