@@ -100,8 +100,8 @@ static LogicalType GetForecastAggResultType(double confidence_level = 0.90) {
     children.push_back(make_pair("forecast_step", LogicalType::LIST(LogicalType(LogicalTypeId::INTEGER))));
     children.push_back(make_pair("forecast_timestamp", LogicalType::LIST(LogicalType(LogicalTypeId::TIMESTAMP))));
     children.push_back(make_pair("point_forecast", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
-    children.push_back(make_pair("lower_" + suffix, LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
-    children.push_back(make_pair("upper_" + suffix, LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(MakeChild("lower_" + suffix, LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
+    children.push_back(MakeChild("upper_" + suffix, LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
     children.push_back(make_pair("model_name", LogicalType(LogicalTypeId::VARCHAR)));
     children.push_back(make_pair("insample_fitted", LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))));
     // WR-02: these four were promised by desc.description below but never
@@ -133,7 +133,7 @@ static LogicalType GetForecastAggResultType(double confidence_level = 0.90) {
 // TsForecastAggUpdate (below) throws if a group's parsed confidence_level
 // disagrees with the one folded here — "confidence_level must be a constant
 // expression" — rather than silently mislabelling the bound fields.
-static unique_ptr<FunctionData> TsForecastAggBind(ClientContext &context, AggregateFunction &function,
+static unique_ptr<FunctionData> TsForecastAggBind(ClientContext &context, AggregateBindFunction &function,
                                                    vector<unique_ptr<Expression>> &arguments) {
     auto bind_data = make_uniq<TsForecastAggBindData>();
 
@@ -154,7 +154,7 @@ static unique_ptr<FunctionData> TsForecastAggBind(ClientContext &context, Aggreg
     bind_data->UpdateColumnNames();
 
     // Set the return type with dynamic column names
-    function.return_type = GetForecastAggResultType(bind_data->confidence_level);
+    SetReturnTypeOf(function, GetForecastAggResultType(bind_data->confidence_level));
 
     return bind_data;
 }
@@ -202,13 +202,13 @@ static void TsForecastAggUpdate(Vector inputs[], AggregateInputData &aggr_input,
     auto &params_vec = inputs[4];  // params MAP
 
     UnifiedVectorFormat ts_data, val_data, method_data, horizon_data, params_data;
-    ts_vec.ToUnifiedFormat(count, ts_data);
-    val_vec.ToUnifiedFormat(count, val_data);
-    method_vec.ToUnifiedFormat(count, method_data);
-    horizon_vec.ToUnifiedFormat(count, horizon_data);
-    params_vec.ToUnifiedFormat(count, params_data);
+    ToUnified(ts_vec, count, ts_data);
+    ToUnified(val_vec, count, val_data);
+    ToUnified(method_vec, count, method_data);
+    ToUnified(horizon_vec, count, horizon_data);
+    ToUnified(params_vec, count, params_data);
 
-    auto states = FlatVector::GetData<TsForecastAggState *>(state_vector);
+    auto states = FlatDataMut<TsForecastAggState *>(state_vector);
 
     for (idx_t i = 0; i < count; i++) {
         auto &state = *states[i];
@@ -295,22 +295,22 @@ static void TsForecastAggUpdate(Vector inputs[], AggregateInputData &aggr_input,
 
 static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr_input,
                                   Vector &result, idx_t count, idx_t offset) {
-    auto states = FlatVector::GetData<TsForecastAggState *>(state_vector);
+    auto states = FlatDataMut<TsForecastAggState *>(state_vector);
 
     auto &children = StructVector::GetEntries(result);
-    auto &step_list = *children[0];      // forecast_step
-    auto &ts_list = *children[1];        // forecast_timestamp
-    auto &point_list = *children[2];     // point_forecast
-    auto &lower_list = *children[3];     // lower_<suffix>
-    auto &upper_list = *children[4];     // upper_<suffix>
-    auto &model_vec = *children[5];      // model_name
-    auto &fitted_list = *children[6];    // insample_fitted
-    auto &residuals_list = *children[7]; // residuals (WR-02)
-    auto &aic_vec = *children[8];        // aic (WR-02)
-    auto &bic_vec = *children[9];        // bic (WR-02)
-    auto &mse_vec = *children[10];       // mse (WR-02)
-    auto &date_col_vec = *children[11];  // date_col_name
-    auto &error_vec = *children[12];     // error_message
+    auto &step_list = StructEntry(children[0]);      // forecast_step
+    auto &ts_list = StructEntry(children[1]);        // forecast_timestamp
+    auto &point_list = StructEntry(children[2]);     // point_forecast
+    auto &lower_list = StructEntry(children[3]);     // lower_<suffix>
+    auto &upper_list = StructEntry(children[4]);     // upper_<suffix>
+    auto &model_vec = StructEntry(children[5]);      // model_name
+    auto &fitted_list = StructEntry(children[6]);    // insample_fitted
+    auto &residuals_list = StructEntry(children[7]); // residuals (WR-02)
+    auto &aic_vec = StructEntry(children[8]);        // aic (WR-02)
+    auto &bic_vec = StructEntry(children[9]);        // bic (WR-02)
+    auto &mse_vec = StructEntry(children[10]);       // mse (WR-02)
+    auto &date_col_vec = StructEntry(children[11]);  // date_col_name
+    auto &error_vec = StructEntry(children[12]);     // error_message
 
     for (idx_t i = 0; i < count; i++) {
         auto &state = *states[i];
@@ -415,11 +415,11 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
             }
 
             // Set error message instead of returning null
-            FlatVector::GetData<string_t>(error_vec)[row] =
+            FlatDataMut<string_t>(error_vec)[row] =
                 StringVector::AddString(error_vec, error.message);
             // Set empty lists for other fields
             auto set_empty_list = [row](Vector &list_vec) {
-                auto list_data = FlatVector::GetData<list_entry_t>(list_vec);
+                auto list_data = FlatDataMut<list_entry_t>(list_vec);
                 list_data[row].offset = ListVector::GetListSize(list_vec);
                 list_data[row].length = 0;
             };
@@ -433,9 +433,9 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
             FlatVector::SetNull(aic_vec, row, true);
             FlatVector::SetNull(bic_vec, row, true);
             FlatVector::SetNull(mse_vec, row, true);
-            FlatVector::GetData<string_t>(model_vec)[row] =
+            FlatDataMut<string_t>(model_vec)[row] =
                 StringVector::AddString(model_vec, "");
-            FlatVector::GetData<string_t>(date_col_vec)[row] =
+            FlatDataMut<string_t>(date_col_vec)[row] =
                 StringVector::AddString(date_col_vec, "date");
             continue;
         }
@@ -450,8 +450,8 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
 
         // Set forecast_step list
         {
-            auto list_data = FlatVector::GetData<list_entry_t>(step_list);
-            auto &list_child = ListVector::GetEntry(step_list);
+            auto list_data = FlatDataMut<list_entry_t>(step_list);
+            auto &list_child = ListChildMut(step_list);
             auto current_size = ListVector::GetListSize(step_list);
 
             list_data[row].offset = current_size;
@@ -460,7 +460,7 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
             ListVector::Reserve(step_list, current_size + fcst_result.n_forecasts);
             ListVector::SetListSize(step_list, current_size + fcst_result.n_forecasts);
 
-            auto child_data = FlatVector::GetData<int32_t>(list_child);
+            auto child_data = FlatDataMut<int32_t>(list_child);
             for (size_t j = 0; j < fcst_result.n_forecasts; j++) {
                 child_data[current_size + j] = j + 1;
             }
@@ -468,8 +468,8 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
 
         // Set forecast_timestamp list
         {
-            auto list_data = FlatVector::GetData<list_entry_t>(ts_list);
-            auto &list_child = ListVector::GetEntry(ts_list);
+            auto list_data = FlatDataMut<list_entry_t>(ts_list);
+            auto &list_child = ListChildMut(ts_list);
             auto current_size = ListVector::GetListSize(ts_list);
 
             list_data[row].offset = current_size;
@@ -478,7 +478,7 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
             ListVector::Reserve(ts_list, current_size + fcst_result.n_forecasts);
             ListVector::SetListSize(ts_list, current_size + fcst_result.n_forecasts);
 
-            auto child_data = FlatVector::GetData<timestamp_t>(list_child);
+            auto child_data = FlatDataMut<timestamp_t>(list_child);
             for (size_t j = 0; j < fcst_result.n_forecasts; j++) {
                 child_data[current_size + j] = timestamp_t(future_ts[j]);
             }
@@ -486,8 +486,8 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
 
         // Set point_forecast list
         {
-            auto list_data = FlatVector::GetData<list_entry_t>(point_list);
-            auto &list_child = ListVector::GetEntry(point_list);
+            auto list_data = FlatDataMut<list_entry_t>(point_list);
+            auto &list_child = ListChildMut(point_list);
             auto current_size = ListVector::GetListSize(point_list);
 
             list_data[row].offset = current_size;
@@ -496,7 +496,7 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
             ListVector::Reserve(point_list, current_size + fcst_result.n_forecasts);
             ListVector::SetListSize(point_list, current_size + fcst_result.n_forecasts);
 
-            auto child_data = FlatVector::GetData<double>(list_child);
+            auto child_data = FlatDataMut<double>(list_child);
             memcpy(child_data + current_size, fcst_result.point_forecasts,
                    fcst_result.n_forecasts * sizeof(double));
         }
@@ -506,8 +506,8 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
         // marked invalid (SQL NULL) instead of memcpy-ing from a null
         // pointer.
         {
-            auto list_data = FlatVector::GetData<list_entry_t>(lower_list);
-            auto &list_child = ListVector::GetEntry(lower_list);
+            auto list_data = FlatDataMut<list_entry_t>(lower_list);
+            auto &list_child = ListChildMut(lower_list);
             auto current_size = ListVector::GetListSize(lower_list);
 
             list_data[row].offset = current_size;
@@ -516,12 +516,12 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
             ListVector::Reserve(lower_list, current_size + fcst_result.n_forecasts);
             ListVector::SetListSize(lower_list, current_size + fcst_result.n_forecasts);
 
-            auto child_data = FlatVector::GetData<double>(list_child);
+            auto child_data = FlatDataMut<double>(list_child);
             if (fcst_result.lower_bounds) {
                 memcpy(child_data + current_size, fcst_result.lower_bounds,
                        fcst_result.n_forecasts * sizeof(double));
             } else {
-                auto &child_validity = FlatVector::Validity(list_child);
+                auto &child_validity = FlatValidityMut(list_child);
                 for (size_t j = 0; j < fcst_result.n_forecasts; j++) {
                     child_data[current_size + j] = 0.0;
                     child_validity.SetInvalid(current_size + j);
@@ -531,8 +531,8 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
 
         // Set upper_<suffix> list. Same null-safety as lower_bound above.
         {
-            auto list_data = FlatVector::GetData<list_entry_t>(upper_list);
-            auto &list_child = ListVector::GetEntry(upper_list);
+            auto list_data = FlatDataMut<list_entry_t>(upper_list);
+            auto &list_child = ListChildMut(upper_list);
             auto current_size = ListVector::GetListSize(upper_list);
 
             list_data[row].offset = current_size;
@@ -541,12 +541,12 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
             ListVector::Reserve(upper_list, current_size + fcst_result.n_forecasts);
             ListVector::SetListSize(upper_list, current_size + fcst_result.n_forecasts);
 
-            auto child_data = FlatVector::GetData<double>(list_child);
+            auto child_data = FlatDataMut<double>(list_child);
             if (fcst_result.upper_bounds) {
                 memcpy(child_data + current_size, fcst_result.upper_bounds,
                        fcst_result.n_forecasts * sizeof(double));
             } else {
-                auto &child_validity = FlatVector::Validity(list_child);
+                auto &child_validity = FlatValidityMut(list_child);
                 for (size_t j = 0; j < fcst_result.n_forecasts; j++) {
                     child_data[current_size + j] = 0.0;
                     child_validity.SetInvalid(current_size + j);
@@ -555,15 +555,15 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
         }
 
         // Set model_name
-        FlatVector::GetData<string_t>(model_vec)[row] =
+        FlatDataMut<string_t>(model_vec)[row] =
             StringVector::AddString(model_vec, fcst_result.model_name);
 
         // Set fitted values list. NaN entries (crate warmup rows per D-11, or
         // leading/trailing trimmed positions per D-12) mark SQL NULL rather
         // than surfacing as a literal NaN double.
         {
-            auto list_data = FlatVector::GetData<list_entry_t>(fitted_list);
-            auto &list_child = ListVector::GetEntry(fitted_list);
+            auto list_data = FlatDataMut<list_entry_t>(fitted_list);
+            auto &list_child = ListChildMut(fitted_list);
             auto current_size = ListVector::GetListSize(fitted_list);
 
             list_data[row].offset = current_size;
@@ -572,11 +572,11 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
             ListVector::Reserve(fitted_list, current_size + fcst_result.n_fitted);
             ListVector::SetListSize(fitted_list, current_size + fcst_result.n_fitted);
 
-            auto child_data = FlatVector::GetData<double>(list_child);
+            auto child_data = FlatDataMut<double>(list_child);
             if (fcst_result.fitted_values && fcst_result.n_fitted > 0) {
                 memcpy(child_data + current_size, fcst_result.fitted_values,
                        fcst_result.n_fitted * sizeof(double));
-                auto &child_validity = FlatVector::Validity(list_child);
+                auto &child_validity = FlatValidityMut(list_child);
                 for (size_t j = 0; j < fcst_result.n_fitted; j++) {
                     if (std::isnan(child_data[current_size + j])) {
                         child_validity.SetInvalid(current_size + j);
@@ -590,8 +590,8 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
         // see the FFI header's n_residuals doc comment) length field the
         // non-aggregate ts_forecast table/scalar functions use.
         {
-            auto list_data = FlatVector::GetData<list_entry_t>(residuals_list);
-            auto &list_child = ListVector::GetEntry(residuals_list);
+            auto list_data = FlatDataMut<list_entry_t>(residuals_list);
+            auto &list_child = ListChildMut(residuals_list);
             auto current_size = ListVector::GetListSize(residuals_list);
 
             list_data[row].offset = current_size;
@@ -600,11 +600,11 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
             ListVector::Reserve(residuals_list, current_size + fcst_result.n_residuals);
             ListVector::SetListSize(residuals_list, current_size + fcst_result.n_residuals);
 
-            auto child_data = FlatVector::GetData<double>(list_child);
+            auto child_data = FlatDataMut<double>(list_child);
             if (fcst_result.residuals && fcst_result.n_residuals > 0) {
                 memcpy(child_data + current_size, fcst_result.residuals,
                        fcst_result.n_residuals * sizeof(double));
-                auto &child_validity = FlatVector::Validity(list_child);
+                auto &child_validity = FlatValidityMut(list_child);
                 for (size_t j = 0; j < fcst_result.n_residuals; j++) {
                     if (std::isnan(child_data[current_size + j])) {
                         child_validity.SetInvalid(current_size + j);
@@ -615,16 +615,16 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
 
         // Set aic/bic/mse (WR-02) — straight from the crate fit, same as
         // ts_forecast.cpp's scalar/table surfaces.
-        FlatVector::GetData<double>(aic_vec)[row] = fcst_result.aic;
-        FlatVector::GetData<double>(bic_vec)[row] = fcst_result.bic;
-        FlatVector::GetData<double>(mse_vec)[row] = fcst_result.mse;
+        FlatDataMut<double>(aic_vec)[row] = fcst_result.aic;
+        FlatDataMut<double>(bic_vec)[row] = fcst_result.bic;
+        FlatDataMut<double>(mse_vec)[row] = fcst_result.mse;
 
         // Set date_col_name (default to "date" as we don't have the column name in aggregate context)
-        FlatVector::GetData<string_t>(date_col_vec)[row] =
+        FlatDataMut<string_t>(date_col_vec)[row] =
             StringVector::AddString(date_col_vec, "date");
 
         // Set error_message (empty on success)
-        FlatVector::GetData<string_t>(error_vec)[row] =
+        FlatDataMut<string_t>(error_vec)[row] =
             StringVector::AddString(error_vec, "");
 
         anofox_free_forecast_result(&fcst_result);
@@ -633,8 +633,8 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
 
 static void TsForecastAggCombine(Vector &state_vector, Vector &combined, AggregateInputData &aggr_input,
                                  idx_t count) {
-    auto src_states = FlatVector::GetData<TsForecastAggState *>(state_vector);
-    auto tgt_states = FlatVector::GetData<TsForecastAggState *>(combined);
+    auto src_states = FlatDataMut<TsForecastAggState *>(state_vector);
+    auto tgt_states = FlatDataMut<TsForecastAggState *>(combined);
 
     for (idx_t i = 0; i < count; i++) {
         auto &src = *src_states[i];
@@ -664,7 +664,7 @@ static void TsForecastAggCombine(Vector &state_vector, Vector &combined, Aggrega
 }
 
 static void TsForecastAggDestructor(Vector &state_vector, AggregateInputData &aggr_input, idx_t count) {
-    auto states = FlatVector::GetData<TsForecastAggState *>(state_vector);
+    auto states = FlatDataMut<TsForecastAggState *>(state_vector);
     for (idx_t i = 0; i < count; i++) {
         if (states[i] && states[i]->data) {
             delete states[i]->data;
@@ -685,9 +685,9 @@ void RegisterTsForecastAggFunction(ExtensionLoader &loader) {
         AggregateFunction::StateInitialize<TsForecastAggState, TsForecastAggOperation>,
         TsForecastAggUpdate,
         TsForecastAggCombine,
-        TsForecastAggFinalize,
+        ANOFOX_AGG_FINALIZE(TsForecastAggFinalize),
         nullptr,  // simple_update
-        TsForecastAggBind,
+        ANOFOX_AGG_BIND(TsForecastAggBind),
         TsForecastAggDestructor
     );
 

@@ -98,9 +98,9 @@ static void TsDetectChangepointsBocpdFunction(DataChunk &args, ExpressionState &
 
         // Set is_changepoint list
         {
-            auto &cp_list = *children[0];
-            auto list_data = FlatVector::GetData<list_entry_t>(cp_list);
-            auto &list_child = ListVector::GetEntry(cp_list);
+            auto &cp_list = StructEntry(children[0]);
+            auto list_data = FlatDataMut<list_entry_t>(cp_list);
+            auto &list_child = ListChildMut(cp_list);
             auto current_size = ListVector::GetListSize(cp_list);
 
             list_data[row_idx].offset = current_size;
@@ -109,7 +109,7 @@ static void TsDetectChangepointsBocpdFunction(DataChunk &args, ExpressionState &
             ListVector::Reserve(cp_list, current_size + bocpd_result.n_points);
             ListVector::SetListSize(cp_list, current_size + bocpd_result.n_points);
 
-            auto child_data = FlatVector::GetData<bool>(list_child);
+            auto child_data = FlatDataMut<bool>(list_child);
             if (bocpd_result.is_changepoint) {
                 for (size_t i = 0; i < bocpd_result.n_points; i++) {
                     child_data[current_size + i] = bocpd_result.is_changepoint[i];
@@ -119,9 +119,9 @@ static void TsDetectChangepointsBocpdFunction(DataChunk &args, ExpressionState &
 
         // Set changepoint_probability list
         {
-            auto &prob_list = *children[1];
-            auto list_data = FlatVector::GetData<list_entry_t>(prob_list);
-            auto &list_child = ListVector::GetEntry(prob_list);
+            auto &prob_list = StructEntry(children[1]);
+            auto list_data = FlatDataMut<list_entry_t>(prob_list);
+            auto &list_child = ListChildMut(prob_list);
             auto current_size = ListVector::GetListSize(prob_list);
 
             list_data[row_idx].offset = current_size;
@@ -130,7 +130,7 @@ static void TsDetectChangepointsBocpdFunction(DataChunk &args, ExpressionState &
             ListVector::Reserve(prob_list, current_size + bocpd_result.n_points);
             ListVector::SetListSize(prob_list, current_size + bocpd_result.n_points);
 
-            auto child_data = FlatVector::GetData<double>(list_child);
+            auto child_data = FlatDataMut<double>(list_child);
             if (bocpd_result.changepoint_probability) {
                 for (size_t i = 0; i < bocpd_result.n_points; i++) {
                     child_data[current_size + i] = bocpd_result.changepoint_probability[i];
@@ -140,9 +140,9 @@ static void TsDetectChangepointsBocpdFunction(DataChunk &args, ExpressionState &
 
         // Set changepoint_indices list
         {
-            auto &idx_list = *children[2];
-            auto list_data = FlatVector::GetData<list_entry_t>(idx_list);
-            auto &list_child = ListVector::GetEntry(idx_list);
+            auto &idx_list = StructEntry(children[2]);
+            auto list_data = FlatDataMut<list_entry_t>(idx_list);
+            auto &list_child = ListChildMut(idx_list);
             auto current_size = ListVector::GetListSize(idx_list);
 
             list_data[row_idx].offset = current_size;
@@ -151,7 +151,7 @@ static void TsDetectChangepointsBocpdFunction(DataChunk &args, ExpressionState &
             ListVector::Reserve(idx_list, current_size + bocpd_result.n_changepoints);
             ListVector::SetListSize(idx_list, current_size + bocpd_result.n_changepoints);
 
-            auto child_data = FlatVector::GetData<uint64_t>(list_child);
+            auto child_data = FlatDataMut<uint64_t>(list_child);
             if (bocpd_result.changepoint_indices) {
                 for (size_t i = 0; i < bocpd_result.n_changepoints; i++) {
                     child_data[current_size + i] = bocpd_result.changepoint_indices[i];
@@ -168,11 +168,11 @@ void RegisterTsDetectChangepointsBocpdFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_bocpd_set("_ts_detect_changepoints_bocpd");
 
     // _ts_detect_changepoints_bocpd(values, hazard_lambda, include_probabilities)
-    ts_bocpd_set.AddFunction(ScalarFunction(
+    ts_bocpd_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::BOOLEAN)},
         GetBocpdResultType(),
         TsDetectChangepointsBocpdFunction
-    ));
+    )));
 
     // Mark as internal to hide from duckdb_functions() and deprioritize in autocomplete
     CreateScalarFunctionInfo info(ts_bocpd_set);
@@ -281,7 +281,7 @@ static unique_ptr<FunctionData> TsDetectChangepointsByBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    TableBindNames &names) {
 
     auto bind_data = make_uniq<TsDetectChangepointsByBindData>();
 
@@ -299,9 +299,9 @@ static unique_ptr<FunctionData> TsDetectChangepointsByBind(
     }
 
     // Preserve column names
-    bind_data->group_col_name = input.input_table_names[0];
-    bind_data->date_col_name = input.input_table_names[1];
-    bind_data->value_col_name = input.input_table_names[2];
+    bind_data->group_col_name = NameString(input.input_table_names[0]);
+    bind_data->date_col_name = NameString(input.input_table_names[1]);
+    bind_data->value_col_name = NameString(input.input_table_names[2]);
     bind_data->group_logical_type = input.input_table_types[0];
     bind_data->date_logical_type = input.input_table_types[1];
 
@@ -321,16 +321,16 @@ static unique_ptr<FunctionData> TsDetectChangepointsByBind(
     }
 
     // Output schema: group_col, date_col, is_changepoint, changepoint_probability
-    names.push_back(bind_data->group_col_name);
+    names.push_back(MakeBindName(bind_data->group_col_name));
     return_types.push_back(bind_data->group_logical_type);
 
-    names.push_back(bind_data->date_col_name);
+    names.push_back(MakeBindName(bind_data->date_col_name));
     return_types.push_back(bind_data->date_logical_type);
 
-    names.push_back("is_changepoint");
+    names.push_back(MakeBindName("is_changepoint"));
     return_types.push_back(LogicalType(LogicalTypeId::BOOLEAN));
 
-    names.push_back("changepoint_probability");
+    names.push_back(MakeBindName("changepoint_probability"));
     return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
 
     return bind_data;
@@ -423,7 +423,7 @@ static OperatorResultType TsDetectChangepointsByInOut(
         }
     }
 
-    output.SetCardinality(0);
+    SetOutputCardinality(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -585,20 +585,20 @@ static OperatorFinalizeResultType TsDetectChangepointsByFinalize(
         }
 
         // is_changepoint
-        FlatVector::GetData<bool>(output.data[2])[out_idx] = row.is_changepoint;
+        FlatDataMut<bool>(output.data[2])[out_idx] = row.is_changepoint;
 
         // changepoint_probability - output NULL when flagged
         if (row.changepoint_probability_null) {
             FlatVector::SetNull(output.data[3], out_idx, true);
         } else {
-            FlatVector::GetData<double>(output.data[3])[out_idx] = row.changepoint_probability;
+            FlatDataMut<double>(output.data[3])[out_idx] = row.changepoint_probability;
         }
 
         output_count++;
         gstate.output_offset++;
     }
 
-    output.SetCardinality(output_count);
+    SetOutputCardinality(output, output_count);
 
     if (gstate.output_offset >= gstate.results.size()) {
         return OperatorFinalizeResultType::FINISHED;

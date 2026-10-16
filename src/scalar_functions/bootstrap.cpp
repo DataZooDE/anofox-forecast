@@ -31,10 +31,10 @@ static void TsBootstrapIntervalsFunction(DataChunk &args, ExpressionState &state
     ScalarArgReader<int64_t> seed_reader(seed_vec, count);
 
     auto &struct_entries = StructVector::GetEntries(result);
-    auto &point_out = *struct_entries[0];
-    auto &lower_out = *struct_entries[1];
-    auto &upper_out = *struct_entries[2];
-    auto &coverage_out = *struct_entries[3];
+    auto &point_out = StructEntry(struct_entries[0]);
+    auto &lower_out = StructEntry(struct_entries[1]);
+    auto &upper_out = StructEntry(struct_entries[2]);
+    auto &coverage_out = StructEntry(struct_entries[3]);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (residuals_reader.IsNull(row_idx) || forecasts_reader.IsNull(row_idx) ||
@@ -73,7 +73,7 @@ static void TsBootstrapIntervalsFunction(DataChunk &args, ExpressionState &state
         WriteDoubleListNanAsNull(point_out, row_idx, bs_result.point, bs_result.n_forecasts);
         WriteDoubleListNanAsNull(lower_out, row_idx, bs_result.lower, bs_result.n_forecasts);
         WriteDoubleListNanAsNull(upper_out, row_idx, bs_result.upper, bs_result.n_forecasts);
-        FlatVector::GetData<double>(coverage_out)[row_idx] = bs_result.coverage;
+        FlatDataMut<double>(coverage_out)[row_idx] = bs_result.coverage;
 
         anofox_free_bootstrap_result(&bs_result);
     }
@@ -89,7 +89,7 @@ void RegisterTsBootstrapIntervalsFunction(ExtensionLoader &loader) {
 
     // ts_bootstrap_intervals(residuals[], forecasts[], n_paths, coverage, seed)
     ScalarFunctionSet bs_set("ts_bootstrap_intervals");
-    bs_set.AddFunction(ScalarFunction(
+    bs_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType(LogicalTypeId::INTEGER),
@@ -97,7 +97,7 @@ void RegisterTsBootstrapIntervalsFunction(ExtensionLoader &loader) {
          LogicalType(LogicalTypeId::BIGINT)},
         result_type,
         TsBootstrapIntervalsFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(bs_set);
         FunctionDescription desc;
@@ -117,7 +117,7 @@ void RegisterTsBootstrapIntervalsFunction(ExtensionLoader &loader) {
     }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_bootstrap_intervals");
-    anofox_set.AddFunction(ScalarFunction(
+    anofox_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType(LogicalTypeId::INTEGER),
@@ -125,7 +125,7 @@ void RegisterTsBootstrapIntervalsFunction(ExtensionLoader &loader) {
          LogicalType(LogicalTypeId::BIGINT)},
         result_type,
         TsBootstrapIntervalsFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(anofox_set);
         info.alias_of = "ts_bootstrap_intervals";
@@ -167,9 +167,9 @@ static void TsBootstrapQuantilesFunction(DataChunk &args, ExpressionState &state
     ScalarArgReader<int64_t> seed_reader(seed_vec, count);
 
     auto &struct_entries = StructVector::GetEntries(result);
-    auto &point_out = *struct_entries[0];
-    auto &quantiles_out = *struct_entries[1];
-    auto &values_out = *struct_entries[2];
+    auto &point_out = StructEntry(struct_entries[0]);
+    auto &quantiles_out = StructEntry(struct_entries[1]);
+    auto &values_out = StructEntry(struct_entries[2]);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (residuals_reader.IsNull(row_idx) || forecasts_reader.IsNull(row_idx) ||
@@ -228,7 +228,7 @@ void RegisterTsBootstrapQuantilesFunction(ExtensionLoader &loader) {
 
     // ts_bootstrap_quantiles(residuals[], forecasts[], n_paths, quantiles[], seed)
     ScalarFunctionSet bq_set("ts_bootstrap_quantiles");
-    bq_set.AddFunction(ScalarFunction(
+    bq_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType(LogicalTypeId::INTEGER),
@@ -236,7 +236,7 @@ void RegisterTsBootstrapQuantilesFunction(ExtensionLoader &loader) {
          LogicalType(LogicalTypeId::BIGINT)},
         result_type,
         TsBootstrapQuantilesFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(bq_set);
         FunctionDescription desc;
@@ -256,7 +256,7 @@ void RegisterTsBootstrapQuantilesFunction(ExtensionLoader &loader) {
     }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_bootstrap_quantiles");
-    anofox_set.AddFunction(ScalarFunction(
+    anofox_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType(LogicalTypeId::INTEGER),
@@ -264,7 +264,7 @@ void RegisterTsBootstrapQuantilesFunction(ExtensionLoader &loader) {
          LogicalType(LogicalTypeId::BIGINT)},
         result_type,
         TsBootstrapQuantilesFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(anofox_set);
         info.alias_of = "ts_bootstrap_quantiles";

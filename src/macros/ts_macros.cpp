@@ -2668,7 +2668,7 @@ GROUP BY group_col
 // Helper function to create a table macro from the definition
 static unique_ptr<CreateMacroInfo> CreateTableMacro(const TsTableMacro &macro_def) {
     // Parse the SQL
-    Parser parser;
+    auto parser = MakeParser();
     parser.ParseQuery(macro_def.macro);
     if (parser.statements.size() != 1 || parser.statements[0]->type != StatementType::SELECT_STATEMENT) {
         throw InternalException("Expected a single select statement in CreateTableMacro");
@@ -2689,16 +2689,15 @@ static unique_ptr<CreateMacroInfo> CreateTableMacro(const TsTableMacro &macro_de
         function->parameters.push_back(make_uniq<ColumnRefExpression>(param.name));
 
         // Parse the default value
-        auto expr_list = Parser::ParseExpressionList(param.default_value);
+        auto expr_list = ParseExpressionList(param.default_value);
         if (!expr_list.empty()) {
-            function->default_parameters.insert(make_pair(string(param.name), std::move(expr_list[0])));
+            function->default_parameters.insert(AsDuckName(param.name), std::move(expr_list[0]));
         }
     }
 
     // Create the macro info
     auto info = make_uniq<CreateMacroInfo>(CatalogType::TABLE_MACRO_ENTRY);
-    info->schema = DEFAULT_SCHEMA;
-    info->name = macro_def.name;
+    SetCreateInfoName(*info, DEFAULT_SCHEMA, macro_def.name);
     info->temporary = true;
     info->internal = true;
     info->macros.push_back(std::move(function));
@@ -2728,8 +2727,8 @@ void RegisterTsTableMacros(ExtensionLoader &loader) {
 
         // Register the prefixed alias (e.g. anofox_fcst_ts_forecast_by)
         auto alias_info = CreateTableMacro(ts_table_macros[i]);
-        alias_info->name = "anofox_fcst_" + string(ts_table_macros[i].name);
-        alias_info->alias_of = string(ts_table_macros[i].name);
+        SetCreateInfoName(*alias_info, DEFAULT_SCHEMA, "anofox_fcst_" + string(ts_table_macros[i].name));
+        alias_info->alias_of = AsDuckName(string(ts_table_macros[i].name));
         loader.RegisterFunction(*alias_info);
     }
 }

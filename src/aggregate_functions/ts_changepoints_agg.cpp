@@ -80,11 +80,11 @@ static void TsChangepointsAggUpdate(Vector inputs[], AggregateInputData &aggr_in
     auto &params_vec = inputs[2];
 
     UnifiedVectorFormat ts_data, val_data, params_data;
-    ts_vec.ToUnifiedFormat(count, ts_data);
-    val_vec.ToUnifiedFormat(count, val_data);
-    params_vec.ToUnifiedFormat(count, params_data);
+    ToUnified(ts_vec, count, ts_data);
+    ToUnified(val_vec, count, val_data);
+    ToUnified(params_vec, count, params_data);
 
-    auto states = FlatVector::GetData<TsChangepointsAggState *>(state_vector);
+    auto states = FlatDataMut<TsChangepointsAggState *>(state_vector);
 
     for (idx_t i = 0; i < count; i++) {
         auto &state = *states[i];
@@ -117,7 +117,7 @@ static void TsChangepointsAggUpdate(Vector inputs[], AggregateInputData &aggr_in
 
 static void TsChangepointsAggFinalize(Vector &state_vector, AggregateInputData &aggr_input,
                                       Vector &result, idx_t count, idx_t offset) {
-    auto states = FlatVector::GetData<TsChangepointsAggState *>(state_vector);
+    auto states = FlatDataMut<TsChangepointsAggState *>(state_vector);
 
     for (idx_t i = 0; i < count; i++) {
         auto &state = *states[i];
@@ -164,8 +164,8 @@ static void TsChangepointsAggFinalize(Vector &state_vector, AggregateInputData &
         }
 
         // Build LIST<STRUCT(timestamp, value, is_changepoint, changepoint_probability)>
-        auto list_data = FlatVector::GetData<list_entry_t>(result);
-        auto &list_child = ListVector::GetEntry(result);  // This is the STRUCT vector
+        auto list_data = FlatDataMut<list_entry_t>(result);
+        auto &list_child = ListChildMut(result);  // This is the STRUCT vector
         auto current_size = ListVector::GetListSize(result);
 
         size_t n = sorted_values.size();
@@ -178,15 +178,15 @@ static void TsChangepointsAggFinalize(Vector &state_vector, AggregateInputData &
 
         // Get the struct children
         auto &struct_entries = StructVector::GetEntries(list_child);
-        auto &ts_child = *struct_entries[0];
-        auto &val_child = *struct_entries[1];
-        auto &cp_child = *struct_entries[2];
-        auto &prob_child = *struct_entries[3];
+        auto &ts_child = StructEntry(struct_entries[0]);
+        auto &val_child = StructEntry(struct_entries[1]);
+        auto &cp_child = StructEntry(struct_entries[2]);
+        auto &prob_child = StructEntry(struct_entries[3]);
 
-        auto ts_child_data = FlatVector::GetData<timestamp_t>(ts_child);
-        auto val_child_data = FlatVector::GetData<double>(val_child);
-        auto cp_child_data = FlatVector::GetData<bool>(cp_child);
-        auto prob_child_data = FlatVector::GetData<double>(prob_child);
+        auto ts_child_data = FlatDataMut<timestamp_t>(ts_child);
+        auto val_child_data = FlatDataMut<double>(val_child);
+        auto cp_child_data = FlatDataMut<bool>(cp_child);
+        auto prob_child_data = FlatDataMut<double>(prob_child);
 
         for (size_t j = 0; j < n; j++) {
             ts_child_data[current_size + j] = timestamp_t(sorted_timestamps[j]);
@@ -202,8 +202,8 @@ static void TsChangepointsAggFinalize(Vector &state_vector, AggregateInputData &
 
 static void TsChangepointsAggCombine(Vector &state_vector, Vector &combined, AggregateInputData &aggr_input,
                                      idx_t count) {
-    auto src_states = FlatVector::GetData<TsChangepointsAggState *>(state_vector);
-    auto tgt_states = FlatVector::GetData<TsChangepointsAggState *>(combined);
+    auto src_states = FlatDataMut<TsChangepointsAggState *>(state_vector);
+    auto tgt_states = FlatDataMut<TsChangepointsAggState *>(combined);
 
     for (idx_t i = 0; i < count; i++) {
         auto &src = *src_states[i];
@@ -230,7 +230,7 @@ static void TsChangepointsAggCombine(Vector &state_vector, Vector &combined, Agg
 }
 
 static void TsChangepointsAggDestructor(Vector &state_vector, AggregateInputData &aggr_input, idx_t count) {
-    auto states = FlatVector::GetData<TsChangepointsAggState *>(state_vector);
+    auto states = FlatDataMut<TsChangepointsAggState *>(state_vector);
     for (idx_t i = 0; i < count; i++) {
         if (states[i] && states[i]->data) {
             delete states[i]->data;
@@ -251,7 +251,7 @@ void RegisterTsDetectChangepointsAggFunction(ExtensionLoader &loader) {
         AggregateFunction::StateInitialize<TsChangepointsAggState, TsChangepointsAggOperation>,
         TsChangepointsAggUpdate,
         TsChangepointsAggCombine,
-        TsChangepointsAggFinalize,
+        ANOFOX_AGG_FINALIZE(TsChangepointsAggFinalize),
         nullptr,  // simple_update
         nullptr,  // bind
         TsChangepointsAggDestructor

@@ -1,3 +1,4 @@
+#include "duckdb_compat.hpp"
 #include "ts_cv_hydrate_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // For DateColumnType, helper functions
 #include "duckdb/common/exception.hpp"
@@ -145,7 +146,7 @@ static string ParseStringParamForHydrate(const Value &params, const string &key,
         auto &struct_children = StructValue::GetChildren(params);
         auto &struct_type = StructType::GetChildTypes(params.type());
         for (idx_t i = 0; i < struct_children.size(); i++) {
-            auto k = struct_type[i].first;
+            auto k = NameString(struct_type[i].first);
             StringUtil::Trim(k);
             if (StringUtil::Lower(k) == StringUtil::Lower(key) && !struct_children[i].IsNull()) {
                 return struct_children[i].ToString();
@@ -280,7 +281,7 @@ static void ValidateHydrateParams(const Value &params) {
     } else if (params.type().id() == LogicalTypeId::STRUCT) {
         auto &struct_type = StructType::GetChildTypes(params.type());
         for (idx_t i = 0; i < struct_type.size(); i++) {
-            auto key = struct_type[i].first;
+            auto key = NameString(struct_type[i].first);
             StringUtil::Trim(key);
             if (VALID_HYDRATE_PARAMS.find(StringUtil::Lower(key)) == VALID_HYDRATE_PARAMS.end()) {
                 unknown_keys.push_back(key);
@@ -311,7 +312,7 @@ static unique_ptr<FunctionData> TsCvHydrateNativeBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    TableBindNames &names) {
 
     auto bind_data = make_uniq<TsCvHydrateNativeBindData>();
 
@@ -336,9 +337,9 @@ static unique_ptr<FunctionData> TsCvHydrateNativeBind(
     bind_data->target_type = input.input_table_types[2];
 
     // Get column names
-    bind_data->group_col_name = input.input_table_names.size() > 0 ? input.input_table_names[0] : "group_col";
-    bind_data->date_col_name = input.input_table_names.size() > 1 ? input.input_table_names[1] : "date_col";
-    bind_data->target_col_name = input.input_table_names.size() > 2 ? input.input_table_names[2] : "target_col";
+    bind_data->group_col_name = input.input_table_names.size() > 0 ? NameString(input.input_table_names[0]) : "group_col";
+    bind_data->date_col_name = input.input_table_names.size() > 1 ? NameString(input.input_table_names[1]) : "date_col";
+    bind_data->target_col_name = input.input_table_names.size() > 2 ? NameString(input.input_table_names[2]) : "target_col";
 
     // Parse unknown_features array (input.inputs[1])
     if (input.inputs.size() >= 2 && !input.inputs[1].IsNull()) {
@@ -370,28 +371,28 @@ static unique_ptr<FunctionData> TsCvHydrateNativeBind(
     // Build output schema: cv_folds columns + unknown features as VARCHAR
     // Column 0: group
     return_types.push_back(bind_data->group_type);
-    names.push_back(bind_data->group_col_name);
+    names.push_back(MakeBindName(bind_data->group_col_name));
 
     // Column 1: date
     return_types.push_back(bind_data->date_type);
-    names.push_back(bind_data->date_col_name);
+    names.push_back(MakeBindName(bind_data->date_col_name));
 
     // Column 2: target
     return_types.push_back(bind_data->target_type);
-    names.push_back(bind_data->target_col_name);
+    names.push_back(MakeBindName(bind_data->target_col_name));
 
     // Column 3: fold_id
     return_types.push_back(LogicalType::BIGINT);
-    names.push_back("fold_id");
+    names.push_back(MakeBindName("fold_id"));
 
     // Column 4: split
     return_types.push_back(LogicalType::VARCHAR);
-    names.push_back("split");
+    names.push_back(MakeBindName("split"));
 
     // Columns 5+: unknown features as VARCHAR
     for (const auto &feat_name : bind_data->unknown_feature_names) {
         return_types.push_back(LogicalType::VARCHAR);
-        names.push_back(feat_name);
+        names.push_back(MakeBindName(feat_name));
     }
 
     return std::move(bind_data);
@@ -479,7 +480,7 @@ static OperatorResultType TsCvHydrateNativeInOut(
         }
     }
 
-    output.SetCardinality(0);
+    SetOutputCardinality(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -590,23 +591,23 @@ static OperatorFinalizeResultType TsCvHydrateNativeFinalize(
         auto &row = gstate.output[gstate.offset];
 
         // cv_folds columns
-        output.SetValue(0, output_idx, row.group);
-        output.SetValue(1, output_idx, row.date);
-        output.SetValue(2, output_idx, row.target);
-        output.SetValue(3, output_idx, Value::BIGINT(row.fold_id));
-        output.SetValue(4, output_idx, Value(row.split));
+        output.data[0].SetValue(output_idx, row.group);
+        output.data[1].SetValue(output_idx, row.date);
+        output.data[2].SetValue(output_idx, row.target);
+        output.data[3].SetValue(output_idx, Value::BIGINT(row.fold_id));
+        output.data[4].SetValue(output_idx, Value(row.split));
 
         // Unknown feature columns (as VARCHAR)
         for (idx_t i = 0; i < num_features; i++) {
             if (row.unknown_values[i].empty() && bind_data.strategy == "null" && row.split != "train") {
                 // For null strategy on test rows, output actual NULL
-                output.SetValue(5 + i, output_idx, Value());
+                output.data[5 + i].SetValue(output_idx, Value());
             } else if (row.unknown_values[i].empty()) {
                 // Empty value from JSON extraction - could be NULL or empty string
                 // Output as NULL for consistency
-                output.SetValue(5 + i, output_idx, Value());
+                output.data[5 + i].SetValue(output_idx, Value());
             } else {
-                output.SetValue(5 + i, output_idx, Value(row.unknown_values[i]));
+                output.data[5 + i].SetValue(output_idx, Value(row.unknown_values[i]));
             }
         }
 
@@ -614,7 +615,7 @@ static OperatorFinalizeResultType TsCvHydrateNativeFinalize(
         gstate.offset++;
     }
 
-    output.SetCardinality(output_idx);
+    SetOutputCardinality(output, output_idx);
 
     if (gstate.offset >= gstate.output.size()) {
         return OperatorFinalizeResultType::FINISHED;

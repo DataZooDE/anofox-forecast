@@ -1,3 +1,4 @@
+#include "duckdb_compat.hpp"
 #include "ts_forecast_panel_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // ParseFrequencyWithType, date helpers, DateColumnType
 #include "ts_future_dates.hpp"     // StepFromFrequency, ComputeFutureDates (D-12)
@@ -122,7 +123,7 @@ static string ParseStringFromPanelParams(const Value &params_value, const string
         auto &struct_children = StructValue::GetChildren(params_value);
         auto &child_types = StructType::GetChildTypes(params_value.type());
         for (idx_t i = 0; i < child_types.size(); i++) {
-            if (child_types[i].first == key && !struct_children[i].IsNull()) {
+            if (NameString(child_types[i].first) == key && !struct_children[i].IsNull()) {
                 return struct_children[i].ToString();
             }
         }
@@ -147,7 +148,7 @@ static int64_t ParseInt64FromPanelParams(const Value &params_value, const string
         auto &struct_children = StructValue::GetChildren(params_value);
         auto &child_types = StructType::GetChildTypes(params_value.type());
         for (idx_t i = 0; i < child_types.size(); i++) {
-            if (child_types[i].first == key && !struct_children[i].IsNull()) {
+            if (NameString(child_types[i].first) == key && !struct_children[i].IsNull()) {
                 try { return struct_children[i].GetValue<int64_t>(); }
                 catch (...) {
                     try { return std::stoll(struct_children[i].ToString()); }
@@ -176,8 +177,8 @@ static void ValidatePanelParamKeys(const Value &params_value) {
     } else if (params_value.type().id() == LogicalTypeId::STRUCT) {
         auto &child_types = StructType::GetChildTypes(params_value.type());
         for (idx_t i = 0; i < child_types.size(); i++) {
-            if (valid_keys.find(child_types[i].first) == valid_keys.end()) {
-                unknown_keys.push_back(child_types[i].first);
+            if (valid_keys.find(NameString(child_types[i].first)) == valid_keys.end()) {
+                unknown_keys.push_back(NameString(child_types[i].first));
             }
         }
     }
@@ -202,7 +203,7 @@ static unique_ptr<FunctionData> TsForecastPanelNativeBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    TableBindNames &names) {
 
     auto bind_data = make_uniq<TsForecastPanelNativeBindData>();
 
@@ -261,22 +262,22 @@ static unique_ptr<FunctionData> TsForecastPanelNativeBind(
 
     // Output schema: <group_col>, forecast_step, <date_col>, yhat, model_name
     auto &table_names = input.input_table_names;
-    string group_col_name = table_names.size() > 0 ? table_names[0] : "id";
-    string date_col_name = table_names.size() > 1 ? table_names[1] : "date";
+    string group_col_name = table_names.size() > 0 ? NameString(table_names[0]) : "id";
+    string date_col_name = table_names.size() > 1 ? NameString(table_names[1]) : "date";
 
-    names.push_back(group_col_name);
+    names.push_back(MakeBindName(group_col_name));
     return_types.push_back(bind_data->group_logical_type);
 
-    names.push_back("forecast_step");
+    names.push_back(MakeBindName("forecast_step"));
     return_types.push_back(LogicalType::INTEGER);
 
-    names.push_back(date_col_name);
+    names.push_back(MakeBindName(date_col_name));
     return_types.push_back(bind_data->date_logical_type);
 
-    names.push_back("yhat");
+    names.push_back(MakeBindName("yhat"));
     return_types.push_back(LogicalType::DOUBLE);
 
-    names.push_back("model_name");
+    names.push_back(MakeBindName("model_name"));
     return_types.push_back(LogicalType::VARCHAR);
 
     return bind_data;
@@ -376,7 +377,7 @@ static OperatorResultType TsForecastPanelNativeInOut(
         }
     }
 
-    output.SetCardinality(0);
+    SetOutputCardinality(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -449,7 +450,7 @@ static OperatorFinalizeResultType TsForecastPanelNativeFinalize(
 
         if (all_dates_set.empty()) {
             gstate.processed = true;
-            output.SetCardinality(0);
+            SetOutputCardinality(output, 0);
             return OperatorFinalizeResultType::FINISHED;
         }
 
@@ -649,12 +650,12 @@ static OperatorFinalizeResultType TsForecastPanelNativeFinalize(
         if (!gstate.deferred_error_message.empty()) {
             throw InvalidInputException("%s", gstate.deferred_error_message);
         }
-        output.SetCardinality(0);
+        SetOutputCardinality(output, 0);
         return OperatorFinalizeResultType::FINISHED;
     }
 
     idx_t to_output = std::min(remaining, static_cast<idx_t>(STANDARD_VECTOR_SIZE));
-    output.SetCardinality(to_output);
+    SetOutputCardinality(output, to_output);
 
     for (idx_t col = 0; col < output.ColumnCount(); col++) {
         output.data[col].SetVectorType(VectorType::FLAT_VECTOR);

@@ -10,6 +10,7 @@
 // `[0,0,0]` broadcast across every row) give correct per-row results, not just
 // row 0.
 
+#include "duckdb_compat.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "anofox_fcst_ffi.h"
@@ -61,9 +62,9 @@ inline bool ApplySingleSeriesPolicy(vector<double> &values, const vector<uint64_
 class ListDoubleReader {
 public:
 	ListDoubleReader(Vector &list_vec, idx_t count) : list_vec(list_vec) {
-		list_vec.ToUnifiedFormat(count, list_data);
-		auto &child_vec_ref = ListVector::GetEntry(list_vec);
-		child_vec_ref.ToUnifiedFormat(ListVector::GetListSize(list_vec), child_data);
+		ToUnified(list_vec, count, list_data);
+		auto &child_vec_ref = ListChildMut(list_vec);
+		ToUnified(child_vec_ref, ListVector::GetListSize(list_vec), child_data);
 	}
 
 	// True if the top-level list argument itself is NULL for this row.
@@ -164,11 +165,11 @@ private:
 class NestedListDoubleReader {
 public:
 	NestedListDoubleReader(Vector &list_vec, idx_t count) : list_vec(list_vec) {
-		list_vec.ToUnifiedFormat(count, outer_data);
-		auto &inner_vec_ref = ListVector::GetEntry(list_vec);
-		inner_vec_ref.ToUnifiedFormat(ListVector::GetListSize(list_vec), inner_data);
-		auto &innermost_vec_ref = ListVector::GetEntry(inner_vec_ref);
-		innermost_vec_ref.ToUnifiedFormat(ListVector::GetListSize(inner_vec_ref), innermost_data);
+		ToUnified(list_vec, count, outer_data);
+		auto &inner_vec_ref = ListChildMut(list_vec);
+		ToUnified(inner_vec_ref, ListVector::GetListSize(list_vec), inner_data);
+		auto &innermost_vec_ref = ListChildMut(inner_vec_ref);
+		ToUnified(innermost_vec_ref, ListVector::GetListSize(inner_vec_ref), innermost_data);
 	}
 
 	bool IsNull(idx_t row_idx) const {
@@ -248,7 +249,7 @@ template <class T>
 class ScalarArgReader {
 public:
 	ScalarArgReader(Vector &vec, idx_t count) : vec(vec) {
-		vec.ToUnifiedFormat(count, data);
+		ToUnified(vec, count, data);
 	}
 
 	bool IsNull(idx_t row_idx) const {
@@ -272,13 +273,13 @@ inline void WriteDoubleList(Vector &list_vec, idx_t row_idx, const double *data,
 	ListVector::Reserve(list_vec, offset + n);
 	ListVector::SetListSize(list_vec, offset + n);
 
-	auto &child_vec = ListVector::GetEntry(list_vec);
-	auto child_data = FlatVector::GetData<double>(child_vec);
+	auto &child_vec = ListChildMut(list_vec);
+	auto child_data = FlatDataMut<double>(child_vec);
 	for (idx_t i = 0; i < n; i++) {
 		child_data[offset + i] = data[i];
 	}
 
-	auto list_entries = FlatVector::GetData<list_entry_t>(list_vec);
+	auto list_entries = FlatDataMut<list_entry_t>(list_vec);
 	list_entries[row_idx].offset = offset;
 	list_entries[row_idx].length = n;
 }
@@ -290,9 +291,9 @@ inline void WriteDoubleListNanAsNull(Vector &list_vec, idx_t row_idx, const doub
 	ListVector::Reserve(list_vec, offset + n);
 	ListVector::SetListSize(list_vec, offset + n);
 
-	auto &child_vec = ListVector::GetEntry(list_vec);
-	auto child_data = FlatVector::GetData<double>(child_vec);
-	auto &child_validity = FlatVector::Validity(child_vec);
+	auto &child_vec = ListChildMut(list_vec);
+	auto child_data = FlatDataMut<double>(child_vec);
+	auto &child_validity = FlatValidityMut(child_vec);
 	for (idx_t i = 0; i < n; i++) {
 		if (std::isnan(data[i])) {
 			child_validity.SetInvalid(offset + i);
@@ -301,7 +302,7 @@ inline void WriteDoubleListNanAsNull(Vector &list_vec, idx_t row_idx, const doub
 		}
 	}
 
-	auto list_entries = FlatVector::GetData<list_entry_t>(list_vec);
+	auto list_entries = FlatDataMut<list_entry_t>(list_vec);
 	list_entries[row_idx].offset = offset;
 	list_entries[row_idx].length = n;
 }
@@ -318,9 +319,9 @@ inline void WriteDoubleListWithValidity(Vector &list_vec, idx_t row_idx, const d
 	ListVector::Reserve(list_vec, offset + n);
 	ListVector::SetListSize(list_vec, offset + n);
 
-	auto &child_vec = ListVector::GetEntry(list_vec);
-	auto child_data = FlatVector::GetData<double>(child_vec);
-	auto &child_validity = FlatVector::Validity(child_vec);
+	auto &child_vec = ListChildMut(list_vec);
+	auto child_data = FlatDataMut<double>(child_vec);
+	auto &child_validity = FlatValidityMut(child_vec);
 	for (idx_t i = 0; i < n; i++) {
 		bool is_valid = (validity[i / 64] >> (i % 64)) & 1ULL;
 		if (is_valid) {
@@ -330,7 +331,7 @@ inline void WriteDoubleListWithValidity(Vector &list_vec, idx_t row_idx, const d
 		}
 	}
 
-	auto list_entries = FlatVector::GetData<list_entry_t>(list_vec);
+	auto list_entries = FlatDataMut<list_entry_t>(list_vec);
 	list_entries[row_idx].offset = offset;
 	list_entries[row_idx].length = n;
 }

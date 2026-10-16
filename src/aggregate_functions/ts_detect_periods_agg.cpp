@@ -96,10 +96,10 @@ static void TsDetectPeriodsAggUpdate2(Vector inputs[], AggregateInputData &aggr_
     auto &val_vec = inputs[1];
 
     UnifiedVectorFormat ts_data, val_data;
-    ts_vec.ToUnifiedFormat(count, ts_data);
-    val_vec.ToUnifiedFormat(count, val_data);
+    ToUnified(ts_vec, count, ts_data);
+    ToUnified(val_vec, count, val_data);
 
-    auto states = FlatVector::GetData<TsDetectPeriodsAggState *>(state_vector);
+    auto states = FlatDataMut<TsDetectPeriodsAggState *>(state_vector);
 
     for (idx_t i = 0; i < count; i++) {
         auto &state = *states[i];
@@ -136,11 +136,11 @@ static void TsDetectPeriodsAggUpdate3(Vector inputs[], AggregateInputData &aggr_
     auto &method_vec = inputs[2];
 
     UnifiedVectorFormat ts_data, val_data, method_data;
-    ts_vec.ToUnifiedFormat(count, ts_data);
-    val_vec.ToUnifiedFormat(count, val_data);
-    method_vec.ToUnifiedFormat(count, method_data);
+    ToUnified(ts_vec, count, ts_data);
+    ToUnified(val_vec, count, val_data);
+    ToUnified(method_vec, count, method_data);
 
-    auto states = FlatVector::GetData<TsDetectPeriodsAggState *>(state_vector);
+    auto states = FlatDataMut<TsDetectPeriodsAggState *>(state_vector);
 
     for (idx_t i = 0; i < count; i++) {
         auto &state = *states[i];
@@ -178,7 +178,7 @@ static void TsDetectPeriodsAggUpdate3(Vector inputs[], AggregateInputData &aggr_
 
 static void TsDetectPeriodsAggFinalize(Vector &state_vector, AggregateInputData &aggr_input,
                                        Vector &result, idx_t count, idx_t offset) {
-    auto states = FlatVector::GetData<TsDetectPeriodsAggState *>(state_vector);
+    auto states = FlatDataMut<TsDetectPeriodsAggState *>(state_vector);
 
     for (idx_t i = 0; i < count; i++) {
         auto &state = *states[i];
@@ -231,8 +231,8 @@ static void TsDetectPeriodsAggFinalize(Vector &state_vector, AggregateInputData 
 
         // periods (index 0) - LIST of STRUCT
         {
-            auto &list_vec = *children[0];
-            auto list_data = FlatVector::GetData<list_entry_t>(list_vec);
+            auto &list_vec = StructEntry(children[0]);
+            auto list_data = FlatDataMut<list_entry_t>(list_vec);
             auto current_size = ListVector::GetListSize(list_vec);
 
             list_data[row].offset = current_size;
@@ -242,18 +242,18 @@ static void TsDetectPeriodsAggFinalize(Vector &state_vector, AggregateInputData 
                 ListVector::Reserve(list_vec, current_size + period_result.n_periods);
                 ListVector::SetListSize(list_vec, current_size + period_result.n_periods);
 
-                auto &list_child = ListVector::GetEntry(list_vec);
+                auto &list_child = ListChildMut(list_vec);
                 auto &struct_entries = StructVector::GetEntries(list_child);
 
-                auto period_data = FlatVector::GetData<double>(*struct_entries[0]);
-                auto confidence_data = FlatVector::GetData<double>(*struct_entries[1]);
-                auto strength_data = FlatVector::GetData<double>(*struct_entries[2]);
-                auto amplitude_data = FlatVector::GetData<double>(*struct_entries[3]);
-                auto phase_data = FlatVector::GetData<double>(*struct_entries[4]);
-                auto iteration_data = FlatVector::GetData<int64_t>(*struct_entries[5]);
-                auto matches_expected_data = FlatVector::GetData<bool>(*struct_entries[6]);
-                auto matched_expected_period_data = FlatVector::GetData<double>(*struct_entries[7]);
-                auto match_deviation_data = FlatVector::GetData<double>(*struct_entries[8]);
+                auto period_data = FlatDataMut<double>(StructEntry(struct_entries[0]));
+                auto confidence_data = FlatDataMut<double>(StructEntry(struct_entries[1]));
+                auto strength_data = FlatDataMut<double>(StructEntry(struct_entries[2]));
+                auto amplitude_data = FlatDataMut<double>(StructEntry(struct_entries[3]));
+                auto phase_data = FlatDataMut<double>(StructEntry(struct_entries[4]));
+                auto iteration_data = FlatDataMut<int64_t>(StructEntry(struct_entries[5]));
+                auto matches_expected_data = FlatDataMut<bool>(StructEntry(struct_entries[6]));
+                auto matched_expected_period_data = FlatDataMut<double>(StructEntry(struct_entries[7]));
+                auto match_deviation_data = FlatDataMut<double>(StructEntry(struct_entries[8]));
 
                 for (size_t j = 0; j < period_result.n_periods; j++) {
                     period_data[current_size + j] = period_result.period_values[j];
@@ -270,14 +270,14 @@ static void TsDetectPeriodsAggFinalize(Vector &state_vector, AggregateInputData 
         }
 
         // n_periods (index 1)
-        FlatVector::GetData<int64_t>(*children[1])[row] = period_result.n_periods;
+        FlatDataMut<int64_t>(StructEntry(children[1]))[row] = period_result.n_periods;
 
         // primary_period (index 2)
-        FlatVector::GetData<double>(*children[2])[row] = period_result.primary_period;
+        FlatDataMut<double>(StructEntry(children[2]))[row] = period_result.primary_period;
 
         // method (index 3)
-        FlatVector::GetData<string_t>(*children[3])[row] =
-            StringVector::AddString(*children[3], period_result.method);
+        FlatDataMut<string_t>(StructEntry(children[3]))[row] =
+            StringVector::AddString(StructEntry(children[3]), period_result.method);
 
         // Free FFI result
         anofox_free_flat_multi_period_result(&period_result);
@@ -286,8 +286,8 @@ static void TsDetectPeriodsAggFinalize(Vector &state_vector, AggregateInputData 
 
 static void TsDetectPeriodsAggCombine(Vector &state_vector, Vector &combined, AggregateInputData &aggr_input,
                                       idx_t count) {
-    auto src_states = FlatVector::GetData<TsDetectPeriodsAggState *>(state_vector);
-    auto tgt_states = FlatVector::GetData<TsDetectPeriodsAggState *>(combined);
+    auto src_states = FlatDataMut<TsDetectPeriodsAggState *>(state_vector);
+    auto tgt_states = FlatDataMut<TsDetectPeriodsAggState *>(combined);
 
     for (idx_t i = 0; i < count; i++) {
         auto &src = *src_states[i];
@@ -314,7 +314,7 @@ static void TsDetectPeriodsAggCombine(Vector &state_vector, Vector &combined, Ag
 }
 
 static void TsDetectPeriodsAggDestructor(Vector &state_vector, AggregateInputData &aggr_input, idx_t count) {
-    auto states = FlatVector::GetData<TsDetectPeriodsAggState *>(state_vector);
+    auto states = FlatDataMut<TsDetectPeriodsAggState *>(state_vector);
     for (idx_t i = 0; i < count; i++) {
         if (states[i] && states[i]->data) {
             delete states[i]->data;
@@ -335,7 +335,7 @@ void RegisterTsDetectPeriodsAggFunction(ExtensionLoader &loader) {
         AggregateFunction::StateInitialize<TsDetectPeriodsAggState, TsDetectPeriodsAggOperation>,
         TsDetectPeriodsAggUpdate2,
         TsDetectPeriodsAggCombine,
-        TsDetectPeriodsAggFinalize,
+        ANOFOX_AGG_FINALIZE(TsDetectPeriodsAggFinalize),
         nullptr,  // simple_update
         nullptr,  // bind
         TsDetectPeriodsAggDestructor
@@ -350,7 +350,7 @@ void RegisterTsDetectPeriodsAggFunction(ExtensionLoader &loader) {
         AggregateFunction::StateInitialize<TsDetectPeriodsAggState, TsDetectPeriodsAggOperation>,
         TsDetectPeriodsAggUpdate3,
         TsDetectPeriodsAggCombine,
-        TsDetectPeriodsAggFinalize,
+        ANOFOX_AGG_FINALIZE(TsDetectPeriodsAggFinalize),
         nullptr,  // simple_update
         nullptr,  // bind
         TsDetectPeriodsAggDestructor

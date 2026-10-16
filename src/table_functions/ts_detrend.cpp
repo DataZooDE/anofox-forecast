@@ -77,9 +77,9 @@ static void TsDetrendFunction(DataChunk &args, ExpressionState &state, Vector &r
 
         // Helper to set a list of doubles
         auto set_double_list = [&](int child_idx, double *data, size_t n) {
-            auto &list_vec = *children[child_idx];
-            auto list_data = FlatVector::GetData<list_entry_t>(list_vec);
-            auto &list_child = ListVector::GetEntry(list_vec);
+            auto &list_vec = StructEntry(children[child_idx]);
+            auto list_data = FlatDataMut<list_entry_t>(list_vec);
+            auto &list_child = ListChildMut(list_vec);
             auto current_size = ListVector::GetListSize(list_vec);
 
             list_data[row_idx].offset = current_size;
@@ -88,7 +88,7 @@ static void TsDetrendFunction(DataChunk &args, ExpressionState &state, Vector &r
             ListVector::Reserve(list_vec, current_size + n);
             ListVector::SetListSize(list_vec, current_size + n);
 
-            auto child_data = FlatVector::GetData<double>(list_child);
+            auto child_data = FlatDataMut<double>(list_child);
             for (size_t i = 0; i < n; i++) {
                 child_data[current_size + i] = data[i];
             }
@@ -96,10 +96,10 @@ static void TsDetrendFunction(DataChunk &args, ExpressionState &state, Vector &r
 
         set_double_list(0, detrend_result.trend, detrend_result.length);
         set_double_list(1, detrend_result.detrended, detrend_result.length);
-        FlatVector::GetData<string_t>(*children[2])[row_idx] = StringVector::AddString(*children[2], detrend_result.method);
+        FlatDataMut<string_t>(StructEntry(children[2]))[row_idx] = StringVector::AddString(StructEntry(children[2]), detrend_result.method);
         set_double_list(3, detrend_result.coefficients, detrend_result.n_coefficients);
-        FlatVector::GetData<double>(*children[4])[row_idx] = detrend_result.rss;
-        FlatVector::GetData<int64_t>(*children[5])[row_idx] = detrend_result.n_params;
+        FlatDataMut<double>(StructEntry(children[4]))[row_idx] = detrend_result.rss;
+        FlatDataMut<int64_t>(StructEntry(children[5]))[row_idx] = detrend_result.n_params;
 
         anofox_free_detrend_result(&detrend_result);
     }
@@ -108,17 +108,17 @@ static void TsDetrendFunction(DataChunk &args, ExpressionState &state, Vector &r
 void RegisterTsDetrendFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_detrend_set("ts_detrend");
     // Single-argument version (auto method)
-    ts_detrend_set.AddFunction(ScalarFunction(
+    ts_detrend_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetDetrendResultType(),
         TsDetrendFunction
-    ));
+    )));
     // With method
-    ts_detrend_set.AddFunction(ScalarFunction(
+    ts_detrend_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::VARCHAR)},
         GetDetrendResultType(),
         TsDetrendFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(ts_detrend_set);
         FunctionDescription desc;
@@ -208,9 +208,9 @@ static void TsDecomposeSeasonalFunction(DataChunk &args, ExpressionState &state,
 
         // Helper to set a list of doubles
         auto set_double_list = [&](int child_idx, double *data, size_t n) {
-            auto &list_vec = *children[child_idx];
-            auto list_data = FlatVector::GetData<list_entry_t>(list_vec);
-            auto &list_child = ListVector::GetEntry(list_vec);
+            auto &list_vec = StructEntry(children[child_idx]);
+            auto list_data = FlatDataMut<list_entry_t>(list_vec);
+            auto &list_child = ListChildMut(list_vec);
             auto current_size = ListVector::GetListSize(list_vec);
 
             list_data[row_idx].offset = current_size;
@@ -219,7 +219,7 @@ static void TsDecomposeSeasonalFunction(DataChunk &args, ExpressionState &state,
             ListVector::Reserve(list_vec, current_size + n);
             ListVector::SetListSize(list_vec, current_size + n);
 
-            auto child_data = FlatVector::GetData<double>(list_child);
+            auto child_data = FlatDataMut<double>(list_child);
             for (size_t i = 0; i < n; i++) {
                 child_data[current_size + i] = data[i];
             }
@@ -228,8 +228,8 @@ static void TsDecomposeSeasonalFunction(DataChunk &args, ExpressionState &state,
         set_double_list(0, decompose_result.trend, decompose_result.length);
         set_double_list(1, decompose_result.seasonal, decompose_result.length);
         set_double_list(2, decompose_result.remainder, decompose_result.length);
-        FlatVector::GetData<double>(*children[3])[row_idx] = decompose_result.period;
-        FlatVector::GetData<string_t>(*children[4])[row_idx] = StringVector::AddString(*children[4], decompose_result.method);
+        FlatDataMut<double>(StructEntry(children[3]))[row_idx] = decompose_result.period;
+        FlatDataMut<string_t>(StructEntry(children[4]))[row_idx] = StringVector::AddString(StructEntry(children[4]), decompose_result.method);
 
         anofox_free_decompose_result(&decompose_result);
     }
@@ -238,17 +238,17 @@ static void TsDecomposeSeasonalFunction(DataChunk &args, ExpressionState &state,
 void RegisterTsDecomposeSeasonalFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_decompose_set("ts_decompose_seasonal");
     // With period (additive by default)
-    ts_decompose_set.AddFunction(ScalarFunction(
+    ts_decompose_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         GetDecomposeResultType(),
         TsDecomposeSeasonalFunction
-    ));
+    )));
     // With period and method
-    ts_decompose_set.AddFunction(ScalarFunction(
+    ts_decompose_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::VARCHAR)},
         GetDecomposeResultType(),
         TsDecomposeSeasonalFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(ts_decompose_set);
         FunctionDescription desc;
@@ -281,7 +281,7 @@ static void TsSeasonalStrengthFunction(DataChunk &args, ExpressionState &state, 
     }
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = FlatDataMut<double>(result);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         if (period_reader.IsNull(row_idx)) {
@@ -331,17 +331,17 @@ static void TsSeasonalStrengthFunction(DataChunk &args, ExpressionState &state, 
 void RegisterTsSeasonalStrengthFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_strength_set("ts_seasonal_strength");
     // With period (variance method by default)
-    ts_strength_set.AddFunction(ScalarFunction(
+    ts_strength_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         LogicalType(LogicalTypeId::DOUBLE),
         TsSeasonalStrengthFunction
-    ));
+    )));
     // With period and method
-    ts_strength_set.AddFunction(ScalarFunction(
+    ts_strength_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::VARCHAR)},
         LogicalType(LogicalTypeId::DOUBLE),
         TsSeasonalStrengthFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(ts_strength_set);
         FunctionDescription desc;
@@ -428,8 +428,8 @@ static void TsSeasonalStrengthWindowedFunction(DataChunk &args, ExpressionState 
             continue;
         }
 
-        auto list_data = FlatVector::GetData<list_entry_t>(result);
-        auto &list_child = ListVector::GetEntry(result);
+        auto list_data = FlatDataMut<list_entry_t>(result);
+        auto &list_child = ListChildMut(result);
         auto current_size = ListVector::GetListSize(result);
 
         list_data[row_idx].offset = current_size;
@@ -438,7 +438,7 @@ static void TsSeasonalStrengthWindowedFunction(DataChunk &args, ExpressionState 
         ListVector::Reserve(result, current_size + n_windows);
         ListVector::SetListSize(result, current_size + n_windows);
 
-        auto child_data = FlatVector::GetData<double>(list_child);
+        auto child_data = FlatDataMut<double>(list_child);
         for (size_t i = 0; i < n_windows; i++) {
             child_data[current_size + i] = strengths[i];
         }
@@ -452,23 +452,23 @@ static void TsSeasonalStrengthWindowedFunction(DataChunk &args, ExpressionState 
 void RegisterTsSeasonalStrengthWindowedFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_strength_win_set("ts_seasonal_strength_windowed");
     // With period
-    ts_strength_win_set.AddFunction(ScalarFunction(
+    ts_strength_win_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
         TsSeasonalStrengthWindowedFunction
-    ));
+    )));
     // With period and window_size
-    ts_strength_win_set.AddFunction(ScalarFunction(
+    ts_strength_win_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
         TsSeasonalStrengthWindowedFunction
-    ));
+    )));
     // With period, window_size, and method
-    ts_strength_win_set.AddFunction(ScalarFunction(
+    ts_strength_win_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::VARCHAR)},
         LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
         TsSeasonalStrengthWindowedFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(ts_strength_win_set);
         FunctionDescription desc;
@@ -572,9 +572,9 @@ static void TsDetectSeasonalityChangesFunction(DataChunk &args, ExpressionState 
 
         // Set change_points list
         {
-            auto &cp_list = *children[0];
-            auto list_data = FlatVector::GetData<list_entry_t>(cp_list);
-            auto &list_child = ListVector::GetEntry(cp_list);
+            auto &cp_list = StructEntry(children[0]);
+            auto list_data = FlatDataMut<list_entry_t>(cp_list);
+            auto &list_child = ListChildMut(cp_list);
             auto current_size = ListVector::GetListSize(cp_list);
 
             list_data[row_idx].offset = current_size;
@@ -585,22 +585,22 @@ static void TsDetectSeasonalityChangesFunction(DataChunk &args, ExpressionState 
 
             auto &struct_entries = StructVector::GetEntries(list_child);
             for (size_t i = 0; i < change_result.n_changes; i++) {
-                FlatVector::GetData<int64_t>(*struct_entries[0])[current_size + i] = change_result.change_points[i].index;
-                FlatVector::GetData<double>(*struct_entries[1])[current_size + i] = change_result.change_points[i].time;
-                FlatVector::GetData<string_t>(*struct_entries[2])[current_size + i] =
-                    StringVector::AddString(*struct_entries[2], change_result.change_points[i].change_type);
-                FlatVector::GetData<double>(*struct_entries[3])[current_size + i] = change_result.change_points[i].strength_before;
-                FlatVector::GetData<double>(*struct_entries[4])[current_size + i] = change_result.change_points[i].strength_after;
+                FlatDataMut<int64_t>(StructEntry(struct_entries[0]))[current_size + i] = change_result.change_points[i].index;
+                FlatDataMut<double>(StructEntry(struct_entries[1]))[current_size + i] = change_result.change_points[i].time;
+                FlatDataMut<string_t>(StructEntry(struct_entries[2]))[current_size + i] =
+                    StringVector::AddString(StructEntry(struct_entries[2]), change_result.change_points[i].change_type);
+                FlatDataMut<double>(StructEntry(struct_entries[3]))[current_size + i] = change_result.change_points[i].strength_before;
+                FlatDataMut<double>(StructEntry(struct_entries[4]))[current_size + i] = change_result.change_points[i].strength_after;
             }
         }
 
-        FlatVector::GetData<int64_t>(*children[1])[row_idx] = change_result.n_changes;
+        FlatDataMut<int64_t>(StructEntry(children[1]))[row_idx] = change_result.n_changes;
 
         // Set strength_curve list
         {
-            auto &curve_list = *children[2];
-            auto list_data = FlatVector::GetData<list_entry_t>(curve_list);
-            auto &list_child = ListVector::GetEntry(curve_list);
+            auto &curve_list = StructEntry(children[2]);
+            auto list_data = FlatDataMut<list_entry_t>(curve_list);
+            auto &list_child = ListChildMut(curve_list);
             auto current_size = ListVector::GetListSize(curve_list);
 
             list_data[row_idx].offset = current_size;
@@ -609,7 +609,7 @@ static void TsDetectSeasonalityChangesFunction(DataChunk &args, ExpressionState 
             ListVector::Reserve(curve_list, current_size + change_result.n_strength_curve);
             ListVector::SetListSize(curve_list, current_size + change_result.n_strength_curve);
 
-            auto child_data = FlatVector::GetData<double>(list_child);
+            auto child_data = FlatDataMut<double>(list_child);
             for (size_t i = 0; i < change_result.n_strength_curve; i++) {
                 child_data[current_size + i] = change_result.strength_curve[i];
             }
@@ -622,29 +622,29 @@ static void TsDetectSeasonalityChangesFunction(DataChunk &args, ExpressionState 
 void RegisterTsDetectSeasonalityChangesFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_changes_set("ts_detect_seasonality_changes");
     // With period
-    ts_changes_set.AddFunction(ScalarFunction(
+    ts_changes_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         GetChangeDetectionResultType(),
         TsDetectSeasonalityChangesFunction
-    ));
+    )));
     // With period and threshold
-    ts_changes_set.AddFunction(ScalarFunction(
+    ts_changes_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetChangeDetectionResultType(),
         TsDetectSeasonalityChangesFunction
-    ));
+    )));
     // With period, threshold, and window_size
-    ts_changes_set.AddFunction(ScalarFunction(
+    ts_changes_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetChangeDetectionResultType(),
         TsDetectSeasonalityChangesFunction
-    ));
+    )));
     // With period, threshold, window_size, and min_duration
-    ts_changes_set.AddFunction(ScalarFunction(
+    ts_changes_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetChangeDetectionResultType(),
         TsDetectSeasonalityChangesFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(ts_changes_set);
         FunctionDescription desc;
@@ -706,9 +706,9 @@ static void TsInstantaneousPeriodFunction(DataChunk &args, ExpressionState &stat
 
         // Helper to set a list of doubles
         auto set_double_list = [&](int child_idx, double *data, size_t n) {
-            auto &list_vec = *children[child_idx];
-            auto list_data = FlatVector::GetData<list_entry_t>(list_vec);
-            auto &list_child = ListVector::GetEntry(list_vec);
+            auto &list_vec = StructEntry(children[child_idx]);
+            auto list_data = FlatDataMut<list_entry_t>(list_vec);
+            auto &list_child = ListChildMut(list_vec);
             auto current_size = ListVector::GetListSize(list_vec);
 
             list_data[row_idx].offset = current_size;
@@ -717,7 +717,7 @@ static void TsInstantaneousPeriodFunction(DataChunk &args, ExpressionState &stat
             ListVector::Reserve(list_vec, current_size + n);
             ListVector::SetListSize(list_vec, current_size + n);
 
-            auto child_data = FlatVector::GetData<double>(list_child);
+            auto child_data = FlatDataMut<double>(list_child);
             for (size_t i = 0; i < n; i++) {
                 child_data[current_size + i] = data[i];
             }
@@ -733,11 +733,11 @@ static void TsInstantaneousPeriodFunction(DataChunk &args, ExpressionState &stat
 
 void RegisterTsInstantaneousPeriodFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_inst_period_set("ts_instantaneous_period");
-    ts_inst_period_set.AddFunction(ScalarFunction(
+    ts_inst_period_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetInstantaneousPeriodResultType(),
         TsInstantaneousPeriodFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(ts_inst_period_set);
         FunctionDescription desc;
@@ -835,18 +835,18 @@ static void TsDetectAmplitudeModulationFunction(DataChunk &args, ExpressionState
 
         auto &children = StructVector::GetEntries(result);
 
-        FlatVector::GetData<bool>(*children[0])[row_idx] = am_result.is_seasonal;
-        FlatVector::GetData<double>(*children[1])[row_idx] = am_result.seasonal_strength;
-        FlatVector::GetData<bool>(*children[2])[row_idx] = am_result.has_modulation;
-        FlatVector::GetData<string_t>(*children[3])[row_idx] = StringVector::AddString(*children[3], am_result.modulation_type);
-        FlatVector::GetData<double>(*children[4])[row_idx] = am_result.modulation_score;
-        FlatVector::GetData<double>(*children[5])[row_idx] = am_result.amplitude_trend;
+        FlatDataMut<bool>(StructEntry(children[0]))[row_idx] = am_result.is_seasonal;
+        FlatDataMut<double>(StructEntry(children[1]))[row_idx] = am_result.seasonal_strength;
+        FlatDataMut<bool>(StructEntry(children[2]))[row_idx] = am_result.has_modulation;
+        FlatDataMut<string_t>(StructEntry(children[3]))[row_idx] = StringVector::AddString(StructEntry(children[3]), am_result.modulation_type);
+        FlatDataMut<double>(StructEntry(children[4]))[row_idx] = am_result.modulation_score;
+        FlatDataMut<double>(StructEntry(children[5]))[row_idx] = am_result.amplitude_trend;
 
         // Helper to set a list of doubles
         auto set_double_list = [&](int child_idx, double *data, size_t n) {
-            auto &list_vec = *children[child_idx];
-            auto list_data = FlatVector::GetData<list_entry_t>(list_vec);
-            auto &list_child = ListVector::GetEntry(list_vec);
+            auto &list_vec = StructEntry(children[child_idx]);
+            auto list_data = FlatDataMut<list_entry_t>(list_vec);
+            auto &list_child = ListChildMut(list_vec);
             auto current_size = ListVector::GetListSize(list_vec);
 
             list_data[row_idx].offset = current_size;
@@ -855,7 +855,7 @@ static void TsDetectAmplitudeModulationFunction(DataChunk &args, ExpressionState
             ListVector::Reserve(list_vec, current_size + n);
             ListVector::SetListSize(list_vec, current_size + n);
 
-            auto child_data = FlatVector::GetData<double>(list_child);
+            auto child_data = FlatDataMut<double>(list_child);
             for (size_t i = 0; i < n; i++) {
                 child_data[current_size + i] = data[i];
             }
@@ -863,7 +863,7 @@ static void TsDetectAmplitudeModulationFunction(DataChunk &args, ExpressionState
 
         set_double_list(6, am_result.wavelet_amplitude, am_result.n_points);
         set_double_list(7, am_result.time_points, am_result.n_points);
-        FlatVector::GetData<double>(*children[8])[row_idx] = am_result.scale;
+        FlatDataMut<double>(StructEntry(children[8]))[row_idx] = am_result.scale;
 
         anofox_free_amplitude_modulation_result(&am_result);
     }
@@ -872,23 +872,23 @@ static void TsDetectAmplitudeModulationFunction(DataChunk &args, ExpressionState
 void RegisterTsDetectAmplitudeModulationFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_am_set("ts_detect_amplitude_modulation");
     // With period
-    ts_am_set.AddFunction(ScalarFunction(
+    ts_am_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         GetAmplitudeModulationResultType(),
         TsDetectAmplitudeModulationFunction
-    ));
+    )));
     // With period and modulation_threshold
-    ts_am_set.AddFunction(ScalarFunction(
+    ts_am_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetAmplitudeModulationResultType(),
         TsDetectAmplitudeModulationFunction
-    ));
+    )));
     // With period, modulation_threshold, and seasonality_threshold
-    ts_am_set.AddFunction(ScalarFunction(
+    ts_am_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetAmplitudeModulationResultType(),
         TsDetectAmplitudeModulationFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(ts_am_set);
         FunctionDescription desc;

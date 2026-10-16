@@ -88,9 +88,9 @@ static void TsDetectPeaksFunction(DataChunk &args, ExpressionState &state, Vecto
 
         // Set peaks list
         {
-            auto &peaks_list = *children[0];
-            auto list_data = FlatVector::GetData<list_entry_t>(peaks_list);
-            auto &list_child = ListVector::GetEntry(peaks_list);
+            auto &peaks_list = StructEntry(children[0]);
+            auto list_data = FlatDataMut<list_entry_t>(peaks_list);
+            auto &list_child = ListChildMut(peaks_list);
             auto current_size = ListVector::GetListSize(peaks_list);
 
             list_data[row_idx].offset = current_size;
@@ -101,21 +101,21 @@ static void TsDetectPeaksFunction(DataChunk &args, ExpressionState &state, Vecto
 
             auto &struct_entries = StructVector::GetEntries(list_child);
             for (size_t i = 0; i < peak_result.n_peaks; i++) {
-                FlatVector::GetData<int64_t>(*struct_entries[0])[current_size + i] = peak_result.peaks[i].index;
-                FlatVector::GetData<double>(*struct_entries[1])[current_size + i] = peak_result.peaks[i].time;
-                FlatVector::GetData<double>(*struct_entries[2])[current_size + i] = peak_result.peaks[i].value;
-                FlatVector::GetData<double>(*struct_entries[3])[current_size + i] = peak_result.peaks[i].prominence;
+                FlatDataMut<int64_t>(StructEntry(struct_entries[0]))[current_size + i] = peak_result.peaks[i].index;
+                FlatDataMut<double>(StructEntry(struct_entries[1]))[current_size + i] = peak_result.peaks[i].time;
+                FlatDataMut<double>(StructEntry(struct_entries[2]))[current_size + i] = peak_result.peaks[i].value;
+                FlatDataMut<double>(StructEntry(struct_entries[3]))[current_size + i] = peak_result.peaks[i].prominence;
             }
         }
 
         // Set n_peaks
-        FlatVector::GetData<int64_t>(*children[1])[row_idx] = peak_result.n_peaks;
+        FlatDataMut<int64_t>(StructEntry(children[1]))[row_idx] = peak_result.n_peaks;
 
         // Set inter_peak_distances list
         {
-            auto &distances_list = *children[2];
-            auto list_data = FlatVector::GetData<list_entry_t>(distances_list);
-            auto &list_child = ListVector::GetEntry(distances_list);
+            auto &distances_list = StructEntry(children[2]);
+            auto list_data = FlatDataMut<list_entry_t>(distances_list);
+            auto &list_child = ListChildMut(distances_list);
             auto current_size = ListVector::GetListSize(distances_list);
 
             list_data[row_idx].offset = current_size;
@@ -124,14 +124,14 @@ static void TsDetectPeaksFunction(DataChunk &args, ExpressionState &state, Vecto
             ListVector::Reserve(distances_list, current_size + peak_result.n_distances);
             ListVector::SetListSize(distances_list, current_size + peak_result.n_distances);
 
-            auto child_data = FlatVector::GetData<double>(list_child);
+            auto child_data = FlatDataMut<double>(list_child);
             for (size_t i = 0; i < peak_result.n_distances; i++) {
                 child_data[current_size + i] = peak_result.inter_peak_distances[i];
             }
         }
 
         // Set mean_period
-        FlatVector::GetData<double>(*children[3])[row_idx] = peak_result.mean_period;
+        FlatDataMut<double>(StructEntry(children[3]))[row_idx] = peak_result.mean_period;
 
         anofox_free_peak_detection_result(&peak_result);
     }
@@ -140,29 +140,29 @@ static void TsDetectPeaksFunction(DataChunk &args, ExpressionState &state, Vecto
 void RegisterTsDetectPeaksFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_peaks_set("ts_detect_peaks");
     // Single-argument version
-    ts_peaks_set.AddFunction(ScalarFunction(
+    ts_peaks_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetPeakDetectionResultType(),
         TsDetectPeaksFunction
-    ));
+    )));
     // With min_distance
-    ts_peaks_set.AddFunction(ScalarFunction(
+    ts_peaks_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         GetPeakDetectionResultType(),
         TsDetectPeaksFunction
-    ));
+    )));
     // With min_distance, min_prominence
-    ts_peaks_set.AddFunction(ScalarFunction(
+    ts_peaks_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetPeakDetectionResultType(),
         TsDetectPeaksFunction
-    ));
+    )));
     // With min_distance, min_prominence, smooth_first
-    ts_peaks_set.AddFunction(ScalarFunction(
+    ts_peaks_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::BOOLEAN)},
         GetPeakDetectionResultType(),
         TsDetectPeaksFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(ts_peaks_set);
         FunctionDescription desc;
@@ -246,9 +246,9 @@ static void TsAnalyzePeakTimingFunction(DataChunk &args, ExpressionState &state,
 
         // Helper to set a list of doubles
         auto set_double_list = [&](int child_idx, double *data, size_t n) {
-            auto &list_vec = *children[child_idx];
-            auto list_data = FlatVector::GetData<list_entry_t>(list_vec);
-            auto &list_child = ListVector::GetEntry(list_vec);
+            auto &list_vec = StructEntry(children[child_idx]);
+            auto list_data = FlatDataMut<list_entry_t>(list_vec);
+            auto &list_child = ListChildMut(list_vec);
             auto current_size = ListVector::GetListSize(list_vec);
 
             list_data[row_idx].offset = current_size;
@@ -257,7 +257,7 @@ static void TsAnalyzePeakTimingFunction(DataChunk &args, ExpressionState &state,
             ListVector::Reserve(list_vec, current_size + n);
             ListVector::SetListSize(list_vec, current_size + n);
 
-            auto child_data = FlatVector::GetData<double>(list_child);
+            auto child_data = FlatDataMut<double>(list_child);
             for (size_t i = 0; i < n; i++) {
                 child_data[current_size + i] = data[i];
             }
@@ -267,13 +267,13 @@ static void TsAnalyzePeakTimingFunction(DataChunk &args, ExpressionState &state,
         set_double_list(1, timing_result.peak_values, timing_result.n_peaks);
         set_double_list(2, timing_result.normalized_timing, timing_result.n_peaks);
 
-        FlatVector::GetData<int64_t>(*children[3])[row_idx] = timing_result.n_peaks;
-        FlatVector::GetData<double>(*children[4])[row_idx] = timing_result.mean_timing;
-        FlatVector::GetData<double>(*children[5])[row_idx] = timing_result.std_timing;
-        FlatVector::GetData<double>(*children[6])[row_idx] = timing_result.range_timing;
-        FlatVector::GetData<double>(*children[7])[row_idx] = timing_result.variability_score;
-        FlatVector::GetData<double>(*children[8])[row_idx] = timing_result.timing_trend;
-        FlatVector::GetData<bool>(*children[9])[row_idx] = timing_result.is_stable;
+        FlatDataMut<int64_t>(StructEntry(children[3]))[row_idx] = timing_result.n_peaks;
+        FlatDataMut<double>(StructEntry(children[4]))[row_idx] = timing_result.mean_timing;
+        FlatDataMut<double>(StructEntry(children[5]))[row_idx] = timing_result.std_timing;
+        FlatDataMut<double>(StructEntry(children[6]))[row_idx] = timing_result.range_timing;
+        FlatDataMut<double>(StructEntry(children[7]))[row_idx] = timing_result.variability_score;
+        FlatDataMut<double>(StructEntry(children[8]))[row_idx] = timing_result.timing_trend;
+        FlatDataMut<bool>(StructEntry(children[9]))[row_idx] = timing_result.is_stable;
 
         anofox_free_peak_timing_result(&timing_result);
     }
@@ -281,11 +281,11 @@ static void TsAnalyzePeakTimingFunction(DataChunk &args, ExpressionState &state,
 
 void RegisterTsAnalyzePeakTimingFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_peak_timing_set("ts_analyze_peak_timing");
-    ts_peak_timing_set.AddFunction(ScalarFunction(
+    ts_peak_timing_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         GetPeakTimingResultType(),
         TsAnalyzePeakTimingFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(ts_peak_timing_set);
         FunctionDescription desc;

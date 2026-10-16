@@ -1,3 +1,4 @@
+#include "duckdb_compat.hpp"
 #include "ts_forecast_var_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // ParseFrequencyWithType, date helpers, DateColumnType
 #include "ts_future_dates.hpp"     // StepFromFrequency, ComputeFutureDates (D-12)
@@ -111,7 +112,7 @@ static int64_t ParseInt64FromVarParams(const Value &params_value, const string &
         auto &struct_children = StructValue::GetChildren(params_value);
         auto &child_types = StructType::GetChildTypes(params_value.type());
         for (idx_t i = 0; i < child_types.size(); i++) {
-            if (child_types[i].first == key && !struct_children[i].IsNull()) {
+            if (NameString(child_types[i].first) == key && !struct_children[i].IsNull()) {
                 try { return struct_children[i].GetValue<int64_t>(); }
                 catch (...) {
                     try { return std::stoll(struct_children[i].ToString()); }
@@ -131,7 +132,7 @@ static unique_ptr<FunctionData> TsForecastVarNativeBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    TableBindNames &names) {
 
     auto bind_data = make_uniq<TsForecastVarNativeBindData>();
 
@@ -191,7 +192,7 @@ static unique_ptr<FunctionData> TsForecastVarNativeBind(
     for (const auto &col_name : bind_data->value_col_names) {
         bool found = false;
         for (idx_t i = 0; i < input.input_table_names.size(); i++) {
-            if (input.input_table_names[i] == col_name) {
+            if (NameString(input.input_table_names[i]) == col_name) {
                 bind_data->value_col_indices.push_back(i);
                 found = true;
                 break;
@@ -208,7 +209,7 @@ static unique_ptr<FunctionData> TsForecastVarNativeBind(
 
     // Resolve date column index by name
     for (idx_t i = 0; i < input.input_table_names.size(); i++) {
-        if (input.input_table_names[i] == date_col_name) {
+        if (NameString(input.input_table_names[i]) == date_col_name) {
             date_col_idx = i;
             break;
         }
@@ -253,16 +254,16 @@ static unique_ptr<FunctionData> TsForecastVarNativeBind(
                 input.input_table_types[date_col_idx].ToString().c_str());
     }
 
-    names.push_back("variable");
+    names.push_back(MakeBindName("variable"));
     return_types.push_back(LogicalType::VARCHAR);
 
-    names.push_back("forecast_step");
+    names.push_back(MakeBindName("forecast_step"));
     return_types.push_back(LogicalType::BIGINT);
 
-    names.push_back(date_col_name);
+    names.push_back(MakeBindName(date_col_name));
     return_types.push_back(bind_data->date_logical_type);
 
-    names.push_back("forecast_value");
+    names.push_back(MakeBindName("forecast_value"));
     return_types.push_back(LogicalType::DOUBLE);
 
     return bind_data;
@@ -370,7 +371,7 @@ static OperatorResultType TsForecastVarNativeInOut(
         }
     }
 
-    output.SetCardinality(0);
+    SetOutputCardinality(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -412,7 +413,7 @@ static OperatorFinalizeResultType TsForecastVarNativeFinalize(
 
         if (n_obs == 0) {
             gstate.processed = true;
-            output.SetCardinality(0);
+            SetOutputCardinality(output, 0);
             return OperatorFinalizeResultType::FINISHED;
         }
 
@@ -566,12 +567,12 @@ static OperatorFinalizeResultType TsForecastVarNativeFinalize(
 
     idx_t remaining = static_cast<idx_t>(gstate.results.size()) - gstate.output_offset;
     if (remaining == 0) {
-        output.SetCardinality(0);
+        SetOutputCardinality(output, 0);
         return OperatorFinalizeResultType::FINISHED;
     }
 
     idx_t to_output = std::min(remaining, static_cast<idx_t>(STANDARD_VECTOR_SIZE));
-    output.SetCardinality(to_output);
+    SetOutputCardinality(output, to_output);
 
     for (idx_t col = 0; col < output.ColumnCount(); col++) {
         output.data[col].SetVectorType(VectorType::FLAT_VECTOR);

@@ -48,7 +48,7 @@ static string InspectParseStringParam(const Value &params_value, const string &k
         auto &struct_children = StructValue::GetChildren(params_value);
         auto &child_types = StructType::GetChildTypes(params_value.type());
         for (idx_t i = 0; i < child_types.size(); i++) {
-            if (child_types[i].first == key && !struct_children[i].IsNull()) {
+            if (NameString(child_types[i].first) == key && !struct_children[i].IsNull()) {
                 return struct_children[i].ToString();
             }
         }
@@ -120,10 +120,10 @@ static bool BuildSeriesFromValueList(Vector &value_list_vec,
 
     auto value_entries = UnifiedVectorFormat::GetData<list_entry_t>(value_list_data);
     auto &value_entry = value_entries[value_idx];
-    auto &value_child = ListVector::GetEntry(value_list_vec);
+    auto &value_child = ListChildMut(value_list_vec);
 
     UnifiedVectorFormat value_child_data;
-    value_child.ToUnifiedFormat(ListVector::GetListSize(value_list_vec), value_child_data);
+    ToUnified(value_child, ListVector::GetListSize(value_list_vec), value_child_data);
     auto value_values = UnifiedVectorFormat::GetData<double>(value_child_data);
 
     idx_t n = value_entry.length;
@@ -158,9 +158,9 @@ static void TsForecastInspectScalarExecute(DataChunk &args, ExpressionState &sta
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
     UnifiedVectorFormat value_list_data, method_data, params_data;
-    value_list_vec.ToUnifiedFormat(count, value_list_data);
-    method_vec.ToUnifiedFormat(count, method_data);
-    params_vec.ToUnifiedFormat(count, params_data);
+    ToUnified(value_list_vec, count, value_list_data);
+    ToUnified(method_vec, count, method_data);
+    ToUnified(params_vec, count, params_data);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         vector<double> values;
@@ -226,10 +226,10 @@ static void TsForecastExplainScalarExecute(DataChunk &args, ExpressionState &sta
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
     UnifiedVectorFormat value_list_data, horizon_data, method_data, params_data;
-    value_list_vec.ToUnifiedFormat(count, value_list_data);
-    horizon_vec.ToUnifiedFormat(count, horizon_data);
-    method_vec.ToUnifiedFormat(count, method_data);
-    params_vec.ToUnifiedFormat(count, params_data);
+    ToUnified(value_list_vec, count, value_list_data);
+    ToUnified(horizon_vec, count, horizon_data);
+    ToUnified(method_vec, count, method_data);
+    ToUnified(params_vec, count, params_data);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         vector<double> values;
@@ -301,7 +301,8 @@ void RegisterTsForecastInspectScalarFunction(ExtensionLoader &loader) {
         {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::VARCHAR, LogicalType::ANY},
         LogicalType::VARCHAR,
         TsForecastInspectScalarExecute);
-    inspect_func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    MarkFallible(inspect_func);
+    SetNullHandlingOf(inspect_func, FunctionNullHandling::SPECIAL_HANDLING);
     loader.RegisterFunction(inspect_func);
 
     // _ts_forecast_explain_scalar(values LIST(DOUBLE), horizon INT,
@@ -311,7 +312,8 @@ void RegisterTsForecastInspectScalarFunction(ExtensionLoader &loader) {
          LogicalType::VARCHAR, LogicalType::ANY},
         LogicalType::VARCHAR,
         TsForecastExplainScalarExecute);
-    explain_func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    MarkFallible(explain_func);
+    SetNullHandlingOf(explain_func, FunctionNullHandling::SPECIAL_HANDLING);
     loader.RegisterFunction(explain_func);
 }
 

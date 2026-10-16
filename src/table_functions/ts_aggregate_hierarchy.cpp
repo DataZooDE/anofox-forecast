@@ -1,3 +1,4 @@
+#include "duckdb_compat.hpp"
 #include "ts_aggregate_hierarchy.hpp"
 #include "ts_fill_gaps_native.hpp"
 #include "duckdb/common/exception.hpp"
@@ -159,7 +160,7 @@ static unique_ptr<FunctionData> TsAggregateHierarchyBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    TableBindNames &names) {
 
     auto bind_data = make_uniq<TsAggregateHierarchyBindData>();
 
@@ -179,13 +180,13 @@ static unique_ptr<FunctionData> TsAggregateHierarchyBind(
     }
 
     // Column layout: date_col, value_col, id_col1, id_col2, ...
-    bind_data->date_col_name = input.input_table_names.size() > 0 ? input.input_table_names[0] : "date";
-    bind_data->value_col_name = input.input_table_names.size() > 1 ? input.input_table_names[1] : "value";
+    bind_data->date_col_name = input.input_table_names.size() > 0 ? NameString(input.input_table_names[0]) : "date";
+    bind_data->value_col_name = input.input_table_names.size() > 1 ? NameString(input.input_table_names[1]) : "value";
     bind_data->num_id_cols = input.input_table_types.size() - 2;
 
     for (idx_t i = 2; i < input.input_table_types.size(); i++) {
         bind_data->id_col_names.push_back(
-            i < input.input_table_names.size() ? input.input_table_names[i] : "id_" + std::to_string(i - 1)
+            i < input.input_table_names.size() ? NameString(input.input_table_names[i]) : "id_" + std::to_string(i - 1)
         );
     }
 
@@ -210,13 +211,13 @@ static unique_ptr<FunctionData> TsAggregateHierarchyBind(
     }
 
     // Output schema: unique_id, date_col, value_col
-    names.push_back("unique_id");
+    names.push_back(MakeBindName("unique_id"));
     return_types.push_back(LogicalType::VARCHAR);
 
-    names.push_back(bind_data->date_col_name);
+    names.push_back(MakeBindName(bind_data->date_col_name));
     return_types.push_back(bind_data->date_logical_type);
 
-    names.push_back(bind_data->value_col_name);
+    names.push_back(MakeBindName(bind_data->value_col_name));
     return_types.push_back(LogicalType::DOUBLE);
 
     return bind_data;
@@ -311,7 +312,7 @@ static OperatorResultType TsAggregateHierarchyInOut(
     }
 
     // Don't output anything during input phase
-    output.SetCardinality(0);
+    SetOutputCardinality(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -407,34 +408,34 @@ static OperatorFinalizeResultType TsAggregateHierarchyFinalize(
         auto& result = gstate.results[gstate.current_result];
 
         // Column 0: unique_id
-        output.SetValue(0, output_idx, Value(result.unique_id));
+        output.data[0].SetValue(output_idx, Value(result.unique_id));
 
         // Column 1: date (preserve original type)
         switch (bind_data.date_col_type) {
             case DateColumnType::DATE:
-                output.SetValue(1, output_idx, Value::DATE(MicrosecondsToDate(result.date_micros)));
+                output.data[1].SetValue(output_idx, Value::DATE(MicrosecondsToDate(result.date_micros)));
                 break;
             case DateColumnType::TIMESTAMP:
-                output.SetValue(1, output_idx, Value::TIMESTAMP(MicrosecondsToTimestamp(result.date_micros)));
+                output.data[1].SetValue(output_idx, Value::TIMESTAMP(MicrosecondsToTimestamp(result.date_micros)));
                 break;
             case DateColumnType::INTEGER:
-                output.SetValue(1, output_idx, Value::INTEGER(static_cast<int32_t>(result.date_micros)));
+                output.data[1].SetValue(output_idx, Value::INTEGER(static_cast<int32_t>(result.date_micros)));
                 break;
             case DateColumnType::BIGINT:
-                output.SetValue(1, output_idx, Value::BIGINT(result.date_micros));
+                output.data[1].SetValue(output_idx, Value::BIGINT(result.date_micros));
                 break;
         }
 
         // Column 2: value — SQL SUM semantics: NULL when no leaf value was present,
         // otherwise the sum of the present values (no NULL->0 imputation).
-        output.SetValue(2, output_idx,
+        output.data[2].SetValue(output_idx,
             result.any_valid ? Value::DOUBLE(result.value) : Value(LogicalType::DOUBLE));
 
         output_idx++;
         gstate.current_result++;
     }
 
-    output.SetCardinality(output_idx);
+    SetOutputCardinality(output, output_idx);
 
     if (gstate.current_result >= gstate.results.size()) {
         return OperatorFinalizeResultType::FINISHED;

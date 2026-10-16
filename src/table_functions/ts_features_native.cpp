@@ -1,3 +1,4 @@
+#include "duckdb_compat.hpp"
 #include "ts_features_native.hpp"
 #include "anofox_fcst_ffi.h"
 #include "ts_list_marshal.hpp"
@@ -154,7 +155,7 @@ static unique_ptr<FunctionData> TsFeaturesNativeBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    TableBindNames &names) {
 
     auto bind_data = make_uniq<TsFeaturesNativeBindData>();
 
@@ -167,16 +168,16 @@ static unique_ptr<FunctionData> TsFeaturesNativeBind(
 
     // Capture input types
     bind_data->group_logical_type = input.input_table_types[0];
-    bind_data->group_col_name = input.input_table_names.size() > 0 ? input.input_table_names[0] : "id";
+    bind_data->group_col_name = input.input_table_names.size() > 0 ? NameString(input.input_table_names[0]) : "id";
 
     // Output schema: preserve original group column name + feature columns
-    names.push_back(bind_data->group_col_name);
+    names.push_back(MakeBindName(bind_data->group_col_name));
     return_types.push_back(bind_data->group_logical_type);
 
     // Add all feature columns
     const auto& feature_names = GetFeatureNames();
     for (const auto& feature_name : feature_names) {
-        names.push_back(feature_name);
+        names.push_back(MakeBindName(feature_name));
         return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
     }
 
@@ -281,7 +282,7 @@ static OperatorResultType TsFeaturesNativeInOut(
     }
 
     // Don't output anything during input phase
-    output.SetCardinality(0);
+    SetOutputCardinality(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -417,16 +418,16 @@ static OperatorFinalizeResultType TsFeaturesNativeFinalize(
         auto& result = gstate.results[gstate.current_result];
 
         // Set group value (column 0 = id)
-        output.SetValue(0, output_idx, result.group_value);
+        output.data[0].SetValue(output_idx, result.group_value);
 
         // Set feature values (columns 1 to N). Phase 12 D-04: an all_null
         // result (nothing left after the single-series gate trimmed the
         // group) emits SQL NULL, not NaN.
         for (size_t i = 0; i < result.features.size() && i + 1 < output.ColumnCount(); i++) {
             if (result.all_null) {
-                output.SetValue(i + 1, output_idx, Value(LogicalType::DOUBLE));
+                output.data[i + 1].SetValue(output_idx, Value(LogicalType::DOUBLE));
             } else {
-                output.SetValue(i + 1, output_idx, Value::DOUBLE(result.features[i]));
+                output.data[i + 1].SetValue(output_idx, Value::DOUBLE(result.features[i]));
             }
         }
 
@@ -434,7 +435,7 @@ static OperatorFinalizeResultType TsFeaturesNativeFinalize(
         gstate.current_result++;
     }
 
-    output.SetCardinality(output_idx);
+    SetOutputCardinality(output, output_idx);
 
     if (gstate.current_result >= gstate.results.size()) {
         return OperatorFinalizeResultType::FINISHED;

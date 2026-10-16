@@ -1,3 +1,4 @@
+#include "duckdb_compat.hpp"
 #include "ts_cv_forecast_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // For DateColumnType, helper functions
 #include "anofox_fcst_ffi.h"
@@ -151,7 +152,7 @@ static string ParseStringFromParams(const Value &params_value, const string &key
         auto &struct_children = StructValue::GetChildren(params_value);
         auto &child_types = StructType::GetChildTypes(params_value.type());
         for (idx_t i = 0; i < child_types.size(); i++) {
-            if (child_types[i].first == key && !struct_children[i].IsNull()) {
+            if (NameString(child_types[i].first) == key && !struct_children[i].IsNull()) {
                 return struct_children[i].ToString();
             }
         }
@@ -185,7 +186,7 @@ static int64_t ParseInt64FromParams(const Value &params_value, const string &key
         auto &struct_children = StructValue::GetChildren(params_value);
         auto &child_types = StructType::GetChildTypes(params_value.type());
         for (idx_t i = 0; i < child_types.size(); i++) {
-            if (child_types[i].first == key && !struct_children[i].IsNull()) {
+            if (NameString(child_types[i].first) == key && !struct_children[i].IsNull()) {
                 try {
                     return struct_children[i].GetValue<int64_t>();
                 } catch (...) {
@@ -227,7 +228,7 @@ static double ParseDoubleFromParams(const Value &params_value, const string &key
         auto &struct_children = StructValue::GetChildren(params_value);
         auto &child_types = StructType::GetChildTypes(params_value.type());
         for (idx_t i = 0; i < child_types.size(); i++) {
-            if (child_types[i].first == key && !struct_children[i].IsNull()) {
+            if (NameString(child_types[i].first) == key && !struct_children[i].IsNull()) {
                 try {
                     return struct_children[i].GetValue<double>();
                 } catch (...) {
@@ -274,8 +275,8 @@ static void ValidateParamKeys(const Value &params_value) {
     } else if (params_value.type().id() == LogicalTypeId::STRUCT) {
         auto &child_types = StructType::GetChildTypes(params_value.type());
         for (idx_t i = 0; i < child_types.size(); i++) {
-            if (valid_keys.find(child_types[i].first) == valid_keys.end()) {
-                unknown_keys.push_back(child_types[i].first);
+            if (valid_keys.find(NameString(child_types[i].first)) == valid_keys.end()) {
+                unknown_keys.push_back(NameString(child_types[i].first));
             }
         }
     }
@@ -300,7 +301,7 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    TableBindNames &names) {
 
     auto bind_data = make_uniq<TsCvForecastNativeBindData>();
 
@@ -320,9 +321,9 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
     idx_t split_idx = DConstants::INVALID_INDEX;
 
     for (idx_t i = 0; i < table_names.size(); i++) {
-        if (table_names[i] == "fold_id") {
+        if (NameString(table_names[i]) == "fold_id") {
             fold_id_idx = i;
-        } else if (table_names[i] == "split") {
+        } else if (NameString(table_names[i]) == "split") {
             split_idx = i;
         }
     }
@@ -341,7 +342,7 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
     // Detect layout: macro (has __cv_grp__ at pos 0) vs direct call
     string group_col_name;
     string date_col_name;
-    bool macro_layout = (table_names.size() > 0 && table_names[0] == "__cv_grp__");
+    bool macro_layout = (table_names.size() > 0 && NameString(table_names[0]) == "__cv_grp__");
 
     if (macro_layout) {
         // Layout A: cols 0-2 are __cv_grp__, __cv_dt__, __cv_tgt__
@@ -350,14 +351,14 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
         bind_data->value_col = 2;
         // Find original column names from remaining columns
         for (idx_t i = 3; i < table_names.size(); i++) {
-            if (table_names[i] == "fold_id" || table_names[i] == "split" ||
-                table_names[i] == "__cv_grp__" || table_names[i] == "__cv_dt__" || table_names[i] == "__cv_tgt__") {
+            if (NameString(table_names[i]) == "fold_id" || NameString(table_names[i]) == "split" ||
+                NameString(table_names[i]) == "__cv_grp__" || NameString(table_names[i]) == "__cv_dt__" || NameString(table_names[i]) == "__cv_tgt__") {
                 continue;
             }
             if (group_col_name.empty()) {
-                group_col_name = table_names[i];
+                group_col_name = NameString(table_names[i]);
             } else if (date_col_name.empty()) {
-                date_col_name = table_names[i];
+                date_col_name = NameString(table_names[i]);
                 break;
             }
         }
@@ -366,8 +367,8 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
         bind_data->group_col = 2;
         bind_data->date_col = 3;
         bind_data->value_col = 4;
-        group_col_name = table_names[2];
-        date_col_name = table_names[3];
+        group_col_name = NameString(table_names[2]);
+        date_col_name = NameString(table_names[3]);
     }
     if (group_col_name.empty()) group_col_name = "id";
     if (date_col_name.empty()) date_col_name = "date";
@@ -478,31 +479,31 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
     }
 
     // Output schema: fold_id, group_col, date_col, y, split, yhat, yhat_lower, yhat_upper, model_name
-    names.push_back("fold_id");
+    names.push_back(MakeBindName("fold_id"));
     return_types.push_back(LogicalType::BIGINT);
 
-    names.push_back(group_col_name);
+    names.push_back(MakeBindName(group_col_name));
     return_types.push_back(bind_data->group_logical_type);
 
-    names.push_back(date_col_name);
+    names.push_back(MakeBindName(date_col_name));
     return_types.push_back(bind_data->date_logical_type);
 
-    names.push_back("y");
+    names.push_back(MakeBindName("y"));
     return_types.push_back(LogicalType::DOUBLE);
 
-    names.push_back("split");
+    names.push_back(MakeBindName("split"));
     return_types.push_back(LogicalType::VARCHAR);
 
-    names.push_back("yhat");
+    names.push_back(MakeBindName("yhat"));
     return_types.push_back(LogicalType::DOUBLE);
 
-    names.push_back("yhat_lower");
+    names.push_back(MakeBindName("yhat_lower"));
     return_types.push_back(LogicalType::DOUBLE);
 
-    names.push_back("yhat_upper");
+    names.push_back(MakeBindName("yhat_upper"));
     return_types.push_back(LogicalType::DOUBLE);
 
-    names.push_back("model_name");
+    names.push_back(MakeBindName("model_name"));
     return_types.push_back(LogicalType::VARCHAR);
 
     return bind_data;
@@ -621,7 +622,7 @@ static OperatorResultType TsCvForecastNativeInOut(
     }
 
     // Don't output anything during input phase
-    output.SetCardinality(0);
+    SetOutputCardinality(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -788,12 +789,12 @@ static OperatorFinalizeResultType TsCvForecastNativeFinalize(
     // Output results in batches
     idx_t remaining = gstate.results.size() - gstate.output_offset;
     if (remaining == 0) {
-        output.SetCardinality(0);
+        SetOutputCardinality(output, 0);
         return OperatorFinalizeResultType::FINISHED;
     }
 
     idx_t to_output = std::min(remaining, static_cast<idx_t>(STANDARD_VECTOR_SIZE));
-    output.SetCardinality(to_output);
+    SetOutputCardinality(output, to_output);
 
     // Initialize all output vectors as FLAT_VECTOR for parallel-safe batch merging
     for (idx_t col = 0; col < output.ColumnCount(); col++) {

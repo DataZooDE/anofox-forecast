@@ -1,3 +1,4 @@
+#include "duckdb_compat.hpp"
 #include "ts_mstl_decomposition_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // For GetGroupKey, etc.
 #include "anofox_fcst_ffi.h"
@@ -96,7 +97,7 @@ static unique_ptr<FunctionData> TsMstlDecompositionNativeBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    TableBindNames &names) {
 
     auto bind_data = make_uniq<TsMstlDecompositionNativeBindData>();
 
@@ -120,20 +121,20 @@ static unique_ptr<FunctionData> TsMstlDecompositionNativeBind(
     bind_data->group_logical_type = input.input_table_types[0];
 
     // Output schema: <group_col>, trend[], seasonal[][], remainder[], periods[]
-    string group_col_name = input.input_table_names.size() > 0 ? input.input_table_names[0] : "id";
-    names.push_back(group_col_name);
+    string group_col_name = input.input_table_names.size() > 0 ? NameString(input.input_table_names[0]) : "id";
+    names.push_back(MakeBindName(group_col_name));
     return_types.push_back(bind_data->group_logical_type);
 
-    names.push_back("trend");
+    names.push_back(MakeBindName("trend"));
     return_types.push_back(LogicalType::LIST(LogicalType::DOUBLE));
 
-    names.push_back("seasonal");
+    names.push_back(MakeBindName("seasonal"));
     return_types.push_back(LogicalType::LIST(LogicalType::LIST(LogicalType::DOUBLE)));
 
-    names.push_back("remainder");
+    names.push_back(MakeBindName("remainder"));
     return_types.push_back(LogicalType::LIST(LogicalType::DOUBLE));
 
-    names.push_back("periods");
+    names.push_back(MakeBindName("periods"));
     return_types.push_back(LogicalType::LIST(LogicalType::INTEGER));
 
     return bind_data;
@@ -252,7 +253,7 @@ static OperatorResultType TsMstlDecompositionNativeInOut(
     }
 
     // Don't output anything during input phase
-    output.SetCardinality(0);
+    SetOutputCardinality(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -392,12 +393,12 @@ static OperatorFinalizeResultType TsMstlDecompositionNativeFinalize(
     // Output results in batches
     idx_t remaining = gstate.results.size() - gstate.output_offset;
     if (remaining == 0) {
-        output.SetCardinality(0);
+        SetOutputCardinality(output, 0);
         return OperatorFinalizeResultType::FINISHED;
     }
 
     idx_t to_output = std::min(remaining, static_cast<idx_t>(STANDARD_VECTOR_SIZE));
-    output.SetCardinality(to_output);
+    SetOutputCardinality(output, to_output);
 
     // Initialize all output vectors as FLAT_VECTOR for parallel-safe batch merging
     for (idx_t col = 0; col < output.ColumnCount(); col++) {

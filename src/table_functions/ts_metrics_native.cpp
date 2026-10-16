@@ -1,3 +1,4 @@
+#include "duckdb_compat.hpp"
 #include "ts_metrics_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // For DateColumnType enum and date helpers
 #include "anofox_fcst_ffi.h"
@@ -247,7 +248,7 @@ static unique_ptr<FunctionData> TsMetricsNativeBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    TableBindNames &names) {
 
     auto bind_data = make_uniq<TsMetricsNativeBindData>();
 
@@ -272,7 +273,7 @@ static unique_ptr<FunctionData> TsMetricsNativeBind(
     bool found_date = false, found_actual = false, found_forecast = false;
 
     for (idx_t i = 0; i < col_names.size(); i++) {
-        if (col_names[i] == date_col_name) {
+        if (NameString(col_names[i]) == date_col_name) {
             bind_data->date_col_idx = i;
             found_date = true;
 
@@ -287,10 +288,10 @@ static unique_ptr<FunctionData> TsMetricsNativeBind(
             } else if (dtype.id() == LogicalTypeId::BIGINT) {
                 bind_data->date_col_type = DateColumnType::BIGINT;
             }
-        } else if (col_names[i] == actual_col_name) {
+        } else if (NameString(col_names[i]) == actual_col_name) {
             bind_data->actual_col_idx = i;
             found_actual = true;
-        } else if (col_names[i] == forecast_col_name) {
+        } else if (NameString(col_names[i]) == forecast_col_name) {
             bind_data->forecast_col_idx = i;
             found_forecast = true;
         }
@@ -313,16 +314,16 @@ static unique_ptr<FunctionData> TsMetricsNativeBind(
             i != bind_data->forecast_col_idx) {
 
             bind_data->group_col_indices.push_back(i);
-            bind_data->output_col_names.push_back(col_names[i]);
+            bind_data->output_col_names.push_back(NameString(col_names[i]));
             bind_data->output_col_types.push_back(col_types[i]);
 
-            names.push_back(col_names[i]);
+            names.push_back(MakeBindName(NameString(col_names[i])));
             return_types.push_back(col_types[i]);
         }
     }
 
     // Add metric column
-    names.push_back(MetricColumnName(bind_data->metric_type));
+    names.push_back(MakeBindName(MetricColumnName(bind_data->metric_type)));
     return_types.push_back(LogicalType::DOUBLE);
 
     return bind_data;
@@ -413,7 +414,7 @@ static OperatorResultType TsMetricsNativeInOut(
         }
     }
 
-    output.SetCardinality(0);
+    SetOutputCardinality(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -490,12 +491,12 @@ static OperatorFinalizeResultType TsMetricsNativeFinalize(
     // Stream results
     idx_t remaining = gstate.results.size() - gstate.output_offset;
     if (remaining == 0) {
-        output.SetCardinality(0);
+        SetOutputCardinality(output, 0);
         return OperatorFinalizeResultType::FINISHED;
     }
 
     idx_t to_output = std::min(remaining, static_cast<idx_t>(STANDARD_VECTOR_SIZE));
-    output.SetCardinality(to_output);
+    SetOutputCardinality(output, to_output);
 
     for (idx_t col = 0; col < output.ColumnCount(); col++) {
         output.data[col].SetVectorType(VectorType::FLAT_VECTOR);
@@ -624,7 +625,7 @@ static unique_ptr<FunctionData> TsMaseNativeBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    TableBindNames &names) {
 
     auto bind_data = make_uniq<TsMaseNativeBindData>();
 
@@ -664,7 +665,7 @@ static unique_ptr<FunctionData> TsMaseNativeBind(
     bool found_date = false, found_actual = false, found_forecast = false;
 
     for (idx_t i = 0; i < col_names.size(); i++) {
-        if (col_names[i] == date_col_name) {
+        if (NameString(col_names[i]) == date_col_name) {
             bind_data->date_col_idx = i;
             found_date = true;
             auto &dtype = col_types[i];
@@ -677,10 +678,10 @@ static unique_ptr<FunctionData> TsMaseNativeBind(
             } else if (dtype.id() == LogicalTypeId::BIGINT) {
                 bind_data->date_col_type = DateColumnType::BIGINT;
             }
-        } else if (col_names[i] == actual_col_name) {
+        } else if (NameString(col_names[i]) == actual_col_name) {
             bind_data->actual_col_idx = i;
             found_actual = true;
-        } else if (col_names[i] == forecast_col_name) {
+        } else if (NameString(col_names[i]) == forecast_col_name) {
             bind_data->forecast_col_idx = i;
             found_forecast = true;
         }
@@ -696,14 +697,14 @@ static unique_ptr<FunctionData> TsMaseNativeBind(
             i != bind_data->actual_col_idx &&
             i != bind_data->forecast_col_idx) {
             bind_data->group_col_indices.push_back(i);
-            bind_data->output_col_names.push_back(col_names[i]);
+            bind_data->output_col_names.push_back(NameString(col_names[i]));
             bind_data->output_col_types.push_back(col_types[i]);
-            names.push_back(col_names[i]);
+            names.push_back(MakeBindName(NameString(col_names[i])));
             return_types.push_back(col_types[i]);
         }
     }
 
-    names.push_back("mase");
+    names.push_back(MakeBindName("mase"));
     return_types.push_back(LogicalType::DOUBLE);
 
     return bind_data;
@@ -786,7 +787,7 @@ static OperatorResultType TsMaseNativeInOut(
         }
     }
 
-    output.SetCardinality(0);
+    SetOutputCardinality(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -900,12 +901,12 @@ static OperatorFinalizeResultType TsMaseNativeFinalize(
 
     idx_t remaining = gstate.results.size() - gstate.output_offset;
     if (remaining == 0) {
-        output.SetCardinality(0);
+        SetOutputCardinality(output, 0);
         return OperatorFinalizeResultType::FINISHED;
     }
 
     idx_t to_output = std::min(remaining, static_cast<idx_t>(STANDARD_VECTOR_SIZE));
-    output.SetCardinality(to_output);
+    SetOutputCardinality(output, to_output);
 
     for (idx_t col = 0; col < output.ColumnCount(); col++) {
         output.data[col].SetVectorType(VectorType::FLAT_VECTOR);
@@ -999,7 +1000,7 @@ struct TsRmaeNativeLocalState : public LocalTableFunctionState {
 
 static unique_ptr<FunctionData> TsRmaeNativeBind(
     ClientContext &context, TableFunctionBindInput &input,
-    vector<LogicalType> &return_types, vector<string> &names) {
+    vector<LogicalType> &return_types, TableBindNames &names) {
 
     auto bind_data = make_uniq<TsRmaeNativeBindData>();
 
@@ -1019,7 +1020,7 @@ static unique_ptr<FunctionData> TsRmaeNativeBind(
     bool found_date = false, found_actual = false, found_pred1 = false, found_pred2 = false;
 
     for (idx_t i = 0; i < col_names.size(); i++) {
-        if (col_names[i] == date_col_name) {
+        if (NameString(col_names[i]) == date_col_name) {
             bind_data->date_col_idx = i;
             found_date = true;
             auto &dtype = col_types[i];
@@ -1027,11 +1028,11 @@ static unique_ptr<FunctionData> TsRmaeNativeBind(
             else if (dtype.id() == LogicalTypeId::TIMESTAMP) bind_data->date_col_type = DateColumnType::TIMESTAMP;
             else if (dtype.id() == LogicalTypeId::INTEGER) bind_data->date_col_type = DateColumnType::INTEGER;
             else if (dtype.id() == LogicalTypeId::BIGINT) bind_data->date_col_type = DateColumnType::BIGINT;
-        } else if (col_names[i] == actual_col_name) {
+        } else if (NameString(col_names[i]) == actual_col_name) {
             bind_data->actual_col_idx = i; found_actual = true;
-        } else if (col_names[i] == pred1_col_name) {
+        } else if (NameString(col_names[i]) == pred1_col_name) {
             bind_data->pred1_col_idx = i; found_pred1 = true;
-        } else if (col_names[i] == pred2_col_name) {
+        } else if (NameString(col_names[i]) == pred2_col_name) {
             bind_data->pred2_col_idx = i; found_pred2 = true;
         }
     }
@@ -1045,12 +1046,12 @@ static unique_ptr<FunctionData> TsRmaeNativeBind(
         if (i != bind_data->date_col_idx && i != bind_data->actual_col_idx &&
             i != bind_data->pred1_col_idx && i != bind_data->pred2_col_idx) {
             bind_data->group_col_indices.push_back(i);
-            names.push_back(col_names[i]);
+            names.push_back(MakeBindName(NameString(col_names[i])));
             return_types.push_back(col_types[i]);
         }
     }
 
-    names.push_back("rmae");
+    names.push_back(MakeBindName("rmae"));
     return_types.push_back(LogicalType::DOUBLE);
 
     return bind_data;
@@ -1131,7 +1132,7 @@ static OperatorResultType TsRmaeNativeInOut(
         }
     }
 
-    output.SetCardinality(0);
+    SetOutputCardinality(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -1200,12 +1201,12 @@ static OperatorFinalizeResultType TsRmaeNativeFinalize(
 
     idx_t remaining = gstate.results.size() - gstate.output_offset;
     if (remaining == 0) {
-        output.SetCardinality(0);
+        SetOutputCardinality(output, 0);
         return OperatorFinalizeResultType::FINISHED;
     }
 
     idx_t to_output = std::min(remaining, static_cast<idx_t>(STANDARD_VECTOR_SIZE));
-    output.SetCardinality(to_output);
+    SetOutputCardinality(output, to_output);
 
     for (idx_t col = 0; col < output.ColumnCount(); col++) {
         output.data[col].SetVectorType(VectorType::FLAT_VECTOR);
@@ -1294,7 +1295,7 @@ struct TsCoverageNativeLocalState : public LocalTableFunctionState {
 
 static unique_ptr<FunctionData> TsCoverageNativeBind(
     ClientContext &context, TableFunctionBindInput &input,
-    vector<LogicalType> &return_types, vector<string> &names) {
+    vector<LogicalType> &return_types, TableBindNames &names) {
 
     auto bind_data = make_uniq<TsCoverageNativeBindData>();
 
@@ -1314,7 +1315,7 @@ static unique_ptr<FunctionData> TsCoverageNativeBind(
     bool found_date = false, found_actual = false, found_lower = false, found_upper = false;
 
     for (idx_t i = 0; i < col_names.size(); i++) {
-        if (col_names[i] == date_col_name) {
+        if (NameString(col_names[i]) == date_col_name) {
             bind_data->date_col_idx = i;
             found_date = true;
             auto &dtype = col_types[i];
@@ -1322,11 +1323,11 @@ static unique_ptr<FunctionData> TsCoverageNativeBind(
             else if (dtype.id() == LogicalTypeId::TIMESTAMP) bind_data->date_col_type = DateColumnType::TIMESTAMP;
             else if (dtype.id() == LogicalTypeId::INTEGER) bind_data->date_col_type = DateColumnType::INTEGER;
             else if (dtype.id() == LogicalTypeId::BIGINT) bind_data->date_col_type = DateColumnType::BIGINT;
-        } else if (col_names[i] == actual_col_name) {
+        } else if (NameString(col_names[i]) == actual_col_name) {
             bind_data->actual_col_idx = i; found_actual = true;
-        } else if (col_names[i] == lower_col_name) {
+        } else if (NameString(col_names[i]) == lower_col_name) {
             bind_data->lower_col_idx = i; found_lower = true;
-        } else if (col_names[i] == upper_col_name) {
+        } else if (NameString(col_names[i]) == upper_col_name) {
             bind_data->upper_col_idx = i; found_upper = true;
         }
     }
@@ -1340,12 +1341,12 @@ static unique_ptr<FunctionData> TsCoverageNativeBind(
         if (i != bind_data->date_col_idx && i != bind_data->actual_col_idx &&
             i != bind_data->lower_col_idx && i != bind_data->upper_col_idx) {
             bind_data->group_col_indices.push_back(i);
-            names.push_back(col_names[i]);
+            names.push_back(MakeBindName(NameString(col_names[i])));
             return_types.push_back(col_types[i]);
         }
     }
 
-    names.push_back("coverage");
+    names.push_back(MakeBindName("coverage"));
     return_types.push_back(LogicalType::DOUBLE);
 
     return bind_data;
@@ -1426,7 +1427,7 @@ static OperatorResultType TsCoverageNativeInOut(
         }
     }
 
-    output.SetCardinality(0);
+    SetOutputCardinality(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -1496,12 +1497,12 @@ static OperatorFinalizeResultType TsCoverageNativeFinalize(
 
     idx_t remaining = gstate.results.size() - gstate.output_offset;
     if (remaining == 0) {
-        output.SetCardinality(0);
+        SetOutputCardinality(output, 0);
         return OperatorFinalizeResultType::FINISHED;
     }
 
     idx_t to_output = std::min(remaining, static_cast<idx_t>(STANDARD_VECTOR_SIZE));
-    output.SetCardinality(to_output);
+    SetOutputCardinality(output, to_output);
 
     for (idx_t col = 0; col < output.ColumnCount(); col++) {
         output.data[col].SetVectorType(VectorType::FLAT_VECTOR);
@@ -1589,7 +1590,7 @@ struct TsQuantileLossNativeLocalState : public LocalTableFunctionState {
 
 static unique_ptr<FunctionData> TsQuantileLossNativeBind(
     ClientContext &context, TableFunctionBindInput &input,
-    vector<LogicalType> &return_types, vector<string> &names) {
+    vector<LogicalType> &return_types, TableBindNames &names) {
 
     auto bind_data = make_uniq<TsQuantileLossNativeBindData>();
 
@@ -1609,7 +1610,7 @@ static unique_ptr<FunctionData> TsQuantileLossNativeBind(
     bool found_date = false, found_actual = false, found_forecast = false;
 
     for (idx_t i = 0; i < col_names.size(); i++) {
-        if (col_names[i] == date_col_name) {
+        if (NameString(col_names[i]) == date_col_name) {
             bind_data->date_col_idx = i;
             found_date = true;
             auto &dtype = col_types[i];
@@ -1617,9 +1618,9 @@ static unique_ptr<FunctionData> TsQuantileLossNativeBind(
             else if (dtype.id() == LogicalTypeId::TIMESTAMP) bind_data->date_col_type = DateColumnType::TIMESTAMP;
             else if (dtype.id() == LogicalTypeId::INTEGER) bind_data->date_col_type = DateColumnType::INTEGER;
             else if (dtype.id() == LogicalTypeId::BIGINT) bind_data->date_col_type = DateColumnType::BIGINT;
-        } else if (col_names[i] == actual_col_name) {
+        } else if (NameString(col_names[i]) == actual_col_name) {
             bind_data->actual_col_idx = i; found_actual = true;
-        } else if (col_names[i] == forecast_col_name) {
+        } else if (NameString(col_names[i]) == forecast_col_name) {
             bind_data->forecast_col_idx = i; found_forecast = true;
         }
     }
@@ -1632,12 +1633,12 @@ static unique_ptr<FunctionData> TsQuantileLossNativeBind(
         if (i != bind_data->date_col_idx && i != bind_data->actual_col_idx &&
             i != bind_data->forecast_col_idx) {
             bind_data->group_col_indices.push_back(i);
-            names.push_back(col_names[i]);
+            names.push_back(MakeBindName(NameString(col_names[i])));
             return_types.push_back(col_types[i]);
         }
     }
 
-    names.push_back("quantile_loss");
+    names.push_back(MakeBindName("quantile_loss"));
     return_types.push_back(LogicalType::DOUBLE);
 
     return bind_data;
@@ -1714,7 +1715,7 @@ static OperatorResultType TsQuantileLossNativeInOut(
         }
     }
 
-    output.SetCardinality(0);
+    SetOutputCardinality(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -1782,12 +1783,12 @@ static OperatorFinalizeResultType TsQuantileLossNativeFinalize(
 
     idx_t remaining = gstate.results.size() - gstate.output_offset;
     if (remaining == 0) {
-        output.SetCardinality(0);
+        SetOutputCardinality(output, 0);
         return OperatorFinalizeResultType::FINISHED;
     }
 
     idx_t to_output = std::min(remaining, static_cast<idx_t>(STANDARD_VECTOR_SIZE));
-    output.SetCardinality(to_output);
+    SetOutputCardinality(output, to_output);
 
     for (idx_t col = 0; col < output.ColumnCount(); col++) {
         output.data[col].SetVectorType(VectorType::FLAT_VECTOR);

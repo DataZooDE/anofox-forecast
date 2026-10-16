@@ -92,10 +92,10 @@ static void TsDataQualityAggUpdate(Vector inputs[], AggregateInputData &aggr_inp
     auto &val_vec = inputs[1];
 
     UnifiedVectorFormat ts_data, val_data;
-    ts_vec.ToUnifiedFormat(count, ts_data);
-    val_vec.ToUnifiedFormat(count, val_data);
+    ToUnified(ts_vec, count, ts_data);
+    ToUnified(val_vec, count, val_data);
 
-    auto states = FlatVector::GetData<TsDataQualityAggState *>(state_vector);
+    auto states = FlatDataMut<TsDataQualityAggState *>(state_vector);
 
     for (idx_t i = 0; i < count; i++) {
         auto &state = *states[i];
@@ -133,13 +133,13 @@ static void TsDataQualityAggUpdate(Vector inputs[], AggregateInputData &aggr_inp
 template <typename T>
 static void SetStructField(Vector &result, idx_t field_idx, idx_t row_idx, T value) {
     auto &children = StructVector::GetEntries(result);
-    auto data = FlatVector::GetData<T>(*children[field_idx]);
+    auto data = FlatDataMut<T>(StructEntry(children[field_idx]));
     data[row_idx] = value;
 }
 
 static void TsDataQualityAggFinalize(Vector &state_vector, AggregateInputData &aggr_input,
                                      Vector &result, idx_t count, idx_t offset) {
-    auto states = FlatVector::GetData<TsDataQualityAggState *>(state_vector);
+    auto states = FlatDataMut<TsDataQualityAggState *>(state_vector);
 
     for (idx_t i = 0; i < count; i++) {
         auto &state = *states[i];
@@ -216,8 +216,8 @@ static void TsDataQualityAggFinalize(Vector &state_vector, AggregateInputData &a
 
 static void TsDataQualityAggCombine(Vector &state_vector, Vector &combined, AggregateInputData &aggr_input,
                                     idx_t count) {
-    auto src_states = FlatVector::GetData<TsDataQualityAggState *>(state_vector);
-    auto tgt_states = FlatVector::GetData<TsDataQualityAggState *>(combined);
+    auto src_states = FlatDataMut<TsDataQualityAggState *>(state_vector);
+    auto tgt_states = FlatDataMut<TsDataQualityAggState *>(combined);
 
     for (idx_t i = 0; i < count; i++) {
         auto &src = *src_states[i];
@@ -247,7 +247,7 @@ static void TsDataQualityAggCombine(Vector &state_vector, Vector &combined, Aggr
 }
 
 static void TsDataQualityAggDestructor(Vector &state_vector, AggregateInputData &aggr_input, idx_t count) {
-    auto states = FlatVector::GetData<TsDataQualityAggState *>(state_vector);
+    auto states = FlatDataMut<TsDataQualityAggState *>(state_vector);
     for (idx_t i = 0; i < count; i++) {
         if (states[i] && states[i]->data) {
             delete states[i]->data;
@@ -266,7 +266,7 @@ void RegisterTsDataQualityAggFunction(ExtensionLoader &loader) {
         AggregateFunction::StateInitialize<TsDataQualityAggState, TsDataQualityAggOperation>,
         TsDataQualityAggUpdate,
         TsDataQualityAggCombine,
-        TsDataQualityAggFinalize,
+        ANOFOX_AGG_FINALIZE(TsDataQualityAggFinalize),
         nullptr,  // simple_update
         nullptr,  // bind
         TsDataQualityAggDestructor

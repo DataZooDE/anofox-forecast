@@ -20,7 +20,7 @@ static void TsMaeFunction(DataChunk &args, ExpressionState &state, Vector &resul
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = FlatDataMut<double>(result);
 
     ListDoubleReader actual_reader(actual_vec, count);
     ListDoubleReader forecast_reader(forecast_vec, count);
@@ -55,11 +55,11 @@ static void TsMaeFunction(DataChunk &args, ExpressionState &state, Vector &resul
 
 void RegisterTsMaeFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_mae_set("ts_mae");
-    ts_mae_set.AddFunction(ScalarFunction(
+    ts_mae_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         LogicalType(LogicalTypeId::DOUBLE),
         TsMaeFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(ts_mae_set);
         FunctionDescription desc;
@@ -73,11 +73,11 @@ void RegisterTsMaeFunction(ExtensionLoader &loader) {
     }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_mae");
-    anofox_set.AddFunction(ScalarFunction(
+    anofox_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         LogicalType(LogicalTypeId::DOUBLE),
         TsMaeFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(anofox_set);
         info.alias_of = "ts_mae";
@@ -102,7 +102,7 @@ static void TsMseFunction(DataChunk &args, ExpressionState &state, Vector &resul
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = FlatDataMut<double>(result);
 
     ListDoubleReader actual_reader(actual_vec, count);
     ListDoubleReader forecast_reader(forecast_vec, count);
@@ -137,11 +137,11 @@ static void TsMseFunction(DataChunk &args, ExpressionState &state, Vector &resul
 
 void RegisterTsMseFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_mse_set("ts_mse");
-    ts_mse_set.AddFunction(ScalarFunction(
+    ts_mse_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         LogicalType(LogicalTypeId::DOUBLE),
         TsMseFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(ts_mse_set);
         FunctionDescription desc;
@@ -155,11 +155,11 @@ void RegisterTsMseFunction(ExtensionLoader &loader) {
     }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_mse");
-    anofox_set.AddFunction(ScalarFunction(
+    anofox_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         LogicalType(LogicalTypeId::DOUBLE),
         TsMseFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(anofox_set);
         info.alias_of = "ts_mse";
@@ -184,7 +184,7 @@ static void TsRmseFunction(DataChunk &args, ExpressionState &state, Vector &resu
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = FlatDataMut<double>(result);
 
     ListDoubleReader actual_reader(actual_vec, count);
     ListDoubleReader forecast_reader(forecast_vec, count);
@@ -219,11 +219,11 @@ static void TsRmseFunction(DataChunk &args, ExpressionState &state, Vector &resu
 
 void RegisterTsRmseFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_rmse_set("ts_rmse");
-    ts_rmse_set.AddFunction(ScalarFunction(
+    ts_rmse_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         LogicalType(LogicalTypeId::DOUBLE),
         TsRmseFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(ts_rmse_set);
         FunctionDescription desc;
@@ -237,11 +237,11 @@ void RegisterTsRmseFunction(ExtensionLoader &loader) {
     }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_rmse");
-    anofox_set.AddFunction(ScalarFunction(
+    anofox_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         LogicalType(LogicalTypeId::DOUBLE),
         TsRmseFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(anofox_set);
         info.alias_of = "ts_rmse";
@@ -266,7 +266,7 @@ static void TsMapeFunction(DataChunk &args, ExpressionState &state, Vector &resu
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = FlatDataMut<double>(result);
 
     ListDoubleReader actual_reader(actual_vec, count);
     ListDoubleReader forecast_reader(forecast_vec, count);
@@ -302,11 +302,11 @@ static void TsMapeFunction(DataChunk &args, ExpressionState &state, Vector &resu
 
 void RegisterTsMapeFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_mape_set("ts_mape");
-    ts_mape_set.AddFunction(ScalarFunction(
+    ts_mape_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         LogicalType(LogicalTypeId::DOUBLE),
         TsMapeFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(ts_mape_set);
         FunctionDescription desc;
@@ -320,11 +320,11 @@ void RegisterTsMapeFunction(ExtensionLoader &loader) {
     }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_mape");
-    anofox_set.AddFunction(ScalarFunction(
+    anofox_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         LogicalType(LogicalTypeId::DOUBLE),
         TsMapeFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(anofox_set);
         info.alias_of = "ts_mape";
@@ -349,7 +349,7 @@ static void TsSmapeFunction(DataChunk &args, ExpressionState &state, Vector &res
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = FlatDataMut<double>(result);
 
     ListDoubleReader actual_reader(actual_vec, count);
     ListDoubleReader forecast_reader(forecast_vec, count);
@@ -384,11 +384,11 @@ static void TsSmapeFunction(DataChunk &args, ExpressionState &state, Vector &res
 
 void RegisterTsSmapeFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_smape_set("ts_smape");
-    ts_smape_set.AddFunction(ScalarFunction(
+    ts_smape_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         LogicalType(LogicalTypeId::DOUBLE),
         TsSmapeFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(ts_smape_set);
         FunctionDescription desc;
@@ -402,11 +402,11 @@ void RegisterTsSmapeFunction(ExtensionLoader &loader) {
     }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_smape");
-    anofox_set.AddFunction(ScalarFunction(
+    anofox_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         LogicalType(LogicalTypeId::DOUBLE),
         TsSmapeFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(anofox_set);
         info.alias_of = "ts_smape";
@@ -438,7 +438,7 @@ static void TsMaseFunction(DataChunk &args, ExpressionState &state, Vector &resu
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = FlatDataMut<double>(result);
 
     ListDoubleReader actual_reader(actual_vec, count);
     ListDoubleReader forecast_reader(forecast_vec, count);
@@ -488,7 +488,7 @@ static void TsMaseFunction(DataChunk &args, ExpressionState &state, Vector &resu
 }
 
 // The removed 3-list form: throws at bind time naming the replacement.
-static unique_ptr<FunctionData> TsMaseRemovedBind(ClientContext &, ScalarFunction &,
+static unique_ptr<FunctionData> TsMaseRemovedBind(ClientContext &, ScalarBindFunction &,
                                                    vector<unique_ptr<Expression>> &) {
     throw InvalidInputException(
         "ts_mase(actual, forecast, baseline) was removed in v2026.10.16: it computed a relative MAE, not MASE. "
@@ -498,18 +498,18 @@ static unique_ptr<FunctionData> TsMaseRemovedBind(ClientContext &, ScalarFunctio
 
 void RegisterTsMaseFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_mase_set("ts_mase");
-    ts_mase_set.AddFunction(ScalarFunction(
+    ts_mase_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT)},
         LogicalType(LogicalTypeId::DOUBLE),
         TsMaseFunction
-    ));
-    ts_mase_set.AddFunction(ScalarFunction(
+    )));
+    ts_mase_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         LogicalType(LogicalTypeId::DOUBLE),
         ScalarFunction::NopFunction,
-        TsMaseRemovedBind
-    ));
+        ANOFOX_SCALAR_BIND(TsMaseRemovedBind)
+    )));
     {
         CreateScalarFunctionInfo info(ts_mase_set);
         FunctionDescription desc;
@@ -523,18 +523,18 @@ void RegisterTsMaseFunction(ExtensionLoader &loader) {
     }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_mase");
-    anofox_set.AddFunction(ScalarFunction(
+    anofox_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::BIGINT)},
         LogicalType(LogicalTypeId::DOUBLE),
         TsMaseFunction
-    ));
-    anofox_set.AddFunction(ScalarFunction(
+    )));
+    anofox_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         LogicalType(LogicalTypeId::DOUBLE),
         ScalarFunction::NopFunction,
-        TsMaseRemovedBind
-    ));
+        ANOFOX_SCALAR_BIND(TsMaseRemovedBind)
+    )));
     {
         CreateScalarFunctionInfo info(anofox_set);
         info.alias_of = "ts_mase";
@@ -559,7 +559,7 @@ static void TsR2Function(DataChunk &args, ExpressionState &state, Vector &result
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = FlatDataMut<double>(result);
 
     ListDoubleReader actual_reader(actual_vec, count);
     ListDoubleReader forecast_reader(forecast_vec, count);
@@ -594,11 +594,11 @@ static void TsR2Function(DataChunk &args, ExpressionState &state, Vector &result
 
 void RegisterTsR2Function(ExtensionLoader &loader) {
     ScalarFunctionSet ts_r2_set("ts_r2");
-    ts_r2_set.AddFunction(ScalarFunction(
+    ts_r2_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         LogicalType(LogicalTypeId::DOUBLE),
         TsR2Function
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(ts_r2_set);
         FunctionDescription desc;
@@ -612,11 +612,11 @@ void RegisterTsR2Function(ExtensionLoader &loader) {
     }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_r2");
-    anofox_set.AddFunction(ScalarFunction(
+    anofox_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         LogicalType(LogicalTypeId::DOUBLE),
         TsR2Function
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(anofox_set);
         info.alias_of = "ts_r2";
@@ -641,7 +641,7 @@ static void TsBiasFunction(DataChunk &args, ExpressionState &state, Vector &resu
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = FlatDataMut<double>(result);
 
     ListDoubleReader actual_reader(actual_vec, count);
     ListDoubleReader forecast_reader(forecast_vec, count);
@@ -676,11 +676,11 @@ static void TsBiasFunction(DataChunk &args, ExpressionState &state, Vector &resu
 
 void RegisterTsBiasFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_bias_set("ts_bias");
-    ts_bias_set.AddFunction(ScalarFunction(
+    ts_bias_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         LogicalType(LogicalTypeId::DOUBLE),
         TsBiasFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(ts_bias_set);
         FunctionDescription desc;
@@ -694,11 +694,11 @@ void RegisterTsBiasFunction(ExtensionLoader &loader) {
     }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_bias");
-    anofox_set.AddFunction(ScalarFunction(
+    anofox_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         LogicalType(LogicalTypeId::DOUBLE),
         TsBiasFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(anofox_set);
         info.alias_of = "ts_bias";
@@ -726,7 +726,7 @@ static void TsRmaeFunction(DataChunk &args, ExpressionState &state, Vector &resu
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = FlatDataMut<double>(result);
 
     ListDoubleReader actual_reader(actual_vec, count);
     ListDoubleReader pred1_reader(pred1_vec, count);
@@ -765,11 +765,11 @@ static void TsRmaeFunction(DataChunk &args, ExpressionState &state, Vector &resu
 
 void RegisterTsRmaeFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_rmae_set("ts_rmae");
-    ts_rmae_set.AddFunction(ScalarFunction(
+    ts_rmae_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         LogicalType(LogicalTypeId::DOUBLE),
         TsRmaeFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(ts_rmae_set);
         FunctionDescription desc;
@@ -783,11 +783,11 @@ void RegisterTsRmaeFunction(ExtensionLoader &loader) {
     }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_rmae");
-    anofox_set.AddFunction(ScalarFunction(
+    anofox_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         LogicalType(LogicalTypeId::DOUBLE),
         TsRmaeFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(anofox_set);
         info.alias_of = "ts_rmae";
@@ -813,11 +813,11 @@ static void TsQuantileLossFunction(DataChunk &args, ExpressionState &state, Vect
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = FlatDataMut<double>(result);
 
     // Use UnifiedVectorFormat to handle both constant and flat vectors
     UnifiedVectorFormat quantile_data;
-    quantile_vec.ToUnifiedFormat(count, quantile_data);
+    ToUnified(quantile_vec, count, quantile_data);
 
     ListDoubleReader actual_reader(actual_vec, count);
     ListDoubleReader forecast_reader(forecast_vec, count);
@@ -858,11 +858,11 @@ static void TsQuantileLossFunction(DataChunk &args, ExpressionState &state, Vect
 
 void RegisterTsQuantileLossFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_ql_set("ts_quantile_loss");
-    ts_ql_set.AddFunction(ScalarFunction(
+    ts_ql_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         LogicalType(LogicalTypeId::DOUBLE),
         TsQuantileLossFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(ts_ql_set);
         FunctionDescription desc;
@@ -876,11 +876,11 @@ void RegisterTsQuantileLossFunction(ExtensionLoader &loader) {
     }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_quantile_loss");
-    anofox_set.AddFunction(ScalarFunction(
+    anofox_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         LogicalType(LogicalTypeId::DOUBLE),
         TsQuantileLossFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(anofox_set);
         info.alias_of = "ts_quantile_loss";
@@ -907,7 +907,7 @@ static void TsMqlossFunction(DataChunk &args, ExpressionState &state, Vector &re
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = FlatDataMut<double>(result);
 
     ListDoubleReader actual_reader(actual_vec, count);
     NestedListDoubleReader quantiles_reader(quantiles_vec, count);
@@ -978,13 +978,13 @@ static void TsMqlossFunction(DataChunk &args, ExpressionState &state, Vector &re
 void RegisterTsMqlossFunction(ExtensionLoader &loader) {
     // C++ API: ts_mqloss(actual[], quantiles[][], levels[])
     ScalarFunctionSet ts_mqloss_set("ts_mqloss");
-    ts_mqloss_set.AddFunction(ScalarFunction(
+    ts_mqloss_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType::LIST(LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))),
          LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         LogicalType(LogicalTypeId::DOUBLE),
         TsMqlossFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(ts_mqloss_set);
         FunctionDescription desc;
@@ -998,13 +998,13 @@ void RegisterTsMqlossFunction(ExtensionLoader &loader) {
     }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_mqloss");
-    anofox_set.AddFunction(ScalarFunction(
+    anofox_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType::LIST(LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))),
          LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         LogicalType(LogicalTypeId::DOUBLE),
         TsMqlossFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(anofox_set);
         info.alias_of = "ts_mqloss";
@@ -1030,7 +1030,7 @@ static void TsCoverageFunction(DataChunk &args, ExpressionState &state, Vector &
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<double>(result);
+    auto result_data = FlatDataMut<double>(result);
 
     ListDoubleReader actual_reader(actual_vec, count);
     ListDoubleReader lower_reader(lower_vec, count);
@@ -1075,11 +1075,11 @@ static void TsCoverageFunction(DataChunk &args, ExpressionState &state, Vector &
 
 void RegisterTsCoverageFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_coverage_set("ts_coverage");
-    ts_coverage_set.AddFunction(ScalarFunction(
+    ts_coverage_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         LogicalType(LogicalTypeId::DOUBLE),
         TsCoverageFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(ts_coverage_set);
         FunctionDescription desc;
@@ -1093,11 +1093,11 @@ void RegisterTsCoverageFunction(ExtensionLoader &loader) {
     }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_coverage");
-    anofox_set.AddFunction(ScalarFunction(
+    anofox_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         LogicalType(LogicalTypeId::DOUBLE),
         TsCoverageFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(anofox_set);
         info.alias_of = "ts_coverage";
@@ -1124,26 +1124,37 @@ static void TsEstimateBacktestMemoryFunction(DataChunk &args, ExpressionState &s
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
-    auto result_data = FlatVector::GetData<int64_t>(result);
+    auto result_data = FlatDataMut<int64_t>(result);
 
-    auto n_series_data = FlatVector::GetData<int64_t>(n_series_vec);
-    auto n_dates_data = FlatVector::GetData<int64_t>(n_dates_vec);
-    auto folds_data = FlatVector::GetData<int64_t>(folds_vec);
-    auto horizon_data = FlatVector::GetData<int64_t>(horizon_vec);
+    // Inputs are read through the unified format: they may be constant or (DuckDB 2.0)
+    // dictionary vectors, which have no flat data.
+    UnifiedVectorFormat n_series_fmt, n_dates_fmt, folds_fmt, horizon_fmt;
+    ToUnified(n_series_vec, count, n_series_fmt);
+    ToUnified(n_dates_vec, count, n_dates_fmt);
+    ToUnified(folds_vec, count, folds_fmt);
+    ToUnified(horizon_vec, count, horizon_fmt);
+    auto n_series_data = UnifiedVectorFormat::GetData<int64_t>(n_series_fmt);
+    auto n_dates_data = UnifiedVectorFormat::GetData<int64_t>(n_dates_fmt);
+    auto folds_data = UnifiedVectorFormat::GetData<int64_t>(folds_fmt);
+    auto horizon_data = UnifiedVectorFormat::GetData<int64_t>(horizon_fmt);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(n_series_vec, row_idx) ||
-            FlatVector::IsNull(n_dates_vec, row_idx) ||
-            FlatVector::IsNull(folds_vec, row_idx) ||
-            FlatVector::IsNull(horizon_vec, row_idx)) {
+        auto n_series_idx = n_series_fmt.sel->get_index(row_idx);
+        auto n_dates_idx = n_dates_fmt.sel->get_index(row_idx);
+        auto folds_idx = folds_fmt.sel->get_index(row_idx);
+        auto horizon_idx = horizon_fmt.sel->get_index(row_idx);
+        if (!n_series_fmt.validity.RowIsValid(n_series_idx) ||
+            !n_dates_fmt.validity.RowIsValid(n_dates_idx) ||
+            !folds_fmt.validity.RowIsValid(folds_idx) ||
+            !horizon_fmt.validity.RowIsValid(horizon_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        int64_t n_series = n_series_data[row_idx];
-        int64_t n_dates = n_dates_data[row_idx];
-        int64_t folds = folds_data[row_idx];
-        int64_t horizon = horizon_data[row_idx];
+        int64_t n_series = n_series_data[n_series_idx];
+        int64_t n_dates = n_dates_data[n_dates_idx];
+        int64_t folds = folds_data[folds_idx];
+        int64_t horizon = horizon_data[horizon_idx];
 
         // Estimate memory usage for the ts_cv_folds_by + ts_cv_forecast_by two-step CV workflow:
         // 1. cv_splits (ts_cv_folds_by output): n_series × n_dates × folds × 40 bytes (5 columns × 8 bytes)
@@ -1167,11 +1178,11 @@ static void TsEstimateBacktestMemoryFunction(DataChunk &args, ExpressionState &s
 
 void RegisterTsEstimateBacktestMemoryFunction(ExtensionLoader &loader) {
     ScalarFunctionSet func_set("ts_estimate_backtest_memory");
-    func_set.AddFunction(ScalarFunction(
+    func_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::BIGINT, LogicalType::BIGINT, LogicalType::BIGINT, LogicalType::BIGINT},
         LogicalType::BIGINT,
         TsEstimateBacktestMemoryFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(func_set);
         FunctionDescription desc;

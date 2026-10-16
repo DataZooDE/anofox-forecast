@@ -105,13 +105,13 @@ struct TsForecastScalarBindData : public FunctionData {
 
 static unique_ptr<FunctionData> TsForecastScalarBind(
     ClientContext &context,
-    ScalarFunction &bound_function,
+    ScalarBindFunction &bound_function,
     vector<unique_ptr<Expression>> &arguments) {
 
     auto bind_data = make_uniq<TsForecastScalarBindData>();
 
     // Detect date column type from LIST child type (argument 0 = dates)
-    auto &date_list_type = arguments[0]->return_type;
+    auto &date_list_type = ReturnTypeOf(*arguments[0]);
     if (date_list_type.id() == LogicalTypeId::LIST) {
         auto &child_type = ListType::GetChildType(date_list_type);
         switch (child_type.id()) {
@@ -146,7 +146,7 @@ static unique_ptr<FunctionData> TsForecastScalarBind(
     struct_children.push_back(make_pair("yhat_upper", LogicalType::DOUBLE));
     struct_children.push_back(make_pair("model_name", LogicalType::VARCHAR));
 
-    bound_function.return_type = LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children)));
+    SetReturnTypeOf(bound_function, LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children))));
 
     return std::move(bind_data);
 }
@@ -197,7 +197,7 @@ static Value MicrosToDateValue(int64_t micros, DateColumnType date_col_type) {
 // parity), including on month-end series ending in a short month.
 
 static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vector &result) {
-    auto &bind_data = state.expr.Cast<BoundFunctionExpression>().bind_info->Cast<TsForecastScalarBindData>();
+    auto &bind_data = BindInfoOf(state.expr.Cast<BoundFunctionExpression>())->Cast<TsForecastScalarBindData>();
     idx_t count = args.size();
 
     auto &date_list_vec = args.data[0];   // LIST(date)
@@ -211,12 +211,12 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
 
     // Unified formats for all inputs
     UnifiedVectorFormat date_list_data, value_list_data, horizon_data, freq_data, method_data, params_data;
-    date_list_vec.ToUnifiedFormat(count, date_list_data);
-    value_list_vec.ToUnifiedFormat(count, value_list_data);
-    horizon_vec.ToUnifiedFormat(count, horizon_data);
-    freq_vec.ToUnifiedFormat(count, freq_data);
-    method_vec.ToUnifiedFormat(count, method_data);
-    params_vec.ToUnifiedFormat(count, params_data);
+    ToUnified(date_list_vec, count, date_list_data);
+    ToUnified(value_list_vec, count, value_list_data);
+    ToUnified(horizon_vec, count, horizon_data);
+    ToUnified(freq_vec, count, freq_data);
+    ToUnified(method_vec, count, method_data);
+    ToUnified(params_vec, count, params_data);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         auto date_idx = date_list_data.sel->get_index(row_idx);
@@ -231,10 +231,10 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
         // --- Extract values from LIST(DOUBLE) ---
         auto value_entries = UnifiedVectorFormat::GetData<list_entry_t>(value_list_data);
         auto &value_entry = value_entries[value_idx];
-        auto &value_child = ListVector::GetEntry(value_list_vec);
+        auto &value_child = ListChildMut(value_list_vec);
 
         UnifiedVectorFormat value_child_data;
-        value_child.ToUnifiedFormat(ListVector::GetListSize(value_list_vec), value_child_data);
+        ToUnified(value_child, ListVector::GetListSize(value_list_vec), value_child_data);
         auto value_values = UnifiedVectorFormat::GetData<double>(value_child_data);
 
         idx_t n = value_entry.length;
@@ -248,7 +248,7 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
         // --- Extract dates from LIST(date) ---
         auto date_entries = UnifiedVectorFormat::GetData<list_entry_t>(date_list_data);
         auto &date_entry = date_entries[date_idx];
-        auto &date_child = ListVector::GetEntry(date_list_vec);
+        auto &date_child = ListChildMut(date_list_vec);
 
         // Build sorted index by date. date_is_null tracks which entries had
         // a NULL date (date_micros[i]=0 is a placeholder, not a real
@@ -444,9 +444,9 @@ static void TsFutureDatesExecute(DataChunk &args, ExpressionState &state, Vector
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
     UnifiedVectorFormat dates_list_data, dates_child_data;
-    dates_vec.ToUnifiedFormat(count, dates_list_data);
-    auto &dates_child = ListVector::GetEntry(dates_vec);
-    dates_child.ToUnifiedFormat(ListVector::GetListSize(dates_vec), dates_child_data);
+    ToUnified(dates_vec, count, dates_list_data);
+    auto &dates_child = ListChildMut(dates_vec);
+    ToUnified(dates_child, ListVector::GetListSize(dates_vec), dates_child_data);
     auto dates_entries = UnifiedVectorFormat::GetData<list_entry_t>(dates_list_data);
     auto dates_values = UnifiedVectorFormat::GetData<timestamp_t>(dates_child_data);
 
@@ -463,7 +463,7 @@ static void TsFutureDatesExecute(DataChunk &args, ExpressionState &state, Vector
 
         int32_t horizon = horizon_reader.Get(row_idx);
         if (horizon <= 0) {
-            auto list_entries = FlatVector::GetData<list_entry_t>(result);
+            auto list_entries = FlatDataMut<list_entry_t>(result);
             list_entries[row_idx].offset = ListVector::GetListSize(result);
             list_entries[row_idx].length = 0;
             continue;
@@ -498,12 +498,12 @@ static void TsFutureDatesExecute(DataChunk &args, ExpressionState &state, Vector
         idx_t offset = ListVector::GetListSize(result);
         ListVector::Reserve(result, offset + future_ts.size());
         ListVector::SetListSize(result, offset + future_ts.size());
-        auto &result_child = ListVector::GetEntry(result);
-        auto result_child_data = FlatVector::GetData<timestamp_t>(result_child);
+        auto &result_child = ListChildMut(result);
+        auto result_child_data = FlatDataMut<timestamp_t>(result_child);
         for (size_t i = 0; i < future_ts.size(); i++) {
             result_child_data[offset + i] = MicrosecondsToTimestamp(future_ts[i]);
         }
-        auto list_entries = FlatVector::GetData<list_entry_t>(result);
+        auto list_entries = FlatDataMut<list_entry_t>(result);
         list_entries[row_idx].offset = offset;
         list_entries[row_idx].length = future_ts.size();
     }
@@ -526,9 +526,10 @@ void RegisterTsForecastScalarFunction(ExtensionLoader &loader) {
          LogicalType::ANY},                        // params (MAP)
         LogicalType::LIST(LogicalType::ANY),       // return type set by bind
         TsForecastScalarExecute,
-        TsForecastScalarBind);
+        ANOFOX_SCALAR_BIND(TsForecastScalarBind));
+    MarkFallible(func);
 
-    func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    SetNullHandlingOf(func, FunctionNullHandling::SPECIAL_HANDLING);
 
     loader.RegisterFunction(func);
 
@@ -538,7 +539,8 @@ void RegisterTsForecastScalarFunction(ExtensionLoader &loader) {
     ScalarFunction future_dates_func("_ts_future_dates",
         {LogicalType::LIST(LogicalType::TIMESTAMP), LogicalType::INTEGER, LogicalType::INTERVAL},
         LogicalType::LIST(LogicalType::TIMESTAMP), TsFutureDatesExecute);
-    future_dates_func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    MarkFallible(future_dates_func);
+    SetNullHandlingOf(future_dates_func, FunctionNullHandling::SPECIAL_HANDLING);
 
     CreateScalarFunctionInfo future_dates_info(future_dates_func);
     future_dates_info.internal = true;

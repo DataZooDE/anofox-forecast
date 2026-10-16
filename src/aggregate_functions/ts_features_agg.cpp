@@ -132,7 +132,7 @@ static LogicalType GetFeaturesAggResultType() {
 
     auto feature_names = GetFeatureNames();
     for (const auto &name : feature_names) {
-        children.push_back(make_pair(name, LogicalType(LogicalTypeId::DOUBLE)));
+        children.push_back(MakeChild(name, LogicalType(LogicalTypeId::DOUBLE)));
     }
 
     return LogicalType::STRUCT(std::move(children));
@@ -146,12 +146,12 @@ static LogicalType GetSelectedFeaturesResultType(const vector<string> &selected)
         // No selection means all features
         auto all_features = GetFeatureNames();
         for (const auto &name : all_features) {
-            children.push_back(make_pair(name, LogicalType(LogicalTypeId::DOUBLE)));
+            children.push_back(MakeChild(name, LogicalType(LogicalTypeId::DOUBLE)));
         }
     } else {
         // Use selected features in order
         for (const auto &name : selected) {
-            children.push_back(make_pair(name, LogicalType(LogicalTypeId::DOUBLE)));
+            children.push_back(MakeChild(name, LogicalType(LogicalTypeId::DOUBLE)));
         }
     }
 
@@ -159,12 +159,12 @@ static LogicalType GetSelectedFeaturesResultType(const vector<string> &selected)
 }
 
 // Bind function for 3-parameter version (with feature_selection)
-static unique_ptr<FunctionData> TsFeaturesAggBind3(ClientContext &context, AggregateFunction &function,
+static unique_ptr<FunctionData> TsFeaturesAggBind3(ClientContext &context, AggregateBindFunction &function,
                                                     vector<unique_ptr<Expression>> &arguments) {
     auto bind_data = make_uniq<TsFeaturesAggBindData>();
 
     // Third argument is feature_selection (LIST(VARCHAR) or NULL)
-    if (arguments.size() >= 3 && arguments[2]->return_type.id() != LogicalTypeId::SQLNULL) {
+    if (arguments.size() >= 3 && ReturnTypeOf(*arguments[2]).id() != LogicalTypeId::SQLNULL) {
         bind_data->has_feature_selection = true;
         // The actual feature list will be extracted at runtime
         // For now, we return all features - dynamic typing based on runtime values
@@ -172,23 +172,23 @@ static unique_ptr<FunctionData> TsFeaturesAggBind3(ClientContext &context, Aggre
     }
 
     // Set return type to all features (filtering happens at runtime)
-    function.return_type = GetFeaturesAggResultType();
+    SetReturnTypeOf(function, GetFeaturesAggResultType());
 
     return bind_data;
 }
 
 // Bind function for 4-parameter version (with feature_selection and feature_params)
-static unique_ptr<FunctionData> TsFeaturesAggBind4(ClientContext &context, AggregateFunction &function,
+static unique_ptr<FunctionData> TsFeaturesAggBind4(ClientContext &context, AggregateBindFunction &function,
                                                     vector<unique_ptr<Expression>> &arguments) {
     auto bind_data = make_uniq<TsFeaturesAggBindData>();
 
     // Third argument is feature_selection, fourth is feature_params
-    if (arguments.size() >= 3 && arguments[2]->return_type.id() != LogicalTypeId::SQLNULL) {
+    if (arguments.size() >= 3 && ReturnTypeOf(*arguments[2]).id() != LogicalTypeId::SQLNULL) {
         bind_data->has_feature_selection = true;
     }
     // feature_params (4th arg) is accepted but not currently used
 
-    function.return_type = GetFeaturesAggResultType();
+    SetReturnTypeOf(function, GetFeaturesAggResultType());
 
     return bind_data;
 }
@@ -239,10 +239,10 @@ static void TsFeaturesAggUpdate(Vector inputs[], AggregateInputData &aggr_input,
     auto &val_vec = inputs[1];
 
     UnifiedVectorFormat ts_data, val_data;
-    ts_vec.ToUnifiedFormat(count, ts_data);
-    val_vec.ToUnifiedFormat(count, val_data);
+    ToUnified(ts_vec, count, ts_data);
+    ToUnified(val_vec, count, val_data);
 
-    auto states = FlatVector::GetData<TsFeaturesAggState *>(state_vector);
+    auto states = FlatDataMut<TsFeaturesAggState *>(state_vector);
 
     for (idx_t i = 0; i < count; i++) {
         auto &state = *states[i];
@@ -278,7 +278,7 @@ static void TsFeaturesAggUpdate(Vector inputs[], AggregateInputData &aggr_input,
 
 static void TsFeaturesAggFinalize(Vector &state_vector, AggregateInputData &aggr_input,
                                   Vector &result, idx_t count, idx_t offset) {
-    auto states = FlatVector::GetData<TsFeaturesAggState *>(state_vector);
+    auto states = FlatDataMut<TsFeaturesAggState *>(state_vector);
 
     // Get feature names for struct field lookup
     static auto feature_names = GetFeatureNames();
@@ -368,8 +368,8 @@ static void TsFeaturesAggFinalize(Vector &state_vector, AggregateInputData &aggr
         // Populate the struct fields
         auto &struct_entries = StructVector::GetEntries(result);
         for (size_t j = 0; j < feature_names.size() && j < struct_entries.size(); j++) {
-            auto &child_vec = *struct_entries[j];
-            auto child_data = FlatVector::GetData<double>(child_vec);
+            auto &child_vec = StructEntry(struct_entries[j]);
+            auto child_data = FlatDataMut<double>(child_vec);
 
             auto it = feature_map.find(feature_names[j]);
             if (it != feature_map.end()) {
@@ -385,8 +385,8 @@ static void TsFeaturesAggFinalize(Vector &state_vector, AggregateInputData &aggr
 
 static void TsFeaturesAggCombine(Vector &state_vector, Vector &combined, AggregateInputData &aggr_input,
                                  idx_t count) {
-    auto src_states = FlatVector::GetData<TsFeaturesAggState *>(state_vector);
-    auto tgt_states = FlatVector::GetData<TsFeaturesAggState *>(combined);
+    auto src_states = FlatDataMut<TsFeaturesAggState *>(state_vector);
+    auto tgt_states = FlatDataMut<TsFeaturesAggState *>(combined);
 
     for (idx_t i = 0; i < count; i++) {
         auto &src = *src_states[i];
@@ -416,7 +416,7 @@ static void TsFeaturesAggCombine(Vector &state_vector, Vector &combined, Aggrega
 }
 
 static void TsFeaturesAggDestructor(Vector &state_vector, AggregateInputData &aggr_input, idx_t count) {
-    auto states = FlatVector::GetData<TsFeaturesAggState *>(state_vector);
+    auto states = FlatDataMut<TsFeaturesAggState *>(state_vector);
     for (idx_t i = 0; i < count; i++) {
         if (states[i] && states[i]->data) {
             delete states[i]->data;
@@ -437,7 +437,7 @@ void RegisterTsFeaturesAggFunction(ExtensionLoader &loader) {
         AggregateFunction::StateInitialize<TsFeaturesAggState, TsFeaturesAggOperation>,
         TsFeaturesAggUpdate,
         TsFeaturesAggCombine,
-        TsFeaturesAggFinalize,
+        ANOFOX_AGG_FINALIZE(TsFeaturesAggFinalize),
         nullptr,  // simple_update
         nullptr,  // bind
         TsFeaturesAggDestructor
@@ -455,9 +455,9 @@ void RegisterTsFeaturesAggFunction(ExtensionLoader &loader) {
         AggregateFunction::StateInitialize<TsFeaturesAggState, TsFeaturesAggOperation>,
         TsFeaturesAggUpdate,
         TsFeaturesAggCombine,
-        TsFeaturesAggFinalize,
+        ANOFOX_AGG_FINALIZE(TsFeaturesAggFinalize),
         nullptr,  // simple_update
-        TsFeaturesAggBind3,
+        ANOFOX_AGG_BIND(TsFeaturesAggBind3),
         TsFeaturesAggDestructor
     );
 
@@ -482,9 +482,9 @@ void RegisterTsFeaturesAggFunction(ExtensionLoader &loader) {
         AggregateFunction::StateInitialize<TsFeaturesAggState, TsFeaturesAggOperation>,
         TsFeaturesAggUpdate,
         TsFeaturesAggCombine,
-        TsFeaturesAggFinalize,
+        ANOFOX_AGG_FINALIZE(TsFeaturesAggFinalize),
         nullptr,  // simple_update
-        TsFeaturesAggBind4,
+        ANOFOX_AGG_BIND(TsFeaturesAggBind4),
         TsFeaturesAggDestructor
     );
 

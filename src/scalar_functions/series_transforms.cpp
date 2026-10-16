@@ -53,7 +53,7 @@ static void TsDiffExecute(DataChunk &args, ExpressionState &state, Vector &resul
 		int32_t lag = lag_reader.Get(row_idx);
 
 		if (n == 0) {
-			auto list_entries = FlatVector::GetData<list_entry_t>(result);
+			auto list_entries = FlatDataMut<list_entry_t>(result);
 			list_entries[row_idx].offset = ListVector::GetListSize(result);
 			list_entries[row_idx].length = 0;
 			continue;
@@ -104,7 +104,7 @@ static void TsFillNullsMeanExecute(DataChunk &args, ExpressionState &state, Vect
 		idx_t n = list_reader.Read(row_idx, values, validity);
 
 		if (n == 0) {
-			auto list_entries = FlatVector::GetData<list_entry_t>(result);
+			auto list_entries = FlatDataMut<list_entry_t>(result);
 			list_entries[row_idx].offset = ListVector::GetListSize(result);
 			list_entries[row_idx].length = 0;
 			continue;
@@ -160,7 +160,7 @@ static void TsIsConstantExecute(DataChunk &args, ExpressionState &state, Vector 
 			throw InvalidInputException("_ts_is_constant: %s", error.message);
 		}
 
-		FlatVector::GetData<bool>(result)[row_idx] = is_const;
+		FlatDataMut<bool>(result)[row_idx] = is_const;
 	}
 }
 
@@ -172,7 +172,8 @@ void RegisterTsSeriesTransformFunctions(ExtensionLoader &loader) {
 	ScalarFunction diff_func(
 	    "_ts_diff", {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::INTEGER, LogicalType::INTEGER},
 	    LogicalType::LIST(LogicalType::DOUBLE), TsDiffExecute);
-	diff_func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+	MarkFallible(diff_func);
+	SetNullHandlingOf(diff_func, FunctionNullHandling::SPECIAL_HANDLING);
 
 	CreateScalarFunctionInfo diff_info(diff_func);
 	diff_info.internal = true;
@@ -180,7 +181,8 @@ void RegisterTsSeriesTransformFunctions(ExtensionLoader &loader) {
 
 	ScalarFunction fill_nulls_mean_func("_ts_fill_nulls_mean", {LogicalType::LIST(LogicalType::DOUBLE)},
 	                                     LogicalType::LIST(LogicalType::DOUBLE), TsFillNullsMeanExecute);
-	fill_nulls_mean_func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+	MarkFallible(fill_nulls_mean_func);
+	SetNullHandlingOf(fill_nulls_mean_func, FunctionNullHandling::SPECIAL_HANDLING);
 
 	CreateScalarFunctionInfo fill_nulls_mean_info(fill_nulls_mean_func);
 	fill_nulls_mean_info.internal = true;
@@ -188,7 +190,8 @@ void RegisterTsSeriesTransformFunctions(ExtensionLoader &loader) {
 
 	ScalarFunction is_constant_func("_ts_is_constant", {LogicalType::LIST(LogicalType::DOUBLE)},
 	                                 LogicalType::BOOLEAN, TsIsConstantExecute);
-	is_constant_func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+	MarkFallible(is_constant_func);
+	SetNullHandlingOf(is_constant_func, FunctionNullHandling::SPECIAL_HANDLING);
 
 	CreateScalarFunctionInfo is_constant_info(is_constant_func);
 	is_constant_info.internal = true;

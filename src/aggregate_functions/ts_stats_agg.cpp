@@ -117,10 +117,10 @@ static void TsStatsAggUpdate(Vector inputs[], AggregateInputData &aggr_input, id
     auto &val_vec = inputs[1];
 
     UnifiedVectorFormat ts_data, val_data;
-    ts_vec.ToUnifiedFormat(count, ts_data);
-    val_vec.ToUnifiedFormat(count, val_data);
+    ToUnified(ts_vec, count, ts_data);
+    ToUnified(val_vec, count, val_data);
 
-    auto states = FlatVector::GetData<TsStatsAggState *>(state_vector);
+    auto states = FlatDataMut<TsStatsAggState *>(state_vector);
 
     for (idx_t i = 0; i < count; i++) {
         auto &state = *states[i];
@@ -158,13 +158,13 @@ static void TsStatsAggUpdate(Vector inputs[], AggregateInputData &aggr_input, id
 template <typename T>
 static void SetStructField(Vector &result, idx_t field_idx, idx_t row_idx, T value) {
     auto &children = StructVector::GetEntries(result);
-    auto data = FlatVector::GetData<T>(*children[field_idx]);
+    auto data = FlatDataMut<T>(StructEntry(children[field_idx]));
     data[row_idx] = value;
 }
 
 static void TsStatsAggFinalize(Vector &state_vector, AggregateInputData &aggr_input,
                                Vector &result, idx_t count, idx_t offset) {
-    auto states = FlatVector::GetData<TsStatsAggState *>(state_vector);
+    auto states = FlatDataMut<TsStatsAggState *>(state_vector);
 
     for (idx_t i = 0; i < count; i++) {
         auto &state = *states[i];
@@ -267,19 +267,19 @@ static void TsStatsAggFinalize(Vector &state_vector, AggregateInputData &aggr_in
         if (stats_result.has_trend_strength) {
             SetStructField<double>(result, 30, row, stats_result.trend_strength);
         } else {
-            FlatVector::SetNull(*children[30], row, true);
+            FlatVector::SetNull(StructEntry(children[30]), row, true);
         }
         if (stats_result.has_seasonality_strength) {
             SetStructField<double>(result, 31, row, stats_result.seasonality_strength);
         } else {
-            FlatVector::SetNull(*children[31], row, true);
+            FlatVector::SetNull(StructEntry(children[31]), row, true);
         }
 
         // entropy - NULL when the Rust side has no entropy value (D-03)
         if (stats_result.has_entropy) {
             SetStructField<double>(result, 32, row, stats_result.entropy);
         } else {
-            FlatVector::SetNull(*children[32], row, true);
+            FlatVector::SetNull(StructEntry(children[32]), row, true);
         }
 
         SetStructField<double>(result, 33, row, stats_result.stability);
@@ -290,17 +290,17 @@ static void TsStatsAggFinalize(Vector &state_vector, AggregateInputData &aggr_in
             SetStructField<uint64_t>(result, 35, row, stats_result.n_gaps);
             SetStructField<uint64_t>(result, 36, row, stats_result.n_gap_runs);
         } else {
-            FlatVector::SetNull(*children[34], row, true);
-            FlatVector::SetNull(*children[35], row, true);
-            FlatVector::SetNull(*children[36], row, true);
+            FlatVector::SetNull(StructEntry(children[34]), row, true);
+            FlatVector::SetNull(StructEntry(children[35]), row, true);
+            FlatVector::SetNull(StructEntry(children[36]), row, true);
         }
     }
 }
 
 static void TsStatsAggCombine(Vector &state_vector, Vector &combined, AggregateInputData &aggr_input,
                               idx_t count) {
-    auto src_states = FlatVector::GetData<TsStatsAggState *>(state_vector);
-    auto tgt_states = FlatVector::GetData<TsStatsAggState *>(combined);
+    auto src_states = FlatDataMut<TsStatsAggState *>(state_vector);
+    auto tgt_states = FlatDataMut<TsStatsAggState *>(combined);
 
     for (idx_t i = 0; i < count; i++) {
         auto &src = *src_states[i];
@@ -330,7 +330,7 @@ static void TsStatsAggCombine(Vector &state_vector, Vector &combined, AggregateI
 }
 
 static void TsStatsAggDestructor(Vector &state_vector, AggregateInputData &aggr_input, idx_t count) {
-    auto states = FlatVector::GetData<TsStatsAggState *>(state_vector);
+    auto states = FlatDataMut<TsStatsAggState *>(state_vector);
     for (idx_t i = 0; i < count; i++) {
         if (states[i] && states[i]->data) {
             delete states[i]->data;
@@ -349,7 +349,7 @@ void RegisterTsStatsAggFunction(ExtensionLoader &loader) {
         AggregateFunction::StateInitialize<TsStatsAggState, TsStatsAggOperation>,
         TsStatsAggUpdate,
         TsStatsAggCombine,
-        TsStatsAggFinalize,
+        ANOFOX_AGG_FINALIZE(TsStatsAggFinalize),
         nullptr,  // simple_update
         nullptr,  // bind
         TsStatsAggDestructor

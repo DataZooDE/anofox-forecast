@@ -1,3 +1,4 @@
+#include "duckdb_compat.hpp"
 #include "ts_cv_folds_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // For DateColumnType, helper functions
 #include "duckdb/common/exception.hpp"
@@ -140,7 +141,7 @@ static string ParseStringParamMl(const Value &params, const string &key, const s
         auto &struct_children = StructValue::GetChildren(params);
         auto &struct_type = StructType::GetChildTypes(params.type());
         for (idx_t i = 0; i < struct_children.size(); i++) {
-            auto k = struct_type[i].first;
+            auto k = NameString(struct_type[i].first);
             StringUtil::Trim(k);
             if (StringUtil::Lower(k) == StringUtil::Lower(key) && !struct_children[i].IsNull()) {
                 return struct_children[i].ToString();
@@ -177,7 +178,7 @@ static int64_t ParseInt64ParamMl(const Value &params, const string &key, int64_t
         auto &struct_children = StructValue::GetChildren(params);
         auto &struct_type = StructType::GetChildTypes(params.type());
         for (idx_t i = 0; i < struct_children.size(); i++) {
-            auto k = struct_type[i].first;
+            auto k = NameString(struct_type[i].first);
             StringUtil::Trim(k);
             if (StringUtil::Lower(k) == StringUtil::Lower(key) && !struct_children[i].IsNull()) {
                 try {
@@ -218,7 +219,7 @@ static bool ParseBoolParamMl(const Value &params, const string &key, bool defaul
         auto &struct_children = StructValue::GetChildren(params);
         auto &struct_type = StructType::GetChildTypes(params.type());
         for (idx_t i = 0; i < struct_children.size(); i++) {
-            auto k = struct_type[i].first;
+            auto k = NameString(struct_type[i].first);
             StringUtil::Trim(k);
             if (StringUtil::Lower(k) == StringUtil::Lower(key) && !struct_children[i].IsNull()) {
                 if (struct_children[i].type().id() == LogicalTypeId::BOOLEAN) {
@@ -263,7 +264,7 @@ static void ValidateParams(const Value &params) {
     } else if (params.type().id() == LogicalTypeId::STRUCT) {
         auto &struct_type = StructType::GetChildTypes(params.type());
         for (idx_t i = 0; i < struct_type.size(); i++) {
-            auto key = struct_type[i].first;
+            auto key = NameString(struct_type[i].first);
             StringUtil::Trim(key);
             provided_keys.push_back(key);
             if (VALID_PARAMS.find(StringUtil::Lower(key)) == VALID_PARAMS.end()) {
@@ -300,7 +301,7 @@ static unique_ptr<FunctionData> TsCvFoldsBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    TableBindNames &names) {
 
     auto bind_data = make_uniq<TsCvFoldsBindData>();
 
@@ -364,22 +365,22 @@ static unique_ptr<FunctionData> TsCvFoldsBind(
 
     // Group column - preserve original name
     return_types.push_back(bind_data->group_logical_type);
-    names.push_back(table_names.size() > 3 ? table_names[3] : "group_col");
+    names.push_back(MakeBindName(table_names.size() > 3 ? NameString(table_names[3]) : "group_col"));
 
     // Date column - preserve original name
     return_types.push_back(bind_data->date_logical_type);
-    names.push_back(table_names.size() > 4 ? table_names[4] : "date_col");
+    names.push_back(MakeBindName(table_names.size() > 4 ? NameString(table_names[4]) : "date_col"));
 
     // Target column - preserve original name (NOT hardcoded 'y')
     return_types.push_back(bind_data->value_logical_type);
-    names.push_back(table_names.size() > 5 ? table_names[5] : "target_col");
+    names.push_back(MakeBindName(table_names.size() > 5 ? NameString(table_names[5]) : "target_col"));
 
     // Fold metadata columns
     return_types.push_back(LogicalType::BIGINT);
-    names.push_back("fold_id");
+    names.push_back(MakeBindName("fold_id"));
 
     return_types.push_back(LogicalType::VARCHAR);
-    names.push_back("split");
+    names.push_back(MakeBindName("split"));
 
     return std::move(bind_data);
 }
@@ -474,7 +475,7 @@ static OperatorResultType TsCvFoldsInOut(
         }
     }
 
-    output.SetCardinality(0);
+    SetOutputCardinality(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -665,23 +666,23 @@ static OperatorFinalizeResultType TsCvFoldsFinalize(
         auto &out_row = gstate.output_rows[gstate.output_offset];
         auto &input_row = gstate.input_rows[out_row.input_idx];
 
-        output.SetValue(0, output_idx, input_row.group_val);
-        output.SetValue(1, output_idx, input_row.date_val);
+        output.data[0].SetValue(output_idx, input_row.group_val);
+        output.data[1].SetValue(output_idx, input_row.date_val);
 
         if (input_row.valid) {
-            output.SetValue(2, output_idx, Value::DOUBLE(input_row.value));
+            output.data[2].SetValue(output_idx, Value::DOUBLE(input_row.value));
         } else {
-            output.SetValue(2, output_idx, Value());
+            output.data[2].SetValue(output_idx, Value());
         }
 
-        output.SetValue(3, output_idx, Value::BIGINT(out_row.fold_id));
-        output.SetValue(4, output_idx, Value(out_row.is_train ? "train" : "test"));
+        output.data[3].SetValue(output_idx, Value::BIGINT(out_row.fold_id));
+        output.data[4].SetValue(output_idx, Value(out_row.is_train ? "train" : "test"));
 
         output_idx++;
         gstate.output_offset++;
     }
 
-    output.SetCardinality(output_idx);
+    SetOutputCardinality(output, output_idx);
 
     if (gstate.output_offset >= gstate.output_rows.size()) {
         return OperatorFinalizeResultType::FINISHED;

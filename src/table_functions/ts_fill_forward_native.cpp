@@ -1,3 +1,4 @@
+#include "duckdb_compat.hpp"
 #include "ts_fill_gaps_native.hpp"  // Reuse helper functions
 #include "anofox_fcst_ffi.h"
 #include "duckdb/common/exception.hpp"
@@ -81,7 +82,7 @@ static unique_ptr<FunctionData> TsFillForwardNativeBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    TableBindNames &names) {
 
     auto bind_data = make_uniq<TsFillForwardNativeBindData>();
 
@@ -173,13 +174,13 @@ static unique_ptr<FunctionData> TsFillForwardNativeBind(
     }
 
     // Output schema: group_col, date_col, value_col with preserved types
-    names.push_back(input.input_table_names[0]);
+    names.push_back(MakeBindName(NameString(input.input_table_names[0])));
     return_types.push_back(bind_data->group_logical_type);
 
-    names.push_back(input.input_table_names[1]);
+    names.push_back(MakeBindName(NameString(input.input_table_names[1])));
     return_types.push_back(bind_data->date_logical_type);
 
-    names.push_back(input.input_table_names[2]);
+    names.push_back(MakeBindName(NameString(input.input_table_names[2])));
     return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
 
     return bind_data;
@@ -337,7 +338,7 @@ static OperatorResultType TsFillForwardNativeInOut(
         }
     }
 
-    output.SetCardinality(0);
+    SetOutputCardinality(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -525,7 +526,7 @@ static OperatorFinalizeResultType TsFillForwardNativeFinalize(
             }
         }
 
-        output.SetCardinality(output_count);
+        SetOutputCardinality(output, output_count);
 
         // Check if we need to continue with this slot or move to next
         if (slot.current_group >= slot.results.size()) {

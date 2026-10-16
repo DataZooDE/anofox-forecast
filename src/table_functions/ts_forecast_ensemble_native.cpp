@@ -92,13 +92,13 @@ struct TsForecastEnsembleNativeBindData : public FunctionData {
 
 static unique_ptr<FunctionData> TsForecastEnsembleNativeBind(
     ClientContext &context,
-    ScalarFunction &bound_function,
+    ScalarBindFunction &bound_function,
     vector<unique_ptr<Expression>> &arguments) {
 
     auto bind_data = make_uniq<TsForecastEnsembleNativeBindData>();
 
     // Detect date column type from LIST child type (argument 0 = dates)
-    auto &date_list_type = arguments[0]->return_type;
+    auto &date_list_type = ReturnTypeOf(*arguments[0]);
     if (date_list_type.id() == LogicalTypeId::LIST) {
         auto &child_type = ListType::GetChildType(date_list_type);
         switch (child_type.id()) {
@@ -124,7 +124,7 @@ static unique_ptr<FunctionData> TsForecastEnsembleNativeBind(
     // Extract members LIST(VARCHAR) from argument 2 at bind time if it is a constant.
     // Runtime extraction is done per-row in Execute.
     // If it is a constant, pre-validate here for early error reporting.
-    if (arguments[2]->return_type.id() == LogicalTypeId::LIST) {
+    if (ReturnTypeOf(*arguments[2]).id() == LogicalTypeId::LIST) {
         // Members are extracted per-row at execute time; bind-time validation
         // for constant member lists happens via the constant-folding path.
         // No early extraction needed here — runtime extraction is reliable.
@@ -144,7 +144,7 @@ static unique_ptr<FunctionData> TsForecastEnsembleNativeBind(
     struct_children.push_back(make_pair("yhat_upper", LogicalType::DOUBLE));
     struct_children.push_back(make_pair("model_name", LogicalType::VARCHAR));
 
-    bound_function.return_type = LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children)));
+    SetReturnTypeOf(bound_function, LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children))));
     return std::move(bind_data);
 }
 
@@ -153,7 +153,7 @@ static unique_ptr<FunctionData> TsForecastEnsembleNativeBind(
 // ============================================================================
 
 static void TsForecastEnsembleNativeExecute(DataChunk &args, ExpressionState &state, Vector &result) {
-    auto &bind_data = state.expr.Cast<BoundFunctionExpression>().bind_info->Cast<TsForecastEnsembleNativeBindData>();
+    auto &bind_data = BindInfoOf(state.expr.Cast<BoundFunctionExpression>())->Cast<TsForecastEnsembleNativeBindData>();
     idx_t count = args.size();
 
     auto &date_list_vec   = args.data[0];  // LIST(date)
@@ -174,15 +174,15 @@ static void TsForecastEnsembleNativeExecute(DataChunk &args, ExpressionState &st
     UnifiedVectorFormat date_list_data, value_list_data, members_list_data;
     UnifiedVectorFormat horizon_data, freq_data, method_data, period_data;
     UnifiedVectorFormat confidence_data;
-    date_list_vec.ToUnifiedFormat(count, date_list_data);
-    value_list_vec.ToUnifiedFormat(count, value_list_data);
-    members_list_vec.ToUnifiedFormat(count, members_list_data);
-    horizon_vec.ToUnifiedFormat(count, horizon_data);
-    freq_vec.ToUnifiedFormat(count, freq_data);
-    method_vec.ToUnifiedFormat(count, method_data);
-    period_vec.ToUnifiedFormat(count, period_data);
+    ToUnified(date_list_vec, count, date_list_data);
+    ToUnified(value_list_vec, count, value_list_data);
+    ToUnified(members_list_vec, count, members_list_data);
+    ToUnified(horizon_vec, count, horizon_data);
+    ToUnified(freq_vec, count, freq_data);
+    ToUnified(method_vec, count, method_data);
+    ToUnified(period_vec, count, period_data);
     if (has_confidence_arg) {
-        args.data[7].ToUnifiedFormat(count, confidence_data);
+        ToUnified(args.data[7], count, confidence_data);
     }
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
@@ -206,7 +206,7 @@ static void TsForecastEnsembleNativeExecute(DataChunk &args, ExpressionState &st
         {
             auto member_entries = UnifiedVectorFormat::GetData<list_entry_t>(members_list_data);
             auto &member_entry  = member_entries[member_idx];
-            auto &member_child  = ListVector::GetEntry(members_list_vec);
+            auto &member_child  = ListChildMut(members_list_vec);
             idx_t m_off = member_entry.offset;
             idx_t m_len = member_entry.length;
 
@@ -227,10 +227,10 @@ static void TsForecastEnsembleNativeExecute(DataChunk &args, ExpressionState &st
         // --- Extract values from LIST(DOUBLE) ---
         auto value_entries = UnifiedVectorFormat::GetData<list_entry_t>(value_list_data);
         auto &value_entry  = value_entries[value_idx];
-        auto &value_child  = ListVector::GetEntry(value_list_vec);
+        auto &value_child  = ListChildMut(value_list_vec);
 
         UnifiedVectorFormat value_child_data;
-        value_child.ToUnifiedFormat(ListVector::GetListSize(value_list_vec), value_child_data);
+        ToUnified(value_child, ListVector::GetListSize(value_list_vec), value_child_data);
         auto value_values = UnifiedVectorFormat::GetData<double>(value_child_data);
 
         idx_t n = value_entry.length;
@@ -244,7 +244,7 @@ static void TsForecastEnsembleNativeExecute(DataChunk &args, ExpressionState &st
         // --- Extract dates from LIST(date) ---
         auto date_entries = UnifiedVectorFormat::GetData<list_entry_t>(date_list_data);
         auto &date_entry  = date_entries[date_idx];
-        auto &date_child  = ListVector::GetEntry(date_list_vec);
+        auto &date_child  = ListChildMut(date_list_vec);
 
         // Build sorted index by date. date_is_null tracks which entries had a
         // NULL date (date_micros[i]=0 is a placeholder, not a real
@@ -469,7 +469,7 @@ void RegisterTsForecastEnsembleNativeFunction(ExtensionLoader &loader) {
     // ts_forecast_ensemble_by pass an explicit confidence_level.
     ScalarFunctionSet func_set("_ts_forecast_ensemble_native");
 
-    func_set.AddFunction(ScalarFunction(
+    ScalarFunction func_7arg(
         {LogicalType::LIST(LogicalType::ANY),      // dates
          LogicalType::LIST(LogicalType::DOUBLE),   // values
          LogicalType::LIST(LogicalType::VARCHAR),  // members
@@ -479,9 +479,10 @@ void RegisterTsForecastEnsembleNativeFunction(ExtensionLoader &loader) {
          LogicalType::INTEGER},                     // seasonal_period
         LogicalType::LIST(LogicalType::ANY),        // return type set by bind
         TsForecastEnsembleNativeExecute,
-        TsForecastEnsembleNativeBind));
+        ANOFOX_SCALAR_BIND(TsForecastEnsembleNativeBind));
+    MarkFallible(func_7arg);
 
-    func_set.AddFunction(ScalarFunction(
+    ScalarFunction func_8arg(
         {LogicalType::LIST(LogicalType::ANY),      // dates
          LogicalType::LIST(LogicalType::DOUBLE),   // values
          LogicalType::LIST(LogicalType::VARCHAR),  // members
@@ -492,10 +493,14 @@ void RegisterTsForecastEnsembleNativeFunction(ExtensionLoader &loader) {
          LogicalType::DOUBLE},                       // confidence_level
         LogicalType::LIST(LogicalType::ANY),        // return type set by bind
         TsForecastEnsembleNativeExecute,
-        TsForecastEnsembleNativeBind));
+        ANOFOX_SCALAR_BIND(TsForecastEnsembleNativeBind));
+    MarkFallible(func_8arg);
 
-    for (auto &func : func_set.functions) {
-        func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    // Configure each overload before adding it: DuckDB 2.0 function sets hold
+    // shared_ptr<const ScalarFunction>, so they cannot be modified once added.
+    for (auto *func : {&func_7arg, &func_8arg}) {
+        SetNullHandlingOf(*func, FunctionNullHandling::SPECIAL_HANDLING);
+        func_set.AddFunction(*func);
     }
 
     CreateScalarFunctionInfo info(func_set);

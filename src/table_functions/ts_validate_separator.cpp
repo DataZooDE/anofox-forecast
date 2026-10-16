@@ -1,3 +1,4 @@
+#include "duckdb_compat.hpp"
 #include "ts_validate_separator.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -70,13 +71,17 @@ static unique_ptr<FunctionData> TsValidateSeparatorBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    TableBindNames &names) {
 
     auto bind_data = make_uniq<TsValidateSeparatorBindData>();
 
     // Parse named parameters
     for (auto &kv : input.named_parameters) {
-        if (kv.first == "separator") {
+        // DuckDB 2.0 passes the typed-NULL default of every parameter the caller left out.
+        if (kNamedParamsHaveNullDefault && kv.second.IsNull()) {
+            continue;
+        }
+        if (NameString(kv.first) == "separator") {
             bind_data->separator = kv.second.GetValue<string>();
         }
     }
@@ -90,19 +95,19 @@ static unique_ptr<FunctionData> TsValidateSeparatorBind(
     bind_data->num_id_cols = input.input_table_types.size();
 
     // Output schema
-    names.push_back("separator");
+    names.push_back(MakeBindName("separator"));
     return_types.push_back(LogicalType::VARCHAR);
 
-    names.push_back("is_valid");
+    names.push_back(MakeBindName("is_valid"));
     return_types.push_back(LogicalType::BOOLEAN);
 
-    names.push_back("n_conflicts");
+    names.push_back(MakeBindName("n_conflicts"));
     return_types.push_back(LogicalType::INTEGER);
 
-    names.push_back("conflicting_values");
+    names.push_back(MakeBindName("conflicting_values"));
     return_types.push_back(LogicalType::LIST(LogicalType::VARCHAR));
 
-    names.push_back("message");
+    names.push_back(MakeBindName("message"));
     return_types.push_back(LogicalType::VARCHAR);
 
     return bind_data;
@@ -168,7 +173,7 @@ static OperatorResultType TsValidateSeparatorInOut(
     }
 
     // Don't output anything during input phase
-    output.SetCardinality(0);
+    SetOutputCardinality(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -248,12 +253,12 @@ static OperatorFinalizeResultType TsValidateSeparatorFinalize(
 
     // Output single row
     output.Reset();
-    output.SetValue(0, 0, Value(bind_data.separator));
-    output.SetValue(1, 0, Value::BOOLEAN(is_valid));
-    output.SetValue(2, 0, Value::INTEGER(static_cast<int32_t>(n_conflicts)));
-    output.SetValue(3, 0, Value::LIST(LogicalType::VARCHAR, conflicting_values));
-    output.SetValue(4, 0, Value(message));
-    output.SetCardinality(1);
+    output.data[0].SetValue(0, Value(bind_data.separator));
+    output.data[1].SetValue(0, Value::BOOLEAN(is_valid));
+    output.data[2].SetValue(0, Value::INTEGER(static_cast<int32_t>(n_conflicts)));
+    output.data[3].SetValue(0, Value::LIST(LogicalType::VARCHAR, conflicting_values));
+    output.data[4].SetValue(0, Value(message));
+    SetOutputCardinality(output, 1);
 
     gstate.output_done = true;
     return OperatorFinalizeResultType::FINISHED;
@@ -273,7 +278,7 @@ void RegisterTsValidateSeparatorFunction(ExtensionLoader &loader) {
                        TsValidateSeparatorInitLocal);
 
     // Named parameters
-    func.named_parameters["separator"] = LogicalType::VARCHAR;
+    AddNamedParameter(func, "separator", LogicalType::VARCHAR);
 
     // Set up as table-in-out function
     func.in_out_function = TsValidateSeparatorInOut;

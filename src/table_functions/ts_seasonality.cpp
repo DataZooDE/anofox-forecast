@@ -57,8 +57,8 @@ static void TsDetectSeasonalityFunction(DataChunk &args, ExpressionState &state,
         }
 
         // Build the result list
-        auto list_data = FlatVector::GetData<list_entry_t>(result);
-        auto &list_child = ListVector::GetEntry(result);
+        auto list_data = FlatDataMut<list_entry_t>(result);
+        auto &list_child = ListChildMut(result);
         auto current_size = ListVector::GetListSize(result);
 
         list_data[row_idx].offset = current_size;
@@ -67,7 +67,7 @@ static void TsDetectSeasonalityFunction(DataChunk &args, ExpressionState &state,
         ListVector::Reserve(result, current_size + n_periods);
         ListVector::SetListSize(result, current_size + n_periods);
 
-        auto child_data = FlatVector::GetData<int32_t>(list_child);
+        auto child_data = FlatDataMut<int32_t>(list_child);
         for (size_t i = 0; i < n_periods; i++) {
             child_data[current_size + i] = periods[i];
         }
@@ -80,11 +80,11 @@ static void TsDetectSeasonalityFunction(DataChunk &args, ExpressionState &state,
 
 void RegisterTsDetectSeasonalityFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_detect_set("ts_detect_seasonality");
-    ts_detect_set.AddFunction(ScalarFunction(
+    ts_detect_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         LogicalType::LIST(LogicalType(LogicalTypeId::INTEGER)),
         TsDetectSeasonalityFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(ts_detect_set);
         FunctionDescription desc;
@@ -98,11 +98,11 @@ void RegisterTsDetectSeasonalityFunction(ExtensionLoader &loader) {
     }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_detect_seasonality");
-    anofox_set.AddFunction(ScalarFunction(
+    anofox_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         LogicalType::LIST(LogicalType(LogicalTypeId::INTEGER)),
         TsDetectSeasonalityFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(anofox_set);
         info.alias_of = "ts_detect_seasonality";
@@ -172,9 +172,9 @@ static void TsAnalyzeSeasonalityWithTimestampsFunction(DataChunk &args, Expressi
 
         // Set detected_periods list
         {
-            auto &periods_list = *children[0];
-            auto list_data = FlatVector::GetData<list_entry_t>(periods_list);
-            auto &list_child = ListVector::GetEntry(periods_list);
+            auto &periods_list = StructEntry(children[0]);
+            auto list_data = FlatDataMut<list_entry_t>(periods_list);
+            auto &list_child = ListChildMut(periods_list);
             auto current_size = ListVector::GetListSize(periods_list);
 
             list_data[row_idx].offset = current_size;
@@ -183,16 +183,16 @@ static void TsAnalyzeSeasonalityWithTimestampsFunction(DataChunk &args, Expressi
             ListVector::Reserve(periods_list, current_size + seas_result.n_periods);
             ListVector::SetListSize(periods_list, current_size + seas_result.n_periods);
 
-            auto child_data = FlatVector::GetData<int32_t>(list_child);
+            auto child_data = FlatDataMut<int32_t>(list_child);
             for (size_t i = 0; i < seas_result.n_periods; i++) {
                 child_data[current_size + i] = seas_result.detected_periods[i];
             }
         }
 
         // Set scalar fields
-        FlatVector::GetData<int32_t>(*children[1])[row_idx] = seas_result.primary_period;
-        FlatVector::GetData<double>(*children[2])[row_idx] = seas_result.seasonal_strength;
-        FlatVector::GetData<double>(*children[3])[row_idx] = seas_result.trend_strength;
+        FlatDataMut<int32_t>(StructEntry(children[1]))[row_idx] = seas_result.primary_period;
+        FlatDataMut<double>(StructEntry(children[2]))[row_idx] = seas_result.seasonal_strength;
+        FlatDataMut<double>(StructEntry(children[3]))[row_idx] = seas_result.trend_strength;
 
         anofox_free_seasonality_result(&seas_result);
     }
@@ -237,9 +237,9 @@ static void TsAnalyzeSeasonalityFunction(DataChunk &args, ExpressionState &state
 
         // Set detected_periods list
         {
-            auto &periods_list = *children[0];
-            auto list_data = FlatVector::GetData<list_entry_t>(periods_list);
-            auto &list_child = ListVector::GetEntry(periods_list);
+            auto &periods_list = StructEntry(children[0]);
+            auto list_data = FlatDataMut<list_entry_t>(periods_list);
+            auto &list_child = ListChildMut(periods_list);
             auto current_size = ListVector::GetListSize(periods_list);
 
             list_data[row_idx].offset = current_size;
@@ -248,16 +248,16 @@ static void TsAnalyzeSeasonalityFunction(DataChunk &args, ExpressionState &state
             ListVector::Reserve(periods_list, current_size + seas_result.n_periods);
             ListVector::SetListSize(periods_list, current_size + seas_result.n_periods);
 
-            auto child_data = FlatVector::GetData<int32_t>(list_child);
+            auto child_data = FlatDataMut<int32_t>(list_child);
             for (size_t i = 0; i < seas_result.n_periods; i++) {
                 child_data[current_size + i] = seas_result.detected_periods[i];
             }
         }
 
         // Set scalar fields
-        FlatVector::GetData<int32_t>(*children[1])[row_idx] = seas_result.primary_period;
-        FlatVector::GetData<double>(*children[2])[row_idx] = seas_result.seasonal_strength;
-        FlatVector::GetData<double>(*children[3])[row_idx] = seas_result.trend_strength;
+        FlatDataMut<int32_t>(StructEntry(children[1]))[row_idx] = seas_result.primary_period;
+        FlatDataMut<double>(StructEntry(children[2]))[row_idx] = seas_result.seasonal_strength;
+        FlatDataMut<double>(StructEntry(children[3]))[row_idx] = seas_result.trend_strength;
 
         anofox_free_seasonality_result(&seas_result);
     }
@@ -266,17 +266,17 @@ static void TsAnalyzeSeasonalityFunction(DataChunk &args, ExpressionState &state
 void RegisterTsAnalyzeSeasonalityFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_analyze_set("ts_analyze_seasonality");
     // Single-argument version (convenience)
-    ts_analyze_set.AddFunction(ScalarFunction(
+    ts_analyze_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetSeasonalityResultType(),
         TsAnalyzeSeasonalityFunction
-    ));
+    )));
     // Two-argument version (C++ API compatible: timestamps, values)
-    ts_analyze_set.AddFunction(ScalarFunction(
+    ts_analyze_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::TIMESTAMP)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetSeasonalityResultType(),
         TsAnalyzeSeasonalityWithTimestampsFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(ts_analyze_set);
         FunctionDescription desc;
@@ -297,16 +297,16 @@ void RegisterTsAnalyzeSeasonalityFunction(ExtensionLoader &loader) {
     }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_analyze_seasonality");
-    anofox_set.AddFunction(ScalarFunction(
+    anofox_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetSeasonalityResultType(),
         TsAnalyzeSeasonalityFunction
-    ));
-    anofox_set.AddFunction(ScalarFunction(
+    )));
+    anofox_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::TIMESTAMP)), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetSeasonalityResultType(),
         TsAnalyzeSeasonalityWithTimestampsFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(anofox_set);
         info.alias_of = "ts_analyze_seasonality";
@@ -350,8 +350,8 @@ static LogicalType GetSeasonalityClassificationResultType() {
 
 // Helper to set list of doubles in result struct
 static void SetDoubleListField(Vector &list_vec, idx_t row_idx, const double *data, size_t count) {
-    auto list_data = FlatVector::GetData<list_entry_t>(list_vec);
-    auto &list_child = ListVector::GetEntry(list_vec);
+    auto list_data = FlatDataMut<list_entry_t>(list_vec);
+    auto &list_child = ListChildMut(list_vec);
     auto current_size = ListVector::GetListSize(list_vec);
 
     list_data[row_idx].offset = current_size;
@@ -360,7 +360,7 @@ static void SetDoubleListField(Vector &list_vec, idx_t row_idx, const double *da
     ListVector::Reserve(list_vec, current_size + count);
     ListVector::SetListSize(list_vec, current_size + count);
 
-    auto child_data = FlatVector::GetData<double>(list_child);
+    auto child_data = FlatDataMut<double>(list_child);
     for (size_t i = 0; i < count; i++) {
         child_data[current_size + i] = data[i];
     }
@@ -368,8 +368,8 @@ static void SetDoubleListField(Vector &list_vec, idx_t row_idx, const double *da
 
 // Helper to set list of bigints in result struct
 static void SetBigintListField(Vector &list_vec, idx_t row_idx, const size_t *data, size_t count) {
-    auto list_data = FlatVector::GetData<list_entry_t>(list_vec);
-    auto &list_child = ListVector::GetEntry(list_vec);
+    auto list_data = FlatDataMut<list_entry_t>(list_vec);
+    auto &list_child = ListChildMut(list_vec);
     auto current_size = ListVector::GetListSize(list_vec);
 
     list_data[row_idx].offset = current_size;
@@ -378,7 +378,7 @@ static void SetBigintListField(Vector &list_vec, idx_t row_idx, const size_t *da
     ListVector::Reserve(list_vec, current_size + count);
     ListVector::SetListSize(list_vec, current_size + count);
 
-    auto child_data = FlatVector::GetData<int64_t>(list_child);
+    auto child_data = FlatDataMut<int64_t>(list_child);
     for (size_t i = 0; i < count; i++) {
         child_data[current_size + i] = static_cast<int64_t>(data[i]);
     }
@@ -479,35 +479,35 @@ static void TsClassifySeasonalityFunction(DataChunk &args, ExpressionState &stat
         auto &children = StructVector::GetEntries(result);
 
         // timing_classification (index 0)
-        FlatVector::GetData<string_t>(*children[0])[row_idx] =
-            StringVector::AddString(*children[0], class_result.classification);
+        FlatDataMut<string_t>(StructEntry(children[0]))[row_idx] =
+            StringVector::AddString(StructEntry(children[0]), class_result.classification);
 
         // modulation_type (index 1)
         if (mod_success) {
-            FlatVector::GetData<string_t>(*children[1])[row_idx] =
-                StringVector::AddString(*children[1], mod_result.modulation_type);
+            FlatDataMut<string_t>(StructEntry(children[1]))[row_idx] =
+                StringVector::AddString(StructEntry(children[1]), mod_result.modulation_type);
         } else {
-            FlatVector::GetData<string_t>(*children[1])[row_idx] =
-                StringVector::AddString(*children[1], "unknown");
+            FlatDataMut<string_t>(StructEntry(children[1]))[row_idx] =
+                StringVector::AddString(StructEntry(children[1]), "unknown");
         }
 
         // has_stable_timing (index 2)
-        FlatVector::GetData<bool>(*children[2])[row_idx] = class_result.has_stable_timing;
+        FlatDataMut<bool>(StructEntry(children[2]))[row_idx] = class_result.has_stable_timing;
 
         // timing_variability (index 3)
-        FlatVector::GetData<double>(*children[3])[row_idx] = class_result.timing_variability;
+        FlatDataMut<double>(StructEntry(children[3]))[row_idx] = class_result.timing_variability;
 
         // seasonal_strength (index 4)
-        FlatVector::GetData<double>(*children[4])[row_idx] = class_result.seasonal_strength;
+        FlatDataMut<double>(StructEntry(children[4]))[row_idx] = class_result.seasonal_strength;
 
         // is_seasonal (index 5)
-        FlatVector::GetData<bool>(*children[5])[row_idx] = class_result.is_seasonal;
+        FlatDataMut<bool>(StructEntry(children[5]))[row_idx] = class_result.is_seasonal;
 
         // cycle_strengths (index 6)
-        SetDoubleListField(*children[6], row_idx, class_result.cycle_strengths, class_result.n_cycle_strengths);
+        SetDoubleListField(StructEntry(children[6]), row_idx, class_result.cycle_strengths, class_result.n_cycle_strengths);
 
         // weak_seasons (index 7)
-        SetBigintListField(*children[7], row_idx, class_result.weak_seasons, class_result.n_weak_seasons);
+        SetBigintListField(StructEntry(children[7]), row_idx, class_result.weak_seasons, class_result.n_weak_seasons);
 
         // Free FFI results
         anofox_free_seasonality_classification_result(&class_result);
@@ -521,25 +521,25 @@ void RegisterTsClassifySeasonalityFunction(ExtensionLoader &loader) {
     ScalarFunctionSet ts_classify_set("ts_classify_seasonality");
 
     // ts_classify_seasonality(values, period) -> STRUCT
-    ts_classify_set.AddFunction(ScalarFunction(
+    ts_classify_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         GetSeasonalityClassificationResultType(),
         TsClassifySeasonalityFunction
-    ));
+    )));
 
     // ts_classify_seasonality(values, period, strength_threshold) -> STRUCT
-    ts_classify_set.AddFunction(ScalarFunction(
+    ts_classify_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetSeasonalityClassificationResultType(),
         TsClassifySeasonalityFunction
-    ));
+    )));
 
     // ts_classify_seasonality(values, period, strength_threshold, timing_threshold) -> STRUCT
-    ts_classify_set.AddFunction(ScalarFunction(
+    ts_classify_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetSeasonalityClassificationResultType(),
         TsClassifySeasonalityFunction
-    ));
+    )));
 
     {
         CreateScalarFunctionInfo info(ts_classify_set);
@@ -555,21 +555,21 @@ void RegisterTsClassifySeasonalityFunction(ExtensionLoader &loader) {
 
     // Also register with anofox_ prefix
     ScalarFunctionSet anofox_classify_set("anofox_fcst_ts_classify_seasonality");
-    anofox_classify_set.AddFunction(ScalarFunction(
+    anofox_classify_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         GetSeasonalityClassificationResultType(),
         TsClassifySeasonalityFunction
-    ));
-    anofox_classify_set.AddFunction(ScalarFunction(
+    )));
+    anofox_classify_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetSeasonalityClassificationResultType(),
         TsClassifySeasonalityFunction
-    ));
-    anofox_classify_set.AddFunction(ScalarFunction(
+    )));
+    anofox_classify_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::DOUBLE)},
         GetSeasonalityClassificationResultType(),
         TsClassifySeasonalityFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(anofox_classify_set);
         info.alias_of = "ts_classify_seasonality";

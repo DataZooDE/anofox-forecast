@@ -38,9 +38,9 @@ static int ParseInsufficientDataMode(const string &mode) {
 class ListIntReader {
 public:
     ListIntReader(Vector &list_vec, idx_t count) : list_vec(list_vec) {
-        list_vec.ToUnifiedFormat(count, list_data);
-        auto &child_vec_ref = ListVector::GetEntry(list_vec);
-        child_vec_ref.ToUnifiedFormat(ListVector::GetListSize(list_vec), child_data);
+        ToUnified(list_vec, count, list_data);
+        auto &child_vec_ref = ListChildMut(list_vec);
+        ToUnified(child_vec_ref, ListVector::GetListSize(list_vec), child_data);
     }
 
     bool IsNull(idx_t row_idx) const {
@@ -137,9 +137,9 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
 
         // Set trend list
         {
-            auto &trend_list = *children[0];
-            auto list_data = FlatVector::GetData<list_entry_t>(trend_list);
-            auto &list_child = ListVector::GetEntry(trend_list);
+            auto &trend_list = StructEntry(children[0]);
+            auto list_data = FlatDataMut<list_entry_t>(trend_list);
+            auto &list_child = ListChildMut(trend_list);
             auto current_size = ListVector::GetListSize(trend_list);
 
             // CR-01: trend is a null pointer when decomposition was not applied
@@ -154,7 +154,7 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
             ListVector::Reserve(trend_list, current_size + trend_len);
             ListVector::SetListSize(trend_list, current_size + trend_len);
 
-            auto child_data = FlatVector::GetData<double>(list_child);
+            auto child_data = FlatDataMut<double>(list_child);
             if (mstl_result.trend) {
                 memcpy(child_data + current_size, mstl_result.trend,
                        trend_len * sizeof(double));
@@ -163,9 +163,9 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
 
         // Set seasonal components (list of lists)
         {
-            auto &seasonal_outer = *children[1];
-            auto outer_list_data = FlatVector::GetData<list_entry_t>(seasonal_outer);
-            auto &inner_list_vec = ListVector::GetEntry(seasonal_outer);
+            auto &seasonal_outer = StructEntry(children[1]);
+            auto outer_list_data = FlatDataMut<list_entry_t>(seasonal_outer);
+            auto &inner_list_vec = ListChildMut(seasonal_outer);
             auto outer_size = ListVector::GetListSize(seasonal_outer);
 
             outer_list_data[row_idx].offset = outer_size;
@@ -174,8 +174,8 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
             ListVector::Reserve(seasonal_outer, outer_size + mstl_result.n_seasonal);
             ListVector::SetListSize(seasonal_outer, outer_size + mstl_result.n_seasonal);
 
-            auto inner_list_data = FlatVector::GetData<list_entry_t>(inner_list_vec);
-            auto &inner_child = ListVector::GetEntry(inner_list_vec);
+            auto inner_list_data = FlatDataMut<list_entry_t>(inner_list_vec);
+            auto &inner_child = ListChildMut(inner_list_vec);
 
             for (size_t s = 0; s < mstl_result.n_seasonal; s++) {
                 auto inner_size = ListVector::GetListSize(inner_list_vec);
@@ -185,7 +185,7 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
                 ListVector::Reserve(inner_list_vec, inner_size + mstl_result.n_observations);
                 ListVector::SetListSize(inner_list_vec, inner_size + mstl_result.n_observations);
 
-                auto inner_data = FlatVector::GetData<double>(inner_child);
+                auto inner_data = FlatDataMut<double>(inner_child);
                 if (mstl_result.seasonal_components && mstl_result.seasonal_components[s]) {
                     memcpy(inner_data + inner_size, mstl_result.seasonal_components[s],
                            mstl_result.n_observations * sizeof(double));
@@ -195,9 +195,9 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
 
         // Set remainder list
         {
-            auto &remainder_list = *children[2];
-            auto list_data = FlatVector::GetData<list_entry_t>(remainder_list);
-            auto &list_child = ListVector::GetEntry(remainder_list);
+            auto &remainder_list = StructEntry(children[2]);
+            auto list_data = FlatDataMut<list_entry_t>(remainder_list);
+            auto &list_child = ListChildMut(remainder_list);
             auto current_size = ListVector::GetListSize(remainder_list);
 
             // CR-01: mirror the trend guard above -- remainder is null when
@@ -211,7 +211,7 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
             ListVector::Reserve(remainder_list, current_size + remainder_len);
             ListVector::SetListSize(remainder_list, current_size + remainder_len);
 
-            auto child_data = FlatVector::GetData<double>(list_child);
+            auto child_data = FlatDataMut<double>(list_child);
             if (mstl_result.remainder) {
                 memcpy(child_data + current_size, mstl_result.remainder,
                        remainder_len * sizeof(double));
@@ -220,9 +220,9 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
 
         // Set periods list
         {
-            auto &periods_list = *children[3];
-            auto list_data = FlatVector::GetData<list_entry_t>(periods_list);
-            auto &list_child = ListVector::GetEntry(periods_list);
+            auto &periods_list = StructEntry(children[3]);
+            auto list_data = FlatDataMut<list_entry_t>(periods_list);
+            auto &list_child = ListChildMut(periods_list);
             auto current_size = ListVector::GetListSize(periods_list);
 
             list_data[row_idx].offset = current_size;
@@ -231,7 +231,7 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
             ListVector::Reserve(periods_list, current_size + mstl_result.n_seasonal);
             ListVector::SetListSize(periods_list, current_size + mstl_result.n_seasonal);
 
-            auto child_data = FlatVector::GetData<int32_t>(list_child);
+            auto child_data = FlatDataMut<int32_t>(list_child);
             if (mstl_result.seasonal_periods) {
                 for (size_t i = 0; i < mstl_result.n_seasonal; i++) {
                     child_data[current_size + i] = mstl_result.seasonal_periods[i];
@@ -247,24 +247,24 @@ void RegisterTsMstlDecompositionFunction(ExtensionLoader &loader) {
     // Internal scalar function used by ts_mstl_decomposition table macro
     ScalarFunctionSet ts_mstl_set("_ts_mstl_decomposition");
     // 1-arg version: just values
-    ts_mstl_set.AddFunction(ScalarFunction(
+    ts_mstl_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetMstlResultType(),
         TsMstlDecompositionFunction
-    ));
+    )));
     // 2-arg version: values + insufficient_data mode
-    ts_mstl_set.AddFunction(ScalarFunction(
+    ts_mstl_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::VARCHAR)},
         GetMstlResultType(),
         TsMstlDecompositionFunction
-    ));
+    )));
     // 3-arg version: values + insufficient_data mode + seasonal periods (D-09)
-    ts_mstl_set.AddFunction(ScalarFunction(
+    ts_mstl_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::VARCHAR),
          LogicalType::LIST(LogicalType(LogicalTypeId::INTEGER))},
         GetMstlResultType(),
         TsMstlDecompositionFunction
-    ));
+    )));
 
     // Mark as internal to hide from duckdb_functions() and deprioritize in autocomplete
     CreateScalarFunctionInfo info(ts_mstl_set);
