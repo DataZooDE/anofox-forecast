@@ -66,9 +66,11 @@ elseif(WIN32)
     endif()
 endif()
 
-# Check for WASM target
-string(FIND "${RUST_TARGETS}" "wasm32-unknown-emscripten" WASM_TARGET_FOUND)
-if (EMSCRIPTEN AND NOT WASM_TARGET_FOUND EQUAL -1)
+# WASM target. Keyed on EMSCRIPTEN alone, not on the *default* rustup toolchain's
+# installed targets: WASM builds use the pinned toolchain below
+# (ANOFOX_WASM_RUST_TOOLCHAIN), whose install step adds wasm32-unknown-emscripten,
+# so the default toolchain need not carry that target.
+if (EMSCRIPTEN)
     set(Rust_CARGO_TARGET "wasm32-unknown-emscripten")
 endif()
 
@@ -103,6 +105,45 @@ project(${TARGET_NAME})
 
 # DuckDB extension boilerplate
 include_directories(src/include)
+
+# WASM-only Rust toolchain pin (native builds keep the workspace floor
+# rust-version = 1.89 and the rust-msrv CI job; no rust-toolchain.toml).
+# Rust >= 1.87 (LLVM 20) marks wasm objects with the bulk-memory-opt and
+# call-indirect-overlong target features. DuckDB CI's emsdk 3.1.71 bundles
+# binaryen v120, whose `wasm-opt -O3` rejects them
+# ("Unknown option '--enable-bulk-memory-opt'"), and the community-extensions
+# registry's DuckDB 2.0 build uses extension-ci-tools' Rust 1.97+. So WASM builds
+# pin Rust 1.86.0 through Corrosion's Rust_TOOLCHAIN. Remove the pin once DuckDB's
+# emsdk understands those features. Set ANOFOX_WASM_RUST_TOOLCHAIN to "" to disable.
+set(ANOFOX_WASM_RUST_TOOLCHAIN "1.86.0" CACHE STRING
+    "Rust toolchain for WASM builds (empty: use the default toolchain)")
+if(WASM_BUILD AND NOT "${ANOFOX_WASM_RUST_TOOLCHAIN}" STREQUAL "")
+    find_program(_ANOFOX_RUSTUP rustup HINTS "$ENV{CARGO_HOME}/bin" "$ENV{HOME}/.cargo/bin")
+    if(_ANOFOX_RUSTUP)
+        # Idempotent: a no-op when the toolchain and target are already installed.
+        execute_process(
+            COMMAND "${_ANOFOX_RUSTUP}" toolchain install "${ANOFOX_WASM_RUST_TOOLCHAIN}"
+                    --profile minimal --target wasm32-unknown-emscripten
+            RESULT_VARIABLE _ANOFOX_RUSTUP_RESULT
+            OUTPUT_VARIABLE _ANOFOX_RUSTUP_OUTPUT
+            ERROR_VARIABLE _ANOFOX_RUSTUP_OUTPUT
+        )
+        if(NOT _ANOFOX_RUSTUP_RESULT EQUAL 0)
+            message(FATAL_ERROR
+                "Could not install Rust ${ANOFOX_WASM_RUST_TOOLCHAIN} for the WASM build:\n"
+                "${_ANOFOX_RUSTUP_OUTPUT}\n"
+                "Install it manually with\n"
+                "  rustup toolchain install ${ANOFOX_WASM_RUST_TOOLCHAIN} --profile minimal "
+                "--target wasm32-unknown-emscripten\n"
+                "or configure with -DANOFOX_WASM_RUST_TOOLCHAIN= to build with the default toolchain.")
+        endif()
+        set(Rust_TOOLCHAIN "${ANOFOX_WASM_RUST_TOOLCHAIN}" CACHE STRING "Rust toolchain used by Corrosion" FORCE)
+        message(STATUS "WASM build: pinned Rust toolchain ${ANOFOX_WASM_RUST_TOOLCHAIN}")
+    else()
+        message(WARNING "rustup not found: cannot pin Rust ${ANOFOX_WASM_RUST_TOOLCHAIN} for the WASM build; "
+                        "using the default Rust toolchain.")
+    endif()
+endif()
 
 # Fetch Corrosion for Rust integration
 include(FetchContent)
