@@ -3,10 +3,10 @@ gsd_state_version: "1.0"
 milestone: v0.10.0
 milestone_name: Statistical Correctness
 status: Awaiting next milestone
-stopped_at: v2026.10.16 released; next = DuckDB 2.0 compat per .planning/HANDOVER-duckdb2-compat.md
+stopped_at: DuckDB 2.0 compat port done (quick 261016-tjw, draft PR #277 green); awaiting review/merge
 last_updated: "2026-10-16T06:12:23.776Z"
-last_activity: 2026-10-16
-last_activity_desc: Milestone v0.10.0 completed and archived
+last_activity: 2026-10-17
+last_activity_desc: Quick task 261016-tjw (DuckDB 2.0 compat port) completed
 state_head: d8e463cd2e62c67d5317a75b315cc24c7f7ced2a
 progress:
   total_phases: 10
@@ -126,7 +126,7 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Next] DuckDB 2.0 compat needed before community-extensions PR #3112 can pass (registry default build = DuckDB 2.0-dev). See .planning/HANDOVER-duckdb2-compat.md (branch chore/duckdb2-compat).
+- [Next] DuckDB 2.0 compat port done on chore/duckdb2-compat (quick 261016-tjw, draft PR #277, CI run 38969012711 green on 1.4.5/1.5.6/2.0-dev). Merge + release still needed before community-extensions PR #3112 can pass (registry default build = DuckDB 2.0-dev).
 
 - [Phase 13/15] STL is shared: STAT-02 uses the crate `seasonality::stl::STL` — validate vs R `stats::stl` in Phase 13; DET-04 reuses or fixes it.
 - [Phase 15] fdars 0.47 bump: ~30 mechanical compile errors in 4 files plus a WASM (`js` feature) build check — use the local wasm_eh recipe.
@@ -139,6 +139,7 @@ None yet.
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 261009-d02 | Docs/README/skills accuracy pass after Phase 9 | 2026-10-09 | 59e8e26 | [261009-d02-docs-readme-skills-accuracy-pass](./quick/261009-d02-docs-readme-skills-accuracy-pass/) |
+| 261016-tjw | DuckDB 2.0-dev compat port (compat header, WASM Rust 1.86 pin, 2.0 CI job) | 2026-10-17 | 720c7c7 | [261016-tjw-port-anofox-statistics-duckdb-2-0-compat](./quick/261016-tjw-port-anofox-statistics-duckdb-2-0-compat/) |
 
 ## Deferred Verification
 
