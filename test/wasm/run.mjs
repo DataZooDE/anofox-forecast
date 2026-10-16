@@ -72,6 +72,7 @@ const CURATED = [
   'test/sql/ts_cv_folds.test',
   'test/sql/ts_aggregate_hierarchy.test',
   'test/sql/ts_periods.test',
+  'test/wasm/negative_control.test', // v0.9.0 Phase 8 negative control: MUST fail
 ];
 
 function parseArgs(argv) {
