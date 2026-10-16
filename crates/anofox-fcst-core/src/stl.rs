@@ -102,7 +102,11 @@ pub struct StlComponents {
 
 fn odd_at_least3(w: usize) -> usize {
     let mut v = w.max(3);
-    if v.is_multiple_of(2) {
+    // `% n == 0` instead of `is_multiple_of` (stable only since Rust 1.87): the WASM
+    // build compiles with DuckDB extension-ci-tools' pinned rustc 1.86.
+    #[allow(clippy::manual_is_multiple_of)]
+    let v_even = v % 2 == 0;
+    if v_even {
         v += 1;
     }
     v

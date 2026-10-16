@@ -266,11 +266,11 @@ fn periodogram_from_detrended(detrended: &[f64]) -> Vec<f64> {
 
     let num_bins = n / 2 + 1;
     let scale = 1.0 / (n as f64 * n as f64);
-    let nyquist = if n.is_multiple_of(2) {
-        Some(n / 2)
-    } else {
-        None
-    };
+    // `% n == 0` instead of `is_multiple_of` (stable only since Rust 1.87): the WASM
+    // build compiles with DuckDB extension-ci-tools' pinned rustc 1.86.
+    #[allow(clippy::manual_is_multiple_of)]
+    let n_even = n % 2 == 0;
+    let nyquist = if n_even { Some(n / 2) } else { None };
     (0..num_bins)
         .map(|k| {
             let mag2 = buffer[k].norm_sqr();

@@ -2790,7 +2790,11 @@ pub fn conformal_predict_per_step_validated(
             fold_actuals.len()
         )));
     }
-    if !fold_forecasts.len().is_multiple_of(horizon) {
+    // `% n == 0` instead of `is_multiple_of` (stable only since Rust 1.87): the WASM
+    // build compiles with DuckDB extension-ci-tools' pinned rustc 1.86.
+    #[allow(clippy::manual_is_multiple_of)]
+    let not_multiple = fold_forecasts.len() % horizon != 0;
+    if not_multiple {
         return Err(ForecastError::InvalidInput(format!(
             "per-step conformal: residual count {} is not a multiple of horizon {}",
             fold_forecasts.len(),
