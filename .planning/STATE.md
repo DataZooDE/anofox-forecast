@@ -142,7 +142,6 @@ None yet.
 
 | Phase | State | Resume |
 |-------|-------|--------|
-| 8 (v0.9.0, parked) | verification_deferred_human | Operator pushes branch, observes `wasm-runtime-test` green → red → green + badge flip, then `/gsd-verify-work 8` and `/gsd-complete-milestone v0.9.0` (phase dirs in `milestones/v0.9.0-phases/`) |
 
 ## Deferred Items
 
@@ -150,7 +149,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 | Category | Item | Status | Deferred At | Milestone |
 |----------|------|--------|-------------|-----------|
-| verification_gaps | Phase 08 (archived v0.9.0): 08-VERIFICATION.md | human_needed | 2026-10-16 | v0.10.0 |
+| verification_gaps | Phase 08 (archived v0.9.0): 08-VERIFICATION.md | RESOLVED 2026-10-16 (live negative control, PR #275) | 2026-10-16 | v0.10.0 |
 | deferred_items | Phase 10/deferred-items.md: 1.  test/sql/ts_model_distinctness.test  SeasonalES/SeasonalESOptimized expected values are stale (pre-existin | acknowledged | 2026-10-16 | v0.10.0 |
 | deferred_items | Phase 10/deferred-items.md: 2. Theta and CrostonClassic produce identical in-sample fitted arrays and MSE on non-seasonal, no-zero series  | acknowledged | 2026-10-16 | v0.10.0 |
 | deferred_items | Phase 10/deferred-items.md: 3. Unparsable numeric params values silently fall back to defaults on every MAP-param surface  -   Discovered  | acknowledged | 2026-10-16 | v0.10.0 |

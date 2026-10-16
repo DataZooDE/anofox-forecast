@@ -1,7 +1,7 @@
 ---
 phase: 08-ci-gating-dedicated-workflow-badge
 verified: 2026-09-02T00:45:00Z
-status: human_needed
+status: passed
 score: "3/3 criteria structurally verified + gate mechanism proven locally; live-CI plumbing observation remains (operator push)"
 behavior_unverified: 0
 human_verification:
@@ -16,6 +16,15 @@ audit_acknowledged:
   milestone: v0.10.0
   at: 2026-10-16
   status: human_needed
+human_verification_resolved:
+  date: 2026-10-16
+  evidence:
+    - item: "wasm-runtime-test runs GREEN in live CI (artifact name resolves)"
+      result: "PASS — green on 30+ live pipeline runs since 2026-09-18, incl. main, tags v2026.09.26 and v2026.10.16 (e.g. https://github.com/DataZooDE/anofox-forecast/actions/runs/38883018941/job/116943951369). Artifact name now anofox_forecast-v1.5.6-extension-wasm_eh (DuckDB bump #268)."
+    - item: "Deliberate curated breakage turns the gate RED; revert returns GREEN"
+      result: "PASS — draft PR #275 (closed unmerged). RED: https://github.com/DataZooDE/anofox-forecast/actions/runs/38905747917/job/117012670318 (8 curated files passed; test/wasm/negative_control.wasmtest failed: expected 3, got 2; the gate was the only failing job). GREEN after revert: https://github.com/DataZooDE/anofox-forecast/actions/runs/38914644475/job/117048339804. Note: the control must not be a *.test file, since the native pipeline runs unittest \"test/*\" (first attempt run 38903249396 failed natively and skipped the gate)."
+    - item: "WasmTest.yml fires via workflow_run; README badge renders and flips"
+      result: "PASS — 53 WasmTest.yml runs via workflow_run (40 success, 6 failure, 7 skipped). The badge went red on main 2026-09-10..2026-10-02 and is now 'passing' (badge.svg?branch=main). The 2026-10-02 failures were artifact-name 404s after the v1.5.6 bump, fixed by the gate-on-success change."
 ---
 
 # Phase 8: CI Gating + Dedicated Workflow + Badge — Verification Report
@@ -63,3 +72,8 @@ The remaining verification is a **live GitHub Actions push** the operator must p
 
 _Verified: 2026-09-02T00:45:00Z_
 _Verifier: Claude (autonomous orchestrator — structural + local-mechanism verification)_
+
+
+## Live-CI verification (2026-10-16)
+
+All three human_verification items were observed in live GitHub Actions (see `human_verification_resolved`). Status set to passed.

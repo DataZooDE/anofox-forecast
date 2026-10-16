@@ -12,6 +12,7 @@ SQL users can produce, validate, combine, and interval-bound time-series forecas
 
 ## Current State
 
+- **Shipped v0.9.0 — WASM Runtime Verification (2026-09-10; closed on main 2026-10-16):** DuckDB-Wasm Node harness, `wasm-runtime-test` CI gate, `WasmTest.yml` badge. The gate was proven RED→GREEN in live CI. See `.planning/milestones/v0.9.0-*`.
 - **Shipped v0.10.0 — Statistical Correctness (2026-10-16):** every statistic is computed in Rust and checked against R / scipy / statsmodels / tsfresh fixtures. The forecast wrapper delegates to the crate (anofox-forecast 0.16.2), with 65/65 requirements met, a `test/sql/correctness/*` suite, a `make audit` no-stats-in-C++ guard and `make check-docs`. See `.planning/milestones/v0.10.0-*`.
 - **Shipped v0.8.0 — Ensemble Forecasting (2026-08-31):** AutoEnsemble (`ts_forecast_by('AutoEnsemble')`), explicit-member ensembles (`ts_forecast_ensemble_by`), six combination methods, ensemble conformal intervals (existing path), and member/weight introspection (`ts_ensemble_inspect_by` / `ts_auto_ensemble_inspect_by`). See `.planning/milestones/v0.8.0-*`.
 - **Shipped v0.7.0 — Diagnostics + Model Coverage (2026-08-22):** stationarity + residual diagnostics, global/panel models, GARCH/Kalman/VAR.
@@ -21,7 +22,6 @@ SQL users can produce, validate, combine, and interval-bound time-series forecas
 To be defined with `/gsd-new-milestone`. Candidates carried forward:
 - v0.10.0 tech debt: integer-`frequency` casts in `ts_forecast_panel_by` / `ts_forecast_var_by` / `ts_stats_by`; `window` / `seasonal_periods` misuse checks in the shared params header; strict parsing of numeric MAP params; the examples/ metric `_by` bare-table form; the `ts_features_config_*` "features" filter; dead `ConformalIntervalFFI`.
 - Upstream crate follow-ups: TBATS optimiser admissibility check; ETS multi-start (RC-03); SESOptimized intermittent optimum (RC-04).
-- v0.9.0 is still parked: the Phase 08 live-CI negative-control push (operator action).
 - Merge `fix/statistical-correctness` to `main` and cut the v0.10.0 extension release (user action).
 
 <details>
@@ -42,7 +42,7 @@ To be defined with `/gsd-new-milestone`. Candidates carried forward:
 - Reference-fixture test suite (checked-in R/Python generators) + docs/skills synced to corrected behaviour
 
 Input: `.planning/research/STAT-AUDIT-2026-10-08.md` (audit findings A–I). Branch: `fix/statistical-correctness`.
-v0.9.0 (WASM Runtime Verification) is parked with only the operator live-CI negative-control check (Phase 08) outstanding.
+v0.9.0 (WASM Runtime Verification) shipped 2026-09-10 and was closed on main 2026-10-16, once the Phase 08 live-CI negative control was observed (PR #275).
 
 </details>
 
@@ -89,7 +89,6 @@ v0.9.0 (WASM Runtime Verification) is parked with only the operator live-CI nega
 <!-- v0.10.0 shipped 2026-10-16; REQ-IDs archived in milestones/v0.10.0-REQUIREMENTS.md. Next milestone's requirements come from /gsd-new-milestone. -->
 
 
-Parked from v0.9.0: Phase 08 live-CI negative-control push (operator action).
 
 Deferred from v0.8.0 (candidates for a future milestone):
 - **CV ensemble params:** `ts_cv_forecast_native.cpp` never parses `ensemble_top_k`/`ensemble_method`, so CV backtests use top_k=3/Mean. The former `ts_cv_forecast_by('AutoEnsemble')` segfault is gone on anofox-forecast ≥0.16.1 (re-checked 2026-10-16 at v0.10.0: 2 folds × 7 forecasts, all non-NULL).
