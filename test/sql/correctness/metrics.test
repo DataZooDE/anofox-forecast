@@ -326,7 +326,7 @@ DROP TABLE mm2;
 
 # =============================================================================
 # ts_smape_by / ts_r2_by (closed form, Phase 18 18-04 close-out: both are named in
-# the v0.10.0 CHANGELOG metric _by subquery-source contract). Same 10-row probe:
+# the v2026.10.16 CHANGELOG metric _by subquery-source contract). Same 10-row probe:
 # y = i, f = i + 1 for i in 1..10.
 #   sMAPE = mean_i 2|f-y|/(|y|+|f|) * 100 = mean_i 2/(2i+1) * 100 = 23.617491555572...
 #   R2    = 1 - SS_res/SS_tot = 1 - 10/82.5 = 0.878787878787...

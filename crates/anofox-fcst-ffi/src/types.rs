@@ -229,9 +229,9 @@ pub struct TsStatsResult {
     pub stability: c_double,
     /// Expected number of observations based on date range and frequency
     pub expected_length: size_t,
-    /// Number of missing periods (D-04; was "gap occurrences" pre-v0.10.0)
+    /// Number of missing periods (D-04; was "gap occurrences" pre-v2026.10.16)
     pub n_gaps: size_t,
-    /// Number of gap runs/intervals (D-04; the pre-v0.10.0 meaning of `n_gaps`)
+    /// Number of gap runs/intervals (D-04; the pre-v2026.10.16 meaning of `n_gaps`)
     pub n_gap_runs: size_t,
     /// Whether date-based metrics (expected_length, n_gaps, n_gap_runs) are valid
     pub has_date_metrics: bool,
@@ -826,9 +826,9 @@ pub struct DataQualityResult {
     pub overall_score: c_double,
     /// Number of missing periods (D-04/D-05: expected timestamps absent under the
     /// declared/detected frequency) -- matches `TsStatsResult::n_gaps`'s meaning, not
-    /// the pre-v0.10.0 "gap occurrence count" (see `n_gap_runs`).
+    /// the pre-v2026.10.16 "gap occurrence count" (see `n_gap_runs`).
     pub n_gaps: size_t,
-    /// Number of gap occurrences/runs (D-05): the pre-v0.10.0 `n_gaps` meaning.
+    /// Number of gap occurrences/runs (D-05): the pre-v2026.10.16 `n_gaps` meaning.
     pub n_gap_runs: size_t,
     /// Number of missing values (NULL or NaN)
     pub n_missing: size_t,

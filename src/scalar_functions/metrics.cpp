@@ -425,7 +425,7 @@ void RegisterTsSmapeFunction(ExtensionLoader &loader) {
 // ts_mase - Mean Absolute Scaled Error (Hyndman & Koehler 2006, D-08)
 // C++ API: ts_mase(actual[], forecast[], insample[], seasonal_period) → DOUBLE
 //
-// The pre-v0.10.0 3-list form ts_mase(actual, forecast, baseline) computed a
+// The pre-v2026.10.16 3-list form ts_mase(actual, forecast, baseline) computed a
 // relative MAE, not MASE -- it is REMOVED (overload below throws naming
 // ts_rmae, which still provides that computation).
 // ============================================================================
@@ -491,7 +491,7 @@ static void TsMaseFunction(DataChunk &args, ExpressionState &state, Vector &resu
 static unique_ptr<FunctionData> TsMaseRemovedBind(ClientContext &, ScalarFunction &,
                                                    vector<unique_ptr<Expression>> &) {
     throw InvalidInputException(
-        "ts_mase(actual, forecast, baseline) was removed in v0.10.0: it computed a relative MAE, not MASE. "
+        "ts_mase(actual, forecast, baseline) was removed in v2026.10.16: it computed a relative MAE, not MASE. "
         "Use ts_rmae(actual, forecast, baseline) for that result, or "
         "ts_mase(actual, forecast, insample, seasonal_period) for Hyndman-Koehler MASE.");
 }
@@ -513,7 +513,7 @@ void RegisterTsMaseFunction(ExtensionLoader &loader) {
     {
         CreateScalarFunctionInfo info(ts_mase_set);
         FunctionDescription desc;
-        desc.description = "Computes Hyndman-Koehler Mean Absolute Scaled Error (MASE): the out-of-sample forecast MAE scaled by the in-sample seasonal-naive MAE at lag seasonal_period. The old 3-argument (actual, forecast, baseline) form was removed in v0.10.0 (it computed a relative MAE, not MASE) -- use ts_rmae for that.";
+        desc.description = "Computes Hyndman-Koehler Mean Absolute Scaled Error (MASE): the out-of-sample forecast MAE scaled by the in-sample seasonal-naive MAE at lag seasonal_period. The old 3-argument (actual, forecast, baseline) form was removed in v2026.10.16 (it computed a relative MAE, not MASE) -- use ts_rmae for that.";
         desc.examples = {"ts_mase(LIST(actual ORDER BY date), LIST(forecast ORDER BY date), LIST(insample ORDER BY date), 12)"};
         desc.categories = {"time-series", "metrics"};
         desc.parameter_names = {"actual", "forecast", "insample", "seasonal_period"};
@@ -539,7 +539,7 @@ void RegisterTsMaseFunction(ExtensionLoader &loader) {
         CreateScalarFunctionInfo info(anofox_set);
         info.alias_of = "ts_mase";
         FunctionDescription desc;
-        desc.description = "Computes Hyndman-Koehler Mean Absolute Scaled Error (MASE): the out-of-sample forecast MAE scaled by the in-sample seasonal-naive MAE at lag seasonal_period. The old 3-argument (actual, forecast, baseline) form was removed in v0.10.0 (it computed a relative MAE, not MASE) -- use ts_rmae for that.";
+        desc.description = "Computes Hyndman-Koehler Mean Absolute Scaled Error (MASE): the out-of-sample forecast MAE scaled by the in-sample seasonal-naive MAE at lag seasonal_period. The old 3-argument (actual, forecast, baseline) form was removed in v2026.10.16 (it computed a relative MAE, not MASE) -- use ts_rmae for that.";
         desc.examples = {"ts_mase(LIST(actual ORDER BY date), LIST(forecast ORDER BY date), LIST(insample ORDER BY date), 12)"};
         desc.categories = {"time-series", "metrics"};
         desc.parameter_names = {"actual", "forecast", "insample", "seasonal_period"};

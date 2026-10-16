@@ -30,7 +30,7 @@ ts_stats(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN,
 
 Returns 36 columns: `length`, `n_nulls`, `n_nan`, `n_zeros`, `n_positive`, `n_negative`, `n_unique_values`, `is_constant`, `n_zeros_start`, `n_zeros_end`, `plateau_size`, `plateau_size_nonzero`, `mean`, `median`, `std_dev`, `variance`, `min`, `max`, `range`, `sum`, `skewness`, `kurtosis`, `tail_index`, `bimodality_coef`, `trimmed_mean`, `coef_variation`, `q1`, `q3`, `iqr`, `autocorr_lag1`, `trend_strength`, `seasonality_strength`, `entropy`, `stability`, plus date-derived `expected_length`, `n_gaps`, and `n_gap_runs`.
 
-**v0.10.0:** `skewness`/`kurtosis` are now textbook scipy `bias=False` G1/
+**v2026.10.16:** `skewness`/`kurtosis` are now textbook scipy `bias=False` G1/
 excess-G2 (previously mixed a population moment with a sample std-dev); `bimodality_coef`
 uses the SAS small-sample formula; `entropy` is now Pincus (1991) approximate entropy
 (`m=2`, `r=0.2*sample sd`; `NULL` for an interior-missing or fewer-than-3-present series) —
@@ -408,7 +408,7 @@ FROM sales GROUP BY product_id;
 
 - **`ts_stats` and `ts_data_quality` are TABLE functions** — call from FROM, not SELECT. Older docs incorrectly showed them as scalars over `LIST(...)`.
 - **`_agg` variants take `(date, value)` directly** — no `LIST()` wrapping. Wrapping in `LIST(...)` errors as "No function matches …".
-- **`trend_strength` / `seasonality_strength` formulas (v0.10.0, STAT-02, D-02)**: both are
+- **`trend_strength` / `seasonality_strength` formulas (v2026.10.16, STAT-02, D-02)**: both are
   Wang/Hyndman STL decomposition strengths from an R-faithful STL —
   `trend_strength = max(0, 1 - Var(R)/Var(T+R))`,
   `seasonality_strength = max(0, 1 - Var(R)/Var(S+R))` — computed via

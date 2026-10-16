@@ -393,8 +393,8 @@ pub fn detect_frequency(dates: &[i64]) -> Result<i64> {
 /// should exist at the resolved step between the first and last observed date,
 /// inclusive. `n_missing_periods` is the sum, over every consecutive pair of distinct
 /// sorted dates, of `(step_count - 1)` — i.e. the count of missing periods ("n_gaps" as
-/// of D-04, replacing the pre-v0.10.0 meaning). `n_gap_runs` counts the number of
-/// consecutive-pair transitions whose step count is `>= 2` — the pre-v0.10.0 `n_gaps`
+/// of D-04, replacing the pre-v2026.10.16 meaning). `n_gap_runs` counts the number of
+/// consecutive-pair transitions whose step count is `>= 2` — the pre-v2026.10.16 `n_gaps`
 /// meaning (number of gap intervals/occurrences, not missing periods).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GapCounts {

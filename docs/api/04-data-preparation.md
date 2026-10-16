@@ -322,11 +322,11 @@ SELECT * FROM ts_fill_gaps_by('sales', product_id, date, quantity, '1d');
 
 **Output:** Returns rows for all dates in range with NULL for missing values.
 
-**Month-end / day-of-month rule (v0.10.0, D-09):** for monthly/quarterly/yearly
+**Month-end / day-of-month rule (v2026.10.16, D-09):** for monthly/quarterly/yearly
 frequencies, inserted dates step from the PREVIOUS observed date using the same
 calendar rule `ts_forecast_by`'s future dates use: a month-end series stays
 month-end, a 1st-of-month series stays on the 1st, and any other day-of-month keeps
-its own day (clamped to the target month's length). Before v0.10.0, calendar gap
+its own day (clamped to the target month's length). Before v2026.10.16, calendar gap
 fill always snapped inserted dates to the start of the period (the 1st).
 
 ```sql

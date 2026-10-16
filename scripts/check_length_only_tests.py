@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Length-only Rust test sweep (Phase 18, 18-02, D-03, TEST-02).
 
-Scans the Rust modules touched by the v0.10.0 Statistical Correctness milestone
+Scans the Rust modules touched by the v2026.10.16 Statistical Correctness milestone
 (frozen MILESTONE_MODULES, computed from `git diff --name-only MILESTONE_BASE..HEAD
 -- crates` at the time this script was written) for `#[test]` functions whose
 assertions only inspect length/shape/presence -- never an actual value -- and

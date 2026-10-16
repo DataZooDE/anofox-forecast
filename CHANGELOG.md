@@ -8,9 +8,9 @@ Releases from `2026.09.26` onward use CalVer (`vYYYY.MM.DD`, the date the binary
 was cut), matching the rest of the anofox and erpl extensions. Earlier entries below
 use the semver numbering this project started with.
 
-## [Unreleased] — v0.10.0 Statistical Correctness
+## [2026.10.16] - 2026-10-16 — Statistical Correctness
 
-### Breaking changes in v0.10.0
+### Breaking changes in v2026.10.16
 
 Every row below changes a function's NUMERIC OUTPUT or its SQL usage (required
 arguments, signature, error behavior) somewhere on the `ts_*` surface. This is the
@@ -56,13 +56,13 @@ before/after tables in "Breaking changes — details by phase" immediately below
 |---|---|---|---|
 | `ts_conformal_by`/`ts_conformal_apply_by`/`ts_interval_width_by` | no `date_col` argument; lower/upper/actual each sorted independently by value, one row per group | a required `date_col` orders and pairs every row; one row per `(group, date)` | add the date column as the new argument; downstream consumers expecting one-row-per-group output must re-aggregate |
 | `ts_conformal_apply_by` | took a literal conformity-score argument | takes a calibration TABLE — `ts_conformal_calibrate`'s own output, matched per group (or pooled fallback) | run `ts_conformal_calibrate` first and pass its output table name instead of a literal score |
-| `ts_mase` | 3-arg `(actual, forecast, baseline)` — computed a relative MAE, not MASE | 4-arg `(actual, forecast, insample, seasonal_period)` — Hyndman-Koehler MASE; `seasonal_period` is a required positional argument (no `:=` defaulting on scalar functions) | the pre-v0.10.0 3-arg call now raises an error naming `ts_rmae`; use `ts_rmae(actual, forecast, baseline)` for the old relative-MAE result |
+| `ts_mase` | 3-arg `(actual, forecast, baseline)` — computed a relative MAE, not MASE | 4-arg `(actual, forecast, insample, seasonal_period)` — Hyndman-Koehler MASE; `seasonal_period` is a required positional argument (no `:=` defaulting on scalar functions) | the pre-v2026.10.16 3-arg call now raises an error naming `ts_rmae`; use `ts_rmae(actual, forecast, baseline)` for the old relative-MAE result |
 | `ts_mase_by` | `(source, date_col, actual_col, forecast_col, baseline_col)` | `(source, date_col, actual_col, forecast_col, seasonal_period := 1)`; `source` must include each group's HISTORY rows (dated before the first forecast, `forecast` NULL) | drop the baseline column; ensure `source` carries pre-forecast history rows for the in-sample scale |
 | `'jackknife+'` conformal strategy (and legacy aliases `JackknifePlus`/`jackknifeplus`/`jackknife_plus`/`jk+`) | silently computed the identical quantile as `'split'` (no real leave-one-out refits) | REMOVED — every spelling now raises a hard SQL error naming the replacement | use `'split'` or `'crossval'` |
 | `'wavelet'` seasonal-strength method (`ts_seasonal_strength(_windowed)`) | always returned `1.0`, regardless of input (could not discriminate signal from noise) | REMOVED — raises a hard SQL error naming the remaining methods | use `'variance'` (default) or `'spectral'` |
 | `ts_adf(_by)`/`ts_kpss(_by)`/`ts_stationarity(_by)` | no `regression` parameter (constant-only test) | `regression := 'c'` (default) or `'ct'` (constant + linear trend) | pass `regression := 'ct'` for a trend-stationarity test; re-check any branching logic keyed on the four-way verdict strings (3 of 4 swapped meaning) |
 | `ts_data_quality_summary` | 5 output columns: `n_total`, `n_good`, `n_fair`, `n_poor`, `avg_score` | adds a 6th column, `n_unassessed` (groups with no usable dates); `avg_score` now covers assessed groups only | a positional consumer expecting exactly 5 columns must account for the new one |
-| `ts_stats*`/`ts_data_quality*` `n_gaps` | counted gap *occurrences* | counts missing *periods*; the old occurrence-count meaning is preserved under a new `n_gap_runs` column | read `n_gap_runs` for pre-v0.10.0 `n_gaps` semantics |
+| `ts_stats*`/`ts_data_quality*` `n_gaps` | counted gap *occurrences* | counts missing *periods*; the old occurrence-count meaning is preserved under a new `n_gap_runs` column | read `n_gap_runs` for pre-v2026.10.16 `n_gaps` semantics |
 | deprecated metric `_by` family (`ts_mae_by`, `ts_mse_by`, `ts_rmse_by`, `ts_mape_by`, `ts_smape_by`, `ts_r2_by`, `ts_bias_by`, `ts_mase_by`, `ts_rmae_by`, `ts_coverage_by`, `ts_quantile_loss_by`) | some docs/examples called these with a bare table name and/or an extra group-column argument | `source` MUST be a subquery, e.g. `(SELECT group_col, date_col, actual, forecast FROM table)` — a bare table name fails to bind (the native function's first parameter is `TABLE`-typed); there is no separate positional `group` argument | wrap the source in a subquery selecting exactly the columns the macro needs, in the documented order |
 | `ts_diff_by` `diff_order` | lag-k difference, `y[t] - y[t-k]` | true d-th order differencing (numpy `diff(n=diff_order)`) | pass the old `k` as the new named `seasonal_lag` parameter with `diff_order := 1` |
 | `ts_backtest_auto_by` / `_ts_backtest_native` | one-step backtest table macro | REMOVED (orphaned internal function removed alongside it) | use the two-step `ts_cv_folds_by` + `ts_cv_forecast_by` workflow |
@@ -74,7 +74,7 @@ before/after tables in "Breaking changes — details by phase" immediately below
   across every forecast surface (`ts_forecast_by`, `ts_forecast_exog_by`, `ts_forecast_agg`,
   the scalar paths, `ts_cv_forecast_by`) are each model's own crate `predict_with_intervals`
   bounds at `confidence_level` — no more fabricated `point ± z·SD(history)·√h` band. Interval
-  widths are narrower and model-specific; they will not match pre-v0.10.0 values for any
+  widths are narrower and model-specific; they will not match pre-v2026.10.16 values for any
   model. `GARCH`, `Kalman`, `AutoEnsemble` (via `ts_forecast_by`), and the explicit-member
   `ts_forecast_ensemble_by` now return real bounds (previously `NULL`/heuristic). Models/paths
   with no native interval support (`ts_forecast_panel_by`; `MSTL`/`AutoMSTL` with regressors)
@@ -216,7 +216,7 @@ before/after tables in "Breaking changes — details by phase" immediately below
   plan 12-07). `diff_order=2` now computes numpy's `diff(n=2)` (the true second difference
   `y[t] - 2*y[t-1] + y[t-2]`), not the old `y[t] - y[t-2]` lag-2 reading. A new named
   `seasonal_lag` parameter (default `1`) recovers the old lag-k behaviour: pass the same value
-  as `seasonal_lag` with `diff_order := 1` for the pre-v0.10.0 reading. Output is still one row
+  as `seasonal_lag` with `diff_order := 1` for the pre-v2026.10.16 reading. Output is still one row
   per input row (NULL for the first `diff_order * seasonal_lag` rows); any difference touching
   a NULL/NaN input is NULL, never an error.
 - **`ts_drop_constant_by` now uses the Rust `is_constant` (RUST-09, D-09, plan 12-07):** groups
@@ -248,7 +248,7 @@ before/after tables in "Breaking changes — details by phase" immediately below
   non-`NULL` float in both cases). `n_gaps` is now the number of **missing periods**
   (expected timestamps absent under the declared or detected frequency) instead of the
   number of gap *occurrences* — a single 10-period gap now reports `n_gaps = 10`, not `1`.
-  The pre-v0.10.0 `n_gaps` meaning (gap occurrences) is preserved under a new `n_gap_runs`
+  The pre-v2026.10.16 `n_gaps` meaning (gap occurrences) is preserved under a new `n_gap_runs`
   column on all three surfaces. The `ts_stats` macro's monthly/quarterly/yearly gap
   counting is now calendar-aware (matching `ts_stats_by`), where it previously used
   approximate fixed-microsecond durations. `ts_stats_agg` now auto-detects the series'
@@ -276,7 +276,7 @@ before/after tables in "Breaking changes — details by phase" immediately below
   previously `temporal_score` was always `1.0` and `n_gaps` was always `0` because the
   underlying `compute_data_quality` call never received the date array; `n_short` and
   `frequency` were silently ignored. `n_gaps` is now the number of **missing periods**
-  (same meaning change as `ts_stats`'s `n_gaps`, D-04), with the pre-v0.10.0 meaning
+  (same meaning change as `ts_stats`'s `n_gaps`, D-04), with the pre-v2026.10.16 meaning
   (gap occurrences) preserved under a new `n_gap_runs` column; a new `is_short` column
   reports whether the present-value count is below `n_short`. `structural_score`'s
   length factor is now `min(1, n_present / n_short)` (was a fixed `/30`). Quality mode/
@@ -307,7 +307,7 @@ before/after tables in "Breaking changes — details by phase" immediately below
   (DuckDB scalar functions don't accept `:=` named arguments). In-sample lag pairs
   touching a missing value are skipped, never spliced out and re-paired; a
   (numerically) zero in-sample scale returns `NULL` (R's `forecast::accuracy()` returns
-  `Inf` here). The pre-v0.10.0 3-argument `ts_mase(actual, forecast, baseline)` form —
+  `Inf` here). The pre-v2026.10.16 3-argument `ts_mase(actual, forecast, baseline)` form —
   which computed `MAE(actual, forecast) / MAE(actual, baseline)`, a relative MAE and
   not MASE at all — is REMOVED: calling it now raises an error naming `ts_rmae`, which
   still provides that computation unchanged. `ts_mase_by`'s signature is now
@@ -318,7 +318,7 @@ before/after tables in "Breaking changes — details by phase" immediately below
   `ts_rmae_by`.
 - **`ts_mape`/`ts_mape_by` return `NULL` when any pairwise-complete `actual` is exactly
   `0.0` (D-07, STAT-05)**, instead of silently excluding that pair from the sum and
-  divisor count (the pre-v0.10.0 behavior) — MAPE is undefined with a zero actual, not
+  divisor count (the pre-v2026.10.16 behavior) — MAPE is undefined with a zero actual, not
   a special case to drop. Use `ts_smape` or `ts_mase` for intermittent-demand series
   where exact zeros are expected.
 - **`ts_features` / `ts_features_by` / `ts_features_agg` values now match tsfresh 0.21.2

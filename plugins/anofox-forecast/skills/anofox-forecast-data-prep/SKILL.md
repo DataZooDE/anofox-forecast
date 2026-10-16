@@ -46,7 +46,7 @@ No params — pure frequency-driven grid completion. Inserted rows have NULL in 
 
 Frequencies: `'1d'`, `'1h'`, `'30m'`, `'1w'`, `'1mo'`, `'1q'`, `'1y'` (Polars-style) or `'1 day'` (DuckDB INTERVAL) or raw int (days).
 
-**Month-end rule (v0.10.0, D-09):** monthly/quarterly/yearly gap fill preserves
+**Month-end rule (v2026.10.16, D-09):** monthly/quarterly/yearly gap fill preserves
 calendar alignment — a month-end series stays month-end (`2024-01-31` → inserted
 `2024-02-29` → `2024-03-31`, not the 1st), a 1st-of-month series stays on the 1st, and
 any other day-of-month keeps its own day (clamped to the target month's length). Same

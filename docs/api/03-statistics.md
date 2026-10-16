@@ -89,8 +89,8 @@ ts_stats_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN,
 | `entropy` | DOUBLE | Pincus (1991) approximate entropy (ApEn), `m=2`, `r=0.2 * sample standard deviation`, Chebyshev distance, self-match included. `NULL` when fewer than 3 present values remain after trimming leading/trailing NULLs, or when an interior value is missing/NaN. A constant series gives `0.0`. |
 | `stability` | DOUBLE | Stability measure |
 | `expected_length` | UBIGINT | Expected observations based on date range and frequency. Identity: `expected_length = n_distinct_observed_periods + n_gaps`. |
-| `n_gaps` | UBIGINT | Number of **missing periods** (expected timestamps absent under the declared or detected frequency) — e.g. a single 10-period gap counts as 10, not 1. **Breaking change (v0.10.0):** before v0.10.0 this column counted gap *occurrences* instead; that count is now `n_gap_runs` below. |
-| `n_gap_runs` | UBIGINT | Number of gap **occurrences** (consecutive-timestamp transitions whose step count is `>= 2`) — the pre-v0.10.0 meaning of `n_gaps`. A single 10-period gap counts as 1 run. |
+| `n_gaps` | UBIGINT | Number of **missing periods** (expected timestamps absent under the declared or detected frequency) — e.g. a single 10-period gap counts as 10, not 1. **Breaking change (v2026.10.16):** before v2026.10.16 this column counted gap *occurrences* instead; that count is now `n_gap_runs` below. |
+| `n_gap_runs` | UBIGINT | Number of gap **occurrences** (consecutive-timestamp transitions whose step count is `>= 2`) — the pre-v2026.10.16 meaning of `n_gaps`. A single 10-period gap counts as 1 run. |
 
 **Example:**
 ```sql
@@ -129,7 +129,7 @@ FROM ts_stats_by('sales', product_id, date, quantity, '1d', seasonal_period := 7
 > **Alias:** `ts_stats` is an alias for `ts_stats_by`
 
 **`ts_stats_agg(date, value)` (aggregate function)** computes the same 36 columns from
-a `GROUP BY` instead of a source table name. Since v0.10.0 it: auto-detects the
+a `GROUP BY` instead of a source table name. Since v2026.10.16 it: auto-detects the
 frequency from the data's own timestamps (`expected_length`/`n_gaps`/`n_gap_runs` are
 no longer always `NULL`); keeps `NULL`-valued rows (counted in `n_nulls`, position
 preserved in the date-ordered series — matching `ts_stats_by`); and skips only rows
@@ -150,7 +150,7 @@ GROUP BY product_id;
 
 ### ts_data_quality_by
 
-Assess data quality for multiple series grouped by identifier. Since v0.10.0
+Assess data quality for multiple series grouped by identifier. Since v2026.10.16
 (D-05/D-06) every score is computed from the series' real dates, frequency and
 `n_short` — see the breaking-change note below.
 
@@ -179,12 +179,12 @@ ts_data_quality_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col 
 | `behavioral_score` | DOUBLE | `0.0` for a constant series; otherwise `clamp(1 - 2*outlier_ratio - zero_run_ratio, 0, 1)` — robust (Iglewicz-Hoaglin modified z-score, threshold 3.5) outliers and the longest run of consecutive exact zeros (a `NULL`/missing entry breaks a run), both as a fraction of present values. A predictable/smooth series (even a near-constant-step one) carries **no** autocorrelation penalty — being easy to forecast is not a quality defect |
 | `overall_score` | DOUBLE | Mean of the four scores above |
 | `n_gaps` | UBIGINT | Number of **missing periods**: expected timestamps absent under the declared/detected frequency between the series' first and last date (same meaning as `ts_stats`'s `n_gaps`) |
-| `n_gap_runs` | UBIGINT | Number of gap **occurrences** (contiguous runs of missing periods) — the pre-v0.10.0 meaning of `n_gaps` |
+| `n_gap_runs` | UBIGINT | Number of gap **occurrences** (contiguous runs of missing periods) — the pre-v2026.10.16 meaning of `n_gaps` |
 | `n_missing` | UBIGINT | Number of missing values (`NULL` or `NaN`) |
 | `is_constant` | BOOLEAN | Whether series is constant among present values, under the SAME scale-relative tolerance `max - min <= 1e-10 * max(1, max\|x\|)` as `ts_stats`'s `is_constant` (D-13, G25) |
 | `is_short` | BOOLEAN | Whether the present-value count is below `n_short` |
 
-> **Breaking change (v0.10.0, D-05):** before this release, `temporal_score`
+> **Breaking change (v2026.10.16, D-05):** before this release, `temporal_score`
 > was always `1.0` and `n_gaps` was always `0` — the dates, `frequency`, and `n_short`
 > arguments were silently ignored by the underlying scoring. They are now real,
 > dates-aware computations; existing queries that assumed `temporal_score == 1.0` or
@@ -217,8 +217,8 @@ WHERE overall_score > 0.8;
 
 **`ts_data_quality_agg(date, value)` (aggregate function)** computes the same 10
 columns from a `GROUP BY` instead of a source table name. It takes no `n_short` or
-`frequency` argument: `n_short` is always `30` (the pre-v0.10.0 fixed structural-length
-scale) and frequency always auto-detects from the group's own timestamps. Since v0.10.0
+`frequency` argument: `n_short` is always `30` (the pre-v2026.10.16 fixed structural-length
+scale) and frequency always auto-detects from the group's own timestamps. Since v2026.10.16
 it also keeps `NULL`-valued rows (counted in `n_missing`, position preserved in the
 date-ordered series — matching `ts_stats_agg`) and skips only rows whose **timestamp**
 is `NULL`.

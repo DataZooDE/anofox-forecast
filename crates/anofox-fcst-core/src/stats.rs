@@ -117,10 +117,10 @@ pub struct TsStats {
     pub expected_length: Option<usize>,
     /// Number of missing periods (expected timestamps absent under the declared or
     /// detected frequency) (D-04). `None` if no dates provided. See also
-    /// [`TsStats::n_gap_runs`] for the count of gap intervals (the pre-v0.10.0 meaning).
+    /// [`TsStats::n_gap_runs`] for the count of gap intervals (the pre-v2026.10.16 meaning).
     pub n_gaps: Option<usize>,
     /// Number of gap runs/intervals (consecutive-timestamp transitions whose step count
-    /// is `>= 2`) — the pre-v0.10.0 meaning of `n_gaps` (D-04). `None` if no dates
+    /// is `>= 2`) — the pre-v2026.10.16 meaning of `n_gaps` (D-04). `None` if no dates
     /// provided.
     pub n_gap_runs: Option<usize>,
 }
@@ -408,7 +408,7 @@ pub fn compute_ts_stats_with_dates_and_type(
     let mut stats = compute_ts_stats(series, seasonal_period)?;
 
     // Then compute date-based metrics if we have valid dates (D-04, STAT-03): n_gaps
-    // becomes the number of missing periods, n_gap_runs keeps the pre-v0.10.0 meaning
+    // becomes the number of missing periods, n_gap_runs keeps the pre-v2026.10.16 meaning
     // (number of gap intervals), via the shared gaps::gap_counts helper.
     if !dates.is_empty() {
         let mut distinct_dates = dates.to_vec();

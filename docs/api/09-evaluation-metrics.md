@@ -13,7 +13,7 @@ Metrics functions evaluate forecast accuracy by comparing actual values to predi
 - Evaluate prediction intervals with coverage and quantile loss
 - Compare forecast quality across series or models
 
-**NULL handling (v0.10.0, Phase 12/13, RUST-01/RUST-02, D-07/D-08):** paired metrics
+**NULL handling (v2026.10.16, Phase 12/13, RUST-01/RUST-02, D-07/D-08):** paired metrics
 (`ts_mae`, `ts_mse`, `ts_rmse`, `ts_smape`, `ts_r2`, `ts_bias`, `ts_rmae`,
 `ts_quantile_loss`, `ts_mqloss`, `ts_coverage`) compute on **pairwise-complete
 observations**, computed in Rust from a validity bitmask — a pair (or, for
@@ -98,7 +98,7 @@ GROUP BY <group_columns>
 | `ts_smape` | `(LIST, LIST) → DOUBLE` | Symmetric MAPE |
 | `ts_r2` | `(LIST, LIST) → DOUBLE` | R-squared (coefficient of determination) |
 | `ts_bias` | `(LIST, LIST) → DOUBLE` | Bias (mean error) |
-| `ts_mase` | `(LIST, LIST, LIST, BIGINT) → DOUBLE` | Hyndman-Koehler MASE: `MAE(actual, forecast) / mean(\|insample_t - insample_{t-seasonal_period}\|)` — the out-of-sample forecast MAE scaled by the IN-SAMPLE seasonal-naive MAE at lag `seasonal_period`. `seasonal_period` is a required 4th positional argument (DuckDB scalar functions don't accept `:=` named arguments) because a defaulted value would silently reinterpret an old 3-list call's `baseline` array as `insample`. Returns `NULL` if the in-sample scale is (numerically) zero — MASE is undefined there. The pre-v0.10.0 3-argument `ts_mase(actual, forecast, baseline)` form, which computed a relative MAE and not MASE, is REMOVED (`ts_mase(a, f, b)` now raises an error naming `ts_rmae`) |
+| `ts_mase` | `(LIST, LIST, LIST, BIGINT) → DOUBLE` | Hyndman-Koehler MASE: `MAE(actual, forecast) / mean(\|insample_t - insample_{t-seasonal_period}\|)` — the out-of-sample forecast MAE scaled by the IN-SAMPLE seasonal-naive MAE at lag `seasonal_period`. `seasonal_period` is a required 4th positional argument (DuckDB scalar functions don't accept `:=` named arguments) because a defaulted value would silently reinterpret an old 3-list call's `baseline` array as `insample`. Returns `NULL` if the in-sample scale is (numerically) zero — MASE is undefined there. The pre-v2026.10.16 3-argument `ts_mase(actual, forecast, baseline)` form, which computed a relative MAE and not MASE, is REMOVED (`ts_mase(a, f, b)` now raises an error naming `ts_rmae`) |
 | `ts_rmae` | `(LIST, LIST, LIST) → DOUBLE` | Relative MAE (actual, pred1, pred2) |
 | `ts_coverage` | `(LIST, LIST, LIST) → DOUBLE` | Interval coverage (actual, lower, upper) |
 | `ts_quantile_loss` | `(LIST, LIST, DOUBLE) → DOUBLE` | Quantile loss (actual, forecast, quantile) |
@@ -206,14 +206,14 @@ GROUP BY unique_id;
   undefined there (R's `forecast::accuracy()` returns `Inf`; this product
   returns `NULL` instead).
 
-**Removed in v0.10.0:** the pre-v0.10.0 3-argument form
+**Removed in v2026.10.16:** the pre-v2026.10.16 3-argument form
 `ts_mase(actual, forecast, baseline)` computed `MAE(actual, forecast) /
 MAE(actual, baseline)` — a relative MAE against an arbitrary baseline array,
 not MASE at all. Calling it now raises an error naming the replacement:
 
 ```sql
 SELECT ts_mase([1.0, 2.0, 3.0], [1.1, 2.1, 3.1], [1.5, 2.5, 3.5]);
--- Error: ts_mase(actual, forecast, baseline) was removed in v0.10.0: it computed
+-- Error: ts_mase(actual, forecast, baseline) was removed in v2026.10.16: it computed
 -- a relative MAE, not MASE. Use ts_rmae(actual, forecast, baseline) for that
 -- result, or ts_mase(actual, forecast, insample, seasonal_period) for
 -- Hyndman-Koehler MASE.
@@ -327,7 +327,7 @@ FROM results
 GROUP BY unique_id;
 ```
 
-**`ts_mase_by` (D-08, v0.10.0):** signature is now
+**`ts_mase_by` (D-08, v2026.10.16):** signature is now
 `ts_mase_by(source, date_col, actual_col, forecast_col, seasonal_period := 1)`
 — the old 5th-argument baseline-column form was removed (see above). `source`
 must include each group's HISTORY rows (dated before that group's first

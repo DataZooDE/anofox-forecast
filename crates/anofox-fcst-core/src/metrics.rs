@@ -103,7 +103,7 @@ pub fn rmse(actual: &[f64], forecast: &[f64]) -> Result<f64> {
 /// Policy (D-07): `actual`/`forecast` are the already pairwise-complete
 /// evaluation pairs. If ANY pairwise-complete actual is exactly `0.0`, MAPE
 /// is undefined (division by zero) and this returns `Ok(None)` rather than
-/// silently excluding that pair (the pre-v0.10.0 behavior) or propagating a
+/// silently excluding that pair (the pre-v2026.10.16 behavior) or propagating a
 /// `NaN`. Use [`smape`] or [`mase`] for series with zero/near-zero actuals
 /// (intermittent demand).
 ///
@@ -187,7 +187,7 @@ pub fn smape(actual: &[f64], forecast: &[f64]) -> Result<f64> {
 ///   MASE as undefined here rather than propagating an infinity.
 /// - Otherwise -> `Ok(Some(MAE(actual, forecast) / scale))`.
 ///
-/// This REPLACES the pre-v0.10.0 `mase(actual, forecast, baseline)` relative-MAE
+/// This REPLACES the pre-v2026.10.16 `mase(actual, forecast, baseline)` relative-MAE
 /// form (`MAE(actual, forecast) / MAE(actual, baseline)`), which was not MASE at
 /// all — that computation survives unchanged as [`rmae`].
 ///

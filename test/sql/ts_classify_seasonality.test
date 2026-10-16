@@ -140,7 +140,7 @@ true
 # `period <= 0 -> SetNull` pre-check entirely and delegate to
 # crates/anofox-fcst-core/src/seasonality.rs, which rejects period <= 0 as
 # InvalidParameter -- unifying this function's error behavior with its 8 period-taking
-# siblings (ts_seasonal_strength, ts_decompose_seasonal, etc). Matches the v0.10.0 goal
+# siblings (ts_seasonal_strength, ts_decompose_seasonal, etc). Matches the v2026.10.16 goal
 # "silent model/parameter fallbacks become errors" (PROJECT.md).
 statement error
 SELECT ts_classify_seasonality([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 0.0) IS NULL;

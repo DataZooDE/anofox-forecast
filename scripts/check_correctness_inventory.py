@@ -57,15 +57,17 @@ def read_unreleased_section():
         lines = f.readlines()
     start = None
     end = len(lines)
+    # The newest section is the first "## [" heading: "[Unreleased]" during
+    # development, or the dated CalVer release ("[2026.10.16] - ...") once cut.
     for i, line in enumerate(lines):
-        if line.startswith("## [Unreleased]"):
+        if start is None and line.startswith("## ["):
             start = i
             continue
         if start is not None and i > start and line.startswith("## ["):
             end = i
             break
     if start is None:
-        print("ERROR: no '## [Unreleased]' heading found in CHANGELOG.md", file=sys.stderr)
+        print("ERROR: no '## [' release heading found in CHANGELOG.md", file=sys.stderr)
         sys.exit(2)
     return lines[start:end]
 

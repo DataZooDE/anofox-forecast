@@ -119,7 +119,7 @@ SeasonalNaive
 # class D): lengthened from 2 cycles (8 points) to 3 (12 points). A model/parameter
 # fallback that silently guessed a period is now an explicit error
 # ("no seasonal period could be detected ... pass seasonal_period explicitly",
-# src/table_functions/ts_forecast.cpp) per the v0.10.0 goal "silent model/parameter
+# src/table_functions/ts_forecast.cpp) per the v2026.10.16 goal "silent model/parameter
 # fallbacks become errors" (PROJECT.md) -- 2 cycles of this 4-point pattern is
 # genuinely ambiguous for the period-detection pipeline (FFT aliases to period 2 on
 # this ramp/sawtooth shape; ACF returns NaN; confirmed directly against

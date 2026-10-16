@@ -20,10 +20,10 @@ pub struct DataQuality {
     /// Number of missing periods (D-04/D-05): expected timestamps absent under the
     /// declared/detected frequency between the first and last observed date. This is
     /// the "missing periods" meaning, matching `ts_stats`'s `n_gaps` (not the
-    /// pre-v0.10.0 "gap occurrence count" -- see [`DataQuality::n_gap_runs`]). Zero
+    /// pre-v2026.10.16 "gap occurrence count" -- see [`DataQuality::n_gap_runs`]). Zero
     /// when no `dates` were supplied or no step could be resolved.
     pub n_gaps: usize,
-    /// Number of gap occurrences/runs (D-05): the pre-v0.10.0 `n_gaps` meaning --
+    /// Number of gap occurrences/runs (D-05): the pre-v2026.10.16 `n_gaps` meaning --
     /// count of consecutive-pair transitions with at least one missing period, not
     /// the number of missing periods itself. Zero when no `dates` were supplied or
     /// no step could be resolved.

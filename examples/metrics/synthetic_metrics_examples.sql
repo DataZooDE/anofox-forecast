@@ -125,8 +125,8 @@ GROUP BY product_id
 ORDER BY product_id;
 
 .print ''
-.print 'Note: the pre-v0.10.0 3-argument ts_mase(actual, forecast, baseline) form was'
-.print 'removed in v0.10.0 -- it computed a relative MAE, not MASE. Calling it now'
+.print 'Note: the pre-v2026.10.16 3-argument ts_mase(actual, forecast, baseline) form was'
+.print 'removed in v2026.10.16 -- it computed a relative MAE, not MASE. Calling it now'
 .print 'raises an error naming the replacement: use ts_rmae(actual, forecast, baseline)'
 .print 'for that relative-MAE comparison, or ts_mase(actual, forecast, insample,'
 .print 'seasonal_period) for Hyndman-Koehler MASE (see test/sql/ts_metrics_reference.test'

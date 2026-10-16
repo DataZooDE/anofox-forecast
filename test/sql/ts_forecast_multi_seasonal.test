@@ -196,7 +196,7 @@ MSTL
 # Re-pinned (Phase 18, 18-01, class D): trend_data is explicitly non-seasonal (a pure
 # linear trend, per the CREATE TABLE comment above), so MSTL -- a seasonal
 # decomposition model -- cannot detect a period and now raises an explicit error
-# instead of silently falling back, per the v0.10.0 goal "silent model/parameter
+# instead of silently falling back, per the v2026.10.16 goal "silent model/parameter
 # fallbacks become errors" (PROJECT.md, FCST-01..08). Converted to the error this
 # model now correctly raises on non-seasonal data.
 statement error
@@ -400,7 +400,7 @@ SELECT length((_ts_forecast([100.0, 110.0, 120.0, 130.0], 2, 'MFLES')).point);
 # Re-pinned (Phase 18, 18-01, class D): MSTL/TBATS are seasonal decomposition models
 # that require a detectable period; this 3-point series has no cycles at all, so
 # period detection now raises an explicit error instead of silently returning a value,
-# per the v0.10.0 goal "silent model/parameter fallbacks become errors" (PROJECT.md,
+# per the v2026.10.16 goal "silent model/parameter fallbacks become errors" (PROJECT.md,
 # FCST-01..08).
 statement error
 SELECT length((_ts_forecast([100.0, 110.0, 120.0], 2, 'MSTL')).point);

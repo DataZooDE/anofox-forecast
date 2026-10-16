@@ -71,7 +71,7 @@ FROM ts_detect_periods_by('sales', product_id, ds, y,
 -- Both of these return primary_period = 12.0 on a clean period-12 sine
 -- (DET-01 fix, 18-06: the default MAP{} call used to return an all-NULL
 -- row -- fixed via FunctionNullHandling::SPECIAL_HANDLING on the
--- underlying _ts_detect_periods overloads, see CHANGELOG.md v0.10.0).
+-- underlying _ts_detect_periods overloads, see CHANGELOG.md v2026.10.16).
 CREATE TABLE sea AS
 SELECT 'A' AS id, TIMESTAMP '2024-01-01' + INTERVAL (g) HOUR AS ts,
        10 + 5*sin(2*pi()*g/12) AS y

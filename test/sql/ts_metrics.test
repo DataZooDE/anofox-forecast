@@ -128,9 +128,9 @@ SELECT ts_smape([10.0, 20.0], [5.0, 10.0]) < 100.0;
 true
 
 #######################################
-# MASE - Hyndman-Koehler Mean Absolute Scaled Error (D-08, v0.10.0)
+# MASE - Hyndman-Koehler Mean Absolute Scaled Error (D-08, v2026.10.16)
 # API: ts_mase(actual[], forecast[], insample[], seasonal_period)
-# The pre-v0.10.0 3-argument (actual, forecast, baseline) form computed a
+# The pre-v2026.10.16 3-argument (actual, forecast, baseline) form computed a
 # relative MAE, not MASE, and was removed -- see ts_rmae below.
 #######################################
 
@@ -438,7 +438,7 @@ SELECT
     110.0 + (i * 2) AS upper_90
 FROM generate_series(11, 20) t(i);
 
-# ts_mase_by (Hyndman-Koehler, D-08, v0.10.0): history rows (dated before the
+# ts_mase_by (Hyndman-Koehler, D-08, v2026.10.16): history rows (dated before the
 # first forecast, forecast NULL) supply the in-sample seasonal-naive scale;
 # evaluation rows are dated at/after the first forecast. The old 5th-argument
 # baseline-column form was removed -- see ts_rmae_by below for that comparison.

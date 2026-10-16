@@ -19,7 +19,7 @@ verification repeatable:
   output against them within the fixture's own declared tolerance.
 
 This harness is seeded in Phase 9 and extended by every later phase of the
-`v0.10.0` "Statistical Correctness" milestone — each new statistical family gets
+`v2026.10.16` "Statistical Correctness" milestone — each new statistical family gets
 its own fixture family here, following the contract in section 3.
 
 ## 2. Layout

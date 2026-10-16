@@ -256,11 +256,11 @@ typedef struct TsStatsResult {
      */
     size_t expected_length;
     /**
-     * Number of missing periods (D-04; was "gap occurrences" pre-v0.10.0)
+     * Number of missing periods (D-04; was "gap occurrences" pre-v2026.10.16)
      */
     size_t n_gaps;
     /**
-     * Number of gap runs/intervals (D-04; the pre-v0.10.0 meaning of `n_gaps`)
+     * Number of gap runs/intervals (D-04; the pre-v2026.10.16 meaning of `n_gaps`)
      */
     size_t n_gap_runs;
     /**
@@ -1390,11 +1390,11 @@ typedef struct DataQualityResult {
     /**
      * Number of missing periods (D-04/D-05: expected timestamps absent under the
      * declared/detected frequency) -- matches `TsStatsResult::n_gaps`'s meaning, not
-     * the pre-v0.10.0 "gap occurrence count" (see `n_gap_runs`).
+     * the pre-v2026.10.16 "gap occurrence count" (see `n_gap_runs`).
      */
     size_t n_gaps;
     /**
-     * Number of gap occurrences/runs (D-05): the pre-v0.10.0 `n_gaps` meaning.
+     * Number of gap occurrences/runs (D-05): the pre-v2026.10.16 `n_gaps` meaning.
      */
     size_t n_gap_runs;
     /**
