@@ -8,10 +8,10 @@
 # group: [sql]
 #
 # Literals are copied from validation/reference/fixtures/r_forecast/*.json via the
-# python3 one-liners documented in ts_forecast_reference.test's own header. This file
-# otherwise stays free of any json-extension require directive -- see the LOAD json
-# note before the ts_forecast_exog_by section (that one macro needs it, matching the
-# documented, pre-existing gap also hit by ts_detect_peaks_by/ts_mstl_decomposition_by).
+# python3 one-liners documented in ts_forecast_reference.test's own header. `require json`
+# is needed only because ts_forecast_exog_by expands to json functions (the documented,
+# pre-existing gap also hit by ts_detect_peaks_by/ts_mstl_decomposition_by); json is
+# statically linked, so it never skips on native builds.
 
 require anofox_forecast
 
@@ -19,11 +19,12 @@ require anofox_forecast
 # native unittest harness without an explicit LOAD (ts_forecast_exog and
 # ts_forecast_exog_by both expand to json_extract/to_json calls for their
 # dynamic xreg_cols handling -- a pre-existing, documented gap also hit by
-# ts_detect_peaks_by/ts_mstl_decomposition_by). This is a plain LOAD
-# statement, NOT a `require json` sqllogictest directive (D-02 forbids the
-# latter; this file carries none).
-statement ok
-LOAD json;
+# ts_detect_peaks_by/ts_mstl_decomposition_by). It uses `require json`,
+# which in the unittest harness activates the statically linked json (a plain
+# `LOAD json;` only worked where json was also installed in ~/.duckdb and failed
+# on clean CI runners). json is always linked into native builds since 18-01,
+# so this never skips natively.
+require json
 
 statement ok
 CREATE TABLE air AS

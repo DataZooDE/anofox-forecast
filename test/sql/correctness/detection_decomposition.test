@@ -18,11 +18,11 @@ require anofox_forecast
 # native unittest harness without an explicit LOAD (ts_detect_peaks_by and
 # ts_mstl_decomposition_by expand to to_json(params)/json_extract_string calls
 # even for an empty params MAP -- a pre-existing, documented gap, see
-# ts_detection_reference.test around CR-04). This is a plain LOAD statement,
-# NOT a `require json` sqllogictest directive (D-02 forbids the latter; this
-# file still carries none).
-statement ok
-LOAD json;
+# ts_detection_reference.test around CR-04). It uses `require json`, which in the unittest harness
+# activates the statically linked json (a plain `LOAD json;` only worked where
+# json was also installed in ~/.duckdb and failed on clean CI runners). json is
+# always linked into native builds since 18-01, so this never skips natively.
+require json
 
 # =============================================================================
 # ts_detect_peaks (DET-01): direct port of scipy.signal.find_peaks. Plateau
