@@ -51,7 +51,7 @@ static unique_ptr<FunctionData> TsFillForwardOperatorBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    TableBindNames &names) {
 
     auto bind_data = make_uniq<TsFillForwardOperatorBindData>();
 
@@ -69,13 +69,13 @@ static unique_ptr<FunctionData> TsFillForwardOperatorBind(
     bind_data->frequency_seconds = 86400; // Default to 1 day
 
     // Define output columns to match the source table + filled rows
-    names.push_back(bind_data->group_col);
+    names.push_back(MakeBindName(bind_data->group_col));
     return_types.push_back(LogicalType(LogicalTypeId::VARCHAR));
 
-    names.push_back(bind_data->date_col);
+    names.push_back(MakeBindName(bind_data->date_col));
     return_types.push_back(LogicalType(LogicalTypeId::TIMESTAMP));
 
-    names.push_back(bind_data->value_col);
+    names.push_back(MakeBindName(bind_data->value_col));
     return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
 
     return bind_data;
@@ -135,7 +135,7 @@ static unique_ptr<GlobalTableFunctionState> TsFillForwardOperatorInitGlobal(
     );
 
     // Execute the query
-    global_state->query_result = context.Query(query, false);
+    global_state->query_result = QueryMaterialized(context, query);
 
     return global_state;
 }
@@ -156,7 +156,7 @@ static void TsFillForwardOperatorExecute(
     auto &global_state = data_p.global_state->Cast<TsFillForwardOperatorGlobalState>();
 
     if (global_state.finished) {
-        output.SetCardinality(0);
+        SetOutputCardinality(output, 0);
         return;
     }
 
@@ -166,7 +166,7 @@ static void TsFillForwardOperatorExecute(
                 global_state.query_result->GetError().c_str());
         }
         global_state.finished = true;
-        output.SetCardinality(0);
+        SetOutputCardinality(output, 0);
         return;
     }
 
@@ -174,7 +174,7 @@ static void TsFillForwardOperatorExecute(
     auto chunk = global_state.query_result->Fetch();
     if (!chunk || chunk->size() == 0) {
         global_state.finished = true;
-        output.SetCardinality(0);
+        SetOutputCardinality(output, 0);
         return;
     }
 

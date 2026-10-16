@@ -15,11 +15,11 @@ require anofox_forecast
 
 statement ok
 CREATE TABLE s AS
-SELECT list_transform(range(48), i -> (10 + 3 * sin(2 * pi() * i / 12) + 0.05 * i)::DOUBLE) AS v;
+SELECT list_transform(range(48), lambda i: (10 + 3 * sin(2 * pi() * i / 12) + 0.05 * i)::DOUBLE) AS v;
 
 statement ok
 CREATE TABLE g AS
-SELECT g, list_transform(range(48), i -> (10 + g + (g + 1) * sin(2 * pi() * i / 12))::DOUBLE) AS v
+SELECT g, list_transform(range(48), lambda i: (10 + g + (g + 1) * sin(2 * pi() * i / 12))::DOUBLE) AS v
 FROM range(3) t(g);
 
 # fe: 30 daily rows, id 'A', y = 10 + sin(i) except NULL at the first/last row (edge NULLs)

@@ -70,17 +70,17 @@ struct TsEnsembleInspectNativeBindData : public FunctionData {
 
 static unique_ptr<FunctionData> TsEnsembleInspectNativeBind(
     ClientContext &,
-    ScalarFunction &bound_function,
+    ScalarBindFunction &bound_function,
     vector<unique_ptr<Expression>> &) {
 
     auto bind_data = make_uniq<TsEnsembleInspectNativeBindData>();
-    bound_function.return_type = MakeInspectReturnType();
+    SetReturnTypeOf(bound_function, MakeInspectReturnType());
     return std::move(bind_data);
 }
 
 static void TsEnsembleInspectNativeExecute(DataChunk &args, ExpressionState &state, Vector &result) {
-    auto &bind_data = state.expr.Cast<BoundFunctionExpression>()
-        .bind_info->Cast<TsEnsembleInspectNativeBindData>();
+    auto &bind_data = BindInfoOf(state.expr.Cast<BoundFunctionExpression>())
+        ->Cast<TsEnsembleInspectNativeBindData>();
     idx_t count = args.size();
 
     auto &value_list_vec    = args.data[0];  // LIST(DOUBLE) values
@@ -91,10 +91,10 @@ static void TsEnsembleInspectNativeExecute(DataChunk &args, ExpressionState &sta
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
     UnifiedVectorFormat value_list_data, members_list_data, method_data, period_data;
-    value_list_vec.ToUnifiedFormat(count, value_list_data);
-    members_list_vec.ToUnifiedFormat(count, members_list_data);
-    method_vec.ToUnifiedFormat(count, method_data);
-    period_vec.ToUnifiedFormat(count, period_data);
+    ToUnified(value_list_vec, count, value_list_data);
+    ToUnified(members_list_vec, count, members_list_data);
+    ToUnified(method_vec, count, method_data);
+    ToUnified(period_vec, count, period_data);
 
     // Precompute result struct type for STRUCT value construction
     child_list_t<LogicalType> struct_type;
@@ -121,7 +121,7 @@ static void TsEnsembleInspectNativeExecute(DataChunk &args, ExpressionState &sta
         {
             auto member_entries = UnifiedVectorFormat::GetData<list_entry_t>(members_list_data);
             auto &member_entry  = member_entries[member_idx];
-            auto &member_child  = ListVector::GetEntry(members_list_vec);
+            auto &member_child  = ListChildMut(members_list_vec);
             idx_t m_off = member_entry.offset;
             idx_t m_len = member_entry.length;
             for (idx_t mi = 0; mi < m_len; mi++) {
@@ -140,10 +140,10 @@ static void TsEnsembleInspectNativeExecute(DataChunk &args, ExpressionState &sta
         // --- Extract values from LIST(DOUBLE) ---
         auto value_entries = UnifiedVectorFormat::GetData<list_entry_t>(value_list_data);
         auto &value_entry  = value_entries[value_idx];
-        auto &value_child  = ListVector::GetEntry(value_list_vec);
+        auto &value_child  = ListChildMut(value_list_vec);
 
         UnifiedVectorFormat value_child_data;
-        value_child.ToUnifiedFormat(ListVector::GetListSize(value_list_vec), value_child_data);
+        ToUnified(value_child, ListVector::GetListSize(value_list_vec), value_child_data);
         auto value_values = UnifiedVectorFormat::GetData<double>(value_child_data);
 
         idx_t n      = value_entry.length;
@@ -291,17 +291,17 @@ struct TsAutoEnsembleInspectNativeBindData : public FunctionData {
 
 static unique_ptr<FunctionData> TsAutoEnsembleInspectNativeBind(
     ClientContext &,
-    ScalarFunction &bound_function,
+    ScalarBindFunction &bound_function,
     vector<unique_ptr<Expression>> &) {
 
     auto bind_data = make_uniq<TsAutoEnsembleInspectNativeBindData>();
-    bound_function.return_type = MakeInspectReturnType();
+    SetReturnTypeOf(bound_function, MakeInspectReturnType());
     return std::move(bind_data);
 }
 
 static void TsAutoEnsembleInspectNativeExecute(DataChunk &args, ExpressionState &state, Vector &result) {
-    auto &bind_data = state.expr.Cast<BoundFunctionExpression>()
-        .bind_info->Cast<TsAutoEnsembleInspectNativeBindData>();
+    auto &bind_data = BindInfoOf(state.expr.Cast<BoundFunctionExpression>())
+        ->Cast<TsAutoEnsembleInspectNativeBindData>();
     idx_t count = args.size();
 
     auto &value_list_vec = args.data[0];  // LIST(DOUBLE) values
@@ -312,10 +312,10 @@ static void TsAutoEnsembleInspectNativeExecute(DataChunk &args, ExpressionState 
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
     UnifiedVectorFormat value_list_data, top_k_data, method_data, period_data;
-    value_list_vec.ToUnifiedFormat(count, value_list_data);
-    top_k_vec.ToUnifiedFormat(count, top_k_data);
-    method_vec.ToUnifiedFormat(count, method_data);
-    period_vec.ToUnifiedFormat(count, period_data);
+    ToUnified(value_list_vec, count, value_list_data);
+    ToUnified(top_k_vec, count, top_k_data);
+    ToUnified(method_vec, count, method_data);
+    ToUnified(period_vec, count, period_data);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         auto value_idx = value_list_data.sel->get_index(row_idx);
@@ -328,10 +328,10 @@ static void TsAutoEnsembleInspectNativeExecute(DataChunk &args, ExpressionState 
         // --- Extract values from LIST(DOUBLE) ---
         auto value_entries = UnifiedVectorFormat::GetData<list_entry_t>(value_list_data);
         auto &value_entry  = value_entries[value_idx];
-        auto &value_child  = ListVector::GetEntry(value_list_vec);
+        auto &value_child  = ListChildMut(value_list_vec);
 
         UnifiedVectorFormat value_child_data;
-        value_child.ToUnifiedFormat(ListVector::GetListSize(value_list_vec), value_child_data);
+        ToUnified(value_child, ListVector::GetListSize(value_list_vec), value_child_data);
         auto value_values = UnifiedVectorFormat::GetData<double>(value_child_data);
 
         idx_t n      = value_entry.length;
@@ -463,8 +463,9 @@ void RegisterTsEnsembleInspectNativeFunction(ExtensionLoader &loader) {
          LogicalType::INTEGER},                     // seasonal_period
         LogicalType::LIST(LogicalType::ANY),        // return type set at bind time
         TsEnsembleInspectNativeExecute,
-        TsEnsembleInspectNativeBind);
-    explicit_func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+        ANOFOX_SCALAR_BIND(TsEnsembleInspectNativeBind));
+    MarkFallible(explicit_func);
+    SetNullHandlingOf(explicit_func, FunctionNullHandling::SPECIAL_HANDLING);
     loader.RegisterFunction(explicit_func);
 
     // _ts_auto_ensemble_inspect_native — AutoEnsemble introspection
@@ -479,8 +480,9 @@ void RegisterTsEnsembleInspectNativeFunction(ExtensionLoader &loader) {
          LogicalType::INTEGER},                     // seasonal_period
         LogicalType::LIST(LogicalType::ANY),        // return type set at bind time
         TsAutoEnsembleInspectNativeExecute,
-        TsAutoEnsembleInspectNativeBind);
-    auto_func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+        ANOFOX_SCALAR_BIND(TsAutoEnsembleInspectNativeBind));
+    MarkFallible(auto_func);
+    SetNullHandlingOf(auto_func, FunctionNullHandling::SPECIAL_HANDLING);
     loader.RegisterFunction(auto_func);
 }
 

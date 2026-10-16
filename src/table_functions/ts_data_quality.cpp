@@ -34,7 +34,7 @@ static LogicalType GetDataQualityResultType() {
 template <typename T>
 static void SetStructField(Vector &result, idx_t field_idx, idx_t row_idx, T value) {
     auto &children = StructVector::GetEntries(result);
-    auto data = FlatVector::GetData<T>(*children[field_idx]);
+    auto data = FlatDataMut<T>(StructEntry(children[field_idx]));
     data[row_idx] = value;
 }
 
@@ -50,16 +50,16 @@ static void SetStructField(Vector &result, idx_t field_idx, idx_t row_idx, T val
 static void ExtractListTimestamps(Vector &list_vec, idx_t count, idx_t row_idx,
                                   vector<int64_t> &out_timestamps) {
     UnifiedVectorFormat list_data;
-    list_vec.ToUnifiedFormat(count, list_data);
+    ToUnified(list_vec, count, list_data);
 
     auto list_entries = UnifiedVectorFormat::GetData<list_entry_t>(list_data);
     auto list_idx = list_data.sel->get_index(row_idx);
     auto &list_entry = list_entries[list_idx];
 
-    auto &child_vec = ListVector::GetEntry(list_vec);
+    auto &child_vec = ListChildMut(list_vec);
 
     UnifiedVectorFormat child_data;
-    child_vec.ToUnifiedFormat(ListVector::GetListSize(list_vec), child_data);
+    ToUnified(child_vec, ListVector::GetListSize(list_vec), child_data);
     auto child_values = UnifiedVectorFormat::GetData<timestamp_t>(child_data);
 
     out_timestamps.clear();
@@ -97,9 +97,9 @@ static void TsDataQualityFunction(DataChunk &args, ExpressionState &state, Vecto
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
     UnifiedVectorFormat dates_format, freq_format, n_short_format;
-    dates_vec.ToUnifiedFormat(count, dates_format);
-    freq_vec.ToUnifiedFormat(count, freq_format);
-    n_short_vec.ToUnifiedFormat(count, n_short_format);
+    ToUnified(dates_vec, count, dates_format);
+    ToUnified(freq_vec, count, freq_format);
+    ToUnified(n_short_vec, count, n_short_format);
 
     auto freq_data = UnifiedVectorFormat::GetData<string_t>(freq_format);
     auto n_short_data = UnifiedVectorFormat::GetData<int32_t>(n_short_format);
@@ -206,11 +206,12 @@ void RegisterTsDataQualityFunction(ExtensionLoader &loader) {
         GetDataQualityResultType(),
         TsDataQualityFunction
     );
-    ts_dq_func.stability = FunctionStability::VOLATILE;
+    MarkFallible(ts_dq_func);
+    SetStabilityOf(ts_dq_func, FunctionStability::VOLATILE);
     // frequency (and dates) may legitimately be NULL (auto-detect / no date info);
     // disable DuckDB's default NULL-in-NULL-out propagation so the function body's
     // own NULL handling (frequency -> auto, dates -> none) actually runs.
-    ts_dq_func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    SetNullHandlingOf(ts_dq_func, FunctionNullHandling::SPECIAL_HANDLING);
     ts_dq_set.AddFunction(ts_dq_func);
 
     // Mark as internal to hide from duckdb_functions() and deprioritize in autocomplete

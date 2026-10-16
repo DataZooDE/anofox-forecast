@@ -76,17 +76,17 @@ static void ExtractListDoubles(Vector &list_vec, idx_t count, idx_t row_idx,
                                vector<uint64_t> &out_validity) {
     // Use UnifiedVectorFormat to handle all vector types (flat, constant, dictionary)
     UnifiedVectorFormat list_data;
-    list_vec.ToUnifiedFormat(count, list_data);
+    ToUnified(list_vec, count, list_data);
 
     auto list_entries = UnifiedVectorFormat::GetData<list_entry_t>(list_data);
     auto list_idx = list_data.sel->get_index(row_idx);
     auto &list_entry = list_entries[list_idx];
 
-    auto &child_vec = ListVector::GetEntry(list_vec);
+    auto &child_vec = ListChildMut(list_vec);
 
     // Also use UnifiedVectorFormat for child vector
     UnifiedVectorFormat child_data;
-    child_vec.ToUnifiedFormat(ListVector::GetListSize(list_vec), child_data);
+    ToUnified(child_vec, ListVector::GetListSize(list_vec), child_data);
     auto child_values = UnifiedVectorFormat::GetData<double>(child_data);
 
     out_values.clear();
@@ -115,7 +115,7 @@ static void ExtractListDoubles(Vector &list_vec, idx_t count, idx_t row_idx,
 template <typename T>
 static void SetStructField(Vector &result, idx_t field_idx, idx_t row_idx, T value) {
     auto &children = StructVector::GetEntries(result);
-    auto data = FlatVector::GetData<T>(*children[field_idx]);
+    auto data = FlatDataMut<T>(StructEntry(children[field_idx]));
     data[row_idx] = value;
 }
 
@@ -129,16 +129,16 @@ static void SetStructField(Vector &result, idx_t field_idx, idx_t row_idx, T val
 static void ExtractListTimestamps(Vector &list_vec, idx_t count, idx_t row_idx,
                                   vector<int64_t> &out_timestamps) {
     UnifiedVectorFormat list_data;
-    list_vec.ToUnifiedFormat(count, list_data);
+    ToUnified(list_vec, count, list_data);
 
     auto list_entries = UnifiedVectorFormat::GetData<list_entry_t>(list_data);
     auto list_idx = list_data.sel->get_index(row_idx);
     auto &list_entry = list_entries[list_idx];
 
-    auto &child_vec = ListVector::GetEntry(list_vec);
+    auto &child_vec = ListChildMut(list_vec);
 
     UnifiedVectorFormat child_data;
-    child_vec.ToUnifiedFormat(ListVector::GetListSize(list_vec), child_data);
+    ToUnified(child_vec, ListVector::GetListSize(list_vec), child_data);
     auto child_values = UnifiedVectorFormat::GetData<timestamp_t>(child_data);
 
     out_timestamps.clear();
@@ -204,12 +204,12 @@ static void PopulateTsStatsResult(Vector &result, idx_t row_idx, const TsStatsRe
     if (stats_result.has_trend_strength) {
         SetStructField<double>(result, 30, row_idx, stats_result.trend_strength);
     } else {
-        FlatVector::SetNull(*children[30], row_idx, true);
+        FlatVector::SetNull(StructEntry(children[30]), row_idx, true);
     }
     if (stats_result.has_seasonality_strength) {
         SetStructField<double>(result, 31, row_idx, stats_result.seasonality_strength);
     } else {
-        FlatVector::SetNull(*children[31], row_idx, true);
+        FlatVector::SetNull(StructEntry(children[31]), row_idx, true);
     }
 
     // entropy: NULL when the Rust side has no entropy value (D-03: interior-missing or
@@ -217,7 +217,7 @@ static void PopulateTsStatsResult(Vector &result, idx_t row_idx, const TsStatsRe
     if (stats_result.has_entropy) {
         SetStructField<double>(result, 32, row_idx, stats_result.entropy);
     } else {
-        FlatVector::SetNull(*children[32], row_idx, true);
+        FlatVector::SetNull(StructEntry(children[32]), row_idx, true);
     }
 
     // expected_length / n_gaps / n_gap_runs: NULL when no date metrics are available.
@@ -226,9 +226,9 @@ static void PopulateTsStatsResult(Vector &result, idx_t row_idx, const TsStatsRe
         SetStructField<uint64_t>(result, 35, row_idx, stats_result.n_gaps);
         SetStructField<uint64_t>(result, 36, row_idx, stats_result.n_gap_runs);
     } else {
-        FlatVector::SetNull(*children[34], row_idx, true);
-        FlatVector::SetNull(*children[35], row_idx, true);
-        FlatVector::SetNull(*children[36], row_idx, true);
+        FlatVector::SetNull(StructEntry(children[34]), row_idx, true);
+        FlatVector::SetNull(StructEntry(children[35]), row_idx, true);
+        FlatVector::SetNull(StructEntry(children[36]), row_idx, true);
     }
 }
 
@@ -240,7 +240,7 @@ static void TsStatsFunction(DataChunk &args, ExpressionState &state, Vector &res
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
     UnifiedVectorFormat list_format;
-    list_vec.ToUnifiedFormat(count, list_format);
+    ToUnified(list_vec, count, list_format);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         auto list_idx = list_format.sel->get_index(row_idx);
@@ -288,10 +288,10 @@ static void TsStatsWithDatesFunction(DataChunk &args, ExpressionState &state, Ve
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
     UnifiedVectorFormat values_format, dates_format, freq_format, seasonal_period_format;
-    values_vec.ToUnifiedFormat(count, values_format);
-    dates_vec.ToUnifiedFormat(count, dates_format);
-    freq_vec.ToUnifiedFormat(count, freq_format);
-    seasonal_period_vec.ToUnifiedFormat(count, seasonal_period_format);
+    ToUnified(values_vec, count, values_format);
+    ToUnified(dates_vec, count, dates_format);
+    ToUnified(freq_vec, count, freq_format);
+    ToUnified(seasonal_period_vec, count, seasonal_period_format);
 
     auto freq_data = UnifiedVectorFormat::GetData<string_t>(freq_format);
     auto seasonal_period_data = UnifiedVectorFormat::GetData<int32_t>(seasonal_period_format);
@@ -434,7 +434,7 @@ static unique_ptr<FunctionData> TsStatsByBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    TableBindNames &names) {
 
     auto bind_data = make_uniq<TsStatsByBindData>();
 
@@ -467,7 +467,7 @@ static unique_ptr<FunctionData> TsStatsByBind(
     }
 
     // Preserve the group column name from input
-    bind_data->group_col_name = input.input_table_names[0];
+    bind_data->group_col_name = NameString(input.input_table_names[0]);
     bind_data->group_logical_type = input.input_table_types[0];
 
     // Detect date column type from input (column 1)
@@ -486,83 +486,83 @@ static unique_ptr<FunctionData> TsStatsByBind(
     }
 
     // Output schema: group_col (with preserved name), then all 36 stats columns
-    names.push_back(bind_data->group_col_name);  // Use the preserved input column name!
+    names.push_back(MakeBindName(bind_data->group_col_name));  // Use the preserved input column name!
     return_types.push_back(bind_data->group_logical_type);
 
     // Add all 36 stats columns
-    names.push_back("length");
+    names.push_back(MakeBindName("length"));
     return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
-    names.push_back("n_nulls");
+    names.push_back(MakeBindName("n_nulls"));
     return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
-    names.push_back("n_nan");
+    names.push_back(MakeBindName("n_nan"));
     return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
-    names.push_back("n_zeros");
+    names.push_back(MakeBindName("n_zeros"));
     return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
-    names.push_back("n_positive");
+    names.push_back(MakeBindName("n_positive"));
     return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
-    names.push_back("n_negative");
+    names.push_back(MakeBindName("n_negative"));
     return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
-    names.push_back("n_unique_values");
+    names.push_back(MakeBindName("n_unique_values"));
     return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
-    names.push_back("is_constant");
+    names.push_back(MakeBindName("is_constant"));
     return_types.push_back(LogicalType(LogicalTypeId::BOOLEAN));
-    names.push_back("n_zeros_start");
+    names.push_back(MakeBindName("n_zeros_start"));
     return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
-    names.push_back("n_zeros_end");
+    names.push_back(MakeBindName("n_zeros_end"));
     return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
-    names.push_back("plateau_size");
+    names.push_back(MakeBindName("plateau_size"));
     return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
-    names.push_back("plateau_size_nonzero");
+    names.push_back(MakeBindName("plateau_size_nonzero"));
     return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
-    names.push_back("mean");
+    names.push_back(MakeBindName("mean"));
     return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
-    names.push_back("median");
+    names.push_back(MakeBindName("median"));
     return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
-    names.push_back("std_dev");
+    names.push_back(MakeBindName("std_dev"));
     return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
-    names.push_back("variance");
+    names.push_back(MakeBindName("variance"));
     return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
-    names.push_back("min");
+    names.push_back(MakeBindName("min"));
     return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
-    names.push_back("max");
+    names.push_back(MakeBindName("max"));
     return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
-    names.push_back("range");
+    names.push_back(MakeBindName("range"));
     return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
-    names.push_back("sum");
+    names.push_back(MakeBindName("sum"));
     return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
-    names.push_back("skewness");
+    names.push_back(MakeBindName("skewness"));
     return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
-    names.push_back("kurtosis");
+    names.push_back(MakeBindName("kurtosis"));
     return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
-    names.push_back("tail_index");
+    names.push_back(MakeBindName("tail_index"));
     return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
-    names.push_back("bimodality_coef");
+    names.push_back(MakeBindName("bimodality_coef"));
     return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
-    names.push_back("trimmed_mean");
+    names.push_back(MakeBindName("trimmed_mean"));
     return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
-    names.push_back("coef_variation");
+    names.push_back(MakeBindName("coef_variation"));
     return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
-    names.push_back("q1");
+    names.push_back(MakeBindName("q1"));
     return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
-    names.push_back("q3");
+    names.push_back(MakeBindName("q3"));
     return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
-    names.push_back("iqr");
+    names.push_back(MakeBindName("iqr"));
     return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
-    names.push_back("autocorr_lag1");
+    names.push_back(MakeBindName("autocorr_lag1"));
     return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
-    names.push_back("trend_strength");
+    names.push_back(MakeBindName("trend_strength"));
     return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
-    names.push_back("seasonality_strength");
+    names.push_back(MakeBindName("seasonality_strength"));
     return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
-    names.push_back("entropy");
+    names.push_back(MakeBindName("entropy"));
     return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
-    names.push_back("stability");
+    names.push_back(MakeBindName("stability"));
     return_types.push_back(LogicalType(LogicalTypeId::DOUBLE));
-    names.push_back("expected_length");
+    names.push_back(MakeBindName("expected_length"));
     return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
-    names.push_back("n_gaps");
+    names.push_back(MakeBindName("n_gaps"));
     return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
-    names.push_back("n_gap_runs");
+    names.push_back(MakeBindName("n_gap_runs"));
     return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
 
     return bind_data;
@@ -660,7 +660,7 @@ static OperatorResultType TsStatsByInOut(
     }
 
     // Don't output anything during input phase - wait for finalize
-    output.SetCardinality(0);
+    SetOutputCardinality(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -786,64 +786,64 @@ static OperatorFinalizeResultType TsStatsByFinalize(
         output.data[0].SetValue(out_idx, row.group_value);
 
         // Columns 1-36: Stats values
-        FlatVector::GetData<uint64_t>(output.data[1])[out_idx] = stats.length;
-        FlatVector::GetData<uint64_t>(output.data[2])[out_idx] = stats.n_nulls;
-        FlatVector::GetData<uint64_t>(output.data[3])[out_idx] = stats.n_nan;
-        FlatVector::GetData<uint64_t>(output.data[4])[out_idx] = stats.n_zeros;
-        FlatVector::GetData<uint64_t>(output.data[5])[out_idx] = stats.n_positive;
-        FlatVector::GetData<uint64_t>(output.data[6])[out_idx] = stats.n_negative;
-        FlatVector::GetData<uint64_t>(output.data[7])[out_idx] = stats.n_unique_values;
-        FlatVector::GetData<bool>(output.data[8])[out_idx] = stats.is_constant;
-        FlatVector::GetData<uint64_t>(output.data[9])[out_idx] = stats.n_zeros_start;
-        FlatVector::GetData<uint64_t>(output.data[10])[out_idx] = stats.n_zeros_end;
-        FlatVector::GetData<uint64_t>(output.data[11])[out_idx] = stats.plateau_size;
-        FlatVector::GetData<uint64_t>(output.data[12])[out_idx] = stats.plateau_size_nonzero;
-        FlatVector::GetData<double>(output.data[13])[out_idx] = stats.mean;
-        FlatVector::GetData<double>(output.data[14])[out_idx] = stats.median;
-        FlatVector::GetData<double>(output.data[15])[out_idx] = stats.std_dev;
-        FlatVector::GetData<double>(output.data[16])[out_idx] = stats.variance;
-        FlatVector::GetData<double>(output.data[17])[out_idx] = stats.min;
-        FlatVector::GetData<double>(output.data[18])[out_idx] = stats.max;
-        FlatVector::GetData<double>(output.data[19])[out_idx] = stats.range;
-        FlatVector::GetData<double>(output.data[20])[out_idx] = stats.sum;
-        FlatVector::GetData<double>(output.data[21])[out_idx] = stats.skewness;
-        FlatVector::GetData<double>(output.data[22])[out_idx] = stats.kurtosis;
-        FlatVector::GetData<double>(output.data[23])[out_idx] = stats.tail_index;
-        FlatVector::GetData<double>(output.data[24])[out_idx] = stats.bimodality_coef;
-        FlatVector::GetData<double>(output.data[25])[out_idx] = stats.trimmed_mean;
-        FlatVector::GetData<double>(output.data[26])[out_idx] = stats.coef_variation;
-        FlatVector::GetData<double>(output.data[27])[out_idx] = stats.q1;
-        FlatVector::GetData<double>(output.data[28])[out_idx] = stats.q3;
-        FlatVector::GetData<double>(output.data[29])[out_idx] = stats.iqr;
-        FlatVector::GetData<double>(output.data[30])[out_idx] = stats.autocorr_lag1;
-        FlatVector::GetData<double>(output.data[34])[out_idx] = stats.stability;
+        FlatDataMut<uint64_t>(output.data[1])[out_idx] = stats.length;
+        FlatDataMut<uint64_t>(output.data[2])[out_idx] = stats.n_nulls;
+        FlatDataMut<uint64_t>(output.data[3])[out_idx] = stats.n_nan;
+        FlatDataMut<uint64_t>(output.data[4])[out_idx] = stats.n_zeros;
+        FlatDataMut<uint64_t>(output.data[5])[out_idx] = stats.n_positive;
+        FlatDataMut<uint64_t>(output.data[6])[out_idx] = stats.n_negative;
+        FlatDataMut<uint64_t>(output.data[7])[out_idx] = stats.n_unique_values;
+        FlatDataMut<bool>(output.data[8])[out_idx] = stats.is_constant;
+        FlatDataMut<uint64_t>(output.data[9])[out_idx] = stats.n_zeros_start;
+        FlatDataMut<uint64_t>(output.data[10])[out_idx] = stats.n_zeros_end;
+        FlatDataMut<uint64_t>(output.data[11])[out_idx] = stats.plateau_size;
+        FlatDataMut<uint64_t>(output.data[12])[out_idx] = stats.plateau_size_nonzero;
+        FlatDataMut<double>(output.data[13])[out_idx] = stats.mean;
+        FlatDataMut<double>(output.data[14])[out_idx] = stats.median;
+        FlatDataMut<double>(output.data[15])[out_idx] = stats.std_dev;
+        FlatDataMut<double>(output.data[16])[out_idx] = stats.variance;
+        FlatDataMut<double>(output.data[17])[out_idx] = stats.min;
+        FlatDataMut<double>(output.data[18])[out_idx] = stats.max;
+        FlatDataMut<double>(output.data[19])[out_idx] = stats.range;
+        FlatDataMut<double>(output.data[20])[out_idx] = stats.sum;
+        FlatDataMut<double>(output.data[21])[out_idx] = stats.skewness;
+        FlatDataMut<double>(output.data[22])[out_idx] = stats.kurtosis;
+        FlatDataMut<double>(output.data[23])[out_idx] = stats.tail_index;
+        FlatDataMut<double>(output.data[24])[out_idx] = stats.bimodality_coef;
+        FlatDataMut<double>(output.data[25])[out_idx] = stats.trimmed_mean;
+        FlatDataMut<double>(output.data[26])[out_idx] = stats.coef_variation;
+        FlatDataMut<double>(output.data[27])[out_idx] = stats.q1;
+        FlatDataMut<double>(output.data[28])[out_idx] = stats.q3;
+        FlatDataMut<double>(output.data[29])[out_idx] = stats.iqr;
+        FlatDataMut<double>(output.data[30])[out_idx] = stats.autocorr_lag1;
+        FlatDataMut<double>(output.data[34])[out_idx] = stats.stability;
 
         // trend_strength / seasonality_strength - NULL when the Rust side has no value
         // (D-02: interior-missing series, or -- for seasonality_strength -- no usable
         // period / zero seasonal variance).
         if (stats.has_trend_strength) {
-            FlatVector::GetData<double>(output.data[31])[out_idx] = stats.trend_strength;
+            FlatDataMut<double>(output.data[31])[out_idx] = stats.trend_strength;
         } else {
             FlatVector::SetNull(output.data[31], out_idx, true);
         }
         if (stats.has_seasonality_strength) {
-            FlatVector::GetData<double>(output.data[32])[out_idx] = stats.seasonality_strength;
+            FlatDataMut<double>(output.data[32])[out_idx] = stats.seasonality_strength;
         } else {
             FlatVector::SetNull(output.data[32], out_idx, true);
         }
 
         // entropy - NULL when the Rust side has no entropy value (D-03)
         if (stats.has_entropy) {
-            FlatVector::GetData<double>(output.data[33])[out_idx] = stats.entropy;
+            FlatDataMut<double>(output.data[33])[out_idx] = stats.entropy;
         } else {
             FlatVector::SetNull(output.data[33], out_idx, true);
         }
 
         // expected_length, n_gaps, n_gap_runs - handle NULL if no date metrics
         if (stats.has_date_metrics) {
-            FlatVector::GetData<uint64_t>(output.data[35])[out_idx] = stats.expected_length;
-            FlatVector::GetData<uint64_t>(output.data[36])[out_idx] = stats.n_gaps;
-            FlatVector::GetData<uint64_t>(output.data[37])[out_idx] = stats.n_gap_runs;
+            FlatDataMut<uint64_t>(output.data[35])[out_idx] = stats.expected_length;
+            FlatDataMut<uint64_t>(output.data[36])[out_idx] = stats.n_gaps;
+            FlatDataMut<uint64_t>(output.data[37])[out_idx] = stats.n_gap_runs;
         } else {
             FlatVector::SetNull(output.data[35], out_idx, true);
             FlatVector::SetNull(output.data[36], out_idx, true);
@@ -854,7 +854,7 @@ static OperatorFinalizeResultType TsStatsByFinalize(
         gstate.output_offset++;
     }
 
-    output.SetCardinality(output_count);
+    SetOutputCardinality(output, output_count);
 
     if (gstate.output_offset >= gstate.results.size()) {
         return OperatorFinalizeResultType::FINISHED;
@@ -897,7 +897,8 @@ void RegisterTsStatsFunction(ExtensionLoader &loader) {
         GetTsStatsResultType(),
         TsStatsFunction
     );
-    ts_stats_func.stability = FunctionStability::VOLATILE;
+    MarkFallible(ts_stats_func);
+    SetStabilityOf(ts_stats_func, FunctionStability::VOLATILE);
     ts_stats_set.AddFunction(ts_stats_func);
 
     CreateScalarFunctionInfo info(ts_stats_set);
@@ -916,7 +917,8 @@ void RegisterTsStatsFunction(ExtensionLoader &loader) {
         GetTsStatsResultType(),
         TsStatsWithDatesFunction
     );
-    ts_stats_with_dates_func.stability = FunctionStability::VOLATILE;
+    MarkFallible(ts_stats_with_dates_func);
+    SetStabilityOf(ts_stats_with_dates_func, FunctionStability::VOLATILE);
     ts_stats_with_dates_set.AddFunction(ts_stats_with_dates_func);
 
     CreateScalarFunctionInfo with_dates_info(ts_stats_with_dates_set);

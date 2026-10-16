@@ -64,21 +64,21 @@ static void TsAdfFunction(DataChunk &args, ExpressionState &state, Vector &resul
 
     // Get STRUCT output entry vectors (order matches child_list_t in RegisterTsAdfFunction)
     auto &struct_entries = StructVector::GetEntries(result);
-    auto &stat_vec       = *struct_entries[0]; // statistic DOUBLE
-    auto &pval_vec       = *struct_entries[1]; // p_value DOUBLE
-    auto &lags_vec       = *struct_entries[2]; // lags BIGINT
-    auto &istat_vec      = *struct_entries[3]; // is_stationary BOOLEAN
-    auto &cv1_vec        = *struct_entries[4]; // cv_1pct DOUBLE
-    auto &cv5_vec        = *struct_entries[5]; // cv_5pct DOUBLE
-    auto &cv10_vec       = *struct_entries[6]; // cv_10pct DOUBLE
+    auto &stat_vec       = StructEntry(struct_entries[0]); // statistic DOUBLE
+    auto &pval_vec       = StructEntry(struct_entries[1]); // p_value DOUBLE
+    auto &lags_vec       = StructEntry(struct_entries[2]); // lags BIGINT
+    auto &istat_vec      = StructEntry(struct_entries[3]); // is_stationary BOOLEAN
+    auto &cv1_vec        = StructEntry(struct_entries[4]); // cv_1pct DOUBLE
+    auto &cv5_vec        = StructEntry(struct_entries[5]); // cv_5pct DOUBLE
+    auto &cv10_vec       = StructEntry(struct_entries[6]); // cv_10pct DOUBLE
 
-    auto stat_data  = FlatVector::GetData<double>(stat_vec);
-    auto pval_data  = FlatVector::GetData<double>(pval_vec);
-    auto lags_data  = FlatVector::GetData<int64_t>(lags_vec);
-    auto istat_data = FlatVector::GetData<bool>(istat_vec);
-    auto cv1_data   = FlatVector::GetData<double>(cv1_vec);
-    auto cv5_data   = FlatVector::GetData<double>(cv5_vec);
-    auto cv10_data  = FlatVector::GetData<double>(cv10_vec);
+    auto stat_data  = FlatDataMut<double>(stat_vec);
+    auto pval_data  = FlatDataMut<double>(pval_vec);
+    auto lags_data  = FlatDataMut<int64_t>(lags_vec);
+    auto istat_data = FlatDataMut<bool>(istat_vec);
+    auto cv1_data   = FlatDataMut<double>(cv1_vec);
+    auto cv5_data   = FlatDataMut<double>(cv5_vec);
+    auto cv10_data  = FlatDataMut<double>(cv10_vec);
 
     vector<double> series;
 
@@ -152,11 +152,11 @@ void RegisterTsAdfFunction(ExtensionLoader &loader) {
 
     // 1-arg overload: ts_adf(series)
     ScalarFunctionSet adf_set("ts_adf");
-    adf_set.AddFunction(ScalarFunction(
+    adf_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         result_type,
         TsAdfFunction
-    ));
+    )));
     // 2-arg overload: ts_adf(series, max_lags). SPECIAL_HANDLING: a NULL
     // max_lags argument is a documented valid "auto" call, not a reason to
     // short-circuit the whole row to SQL NULL before TsAdfFunction runs
@@ -167,7 +167,8 @@ void RegisterTsAdfFunction(ExtensionLoader &loader) {
         result_type,
         TsAdfFunction
     );
-    adf_2arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    MarkFallible(adf_2arg);
+    SetNullHandlingOf(adf_2arg, FunctionNullHandling::SPECIAL_HANDLING);
     adf_set.AddFunction(adf_2arg);
     // 3-arg overload: ts_adf(series, max_lags, regression) (D-05). Same
     // SPECIAL_HANDLING reason: a NULL regression means 'c', not SQL NULL.
@@ -178,7 +179,8 @@ void RegisterTsAdfFunction(ExtensionLoader &loader) {
         result_type,
         TsAdfFunction
     );
-    adf_3arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    MarkFallible(adf_3arg);
+    SetNullHandlingOf(adf_3arg, FunctionNullHandling::SPECIAL_HANDLING);
     adf_set.AddFunction(adf_3arg);
     {
         CreateScalarFunctionInfo info(adf_set);
@@ -221,18 +223,19 @@ void RegisterTsAdfFunction(ExtensionLoader &loader) {
     auto result_type2 = LogicalType::STRUCT(std::move(struct_children2));
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_adf");
-    anofox_set.AddFunction(ScalarFunction(
+    anofox_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         result_type2,
         TsAdfFunction
-    ));
+    )));
     ScalarFunction anofox_adf_2arg(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType(LogicalTypeId::INTEGER)},
         result_type2,
         TsAdfFunction
     );
-    anofox_adf_2arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    MarkFallible(anofox_adf_2arg);
+    SetNullHandlingOf(anofox_adf_2arg, FunctionNullHandling::SPECIAL_HANDLING);
     anofox_set.AddFunction(anofox_adf_2arg);
     ScalarFunction anofox_adf_3arg(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
@@ -241,7 +244,8 @@ void RegisterTsAdfFunction(ExtensionLoader &loader) {
         result_type2,
         TsAdfFunction
     );
-    anofox_adf_3arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    MarkFallible(anofox_adf_3arg);
+    SetNullHandlingOf(anofox_adf_3arg, FunctionNullHandling::SPECIAL_HANDLING);
     anofox_set.AddFunction(anofox_adf_3arg);
     {
         CreateScalarFunctionInfo info(anofox_set);
@@ -288,13 +292,13 @@ static void TsKpssFunction(DataChunk &args, ExpressionState &state, Vector &resu
     }
 
     auto &struct_entries = StructVector::GetEntries(result);
-    auto stat_data  = FlatVector::GetData<double>(*struct_entries[0]);
-    auto pval_data  = FlatVector::GetData<double>(*struct_entries[1]);
-    auto lags_data  = FlatVector::GetData<int64_t>(*struct_entries[2]);
-    auto istat_data = FlatVector::GetData<bool>(*struct_entries[3]);
-    auto cv1_data   = FlatVector::GetData<double>(*struct_entries[4]);
-    auto cv5_data   = FlatVector::GetData<double>(*struct_entries[5]);
-    auto cv10_data  = FlatVector::GetData<double>(*struct_entries[6]);
+    auto stat_data  = FlatDataMut<double>(StructEntry(struct_entries[0]));
+    auto pval_data  = FlatDataMut<double>(StructEntry(struct_entries[1]));
+    auto lags_data  = FlatDataMut<int64_t>(StructEntry(struct_entries[2]));
+    auto istat_data = FlatDataMut<bool>(StructEntry(struct_entries[3]));
+    auto cv1_data   = FlatDataMut<double>(StructEntry(struct_entries[4]));
+    auto cv5_data   = FlatDataMut<double>(StructEntry(struct_entries[5]));
+    auto cv10_data  = FlatDataMut<double>(StructEntry(struct_entries[6]));
 
     vector<double> series;
 
@@ -366,14 +370,14 @@ static void TsStationarityFunction(DataChunk &args, ExpressionState &state, Vect
     }
 
     auto &struct_entries = StructVector::GetEntries(result);
-    auto adf_stat_data  = FlatVector::GetData<double>(*struct_entries[0]);
-    auto adf_pval_data  = FlatVector::GetData<double>(*struct_entries[1]);
-    auto kpss_stat_data = FlatVector::GetData<double>(*struct_entries[2]);
-    auto kpss_pval_data = FlatVector::GetData<double>(*struct_entries[3]);
-    auto adf_istat_data = FlatVector::GetData<bool>(*struct_entries[4]);
-    auto kpss_istat_data = FlatVector::GetData<bool>(*struct_entries[5]);
-    auto &verdict_vec   = *struct_entries[6];
-    auto verdict_data   = FlatVector::GetData<string_t>(verdict_vec);
+    auto adf_stat_data  = FlatDataMut<double>(StructEntry(struct_entries[0]));
+    auto adf_pval_data  = FlatDataMut<double>(StructEntry(struct_entries[1]));
+    auto kpss_stat_data = FlatDataMut<double>(StructEntry(struct_entries[2]));
+    auto kpss_pval_data = FlatDataMut<double>(StructEntry(struct_entries[3]));
+    auto adf_istat_data = FlatDataMut<bool>(StructEntry(struct_entries[4]));
+    auto kpss_istat_data = FlatDataMut<bool>(StructEntry(struct_entries[5]));
+    auto &verdict_vec   = StructEntry(struct_entries[6]);
+    auto verdict_data   = FlatDataMut<string_t>(verdict_vec);
 
     vector<double> series;
 
@@ -451,9 +455,9 @@ void RegisterTsKpssFunction(ExtensionLoader &loader) {
     auto result_type = LogicalType::STRUCT(StationarityStructChildren());
 
     ScalarFunctionSet kpss_set("ts_kpss");
-    kpss_set.AddFunction(ScalarFunction(
+    kpss_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
-        result_type, TsKpssFunction));
+        result_type, TsKpssFunction)));
     // 2-arg and 3-arg overloads take a nullable lags / regression: a NULL
     // means "auto" / 'c' respectively, not SQL NULL (same SPECIAL_HANDLING
     // fix as ts_adf).
@@ -461,14 +465,16 @@ void RegisterTsKpssFunction(ExtensionLoader &loader) {
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType(LogicalTypeId::INTEGER)},
         result_type, TsKpssFunction);
-    kpss_2arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    MarkFallible(kpss_2arg);
+    SetNullHandlingOf(kpss_2arg, FunctionNullHandling::SPECIAL_HANDLING);
     kpss_set.AddFunction(kpss_2arg);
     ScalarFunction kpss_3arg(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType(LogicalTypeId::INTEGER),
          LogicalType(LogicalTypeId::VARCHAR)},
         result_type, TsKpssFunction);
-    kpss_3arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    MarkFallible(kpss_3arg);
+    SetNullHandlingOf(kpss_3arg, FunctionNullHandling::SPECIAL_HANDLING);
     kpss_set.AddFunction(kpss_3arg);
     {
         CreateScalarFunctionInfo info(kpss_set);
@@ -499,21 +505,23 @@ void RegisterTsKpssFunction(ExtensionLoader &loader) {
     }
 
     ScalarFunctionSet alias_set("anofox_fcst_ts_kpss");
-    alias_set.AddFunction(ScalarFunction(
+    alias_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
-        LogicalType::STRUCT(StationarityStructChildren()), TsKpssFunction));
+        LogicalType::STRUCT(StationarityStructChildren()), TsKpssFunction)));
     ScalarFunction alias_kpss_2arg(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType(LogicalTypeId::INTEGER)},
         LogicalType::STRUCT(StationarityStructChildren()), TsKpssFunction);
-    alias_kpss_2arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    MarkFallible(alias_kpss_2arg);
+    SetNullHandlingOf(alias_kpss_2arg, FunctionNullHandling::SPECIAL_HANDLING);
     alias_set.AddFunction(alias_kpss_2arg);
     ScalarFunction alias_kpss_3arg(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType(LogicalTypeId::INTEGER),
          LogicalType(LogicalTypeId::VARCHAR)},
         LogicalType::STRUCT(StationarityStructChildren()), TsKpssFunction);
-    alias_kpss_3arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    MarkFallible(alias_kpss_3arg);
+    SetNullHandlingOf(alias_kpss_3arg, FunctionNullHandling::SPECIAL_HANDLING);
     alias_set.AddFunction(alias_kpss_3arg);
     {
         CreateScalarFunctionInfo info(alias_set);
@@ -531,16 +539,17 @@ void RegisterTsStationarityFunction(ExtensionLoader &loader) {
     auto result_type = LogicalType::STRUCT(CombinedStationarityStructChildren());
 
     ScalarFunctionSet stat_set("ts_stationarity");
-    stat_set.AddFunction(ScalarFunction(
+    stat_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
-        result_type, TsStationarityFunction));
+        result_type, TsStationarityFunction)));
     // 2-arg overload takes a nullable regression: NULL means 'c' (same
     // SPECIAL_HANDLING fix as ts_adf/ts_kpss).
     ScalarFunction stat_2arg(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType(LogicalTypeId::VARCHAR)},
         result_type, TsStationarityFunction);
-    stat_2arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    MarkFallible(stat_2arg);
+    SetNullHandlingOf(stat_2arg, FunctionNullHandling::SPECIAL_HANDLING);
     stat_set.AddFunction(stat_2arg);
     {
         CreateScalarFunctionInfo info(stat_set);
@@ -571,14 +580,15 @@ void RegisterTsStationarityFunction(ExtensionLoader &loader) {
     }
 
     ScalarFunctionSet alias_set("anofox_fcst_ts_stationarity");
-    alias_set.AddFunction(ScalarFunction(
+    alias_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
-        LogicalType::STRUCT(CombinedStationarityStructChildren()), TsStationarityFunction));
+        LogicalType::STRUCT(CombinedStationarityStructChildren()), TsStationarityFunction)));
     ScalarFunction alias_stat_2arg(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType(LogicalTypeId::VARCHAR)},
         LogicalType::STRUCT(CombinedStationarityStructChildren()), TsStationarityFunction);
-    alias_stat_2arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    MarkFallible(alias_stat_2arg);
+    SetNullHandlingOf(alias_stat_2arg, FunctionNullHandling::SPECIAL_HANDLING);
     alias_set.AddFunction(alias_stat_2arg);
     {
         CreateScalarFunctionInfo info(alias_set);
@@ -616,10 +626,10 @@ static void TsLjungBoxFunction(DataChunk &args, ExpressionState &state, Vector &
     }
 
     auto &e = StructVector::GetEntries(result);
-    auto stat_data = FlatVector::GetData<double>(*e[0]);
-    auto pval_data = FlatVector::GetData<double>(*e[1]);
-    auto lags_data = FlatVector::GetData<int64_t>(*e[2]);
-    auto df_data   = FlatVector::GetData<int64_t>(*e[3]);
+    auto stat_data = FlatDataMut<double>(StructEntry(e[0]));
+    auto pval_data = FlatDataMut<double>(StructEntry(e[1]));
+    auto lags_data = FlatDataMut<int64_t>(StructEntry(e[2]));
+    auto df_data   = FlatDataMut<int64_t>(StructEntry(e[3]));
 
     vector<double> series;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
@@ -663,9 +673,9 @@ static void TsDurbinWatsonFunction(DataChunk &args, ExpressionState &state, Vect
     idx_t count = args.size();
     ListDoubleReader series_reader(values_vec, count);
     auto &e = StructVector::GetEntries(result);
-    auto stat_data = FlatVector::GetData<double>(*e[0]);
-    auto &interp_vec = *e[1];
-    auto interp_data = FlatVector::GetData<string_t>(interp_vec);
+    auto stat_data = FlatDataMut<double>(StructEntry(e[0]));
+    auto &interp_vec = StructEntry(e[1]);
+    auto interp_data = FlatDataMut<string_t>(interp_vec);
 
     vector<double> series;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
@@ -694,10 +704,10 @@ static void TsJarqueBeraFunction(DataChunk &args, ExpressionState &state, Vector
     idx_t count = args.size();
     ListDoubleReader series_reader(values_vec, count);
     auto &e = StructVector::GetEntries(result);
-    auto stat_data = FlatVector::GetData<double>(*e[0]);
-    auto pval_data = FlatVector::GetData<double>(*e[1]);
-    auto skew_data = FlatVector::GetData<double>(*e[2]);
-    auto kurt_data = FlatVector::GetData<double>(*e[3]);
+    auto stat_data = FlatDataMut<double>(StructEntry(e[0]));
+    auto pval_data = FlatDataMut<double>(StructEntry(e[1]));
+    auto skew_data = FlatDataMut<double>(StructEntry(e[2]));
+    auto kurt_data = FlatDataMut<double>(StructEntry(e[3]));
 
     vector<double> series;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
@@ -735,17 +745,17 @@ static void TsResidualDiagnosticsFunction(DataChunk &args, ExpressionState &stat
     }
 
     auto &e = StructVector::GetEntries(result);
-    auto lb_stat = FlatVector::GetData<double>(*e[0]);
-    auto lb_pval = FlatVector::GetData<double>(*e[1]);
-    auto lb_lags = FlatVector::GetData<int64_t>(*e[2]);
-    auto dw_stat = FlatVector::GetData<double>(*e[3]);
-    auto &dw_interp_vec = *e[4];
-    auto dw_interp = FlatVector::GetData<string_t>(dw_interp_vec);
-    auto jb_stat = FlatVector::GetData<double>(*e[5]);
-    auto jb_pval = FlatVector::GetData<double>(*e[6]);
-    auto jb_skew = FlatVector::GetData<double>(*e[7]);
-    auto jb_kurt = FlatVector::GetData<double>(*e[8]);
-    auto adequate_data = FlatVector::GetData<bool>(*e[9]);
+    auto lb_stat = FlatDataMut<double>(StructEntry(e[0]));
+    auto lb_pval = FlatDataMut<double>(StructEntry(e[1]));
+    auto lb_lags = FlatDataMut<int64_t>(StructEntry(e[2]));
+    auto dw_stat = FlatDataMut<double>(StructEntry(e[3]));
+    auto &dw_interp_vec = StructEntry(e[4]);
+    auto dw_interp = FlatDataMut<string_t>(dw_interp_vec);
+    auto jb_stat = FlatDataMut<double>(StructEntry(e[5]));
+    auto jb_pval = FlatDataMut<double>(StructEntry(e[6]));
+    auto jb_skew = FlatDataMut<double>(StructEntry(e[7]));
+    auto jb_kurt = FlatDataMut<double>(StructEntry(e[8]));
+    auto adequate_data = FlatDataMut<bool>(StructEntry(e[9]));
 
     vector<double> series;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
@@ -825,7 +835,7 @@ static void RegisterSimpleDiag(ExtensionLoader &loader, const string &name,
                                const string &alias_name, ScalarFunction fn1,
                                ScalarFunction fn1_alias, const string &desc_text,
                                const string &example) {
-    ScalarFunctionSet s(name);
+    ScalarFunctionSet s(AsDuckName(name));
     s.AddFunction(fn1);
     {
         CreateScalarFunctionInfo info(s);
@@ -836,11 +846,11 @@ static void RegisterSimpleDiag(ExtensionLoader &loader, const string &name,
         info.descriptions.push_back(std::move(desc));
         loader.RegisterFunction(std::move(info));
     }
-    ScalarFunctionSet a(alias_name);
+    ScalarFunctionSet a(AsDuckName(alias_name));
     a.AddFunction(fn1_alias);
     {
         CreateScalarFunctionInfo info(a);
-        info.alias_of = name;
+        info.alias_of = AsDuckName(name);
         FunctionDescription desc;
         desc.description = desc_text + " (prefixed alias).";
         desc.categories = {"time-series", "diagnostics"};
@@ -852,20 +862,22 @@ static void RegisterSimpleDiag(ExtensionLoader &loader, const string &name,
 void RegisterTsLjungBoxFunction(ExtensionLoader &loader) {
     auto rt = LogicalType::STRUCT(LjungBoxStructChildren());
     ScalarFunctionSet s("ts_ljung_box");
-    s.AddFunction(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))}, rt, TsLjungBoxFunction));
+    s.AddFunction(Fallible(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))}, rt, TsLjungBoxFunction)));
     // 2-arg and 3-arg overloads take a nullable lags / fitted_params: a NULL
     // means "auto lags" / "fitted_params 0" respectively, not SQL NULL (same
     // SPECIAL_HANDLING fix as ts_adf/ts_kpss -- WR-01 review fix).
     ScalarFunction ljung_box_2arg(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType(LogicalTypeId::INTEGER)}, rt, TsLjungBoxFunction);
-    ljung_box_2arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    MarkFallible(ljung_box_2arg);
+    SetNullHandlingOf(ljung_box_2arg, FunctionNullHandling::SPECIAL_HANDLING);
     s.AddFunction(ljung_box_2arg);
     ScalarFunction ljung_box_3arg(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType(LogicalTypeId::INTEGER),
          LogicalType(LogicalTypeId::INTEGER)}, rt, TsLjungBoxFunction);
-    ljung_box_3arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    MarkFallible(ljung_box_3arg);
+    SetNullHandlingOf(ljung_box_3arg, FunctionNullHandling::SPECIAL_HANDLING);
     s.AddFunction(ljung_box_3arg);
     {
         CreateScalarFunctionInfo info(s);
@@ -889,17 +901,19 @@ void RegisterTsLjungBoxFunction(ExtensionLoader &loader) {
     }
     auto rt2 = LogicalType::STRUCT(LjungBoxStructChildren());
     ScalarFunctionSet a("anofox_fcst_ts_ljung_box");
-    a.AddFunction(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))}, rt2, TsLjungBoxFunction));
+    a.AddFunction(Fallible(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))}, rt2, TsLjungBoxFunction)));
     ScalarFunction anofox_ljung_box_2arg(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType(LogicalTypeId::INTEGER)}, rt2, TsLjungBoxFunction);
-    anofox_ljung_box_2arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    MarkFallible(anofox_ljung_box_2arg);
+    SetNullHandlingOf(anofox_ljung_box_2arg, FunctionNullHandling::SPECIAL_HANDLING);
     a.AddFunction(anofox_ljung_box_2arg);
     ScalarFunction anofox_ljung_box_3arg(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType(LogicalTypeId::INTEGER),
          LogicalType(LogicalTypeId::INTEGER)}, rt2, TsLjungBoxFunction);
-    anofox_ljung_box_3arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    MarkFallible(anofox_ljung_box_3arg);
+    SetNullHandlingOf(anofox_ljung_box_3arg, FunctionNullHandling::SPECIAL_HANDLING);
     a.AddFunction(anofox_ljung_box_3arg);
     {
         CreateScalarFunctionInfo info(a);
@@ -915,10 +929,10 @@ void RegisterTsLjungBoxFunction(ExtensionLoader &loader) {
 void RegisterTsDurbinWatsonFunction(ExtensionLoader &loader) {
     RegisterSimpleDiag(
         loader, "ts_durbin_watson", "anofox_fcst_ts_durbin_watson",
-        ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
-                       LogicalType::STRUCT(DurbinWatsonStructChildren()), TsDurbinWatsonFunction),
-        ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
-                       LogicalType::STRUCT(DurbinWatsonStructChildren()), TsDurbinWatsonFunction),
+        Fallible(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+                       LogicalType::STRUCT(DurbinWatsonStructChildren()), TsDurbinWatsonFunction)),
+        Fallible(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+                       LogicalType::STRUCT(DurbinWatsonStructChildren()), TsDurbinWatsonFunction)),
         "Durbin-Watson first-order autocorrelation statistic on residuals. Returns "
         "STRUCT(statistic DOUBLE, interpretation VARCHAR); statistic in [0,4], ~2 means no "
         "autocorrelation. interpretation is one of positive_strong / positive_weak / none / "
@@ -929,10 +943,10 @@ void RegisterTsDurbinWatsonFunction(ExtensionLoader &loader) {
 void RegisterTsJarqueBeraFunction(ExtensionLoader &loader) {
     RegisterSimpleDiag(
         loader, "ts_jarque_bera", "anofox_fcst_ts_jarque_bera",
-        ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
-                       LogicalType::STRUCT(JarqueBeraStructChildren()), TsJarqueBeraFunction),
-        ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
-                       LogicalType::STRUCT(JarqueBeraStructChildren()), TsJarqueBeraFunction),
+        Fallible(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+                       LogicalType::STRUCT(JarqueBeraStructChildren()), TsJarqueBeraFunction)),
+        Fallible(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
+                       LogicalType::STRUCT(JarqueBeraStructChildren()), TsJarqueBeraFunction)),
         "Jarque-Bera normality test on residuals. Returns STRUCT(statistic DOUBLE, "
         "p_value DOUBLE, skewness DOUBLE, excess_kurtosis DOUBLE). A small p-value rejects "
         "normality.",
@@ -942,13 +956,14 @@ void RegisterTsJarqueBeraFunction(ExtensionLoader &loader) {
 void RegisterTsResidualDiagnosticsFunction(ExtensionLoader &loader) {
     auto rt = LogicalType::STRUCT(ResidualDiagnosticsStructChildren());
     ScalarFunctionSet s("ts_residual_diagnostics");
-    s.AddFunction(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))}, rt, TsResidualDiagnosticsFunction));
+    s.AddFunction(Fallible(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))}, rt, TsResidualDiagnosticsFunction)));
     // 2-arg overload takes a nullable alpha: NULL means 0.05 (same
     // SPECIAL_HANDLING fix as ts_adf/ts_kpss -- WR-01 review fix).
     ScalarFunction residual_diag_2arg(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType(LogicalTypeId::DOUBLE)}, rt, TsResidualDiagnosticsFunction);
-    residual_diag_2arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    MarkFallible(residual_diag_2arg);
+    SetNullHandlingOf(residual_diag_2arg, FunctionNullHandling::SPECIAL_HANDLING);
     s.AddFunction(residual_diag_2arg);
     {
         CreateScalarFunctionInfo info(s);
@@ -970,11 +985,12 @@ void RegisterTsResidualDiagnosticsFunction(ExtensionLoader &loader) {
     }
     auto rt2 = LogicalType::STRUCT(ResidualDiagnosticsStructChildren());
     ScalarFunctionSet a("anofox_fcst_ts_residual_diagnostics");
-    a.AddFunction(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))}, rt2, TsResidualDiagnosticsFunction));
+    a.AddFunction(Fallible(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))}, rt2, TsResidualDiagnosticsFunction)));
     ScalarFunction anofox_residual_diag_2arg(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType(LogicalTypeId::DOUBLE)}, rt2, TsResidualDiagnosticsFunction);
-    anofox_residual_diag_2arg.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    MarkFallible(anofox_residual_diag_2arg);
+    SetNullHandlingOf(anofox_residual_diag_2arg, FunctionNullHandling::SPECIAL_HANDLING);
     a.AddFunction(anofox_residual_diag_2arg);
     {
         CreateScalarFunctionInfo info(a);

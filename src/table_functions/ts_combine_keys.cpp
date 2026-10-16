@@ -1,3 +1,4 @@
+#include "duckdb_compat.hpp"
 #include "ts_combine_keys.hpp"
 #include "ts_fill_gaps_native.hpp"
 #include "duckdb/common/exception.hpp"
@@ -85,7 +86,7 @@ static unique_ptr<FunctionData> TsCombineKeysBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    TableBindNames &names) {
 
     auto bind_data = make_uniq<TsCombineKeysBindData>();
 
@@ -103,8 +104,8 @@ static unique_ptr<FunctionData> TsCombineKeysBind(
     }
 
     // Column layout: date_col, value_col, id_col1, id_col2, ...
-    bind_data->date_col_name = input.input_table_names.size() > 0 ? input.input_table_names[0] : "date";
-    bind_data->value_col_name = input.input_table_names.size() > 1 ? input.input_table_names[1] : "value";
+    bind_data->date_col_name = input.input_table_names.size() > 0 ? NameString(input.input_table_names[0]) : "date";
+    bind_data->value_col_name = input.input_table_names.size() > 1 ? NameString(input.input_table_names[1]) : "value";
     bind_data->num_id_cols = input.input_table_types.size() - 2;
 
     // Detect date column type
@@ -131,13 +132,13 @@ static unique_ptr<FunctionData> TsCombineKeysBind(
     bind_data->value_logical_type = input.input_table_types[1];
 
     // Output schema: unique_id, date_col, value_col
-    names.push_back("unique_id");
+    names.push_back(MakeBindName("unique_id"));
     return_types.push_back(LogicalType::VARCHAR);
 
-    names.push_back(bind_data->date_col_name);
+    names.push_back(MakeBindName(bind_data->date_col_name));
     return_types.push_back(bind_data->date_logical_type);
 
-    names.push_back(bind_data->value_col_name);
+    names.push_back(MakeBindName(bind_data->value_col_name));
     return_types.push_back(bind_data->value_logical_type);
 
     return bind_data;
@@ -189,18 +190,18 @@ static OperatorResultType TsCombineKeysInOut(
         }
 
         // Column 0: unique_id
-        output.SetValue(0, output_idx, Value(unique_id));
+        output.data[0].SetValue(output_idx, Value(unique_id));
 
         // Column 1: date (pass through)
-        output.SetValue(1, output_idx, input.GetValue(0, row_idx));
+        output.data[1].SetValue(output_idx, input.GetValue(0, row_idx));
 
         // Column 2: value (pass through)
-        output.SetValue(2, output_idx, input.GetValue(1, row_idx));
+        output.data[2].SetValue(output_idx, input.GetValue(1, row_idx));
 
         output_idx++;
     }
 
-    output.SetCardinality(output_idx);
+    SetOutputCardinality(output, output_idx);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 

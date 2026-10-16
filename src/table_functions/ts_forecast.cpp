@@ -30,17 +30,17 @@ static void ExtractListValues(Vector &list_vec, idx_t count, idx_t row_idx,
                               vector<uint64_t> &out_validity) {
     // Use UnifiedVectorFormat to handle all vector types (flat, constant, dictionary)
     UnifiedVectorFormat list_data;
-    list_vec.ToUnifiedFormat(count, list_data);
+    ToUnified(list_vec, count, list_data);
 
     auto list_entries = UnifiedVectorFormat::GetData<list_entry_t>(list_data);
     auto list_idx = list_data.sel->get_index(row_idx);
     auto &list_entry = list_entries[list_idx];
 
-    auto &child_vec = ListVector::GetEntry(list_vec);
+    auto &child_vec = ListChildMut(list_vec);
 
     // Also use UnifiedVectorFormat for child vector
     UnifiedVectorFormat child_data;
-    child_vec.ToUnifiedFormat(ListVector::GetListSize(list_vec), child_data);
+    ToUnified(child_vec, ListVector::GetListSize(list_vec), child_data);
     auto child_values = UnifiedVectorFormat::GetData<double>(child_data);
 
     out_values.clear();
@@ -76,8 +76,8 @@ static void ExtractListValues(Vector &list_vec, idx_t count, idx_t row_idx,
 static void SetListFromArray(Vector &result, idx_t field_idx, idx_t row_idx,
                              double *data, size_t length) {
     auto &children = StructVector::GetEntries(result);
-    auto &list_vec = *children[field_idx];
-    auto list_data = FlatVector::GetData<list_entry_t>(list_vec);
+    auto &list_vec = StructEntry(children[field_idx]);
+    auto list_data = FlatDataMut<list_entry_t>(list_vec);
     auto current_size = ListVector::GetListSize(list_vec);
 
     if (!data) {
@@ -87,7 +87,7 @@ static void SetListFromArray(Vector &result, idx_t field_idx, idx_t row_idx,
         return;
     }
 
-    auto &list_child = ListVector::GetEntry(list_vec);
+    auto &list_child = ListChildMut(list_vec);
 
     list_data[row_idx].offset = current_size;
     list_data[row_idx].length = length;
@@ -95,7 +95,7 @@ static void SetListFromArray(Vector &result, idx_t field_idx, idx_t row_idx,
     ListVector::Reserve(list_vec, current_size + length);
     ListVector::SetListSize(list_vec, current_size + length);
 
-    auto child_data = FlatVector::GetData<double>(list_child);
+    auto child_data = FlatDataMut<double>(list_child);
     if (length > 0) {
         memcpy(child_data + current_size, data, length * sizeof(double));
     }
@@ -111,8 +111,8 @@ static void SetListFromArray(Vector &result, idx_t field_idx, idx_t row_idx,
 static void SetListFromArrayNanSafe(Vector &result, idx_t field_idx, idx_t row_idx,
                                     double *data, size_t length) {
     auto &children = StructVector::GetEntries(result);
-    auto &list_vec = *children[field_idx];
-    auto list_data = FlatVector::GetData<list_entry_t>(list_vec);
+    auto &list_vec = StructEntry(children[field_idx]);
+    auto list_data = FlatDataMut<list_entry_t>(list_vec);
     auto current_size = ListVector::GetListSize(list_vec);
 
     if (!data) {
@@ -122,7 +122,7 @@ static void SetListFromArrayNanSafe(Vector &result, idx_t field_idx, idx_t row_i
         return;
     }
 
-    auto &list_child = ListVector::GetEntry(list_vec);
+    auto &list_child = ListChildMut(list_vec);
 
     list_data[row_idx].offset = current_size;
     list_data[row_idx].length = length;
@@ -130,7 +130,7 @@ static void SetListFromArrayNanSafe(Vector &result, idx_t field_idx, idx_t row_i
     ListVector::Reserve(list_vec, current_size + length);
     ListVector::SetListSize(list_vec, current_size + length);
 
-    auto child_data = FlatVector::GetData<double>(list_child);
+    auto child_data = FlatDataMut<double>(list_child);
     for (size_t i = 0; i < length; i++) {
         if (std::isnan(data[i])) {
             FlatVector::SetNull(list_child, current_size + i, true);
@@ -144,14 +144,14 @@ static void SetListFromArrayNanSafe(Vector &result, idx_t field_idx, idx_t row_i
 template <typename T>
 static void SetStructField(Vector &result, idx_t field_idx, idx_t row_idx, T value) {
     auto &children = StructVector::GetEntries(result);
-    auto data = FlatVector::GetData<T>(*children[field_idx]);
+    auto data = FlatDataMut<T>(StructEntry(children[field_idx]));
     data[row_idx] = value;
 }
 
 static void SetStringField(Vector &result, idx_t field_idx, idx_t row_idx, const char *value) {
     auto &children = StructVector::GetEntries(result);
-    auto data = FlatVector::GetData<string_t>(*children[field_idx]);
-    data[row_idx] = StringVector::AddString(*children[field_idx], value);
+    auto data = FlatDataMut<string_t>(StructEntry(children[field_idx]));
+    data[row_idx] = StringVector::AddString(StructEntry(children[field_idx]), value);
 }
 
 static void TsForecastFunction(DataChunk &args, ExpressionState &state, Vector &result) {
@@ -163,10 +163,10 @@ static void TsForecastFunction(DataChunk &args, ExpressionState &state, Vector &
 
     // Use UnifiedVectorFormat to handle both constant and flat vectors
     UnifiedVectorFormat list_format;
-    list_vec.ToUnifiedFormat(count, list_format);
+    ToUnified(list_vec, count, list_format);
 
     UnifiedVectorFormat horizon_data;
-    horizon_vec.ToUnifiedFormat(count, horizon_data);
+    ToUnified(horizon_vec, count, horizon_data);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         auto list_idx = list_format.sel->get_index(row_idx);
@@ -246,7 +246,7 @@ static void ExtractNestedListValues(Vector &list_vec, idx_t count, idx_t row_idx
     out_validity.clear();
 
     UnifiedVectorFormat list_data;
-    list_vec.ToUnifiedFormat(count, list_data);
+    ToUnified(list_vec, count, list_data);
 
     auto list_idx = list_data.sel->get_index(row_idx);
     if (!list_data.validity.RowIsValid(list_idx)) {
@@ -256,7 +256,7 @@ static void ExtractNestedListValues(Vector &list_vec, idx_t count, idx_t row_idx
     auto list_entries = UnifiedVectorFormat::GetData<list_entry_t>(list_data);
     auto &outer_entry = list_entries[list_idx];
 
-    auto &inner_list_vec = ListVector::GetEntry(list_vec);
+    auto &inner_list_vec = ListChildMut(list_vec);
     idx_t outer_size = outer_entry.length;
     idx_t outer_offset = outer_entry.offset;
 
@@ -264,15 +264,15 @@ static void ExtractNestedListValues(Vector &list_vec, idx_t count, idx_t row_idx
         idx_t inner_idx = outer_offset + i;
 
         UnifiedVectorFormat inner_data;
-        inner_list_vec.ToUnifiedFormat(ListVector::GetListSize(list_vec), inner_data);
+        ToUnified(inner_list_vec, ListVector::GetListSize(list_vec), inner_data);
         auto inner_entries = UnifiedVectorFormat::GetData<list_entry_t>(inner_data);
 
         auto inner_unified_idx = inner_data.sel->get_index(inner_idx);
         auto &inner_entry = inner_entries[inner_unified_idx];
 
-        auto &values_vec = ListVector::GetEntry(inner_list_vec);
+        auto &values_vec = ListChildMut(inner_list_vec);
         UnifiedVectorFormat values_data;
-        values_vec.ToUnifiedFormat(ListVector::GetListSize(inner_list_vec), values_data);
+        ToUnified(values_vec, ListVector::GetListSize(inner_list_vec), values_data);
         auto values = UnifiedVectorFormat::GetData<double>(values_data);
 
         vector<double> regressor;
@@ -315,7 +315,7 @@ static string ExogParseStringParam(const Value &params_value, const string &key,
         auto &struct_children = StructValue::GetChildren(params_value);
         auto &child_types = StructType::GetChildTypes(params_value.type());
         for (idx_t i = 0; i < child_types.size(); i++) {
-            if (child_types[i].first == key && !struct_children[i].IsNull()) {
+            if (NameString(child_types[i].first) == key && !struct_children[i].IsNull()) {
                 return struct_children[i].ToString();
             }
         }
@@ -359,8 +359,8 @@ static void ExogValidateParamKeys(const Value &params_value) {
     } else if (params_value.type().id() == LogicalTypeId::STRUCT) {
         auto &child_types = StructType::GetChildTypes(params_value.type());
         for (idx_t i = 0; i < child_types.size(); i++) {
-            if (valid_keys.find(child_types[i].first) == valid_keys.end()) {
-                unknown_keys.push_back(child_types[i].first);
+            if (valid_keys.find(NameString(child_types[i].first)) == valid_keys.end()) {
+                unknown_keys.push_back(NameString(child_types[i].first));
             }
         }
     }
@@ -402,17 +402,17 @@ static void TsForecastExogFunction(DataChunk &args, ExpressionState &state, Vect
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
     UnifiedVectorFormat list_format;
-    list_vec.ToUnifiedFormat(count, list_format);
+    ToUnified(list_vec, count, list_format);
 
     UnifiedVectorFormat horizon_data;
-    horizon_vec.ToUnifiedFormat(count, horizon_data);
+    ToUnified(horizon_vec, count, horizon_data);
 
     UnifiedVectorFormat model_data;
-    model_vec.ToUnifiedFormat(count, model_data);
+    ToUnified(model_vec, count, model_data);
 
     UnifiedVectorFormat params_data;
     if (has_params) {
-        args.data[5].ToUnifiedFormat(count, params_data);
+        ToUnified(args.data[5], count, params_data);
     }
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
@@ -613,13 +613,13 @@ static void TsForecastWithModelFunction(DataChunk &args, ExpressionState &state,
 
     // Use UnifiedVectorFormat to handle both constant and flat vectors
     UnifiedVectorFormat list_format;
-    list_vec.ToUnifiedFormat(count, list_format);
+    ToUnified(list_vec, count, list_format);
 
     UnifiedVectorFormat horizon_data;
-    horizon_vec.ToUnifiedFormat(count, horizon_data);
+    ToUnified(horizon_vec, count, horizon_data);
 
     UnifiedVectorFormat model_data;
-    model_vec.ToUnifiedFormat(count, model_data);
+    ToUnified(model_vec, count, model_data);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         auto list_idx = list_format.sel->get_index(row_idx);
@@ -724,7 +724,8 @@ void RegisterTsForecastFunction(ExtensionLoader &loader) {
         GetForecastResultType(),
         TsForecastFunction
     );
-    ts_forecast_basic.stability = FunctionStability::VOLATILE;
+    MarkFallible(ts_forecast_basic);
+    SetStabilityOf(ts_forecast_basic, FunctionStability::VOLATILE);
     ts_forecast_set.AddFunction(ts_forecast_basic);
 
     // _ts_forecast(values, horizon, model)
@@ -734,7 +735,8 @@ void RegisterTsForecastFunction(ExtensionLoader &loader) {
         GetForecastResultType(),
         TsForecastWithModelFunction
     );
-    ts_forecast_with_model.stability = FunctionStability::VOLATILE;
+    MarkFallible(ts_forecast_with_model);
+    SetStabilityOf(ts_forecast_with_model, FunctionStability::VOLATILE);
     ts_forecast_set.AddFunction(ts_forecast_with_model);
 
     // Mark as internal to hide from duckdb_functions() and deprioritize in autocomplete
@@ -765,7 +767,8 @@ void RegisterTsForecastFunction(ExtensionLoader &loader) {
         GetForecastResultType(),
         TsForecastExogFunction
     );
-    ts_forecast_exog_5arg.stability = FunctionStability::VOLATILE;
+    MarkFallible(ts_forecast_exog_5arg);
+    SetStabilityOf(ts_forecast_exog_5arg, FunctionStability::VOLATILE);
     ts_forecast_exog_set.AddFunction(ts_forecast_exog_5arg);
 
     ScalarFunction ts_forecast_exog_6arg(
@@ -778,7 +781,8 @@ void RegisterTsForecastFunction(ExtensionLoader &loader) {
         GetForecastResultType(),
         TsForecastExogFunction
     );
-    ts_forecast_exog_6arg.stability = FunctionStability::VOLATILE;
+    MarkFallible(ts_forecast_exog_6arg);
+    SetStabilityOf(ts_forecast_exog_6arg, FunctionStability::VOLATILE);
     ts_forecast_exog_set.AddFunction(ts_forecast_exog_6arg);
 
     // Mark as internal

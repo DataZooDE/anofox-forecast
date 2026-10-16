@@ -1,3 +1,4 @@
+#include "duckdb_compat.hpp"
 #include "ts_cv_split_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // For ParseFrequencyToSeconds, etc.
 #include "duckdb/common/exception.hpp"
@@ -191,7 +192,7 @@ static unique_ptr<FunctionData> TsCvSplitNativeBind(
     ClientContext &context,
     TableFunctionBindInput &input,
     vector<LogicalType> &return_types,
-    vector<string> &names) {
+    TableBindNames &names) {
 
     auto bind_data = make_uniq<TsCvSplitNativeBindData>();
 
@@ -262,19 +263,19 @@ static unique_ptr<FunctionData> TsCvSplitNativeBind(
 
     // Output columns: preserve original column names, add fold_id and split
     return_types.push_back(bind_data->group_logical_type);
-    names.push_back(table_names.size() > 0 ? table_names[0] : "group_col");
+    names.push_back(MakeBindName(table_names.size() > 0 ? NameString(table_names[0]) : "group_col"));
 
     return_types.push_back(bind_data->date_logical_type);
-    names.push_back(table_names.size() > 1 ? table_names[1] : "date_col");
+    names.push_back(MakeBindName(table_names.size() > 1 ? NameString(table_names[1]) : "date_col"));
 
     return_types.push_back(bind_data->value_logical_type);
-    names.push_back(table_names.size() > 2 ? table_names[2] : "target_col");
+    names.push_back(MakeBindName(table_names.size() > 2 ? NameString(table_names[2]) : "target_col"));
 
     return_types.push_back(LogicalType::BIGINT);
-    names.push_back("fold_id");
+    names.push_back(MakeBindName("fold_id"));
 
     return_types.push_back(LogicalType::VARCHAR);
-    names.push_back("split");
+    names.push_back(MakeBindName("split"));
 
     return std::move(bind_data);
 }
@@ -361,7 +362,7 @@ static OperatorResultType TsCvSplitNativeInOut(
     }
 
     // Don't output anything during input phase
-    output.SetCardinality(0);
+    SetOutputCardinality(output, 0);
     return OperatorResultType::NEED_MORE_INPUT;
 }
 
@@ -512,23 +513,23 @@ static OperatorFinalizeResultType TsCvSplitNativeFinalize(
         auto &out_row = gstate.output_rows[gstate.output_offset];
         auto &input_row = gstate.input_rows[out_row.input_idx];
 
-        output.SetValue(0, output_idx, input_row.group_val);
-        output.SetValue(1, output_idx, input_row.date_val);
+        output.data[0].SetValue(output_idx, input_row.group_val);
+        output.data[1].SetValue(output_idx, input_row.date_val);
 
         if (input_row.valid) {
-            output.SetValue(2, output_idx, Value::DOUBLE(input_row.value));
+            output.data[2].SetValue(output_idx, Value::DOUBLE(input_row.value));
         } else {
-            output.SetValue(2, output_idx, Value());
+            output.data[2].SetValue(output_idx, Value());
         }
 
-        output.SetValue(3, output_idx, Value::BIGINT(out_row.fold_id));
-        output.SetValue(4, output_idx, Value(out_row.is_train ? "train" : "test"));
+        output.data[3].SetValue(output_idx, Value::BIGINT(out_row.fold_id));
+        output.data[4].SetValue(output_idx, Value(out_row.is_train ? "train" : "test"));
 
         output_idx++;
         gstate.output_offset++;
     }
 
-    output.SetCardinality(output_idx);
+    SetOutputCardinality(output, output_idx);
 
     if (gstate.output_offset >= gstate.output_rows.size()) {
         return OperatorFinalizeResultType::FINISHED;

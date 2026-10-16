@@ -86,11 +86,11 @@ static void TsClassifySeasonalityAggUpdate(Vector inputs[], AggregateInputData &
     auto &period_vec = inputs[2];
 
     UnifiedVectorFormat ts_data, val_data, period_data;
-    ts_vec.ToUnifiedFormat(count, ts_data);
-    val_vec.ToUnifiedFormat(count, val_data);
-    period_vec.ToUnifiedFormat(count, period_data);
+    ToUnified(ts_vec, count, ts_data);
+    ToUnified(val_vec, count, val_data);
+    ToUnified(period_vec, count, period_data);
 
-    auto states = FlatVector::GetData<TsClassifySeasonalityAggState *>(state_vector);
+    auto states = FlatDataMut<TsClassifySeasonalityAggState *>(state_vector);
 
     for (idx_t i = 0; i < count; i++) {
         auto &state = *states[i];
@@ -125,7 +125,7 @@ static void TsClassifySeasonalityAggUpdate(Vector inputs[], AggregateInputData &
 
 static void TsClassifySeasonalityAggFinalize(Vector &state_vector, AggregateInputData &aggr_input,
                                              Vector &result, idx_t count, idx_t offset) {
-    auto states = FlatVector::GetData<TsClassifySeasonalityAggState *>(state_vector);
+    auto states = FlatDataMut<TsClassifySeasonalityAggState *>(state_vector);
 
     for (idx_t i = 0; i < count; i++) {
         auto &state = *states[i];
@@ -205,35 +205,35 @@ static void TsClassifySeasonalityAggFinalize(Vector &state_vector, AggregateInpu
         auto &children = StructVector::GetEntries(result);
 
         // timing_classification (index 0)
-        FlatVector::GetData<string_t>(*children[0])[row] =
-            StringVector::AddString(*children[0], class_result.classification);
+        FlatDataMut<string_t>(StructEntry(children[0]))[row] =
+            StringVector::AddString(StructEntry(children[0]), class_result.classification);
 
         // modulation_type (index 1)
         if (mod_success) {
-            FlatVector::GetData<string_t>(*children[1])[row] =
-                StringVector::AddString(*children[1], mod_result.modulation_type);
+            FlatDataMut<string_t>(StructEntry(children[1]))[row] =
+                StringVector::AddString(StructEntry(children[1]), mod_result.modulation_type);
         } else {
-            FlatVector::GetData<string_t>(*children[1])[row] =
-                StringVector::AddString(*children[1], "unknown");
+            FlatDataMut<string_t>(StructEntry(children[1]))[row] =
+                StringVector::AddString(StructEntry(children[1]), "unknown");
         }
 
         // has_stable_timing (index 2)
-        FlatVector::GetData<bool>(*children[2])[row] = class_result.has_stable_timing;
+        FlatDataMut<bool>(StructEntry(children[2]))[row] = class_result.has_stable_timing;
 
         // timing_variability (index 3)
-        FlatVector::GetData<double>(*children[3])[row] = class_result.timing_variability;
+        FlatDataMut<double>(StructEntry(children[3]))[row] = class_result.timing_variability;
 
         // seasonal_strength (index 4)
-        FlatVector::GetData<double>(*children[4])[row] = class_result.seasonal_strength;
+        FlatDataMut<double>(StructEntry(children[4]))[row] = class_result.seasonal_strength;
 
         // is_seasonal (index 5)
-        FlatVector::GetData<bool>(*children[5])[row] = class_result.is_seasonal;
+        FlatDataMut<bool>(StructEntry(children[5]))[row] = class_result.is_seasonal;
 
         // cycle_strengths (index 6)
         {
-            auto &list_vec = *children[6];
-            auto list_data = FlatVector::GetData<list_entry_t>(list_vec);
-            auto &list_child = ListVector::GetEntry(list_vec);
+            auto &list_vec = StructEntry(children[6]);
+            auto list_data = FlatDataMut<list_entry_t>(list_vec);
+            auto &list_child = ListChildMut(list_vec);
             auto current_size = ListVector::GetListSize(list_vec);
 
             list_data[row].offset = current_size;
@@ -242,7 +242,7 @@ static void TsClassifySeasonalityAggFinalize(Vector &state_vector, AggregateInpu
             ListVector::Reserve(list_vec, current_size + class_result.n_cycle_strengths);
             ListVector::SetListSize(list_vec, current_size + class_result.n_cycle_strengths);
 
-            auto child_data = FlatVector::GetData<double>(list_child);
+            auto child_data = FlatDataMut<double>(list_child);
             for (size_t j = 0; j < class_result.n_cycle_strengths; j++) {
                 child_data[current_size + j] = class_result.cycle_strengths[j];
             }
@@ -250,9 +250,9 @@ static void TsClassifySeasonalityAggFinalize(Vector &state_vector, AggregateInpu
 
         // weak_seasons (index 7)
         {
-            auto &list_vec = *children[7];
-            auto list_data = FlatVector::GetData<list_entry_t>(list_vec);
-            auto &list_child = ListVector::GetEntry(list_vec);
+            auto &list_vec = StructEntry(children[7]);
+            auto list_data = FlatDataMut<list_entry_t>(list_vec);
+            auto &list_child = ListChildMut(list_vec);
             auto current_size = ListVector::GetListSize(list_vec);
 
             list_data[row].offset = current_size;
@@ -261,7 +261,7 @@ static void TsClassifySeasonalityAggFinalize(Vector &state_vector, AggregateInpu
             ListVector::Reserve(list_vec, current_size + class_result.n_weak_seasons);
             ListVector::SetListSize(list_vec, current_size + class_result.n_weak_seasons);
 
-            auto child_data = FlatVector::GetData<int64_t>(list_child);
+            auto child_data = FlatDataMut<int64_t>(list_child);
             for (size_t j = 0; j < class_result.n_weak_seasons; j++) {
                 child_data[current_size + j] = static_cast<int64_t>(class_result.weak_seasons[j]);
             }
@@ -277,8 +277,8 @@ static void TsClassifySeasonalityAggFinalize(Vector &state_vector, AggregateInpu
 
 static void TsClassifySeasonalityAggCombine(Vector &state_vector, Vector &combined, AggregateInputData &aggr_input,
                                             idx_t count) {
-    auto src_states = FlatVector::GetData<TsClassifySeasonalityAggState *>(state_vector);
-    auto tgt_states = FlatVector::GetData<TsClassifySeasonalityAggState *>(combined);
+    auto src_states = FlatDataMut<TsClassifySeasonalityAggState *>(state_vector);
+    auto tgt_states = FlatDataMut<TsClassifySeasonalityAggState *>(combined);
 
     for (idx_t i = 0; i < count; i++) {
         auto &src = *src_states[i];
@@ -305,7 +305,7 @@ static void TsClassifySeasonalityAggCombine(Vector &state_vector, Vector &combin
 }
 
 static void TsClassifySeasonalityAggDestructor(Vector &state_vector, AggregateInputData &aggr_input, idx_t count) {
-    auto states = FlatVector::GetData<TsClassifySeasonalityAggState *>(state_vector);
+    auto states = FlatDataMut<TsClassifySeasonalityAggState *>(state_vector);
     for (idx_t i = 0; i < count; i++) {
         if (states[i] && states[i]->data) {
             delete states[i]->data;
@@ -324,7 +324,7 @@ void RegisterTsClassifySeasonalityAggFunction(ExtensionLoader &loader) {
         AggregateFunction::StateInitialize<TsClassifySeasonalityAggState, TsClassifySeasonalityAggOperation>,
         TsClassifySeasonalityAggUpdate,
         TsClassifySeasonalityAggCombine,
-        TsClassifySeasonalityAggFinalize,
+        ANOFOX_AGG_FINALIZE(TsClassifySeasonalityAggFinalize),
         nullptr,  // simple_update
         nullptr,  // bind
         TsClassifySeasonalityAggDestructor

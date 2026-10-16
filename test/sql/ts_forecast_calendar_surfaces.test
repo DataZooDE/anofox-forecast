@@ -28,7 +28,7 @@ true
 # 12 months after the last observation (2023-12-01 + 12mo = 2024-12-01).
 query I
 SELECT len(x) = 12
-   AND list_bool_and(list_transform(x, d -> day(d) = 1))
+   AND list_bool_and(list_transform(x, lambda d: day(d) = 1))
    AND x[12] = TIMESTAMP '2024-12-01 00:00:00'
 FROM (
     SELECT _ts_future_dates(

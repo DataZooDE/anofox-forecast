@@ -68,7 +68,7 @@ inline string ForecastParamString(const Value &params_value, const string &key, 
         auto &struct_children = StructValue::GetChildren(params_value);
         auto &child_types = StructType::GetChildTypes(params_value.type());
         for (idx_t i = 0; i < child_types.size(); i++) {
-            if (child_types[i].first == key && !struct_children[i].IsNull()) {
+            if (NameString(child_types[i].first) == key && !struct_children[i].IsNull()) {
                 return struct_children[i].ToString();
             }
         }
@@ -136,8 +136,8 @@ inline void ValidateForecastParamKeys(const Value &params_value) {
     } else if (params_value.type().id() == LogicalTypeId::STRUCT) {
         auto &child_types = StructType::GetChildTypes(params_value.type());
         for (idx_t i = 0; i < child_types.size(); i++) {
-            if (valid_keys.find(child_types[i].first) == valid_keys.end()) {
-                unknown_keys.push_back(child_types[i].first);
+            if (valid_keys.find(NameString(child_types[i].first)) == valid_keys.end()) {
+                unknown_keys.push_back(NameString(child_types[i].first));
             }
         }
     }

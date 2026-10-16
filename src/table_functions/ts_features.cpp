@@ -35,21 +35,21 @@ struct TsFeaturesListData : public TableFunctionData {
 };
 
 static unique_ptr<FunctionData> TsFeaturesListBind(ClientContext &context, TableFunctionBindInput &input,
-                                                    vector<LogicalType> &return_types, vector<string> &names) {
+                                                    vector<LogicalType> &return_types, TableBindNames &names) {
     // Define return columns to match C++ extension
-    names.push_back("column_name");
+    names.push_back(MakeBindName("column_name"));
     return_types.push_back(LogicalType(LogicalTypeId::VARCHAR));
 
-    names.push_back("feature_name");
+    names.push_back(MakeBindName("feature_name"));
     return_types.push_back(LogicalType(LogicalTypeId::VARCHAR));
 
-    names.push_back("parameter_suffix");
+    names.push_back(MakeBindName("parameter_suffix"));
     return_types.push_back(LogicalType(LogicalTypeId::VARCHAR));
 
-    names.push_back("default_parameters");
+    names.push_back(MakeBindName("default_parameters"));
     return_types.push_back(LogicalType(LogicalTypeId::VARCHAR));
 
-    names.push_back("parameter_keys");
+    names.push_back(MakeBindName("parameter_keys"));
     return_types.push_back(LogicalType(LogicalTypeId::VARCHAR));
 
     return make_uniq<TsFeaturesListData>();
@@ -82,30 +82,30 @@ static void TsFeaturesListExecute(ClientContext &context, TableFunctionInput &da
         const auto &name = data.feature_names[data.current_idx];
 
         // column_name: "value" (default column name for features)
-        FlatVector::GetData<string_t>(output.data[0])[count] =
+        FlatDataMut<string_t>(output.data[0])[count] =
             StringVector::AddString(output.data[0], "value");
 
         // feature_name: the actual feature name
-        FlatVector::GetData<string_t>(output.data[1])[count] =
+        FlatDataMut<string_t>(output.data[1])[count] =
             StringVector::AddString(output.data[1], name);
 
         // parameter_suffix: empty for basic features
-        FlatVector::GetData<string_t>(output.data[2])[count] =
+        FlatDataMut<string_t>(output.data[2])[count] =
             StringVector::AddString(output.data[2], "");
 
         // default_parameters: empty for basic features
-        FlatVector::GetData<string_t>(output.data[3])[count] =
+        FlatDataMut<string_t>(output.data[3])[count] =
             StringVector::AddString(output.data[3], "{}");
 
         // parameter_keys: empty for basic features
-        FlatVector::GetData<string_t>(output.data[4])[count] =
+        FlatDataMut<string_t>(output.data[4])[count] =
             StringVector::AddString(output.data[4], "");
 
         data.current_idx++;
         count++;
     }
 
-    output.SetCardinality(count);
+    SetOutputCardinality(output, count);
 }
 
 void RegisterTsFeaturesListFunction(ExtensionLoader &loader) {
@@ -133,11 +133,11 @@ struct TsFeaturesConfigTemplateData : public TableFunctionData {
 };
 
 static unique_ptr<FunctionData> TsFeaturesConfigTemplateBind(ClientContext &context, TableFunctionBindInput &input,
-                                                              vector<LogicalType> &return_types, vector<string> &names) {
-    names.push_back("feature");
+                                                              vector<LogicalType> &return_types, TableBindNames &names) {
+    names.push_back(MakeBindName("feature"));
     return_types.push_back(LogicalType(LogicalTypeId::VARCHAR));
 
-    names.push_back("params_json");
+    names.push_back(MakeBindName("params_json"));
     return_types.push_back(LogicalType(LogicalTypeId::VARCHAR));
 
     return make_uniq<TsFeaturesConfigTemplateData>();
@@ -170,17 +170,17 @@ static void TsFeaturesConfigTemplateExecute(ClientContext &context, TableFunctio
     while (data.current_idx < data.features.size() && count < max_count) {
         const auto &feat = data.features[data.current_idx];
 
-        FlatVector::GetData<string_t>(output.data[0])[count] =
+        FlatDataMut<string_t>(output.data[0])[count] =
             StringVector::AddString(output.data[0], feat.first);
 
-        FlatVector::GetData<string_t>(output.data[1])[count] =
+        FlatDataMut<string_t>(output.data[1])[count] =
             StringVector::AddString(output.data[1], feat.second);
 
         data.current_idx++;
         count++;
     }
 
-    output.SetCardinality(count);
+    SetOutputCardinality(output, count);
 }
 
 void RegisterTsFeaturesConfigTemplateFunction(ExtensionLoader &loader) {
@@ -222,8 +222,11 @@ static void TsFeaturesConfigFromJsonFunction(DataChunk &args, ExpressionState &s
     result.SetVectorType(VectorType::FLAT_VECTOR);
     auto &struct_entries = StructVector::GetEntries(result);
 
+    UnifiedVectorFormat path_fmt;
+    ToUnified(path_vec, count, path_fmt);
+
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(path_vec, row_idx)) {
+        if (!path_fmt.validity.RowIsValid(path_fmt.sel->get_index(row_idx))) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -237,9 +240,9 @@ static void TsFeaturesConfigFromJsonFunction(DataChunk &args, ExpressionState &s
         bool success = anofox_ts_features(dummy, 10, &feat_result, &error);
 
         // Set feature_names list
-        auto &names_list = *struct_entries[0];
-        auto names_list_data = FlatVector::GetData<list_entry_t>(names_list);
-        auto &names_child = ListVector::GetEntry(names_list);
+        auto &names_list = StructEntry(struct_entries[0]);
+        auto names_list_data = FlatDataMut<list_entry_t>(names_list);
+        auto &names_child = ListChildMut(names_list);
         auto current_names_size = ListVector::GetListSize(names_list);
 
         if (success && feat_result.n_features > 0) {
@@ -249,7 +252,7 @@ static void TsFeaturesConfigFromJsonFunction(DataChunk &args, ExpressionState &s
             ListVector::Reserve(names_list, current_names_size + feat_result.n_features);
             ListVector::SetListSize(names_list, current_names_size + feat_result.n_features);
 
-            auto names_data = FlatVector::GetData<string_t>(names_child);
+            auto names_data = FlatDataMut<string_t>(names_child);
             for (size_t i = 0; i < feat_result.n_features; i++) {
                 names_data[current_names_size + i] = StringVector::AddString(names_child, feat_result.feature_names[i]);
             }
@@ -260,8 +263,8 @@ static void TsFeaturesConfigFromJsonFunction(DataChunk &args, ExpressionState &s
         }
 
         // Set overrides list (empty for default config)
-        auto &overrides_list = *struct_entries[1];
-        auto overrides_list_data = FlatVector::GetData<list_entry_t>(overrides_list);
+        auto &overrides_list = StructEntry(struct_entries[1]);
+        auto overrides_list_data = FlatDataMut<list_entry_t>(overrides_list);
         auto current_overrides_size = ListVector::GetListSize(overrides_list);
 
         overrides_list_data[row_idx].offset = current_overrides_size;
@@ -271,11 +274,11 @@ static void TsFeaturesConfigFromJsonFunction(DataChunk &args, ExpressionState &s
 
 void RegisterTsFeaturesConfigFromJsonFunction(ExtensionLoader &loader) {
     ScalarFunctionSet config_json_set("ts_features_config_from_json");
-    config_json_set.AddFunction(ScalarFunction(
+    config_json_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType(LogicalTypeId::VARCHAR)},
         GetFeaturesConfigResultType(),
         TsFeaturesConfigFromJsonFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(config_json_set);
         FunctionDescription desc;
@@ -289,11 +292,11 @@ void RegisterTsFeaturesConfigFromJsonFunction(ExtensionLoader &loader) {
     }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_features_config_from_json");
-    anofox_set.AddFunction(ScalarFunction(
+    anofox_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType(LogicalTypeId::VARCHAR)},
         GetFeaturesConfigResultType(),
         TsFeaturesConfigFromJsonFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(anofox_set);
         info.alias_of = "ts_features_config_from_json";
@@ -320,11 +323,11 @@ static void TsFeaturesConfigFromCsvFunction(DataChunk &args, ExpressionState &st
 
 void RegisterTsFeaturesConfigFromCsvFunction(ExtensionLoader &loader) {
     ScalarFunctionSet config_csv_set("ts_features_config_from_csv");
-    config_csv_set.AddFunction(ScalarFunction(
+    config_csv_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType(LogicalTypeId::VARCHAR)},
         GetFeaturesConfigResultType(),
         TsFeaturesConfigFromCsvFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(config_csv_set);
         FunctionDescription desc;
@@ -338,11 +341,11 @@ void RegisterTsFeaturesConfigFromCsvFunction(ExtensionLoader &loader) {
     }
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_features_config_from_csv");
-    anofox_set.AddFunction(ScalarFunction(
+    anofox_set.AddFunction(Fallible(ScalarFunction(
         {LogicalType(LogicalTypeId::VARCHAR)},
         GetFeaturesConfigResultType(),
         TsFeaturesConfigFromCsvFunction
-    ));
+    )));
     {
         CreateScalarFunctionInfo info(anofox_set);
         info.alias_of = "ts_features_config_from_csv";
