@@ -808,12 +808,12 @@ SELECT count(*) FROM (DESCRIBE SELECT * FROM ts_features_by('x20', id, ds, v));
 118
 
 query I
-SELECT len(struct_keys(ts_features_agg(ds, v))) FROM x20;
+SELECT count(*) FROM (DESCRIBE SELECT unnest(ts_features_agg(ds, v)) FROM x20);
 ----
 117
 
 query I
-SELECT len(struct_keys(ts_features(ds, v))) FROM x20;
+SELECT count(*) FROM (DESCRIBE SELECT unnest(ts_features(ds, v)) FROM x20);
 ----
 117
 
