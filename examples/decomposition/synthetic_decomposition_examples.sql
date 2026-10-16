@@ -8,11 +8,15 @@
 --   ts_mstl_decomposition_by - Full seasonal decomposition (trend + seasonal + remainder)
 --   ts_detrend_by            - Simple trend removal (when you only need detrended data)
 --
--- MAP{} BEHAVIOR:
---   When you pass MAP{} (empty params) to ts_mstl_decomposition_by:
---   - Auto-detect seasonal periods from the data
---   - Works well for most time series with clear patterns
---   - For explicit control, use: MAP{'periods': '[7, 30]'} for weekly + monthly
+-- MAP{} BEHAVIOR (Phase 15, D-09):
+--   When you pass MAP{} (empty params) to ts_mstl_decomposition_by, NO period is
+--   requested at all -- the result is a NON-SEASONAL trend (R forecast::mstl's own
+--   stats::supsmu fallback), and seasonal/periods come back EMPTY. There is no
+--   period auto-detection inside ts_mstl_decomposition_by itself.
+--   To get a real seasonal decomposition, pass the period(s) explicitly:
+--   MAP{'seasonal_periods': '[7, 30]'} (alias 'periods') for weekly + monthly.
+--   Periods that need n/2 or more points are dropped silently (matching R); the
+--   returned `periods` column is ascending and de-duplicated, not request order.
 --
 -- Run: ./build/release/duckdb < examples/decomposition/synthetic_decomposition_examples.sql
 -- ============================================================================
@@ -68,15 +72,15 @@ SELECT * FROM (
 SELECT series_id, COUNT(*) AS n_points, ROUND(AVG(value), 2) AS avg_value
 FROM multi_series GROUP BY series_id ORDER BY series_id;
 
--- 1.1: Basic decomposition (auto-detect periods)
+-- 1.1: Basic decomposition (no periods requested -> non-seasonal supsmu trend)
 .print ''
-.print 'Section 1.1: Basic MSTL Decomposition (auto-detect periods)'
+.print 'Section 1.1: Basic MSTL Decomposition (MAP{} = no periods -> non-seasonal trend)'
 
 SELECT
     series_id,
     length(trend) AS trend_length,
     length(remainder) AS remainder_length,
-    periods AS detected_periods
+    periods AS usable_periods
 FROM ts_mstl_decomposition_by('multi_series', series_id, date, value, MAP{});
 
 -- ============================================================================
@@ -95,7 +99,7 @@ SELECT
     length(trend) AS n_points,
     periods
 FROM ts_mstl_decomposition_by('multi_series', series_id, date, value,
-    MAP{'periods': '[7]'});
+    MAP{'seasonal_periods': '[7]'});
 
 -- 2.2: Multiple seasonal periods
 .print ''
@@ -106,7 +110,7 @@ SELECT
     length(trend) AS n_points,
     periods
 FROM ts_mstl_decomposition_by('multi_series', series_id, date, value,
-    MAP{'periods': '[7, 30]'});
+    MAP{'seasonal_periods': '[7, 30]'});
 
 -- ============================================================================
 -- SECTION 3: Extracting Components
@@ -193,7 +197,7 @@ SELECT * FROM (
 SELECT
     store_id AS store,
     length(trend) AS n_days,
-    periods AS detected_periods,
+    periods AS usable_periods,
     ROUND(trend[length(trend)] - trend[1], 0) AS trend_change_6months
 FROM ts_mstl_decomposition_by('retail_sales', store_id, date, sales, MAP{});
 
@@ -231,7 +235,7 @@ SELECT * FROM (
 SELECT
     sensor_id AS sensor,
     length(trend) AS n_hours,
-    periods AS detected_periods
+    periods AS usable_periods
 FROM ts_mstl_decomposition_by('sensor_readings', sensor_id, timestamp, reading, MAP{});
 
 -- ============================================================================

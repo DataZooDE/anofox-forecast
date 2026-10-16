@@ -255,19 +255,25 @@ OptimizedTheta
 # Model Tests - State Space/ARIMA
 #######################################
 
-# ETS model
+# ETS model. Re-pinned (Phase 18, 18-01, class D): model_name now reports the full
+# state-space notation (component letters for error/trend/season), not the bare
+# method name -- confirmed directly against the query output. Attributed to Phase 17's
+# ETS/AutoARIMA R-parity work (UPST-01, PROJECT.md "ETS MAA/MAdA" / "Holt" remap, D-13).
 query I
 SELECT (ts_forecast_agg(ts, value, 'ETS', 3, MAP([], []))).model_name
 FROM single_series;
 ----
-ETS
+ETS(M,A,N)
 
-# ARIMA model
+# ARIMA model. Re-pinned (Phase 18, 18-01, class D): plain 'ARIMA' now requires an
+# explicit arima_order=[p,d,q] ("silent model/parameter fallbacks become errors",
+# PROJECT.md, FCST-01..08) -- confirmed directly via the Invalid Input Error. model_name
+# also reports the full order notation, not the bare method name.
 query I
-SELECT (ts_forecast_agg(ts, value, 'ARIMA', 3, MAP([], []))).model_name
+SELECT (ts_forecast_agg(ts, value, 'ARIMA', 3, MAP(['arima_order'], [[1, 1, 1]]))).model_name
 FROM single_series;
 ----
-ARIMA
+ARIMA(1,1,1) with drift
 
 #######################################
 # Model Tests - Auto Selection

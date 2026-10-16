@@ -3,13 +3,18 @@
 // Implements _ts_forecast_ensemble_native — a ScalarFunction that follows the
 // _ts_forecast_scalar precedent (per-series GROUP BY shape, unnest wrapper).
 //
-// Signature:
+// Signature (two overloads — the 8-argument form adds confidence_level;
+// the 7-argument form keeps the documented 0.90 default, plan 10-03):
 //   _ts_forecast_ensemble_native(dates LIST, values LIST(DOUBLE),
 //                                members LIST(VARCHAR), horizon INT,
 //                                frequency VARCHAR, combination_method VARCHAR,
-//                                seasonal_period INT)
+//                                seasonal_period INT[, confidence_level DOUBLE])
 //   -> LIST(STRUCT(forecast_step INT, ds ANY, yhat DOUBLE,
 //                  yhat_lower DOUBLE, yhat_upper DOUBLE, model_name VARCHAR))
+//
+// yhat_lower/yhat_upper are the crate Ensemble's own pooled prediction
+// interval bounds at confidence_level (D-01, plan 10-03) — NULL only when
+// the crate itself returns no bounds.
 //
 // Called per-group by the ts_forecast_ensemble_by macro via:
 //   SELECT group_col, unnest(_ts_forecast_ensemble_native(...), recursive := true)
@@ -20,6 +25,7 @@
 #include "ts_forecast_ensemble_native.hpp"
 #include "anofox_forecast_extension.hpp"    // ExtensionLoader
 #include "ts_fill_gaps_native.hpp"          // ParseFrequencyWithType, DateColumnType, etc.
+#include "ts_future_dates.hpp"              // StepFromFrequency, ComputeFutureDates (D-12)
 #include "anofox_fcst_ffi.h"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
@@ -28,6 +34,7 @@
 #include "duckdb/common/types/date.hpp"
 #include "duckdb/common/types/timestamp.hpp"
 #include "duckdb/common/types/vector.hpp"
+#include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -49,6 +56,7 @@ struct TsForecastEnsembleNativeBindData : public FunctionData {
     vector<string> member_names;        // parsed from DuckDB LIST(VARCHAR)
     string combination_method = "";     // "" → "mean" in Rust core
     int64_t seasonal_period = 0;
+    double confidence_level = 0.90;     // D-01, plan 10-03 — documented default
 
     // Type preservation
     DateColumnType date_col_type = DateColumnType::TIMESTAMP;
@@ -62,6 +70,7 @@ struct TsForecastEnsembleNativeBindData : public FunctionData {
         copy->member_names = member_names;
         copy->combination_method = combination_method;
         copy->seasonal_period = seasonal_period;
+        copy->confidence_level = confidence_level;
         copy->date_col_type = date_col_type;
         return std::move(copy);
     }
@@ -72,7 +81,8 @@ struct TsForecastEnsembleNativeBindData : public FunctionData {
                frequency_seconds == other.frequency_seconds &&
                member_names == other.member_names &&
                combination_method == other.combination_method &&
-               seasonal_period == other.seasonal_period;
+               seasonal_period == other.seasonal_period &&
+               confidence_level == other.confidence_level;
     }
 };
 
@@ -154,11 +164,16 @@ static void TsForecastEnsembleNativeExecute(DataChunk &args, ExpressionState &st
     auto &method_vec      = args.data[5];  // VARCHAR — combination_method
     auto &period_vec      = args.data[6];  // INTEGER — seasonal_period
 
+    // confidence_level (D-01, plan 10-03): present only on the 8-argument
+    // overload; the 7-argument overload keeps bind_data's 0.90 default.
+    bool has_confidence_arg = args.ColumnCount() > 7;
+
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
     // Unified formats for all inputs
     UnifiedVectorFormat date_list_data, value_list_data, members_list_data;
     UnifiedVectorFormat horizon_data, freq_data, method_data, period_data;
+    UnifiedVectorFormat confidence_data;
     date_list_vec.ToUnifiedFormat(count, date_list_data);
     value_list_vec.ToUnifiedFormat(count, value_list_data);
     members_list_vec.ToUnifiedFormat(count, members_list_data);
@@ -166,6 +181,9 @@ static void TsForecastEnsembleNativeExecute(DataChunk &args, ExpressionState &st
     freq_vec.ToUnifiedFormat(count, freq_data);
     method_vec.ToUnifiedFormat(count, method_data);
     period_vec.ToUnifiedFormat(count, period_data);
+    if (has_confidence_arg) {
+        args.data[7].ToUnifiedFormat(count, confidence_data);
+    }
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         auto date_idx  = date_list_data.sel->get_index(row_idx);
@@ -228,13 +246,20 @@ static void TsForecastEnsembleNativeExecute(DataChunk &args, ExpressionState &st
         auto &date_entry  = date_entries[date_idx];
         auto &date_child  = ListVector::GetEntry(date_list_vec);
 
-        // Build sorted index by date
+        // Build sorted index by date. date_is_null tracks which entries had a
+        // NULL date (date_micros[i]=0 is a placeholder, not a real
+        // 1970-01-01 observation) so the calendar `observed` series below
+        // never includes a NULL date disguised as epoch zero (D-12, plan
+        // 12-06).
         vector<int64_t> date_micros(n);
+        vector<bool> date_is_null(n);
         for (idx_t i = 0; i < n; i++) {
             Value dv = date_child.GetValue(date_entry.offset + i);
             if (dv.IsNull()) {
                 date_micros[i] = 0;
+                date_is_null[i] = true;
             } else {
+                date_is_null[i] = false;
                 switch (bind_data.date_col_type) {
                     case DateColumnType::DATE:
                         date_micros[i] = DateToMicroseconds(dv.GetValue<date_t>());
@@ -260,11 +285,14 @@ static void TsForecastEnsembleNativeExecute(DataChunk &args, ExpressionState &st
         std::sort(indices.begin(), indices.end(),
             [&date_micros](size_t a, size_t b) { return date_micros[a] < date_micros[b]; });
 
-        // Build sorted values + validity
+        // Build sorted values + validity, and the NON-NULL-date `observed`
+        // series (D-12) in the same ascending order — a subsequence of the
+        // already-sorted `indices`, so it stays ascending without a second sort.
         vector<double> sorted_values(n);
         size_t validity_words = (n + 63) / 64;
         vector<uint64_t> validity_bits(validity_words, 0);
-        int64_t last_date = 0;
+        vector<int64_t> observed;
+        observed.reserve(n);
 
         for (size_t i = 0; i < n; i++) {
             idx_t src       = indices[i];
@@ -277,7 +305,13 @@ static void TsForecastEnsembleNativeExecute(DataChunk &args, ExpressionState &st
             } else {
                 sorted_values[i] = 0.0;
             }
-            last_date = date_micros[indices[i]];
+            if (!date_is_null[src]) {
+                observed.push_back(date_micros[src]);
+            }
+        }
+
+        if (observed.empty()) {
+            throw InvalidInputException("ts_forecast_ensemble_by: all date values are NULL for this group");
         }
 
         // --- Parse per-row parameters ---
@@ -311,6 +345,14 @@ static void TsForecastEnsembleNativeExecute(DataChunk &args, ExpressionState &st
             seasonal_period = UnifiedVectorFormat::GetData<int32_t>(period_data)[p_idx];
         }
 
+        double confidence_level = bind_data.confidence_level;
+        if (has_confidence_arg) {
+            auto c_idx = confidence_data.sel->get_index(row_idx);
+            if (confidence_data.validity.RowIsValid(c_idx)) {
+                confidence_level = UnifiedVectorFormat::GetData<double>(confidence_data)[c_idx];
+            }
+        }
+
         // --- Build null-delimited member buffer for FFI ---
         std::string members_buf;
         for (const auto &name : member_names) {
@@ -335,6 +377,7 @@ static void TsForecastEnsembleNativeExecute(DataChunk &args, ExpressionState &st
             combination_method.c_str(),
             static_cast<int>(seasonal_period),
             static_cast<int>(horizon),
+            confidence_level,
             &fcst_result,
             &error
         );
@@ -349,37 +392,15 @@ static void TsForecastEnsembleNativeExecute(DataChunk &args, ExpressionState &st
         }
 
         // --- Build LIST(STRUCT(...)) result ---
-        // Helper lambda to compute forecast date for step i (calendar-aware)
-        auto compute_forecast_date = [&](int64_t step) -> int64_t {
-            if (freq_parsed == FrequencyType::MONTHLY ||
-                freq_parsed == FrequencyType::QUARTERLY ||
-                freq_parsed == FrequencyType::YEARLY) {
-                date_t base_date = MicrosecondsToDate(last_date);
-                int32_t year, month, day;
-                Date::Convert(base_date, year, month, day);
-                int64_t months_to_add = step * freq_seconds;
-                if (freq_parsed == FrequencyType::QUARTERLY)   months_to_add *= 3;
-                else if (freq_parsed == FrequencyType::YEARLY) months_to_add *= 12;
-                int64_t total_months = static_cast<int64_t>(year) * 12 + (month - 1) + months_to_add;
-                int32_t new_year  = static_cast<int32_t>(total_months / 12);
-                int32_t new_month = static_cast<int32_t>((total_months % 12) + 1);
-                if (new_month < 1) { new_month += 12; new_year -= 1; }
-                int32_t max_day  = Date::MonthDays(new_year, new_month);
-                int32_t new_day  = std::min(day, max_day);
-                return DateToMicroseconds(Date::FromDate(new_year, new_month, new_day));
-            } else {
-                int64_t freq_micros;
-                if (bind_data.date_col_type == DateColumnType::INTEGER ||
-                    bind_data.date_col_type == DateColumnType::BIGINT) {
-                    freq_micros = freq_seconds;
-                } else {
-                    freq_micros = freq_is_raw
-                        ? freq_seconds * 86400LL * 1000000LL
-                        : freq_seconds * 1000000LL;
-                }
-                return last_date + freq_micros * step;
-            }
-        };
+        // Forecast dates computed via the Rust D-12 calendar rule
+        // (StepFromFrequency + ComputeFutureDates, plan 12-05/12-06) instead
+        // of this file's own month arithmetic + the day-of-month clamp this file used to replicate per-call.
+        int64_t step_months = 0;
+        int64_t step_micros = 0;
+        StepFromFrequency(freq_parsed, freq_seconds, freq_is_raw, bind_data.date_col_type, step_months,
+                           step_micros);
+        vector<int64_t> future_ts =
+            ComputeFutureDates(observed, fcst_result.n_forecasts, step_months, step_micros);
 
         // Helper lambda to convert micros back to DuckDB Value based on date col type
         auto micros_to_date_value = [&](int64_t micros) -> Value {
@@ -397,7 +418,7 @@ static void TsForecastEnsembleNativeExecute(DataChunk &args, ExpressionState &st
 
         for (size_t i = 0; i < fcst_result.n_forecasts; i++) {
             int64_t step = static_cast<int64_t>(i + 1);
-            int64_t forecast_date = compute_forecast_date(step);
+            int64_t forecast_date = future_ts[i];
 
             child_list_t<Value> struct_values;
             struct_values.push_back(make_pair("forecast_step",
@@ -406,7 +427,9 @@ static void TsForecastEnsembleNativeExecute(DataChunk &args, ExpressionState &st
                 micros_to_date_value(forecast_date)));
             struct_values.push_back(make_pair("yhat",
                 Value::DOUBLE(fcst_result.point_forecasts[i])));
-            // yhat_lower and yhat_upper are NULL in Phase 5 (EPI-01 deferred to Phase 6)
+            // yhat_lower/yhat_upper are the crate Ensemble's own pooled
+            // prediction interval bounds at confidence_level (D-01,
+            // plan 10-03) — NULL only when the crate itself returns none.
             struct_values.push_back(make_pair("yhat_lower",
                 (fcst_result.lower_bounds != nullptr)
                     ? Value::DOUBLE(fcst_result.lower_bounds[i])
@@ -436,10 +459,17 @@ void RegisterTsForecastEnsembleNativeFunction(ExtensionLoader &loader) {
     // _ts_forecast_ensemble_native(
     //   dates  LIST(ANY),     values LIST(DOUBLE), members LIST(VARCHAR),
     //   horizon INTEGER,      frequency VARCHAR,
-    //   combination_method VARCHAR, seasonal_period INTEGER)
+    //   combination_method VARCHAR, seasonal_period INTEGER
+    //   [, confidence_level DOUBLE])
     // -> LIST(STRUCT(forecast_step INT, ds ANY, yhat DOUBLE,
     //                yhat_lower DOUBLE, yhat_upper DOUBLE, model_name VARCHAR))
-    ScalarFunction func("_ts_forecast_ensemble_native",
+    //
+    // Two overloads (plan 10-03 D-01): the 7-argument form keeps the
+    // documented confidence_level=0.90 default; the 8-argument form lets
+    // ts_forecast_ensemble_by pass an explicit confidence_level.
+    ScalarFunctionSet func_set("_ts_forecast_ensemble_native");
+
+    func_set.AddFunction(ScalarFunction(
         {LogicalType::LIST(LogicalType::ANY),      // dates
          LogicalType::LIST(LogicalType::DOUBLE),   // values
          LogicalType::LIST(LogicalType::VARCHAR),  // members
@@ -449,11 +479,27 @@ void RegisterTsForecastEnsembleNativeFunction(ExtensionLoader &loader) {
          LogicalType::INTEGER},                     // seasonal_period
         LogicalType::LIST(LogicalType::ANY),        // return type set by bind
         TsForecastEnsembleNativeExecute,
-        TsForecastEnsembleNativeBind);
+        TsForecastEnsembleNativeBind));
 
-    func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    func_set.AddFunction(ScalarFunction(
+        {LogicalType::LIST(LogicalType::ANY),      // dates
+         LogicalType::LIST(LogicalType::DOUBLE),   // values
+         LogicalType::LIST(LogicalType::VARCHAR),  // members
+         LogicalType::INTEGER,                      // horizon
+         LogicalType::VARCHAR,                      // frequency
+         LogicalType::VARCHAR,                      // combination_method
+         LogicalType::INTEGER,                       // seasonal_period
+         LogicalType::DOUBLE},                       // confidence_level
+        LogicalType::LIST(LogicalType::ANY),        // return type set by bind
+        TsForecastEnsembleNativeExecute,
+        TsForecastEnsembleNativeBind));
 
-    loader.RegisterFunction(func);
+    for (auto &func : func_set.functions) {
+        func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+    }
+
+    CreateScalarFunctionInfo info(func_set);
+    loader.RegisterFunction(info);
 }
 
 } // namespace duckdb

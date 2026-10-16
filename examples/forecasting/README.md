@@ -16,12 +16,16 @@ This folder contains runnable SQL examples demonstrating time series forecasting
 | File | Description | Data Source |
 |------|-------------|-------------|
 | [`synthetic_forecasting_examples.sql`](synthetic_forecasting_examples.sql) | Multi-series forecasting examples | Synthetic |
+| [`crate_delegation_examples.sql`](crate_delegation_examples.sql) | Self-checking proof of Phase 10 crate-delegation behaviour: real crate prediction intervals, ARIMA via `arima_order`/`seasonal_order`, `'ETS'` = AutoETS selection, AutoARIMA with regressors, trailing-NULL realignment | AirPassengers + synthetic |
 
 ## Quick Start
 
 ```bash
 # Run synthetic examples
 ./build/release/duckdb < examples/forecasting/synthetic_forecasting_examples.sql
+
+# Run the Phase 10 crate-delegation proof (self-checking, aborts on any FAIL)
+./build/release/duckdb -unsigned -bail < examples/forecasting/crate_delegation_examples.sql
 ```
 
 ---

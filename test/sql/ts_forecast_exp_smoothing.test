@@ -495,12 +495,16 @@ SELECT length((_ts_forecast([1.0, 2.0, 3.0], 2, 'Holt')).point);
 ----
 2
 
-# Test HoltWinters falls back to Holt when insufficient seasonal data
-# (less than 2*period points)
-query I
+# Re-pinned (Phase 18, 18-01, class D): HoltWinters with no detectable seasonal period
+# (this 5-point series has no seasonality to detect at all) is now an explicit error
+# ("no seasonal period could be detected ... pass seasonal_period explicitly",
+# src/table_functions/ts_forecast.cpp), not a silent fallback to Holt -- matching the
+# v2026.10.16 goal "silent model/parameter fallbacks become errors" (PROJECT.md,
+# FCST-01..08). Converted to the error this model now correctly raises.
+statement error
 SELECT length((_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0], 2, 'HoltWinters')).point);
 ----
-2
+no seasonal period could be detected
 
 # Test with large horizon
 query I

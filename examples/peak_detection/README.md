@@ -4,6 +4,13 @@
 
 This folder contains runnable SQL examples demonstrating peak detection and timing analysis with the anofox-forecast extension.
 
+**Algorithm (Phase 15, DET-01):** `ts_detect_peaks(_by)` is a direct port of
+`scipy.signal.find_peaks` 1.18.1. `prominence` is on the **same scale as the input
+data**, not a normalised `0..1` score — see "Peak Prominence" below. A plateau (a run
+of equal values) reports its midpoint index. See
+[`docs/api/05b-peak-detection.md`](../../docs/api/05b-peak-detection.md) for the full
+parameter mapping.
+
 ## Functions
 
 | Function | Description |
@@ -74,8 +81,8 @@ FROM ts_analyze_peak_timing_by('sales', product_id, date, value, 7.0, MAP{}) t;
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `min_prominence` | VARCHAR | `'0'` | Filter peaks by significance (0-1 normalized) |
-| `min_distance` | VARCHAR | `'1'` | Minimum observations between peaks |
+| `min_prominence` | VARCHAR | `'0'` | Minimum peak prominence, on the **same scale as the data** (not normalized) |
+| `min_distance` | VARCHAR | `'1'` | Minimum index distance between peaks (`'1'`, the default, applies no filter) |
 
 ### ts_analyze_peak_timing_by
 
@@ -115,14 +122,17 @@ FROM ts_analyze_peak_timing_by('sales', product_id, date, value, 7.0, MAP{}) t;
 
 ### Peak Prominence
 
-Prominence measures how much a peak "stands out" from surrounding data (normalized 0-1 scale):
+Prominence measures how much a peak "stands out" from surrounding data, on the **same
+scale as the input values** (scipy's own definition — not normalized to 0-1). A peak's
+prominence is its height minus the higher of its left/right "valley" minima. Choose a
+threshold relative to your own data's scale:
 
-| Prominence Level | Use Case |
-|------------------|----------|
-| 0 (default) | Find all local maxima |
-| 0.1-0.3 | Moderate peaks |
-| 0.3-0.5 | Significant peaks only |
-| 0.5+ | Only major peaks/anomalies |
+| Prominence (relative to your data's typical swing) | Use Case |
+|------------------------------------------------------|----------|
+| `0` (default) | Find all local maxima |
+| small, e.g. 10% of the typical range | Moderate peaks |
+| mid, e.g. 30-50% of the typical range | Significant peaks only |
+| large, e.g. 50%+ of the typical range | Only major peaks/anomalies |
 
 ### Minimum Distance
 

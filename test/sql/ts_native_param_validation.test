@@ -139,20 +139,34 @@ SELECT * FROM _ts_forecast_native(
 Invalid ETS model specification
 
 #######################################
-# Unstable ETS combination → error with alternatives
+# ETS MAA / MAdA (Phase 17 plan 17-01): anofox-forecast 0.16.x's
+# ETSSpec::is_valid() always returns true (CHANGELOG "Changed — ETS
+# (UPST-03)"), so these now fit instead of erroring as "unstable".
 #######################################
 
-statement error
-SELECT * FROM _ts_forecast_native(
+query I
+SELECT count(*) FROM _ts_forecast_native(
     (SELECT id, ds, y FROM param_test_data), 3, '1d', 'ETS', MAP{'model': 'MAA'});
 ----
-unstable
+6
 
-statement error
-SELECT * FROM _ts_forecast_native(
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'ETS', MAP{'model': 'MAA'});
+----
+ETS(M,A,A)
+
+query I
+SELECT count(*) FROM _ts_forecast_native(
     (SELECT id, ds, y FROM param_test_data), 3, '1d', 'ETS', MAP{'model': 'MAdA'});
 ----
-unstable
+6
+
+query I
+SELECT DISTINCT model_name FROM _ts_forecast_native(
+    (SELECT id, ds, y FROM param_test_data), 3, '1d', 'ETS', MAP{'model': 'MAdA'});
+----
+ETS(M,Ad,A)
 
 #######################################
 # ETS spec is passed through to Rust (no longer silently ignored)

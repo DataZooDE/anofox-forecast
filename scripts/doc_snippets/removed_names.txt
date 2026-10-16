@@ -1,0 +1,9 @@
+# name<TAB>reason
+# Function/macro names that legitimately appear in docs/skills (migration notes
+# explaining what to use instead of a REMOVED name, or forward-looking notes about a
+# NOT-YET-IMPLEMENTED planned name) but are not currently registered. Each confirmed
+# unregistered via `SELECT DISTINCT function_name FROM duckdb_functions()` against a
+# fresh build (Phase 18 plan 18-04).
+ts_backtest_auto_by	removed (CHANGELOG RUST-06/D-07, phase 12 plan 12-08): use ts_cv_folds_by + ts_cv_forecast_by two-step CV workflow instead
+_ts_backtest_native	removed (CHANGELOG RUST-06/D-07, phase 12 plan 12-08): orphaned internal function once ts_backtest_auto_by was removed
+ts_forecast_dist_by	not yet implemented (planned future function, PR B of the distributional/Laplace series) -- mentioned as "upcoming" in docs/api/07-forecasting.md and docs/reference/models/distributional/laplace.md

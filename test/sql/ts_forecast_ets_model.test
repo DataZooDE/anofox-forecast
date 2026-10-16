@@ -76,20 +76,35 @@ SELECT * FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, '1d', MAP{'mod
 Invalid ETS model specification
 
 #######################################
-# Unstable Model Rejection Tests (FPP3 Taxonomy)
+# ETS MAA / MAdA (Phase 17 plan 17-01): anofox-forecast 0.16.x's
+# ETSSpec::is_valid() always returns true (CHANGELOG "Changed — ETS
+# (UPST-03)"), so these now fit instead of erroring as "unstable". This
+# file is json-gated (not run by `make test_release` / unittest); verify
+# manually via `./build/release/duckdb -unsigned -c "LOAD json; ..."` and
+# paste the output in the plan SUMMARY.
 #######################################
 
-# Test: MAA (Multiplicative error, Additive trend, Additive seasonal) is unstable - rejected
-statement error
-SELECT * FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, '1d', MAP{'model': 'MAA'});
+# Test: MAA (Multiplicative error, Additive trend, Additive seasonal) fits
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, '1d', MAP{'model': 'MAA'});
 ----
-unstable
+14
 
-# Test: MAdA (Multiplicative error, Additive damped trend, Additive seasonal) is unstable - rejected
-statement error
-SELECT * FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, '1d', MAP{'model': 'MAdA'});
+query I
+SELECT DISTINCT model_name FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, '1d', MAP{'model': 'MAA'});
 ----
-unstable
+ETS(M,A,A)
+
+# Test: MAdA (Multiplicative error, Additive damped trend, Additive seasonal) fits
+query I
+SELECT COUNT(*) FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, '1d', MAP{'model': 'MAdA'});
+----
+14
+
+query I
+SELECT DISTINCT model_name FROM ts_forecast_by('test_ets', id, ds, value, 'ETS', 7, '1d', MAP{'model': 'MAdA'});
+----
+ETS(M,Ad,A)
 
 #######################################
 # Parameter Validation Tests (#177)

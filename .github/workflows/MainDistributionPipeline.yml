@@ -174,3 +174,35 @@ jobs:
 
       - name: Run Rust tests
         run: cargo test --all-features
+
+  rust-msrv:
+    name: Rust MSRV (1.89.0)
+    timeout-minutes: 25
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: 'recursive'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.89.0
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-msrv-
+
+      - name: Build on MSRV toolchain
+        run: cargo build --workspace --all-targets --locked
+
+      - name: Run Rust tests on MSRV toolchain
+        run: cargo test --workspace --locked

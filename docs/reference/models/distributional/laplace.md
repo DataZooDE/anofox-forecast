@@ -80,11 +80,27 @@ Same shape as any `ts_forecast_by` call: `(group_col, forecast_step, ds, yhat, y
 | `yhat_lower` / `yhat_upper` | DOUBLE | Prediction interval at `confidence_level` |
 | `model_name` | VARCHAR | Tagged variant + seasonal + batch_init state |
 
+`yhat_lower` / `yhat_upper` are Laplace's **own distributional interval** — the forecaster's
+`predict_with_intervals` quantiles from the per-horizon mixture, passed through unchanged
+(the level is clamped to `[0.5, 0.999]` before reaching the crate). See
+[07-forecasting.md's "Prediction intervals, fitted values and input handling"](../../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling)
+for calibration caveats shared across all models. For calibrated coverage independent of the
+mixture's own interval machinery, use conformal prediction intervals (see
+`docs/api/11-conformal-prediction.md`) on top of the point forecast.
+
 ## SQL Examples
 
 ### Default — auto on monthly retail
 
 ```sql
+-- Monthly retail series: 2 products x 36 months, period-12 seasonality
+CREATE OR REPLACE TABLE sales_monthly AS
+SELECT product_id,
+       (DATE '2021-01-01' + INTERVAL (i) MONTH) AS ds,
+       100.0 + 20.0 * SIN(2 * PI() * i / 12.0) + 0.5 * i AS y
+FROM range(0, 36) t(i)
+CROSS JOIN (SELECT unnest(['P1', 'P2']) AS product_id);
+
 -- 12-month forecast, weekly seasonal_period not applicable to monthly data;
 -- for monthly retail use seasonal_period=12
 SELECT * FROM ts_forecast_by(
@@ -97,6 +113,14 @@ SELECT * FROM ts_forecast_by(
 ### Intermittent counts — auto_aid
 
 ```sql
+-- Retail SKU with many zero-days (period-7 weekly demand spikes)
+CREATE OR REPLACE TABLE sales_daily AS
+SELECT item_id,
+       (DATE '2024-01-01' + INTERVAL (i) DAY) AS ds,
+       CASE WHEN (i + item_id) % 7 = 0 THEN 2.0 + (i % 3) ELSE 0.0 END AS y
+FROM range(0, 90) t(i)
+CROSS JOIN (SELECT unnest([1, 2]) AS item_id);
+
 -- Retail SKU with many zero-days; AID picks Poisson/NegBin/Croston leaves
 SELECT * FROM ts_forecast_by(
     'sales_daily', item_id, ds, y,
@@ -132,11 +156,19 @@ SELECT * FROM ts_forecast_by(
 ### Slice metrics by variant post-hoc
 
 ```sql
--- Fit all three variants, join with actuals, compare per-variant MAE
+-- Fit all three variants, join with actuals, compare per-variant MAE.
+-- train = first 30 months; test = the 6 held-out months right after train's end.
+CREATE OR REPLACE TABLE train AS
+SELECT product_id AS id, ds, y FROM sales_monthly WHERE ds < DATE '2023-07-01';
+
+CREATE OR REPLACE TABLE test AS
+SELECT product_id AS id, ds, y FROM sales_monthly
+WHERE ds >= DATE '2023-07-01' AND ds < DATE '2024-01-01';
+
 WITH fcst AS (
-    SELECT 'auto'     AS variant, * FROM ts_forecast_by('train', id, ds, y, 'Laplace', 12, '1mo', MAP{'seasonal_period':'12','laplace_variant':'auto'})
-    UNION ALL SELECT 'auto_aid', * FROM ts_forecast_by('train', id, ds, y, 'Laplace', 12, '1mo', MAP{'seasonal_period':'12','laplace_variant':'auto_aid'})
-    UNION ALL SELECT 'skaters',  * FROM ts_forecast_by('train', id, ds, y, 'Laplace', 12, '1mo', MAP{'seasonal_period':'12','laplace_variant':'skaters'})
+    SELECT 'auto'     AS variant, * FROM ts_forecast_by('train', id, ds, y, 'Laplace', 6, '1mo', MAP{'seasonal_period':'12','laplace_variant':'auto'})
+    UNION ALL SELECT 'auto_aid', * FROM ts_forecast_by('train', id, ds, y, 'Laplace', 6, '1mo', MAP{'seasonal_period':'12','laplace_variant':'auto_aid'})
+    UNION ALL SELECT 'skaters',  * FROM ts_forecast_by('train', id, ds, y, 'Laplace', 6, '1mo', MAP{'seasonal_period':'12','laplace_variant':'skaters'})
 )
 SELECT variant,
        ROUND(AVG(ABS(t.y - f.yhat)), 3) AS mae

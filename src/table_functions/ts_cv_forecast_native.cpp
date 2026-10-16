@@ -47,6 +47,9 @@ struct TsCvForecastNativeBindData : public TableFunctionData {
     string model_pool = "";
     string laplace_variant = "";
     bool laplace_seasonal_batch_init = false;
+    // ARIMA order params (D-08/D-09, plan 10-02)
+    string arima_order = "";
+    string seasonal_order = "";
 
     // Column indices (resolved by name in bind)
     idx_t fold_id_col = 0;
@@ -253,7 +256,8 @@ static string MakeCompositeKey(int64_t fold_id, const string &group_key) {
 static void ValidateParamKeys(const Value &params_value) {
     static const unordered_set<string> valid_keys = {
         "model", "seasonal_period", "seasonal_periods", "confidence_level", "window", "model_pool",
-        "laplace_variant", "laplace_seasonal_batch_init"
+        "laplace_variant", "laplace_seasonal_batch_init",
+        "arima_order", "seasonal_order"  // D-08/D-09, plan 10-02
     };
 
     vector<string> unknown_keys;
@@ -283,7 +287,7 @@ static void ValidateParamKeys(const Value &params_value) {
             unknown_list += "'" + unknown_keys[i] + "'";
         }
         throw InvalidInputException(
-            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init",
+            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init, arima_order, seasonal_order",
             unknown_list);
     }
 }
@@ -386,6 +390,22 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
         bind_data->laplace_variant = ParseStringFromParams(params, "laplace_variant", "");
         bind_data->laplace_seasonal_batch_init =
             ParseInt64FromParams(params, "laplace_seasonal_batch_init", 0) != 0;
+        bind_data->arima_order = ParseStringFromParams(params, "arima_order", "");
+        bind_data->seasonal_order = ParseStringFromParams(params, "seasonal_order", "");
+
+        // WR-03: reject arima_order/seasonal_order strings that would
+        // silently truncate when copied into the fixed 32-byte
+        // ForecastOptions::arima_order_str/seasonal_order_str buffers.
+        if (bind_data->arima_order.size() > sizeof(ForecastOptions::arima_order_str) - 1) {
+            throw InvalidInputException(
+                "arima_order value is too long (max %d characters): '%s'",
+                (int)(sizeof(ForecastOptions::arima_order_str) - 1), bind_data->arima_order);
+        }
+        if (bind_data->seasonal_order.size() > sizeof(ForecastOptions::seasonal_order_str) - 1) {
+            throw InvalidInputException(
+                "seasonal_order value is too long (max %d characters): '%s'",
+                (int)(sizeof(ForecastOptions::seasonal_order_str) - 1), bind_data->seasonal_order);
+        }
 
         // Validate confidence_level range
         if (bind_data->confidence_level <= 0.0 || bind_data->confidence_level >= 1.0) {
@@ -699,6 +719,16 @@ static OperatorFinalizeResultType TsCvForecastNativeFinalize(
                 opts.laplace_variant[sizeof(opts.laplace_variant) - 1] = '\0';
             }
             opts.laplace_seasonal_batch_init = bind_data.laplace_seasonal_batch_init;
+            if (!bind_data.arima_order.empty()) {
+                strncpy(opts.arima_order_str, bind_data.arima_order.c_str(),
+                        sizeof(opts.arima_order_str) - 1);
+                opts.arima_order_str[sizeof(opts.arima_order_str) - 1] = '\0';
+            }
+            if (!bind_data.seasonal_order.empty()) {
+                strncpy(opts.seasonal_order_str, bind_data.seasonal_order.c_str(),
+                        sizeof(opts.seasonal_order_str) - 1);
+                opts.seasonal_order_str[sizeof(opts.seasonal_order_str) - 1] = '\0';
+            }
 
             // Call Rust FFI
             ForecastResult fcst_result;
@@ -733,8 +763,16 @@ static OperatorFinalizeResultType TsCvForecastNativeFinalize(
                 row.date = sorted_test_dates[i];  // Use actual test date
                 row.y = sorted_test_actuals[i];   // Actual value
                 row.forecast = fcst_result.point_forecasts[i];
-                row.lower_90 = fcst_result.lower_bounds[i];
-                row.upper_90 = fcst_result.upper_bounds[i];
+                // lower_bounds / upper_bounds are null when the model does not
+                // provide prediction intervals (D-02). Use NaN as sentinel so
+                // the output layer can emit SQL NULL instead of dereferencing
+                // a null pointer — matches ts_forecast_native.cpp's convention.
+                row.lower_90 = (fcst_result.lower_bounds != nullptr)
+                    ? fcst_result.lower_bounds[i]
+                    : std::numeric_limits<double>::quiet_NaN();
+                row.upper_90 = (fcst_result.upper_bounds != nullptr)
+                    ? fcst_result.upper_bounds[i]
+                    : std::numeric_limits<double>::quiet_NaN();
                 row.model_name = string(fcst_result.model_name);
 
                 gstate.results.push_back(row);
@@ -794,9 +832,14 @@ static OperatorFinalizeResultType TsCvForecastNativeFinalize(
         output.data[4].SetValue(i, Value("test"));
 
         // forecast, lower_90, upper_90
+        // NaN sentinel (set above) means "no interval" — emit SQL NULL.
         output.data[5].SetValue(i, Value::DOUBLE(row.forecast));
-        output.data[6].SetValue(i, Value::DOUBLE(row.lower_90));
-        output.data[7].SetValue(i, Value::DOUBLE(row.upper_90));
+        output.data[6].SetValue(i, std::isnan(row.lower_90)
+            ? Value(LogicalType::DOUBLE)
+            : Value::DOUBLE(row.lower_90));
+        output.data[7].SetValue(i, std::isnan(row.upper_90)
+            ? Value(LogicalType::DOUBLE)
+            : Value::DOUBLE(row.upper_90));
 
         // model_name
         output.data[8].SetValue(i, Value(row.model_name));

@@ -4,7 +4,8 @@
 
 - ✅ **v0.7.0 — Close the Crate→Extension Gap (Diagnostics + Model Coverage)** — Phases 1-3 (shipped 2026-08-22)
 - ✅ **v0.8.0 — Ensemble Forecasting** — Phases 4-6 (shipped 2026-08-31)
-- 🔨 **v0.9.0 — WASM Runtime Verification** — Phases 7-8 (in progress)
+- 🗄 **v0.9.0 — WASM Runtime Verification** — Phases 7-8 (parked; Phase 8 operator live-CI negative control outstanding)
+- ✅ **v0.10.0 — Statistical Correctness** — Phases 9-18 (shipped 2026-10-16)
 
 ## Phases
 
@@ -44,52 +45,39 @@ Tech debt carried forward: `ts_cv_forecast_by('AutoEnsemble')` segfaults (crate/
 
 </details>
 
-### v0.9.0 — WASM Runtime Verification (Phases 7-8)
+<details>
+<summary>🗄 v0.9.0 — WASM Runtime Verification (Phases 7-8) — PARKED, phase dirs archived 2026-10-08</summary>
 
-- [x] **Phase 7: WASM Node Harness + Local Green** — Boot DuckDB-Wasm, LOAD the built `.wasm`, run the full `test/sql` suite green locally (WASM-01, WASM-02, WASM-03, DEP-01, DEP-02) — harness + DEP-01/02 delivered & proven (DEP-02 build-confirmed); WASM-03 full-green deferred (out-of-scope pre-existing test debt)
-- [ ] **Phase 8: CI Gating + Dedicated Workflow + Badge** — Gate the harness in CI so WASM regressions fail the build, with an independently observable workflow + README badge (CI-01, CI-02, CI-03)
+Phase artifacts (plans, summaries, verification): [milestones/v0.9.0-phases/](milestones/v0.9.0-phases/). Not yet closed via `/gsd-complete-milestone`.
 
-## Phase Details
+- [x] Phase 7: WASM Node Harness + Local Green (1/1 plans) — completed 2026-09-02
+      DuckDB-Wasm Node harness (`test/wasm/run.mjs` + `sqllogic.mjs`), `@duckdb/duckdb-wasm` engine-version pin, openssl `!wasm32` vcpkg guard (WASM-01, WASM-02, DEP-01, DEP-02). WASM-03 full-suite green deferred: 23 files fail on pre-existing `test/sql` API drift, not WASM.
 
-### Phase 7: WASM Node Harness + Local Green
+- Phase 8: CI Gating + Dedicated Workflow + Badge (1/1 plans; verification deferred to operator)
+      `wasm-runtime-test` gating job (curated subset, no `--all`), `WasmTest.yml`, README badge (CI-01..03) — implemented and locally verified (curated exit 0 → broken test exit 1 → reverted exit 0). Outstanding: push the branch, observe the gate green → red (deliberate curated break) → green in GitHub Actions, confirm the badge flips, record run URLs, then `/gsd-verify-work 8` and `/gsd-complete-milestone v0.9.0`.
 
-**Goal**: A developer can run one command locally that boots DuckDB-Wasm, loads the freshly-built `anofox_forecast.duckdb_extension.wasm`, and runs the entire `test/sql` suite green — with the engine version pinned to match the built DuckDB and OpenSSL no longer compiled for the WASM target.
-**Depends on**: Nothing (first phase of this milestone; ports anofox-statistics PR #131)
-**Requirements**: WASM-01, WASM-02, WASM-03, DEP-01, DEP-02
-**Success Criteria** (what must be TRUE):
+</details>
 
-  1. Running the harness (`node test/wasm/run.mjs` or equivalent) boots DuckDB-Wasm on the `eh` bundle with `pthreadWorker=null` and `web-worker@1.2.0` pinned, serves the built `.wasm` over localhost via a version-agnostic `<version>/<platform>/` path, and `FORCE INSTALL` + `LOAD`s it with no load error.
-  2. The sqllogictest-subset runner executes a `.test` file end-to-end: it re-opens the DB and re-`LOAD`s the extension per file for catalog isolation, and results formatted through `::VARCHAR` match native sqllogictest output for DECIMAL-bearing queries (no unscaled-integer mismatch).
-  3. The full 66-file `test/sql/**/*.test` suite passes against the built `.wasm`, and every test that is genuinely infeasible on WASM appears in an explicit skip-list with a documented per-entry reason.
-  4. `@duckdb/duckdb-wasm` and `web-worker@1.2.0` are pinned to versions whose engine ABI matches the built DuckDB version, and the procedure to verify/update that version match is documented.
-  5. `vcpkg.json` declares `openssl` as a `!wasm32` dependency, and a WASM build confirms Emscripten no longer compiles OpenSSL for the WASM target (native builds still link it).
+<details>
+<summary>✅ v0.10.0 — Statistical Correctness (Phases 9-18) — SHIPPED 2026-10-16</summary>
 
-**Plans**: 1/1 plans executed
+Full detail: [milestones/v0.10.0-ROADMAP.md](milestones/v0.10.0-ROADMAP.md) · Requirements: [milestones/v0.10.0-REQUIREMENTS.md](milestones/v0.10.0-REQUIREMENTS.md) · Audit: [milestones/v0.10.0-MILESTONE-AUDIT.md](milestones/v0.10.0-MILESTONE-AUDIT.md) · Phase artifacts: [milestones/v0.10.0-phases/](milestones/v0.10.0-phases/)
 
-- [x] 07-01-wasm-node-harness-PLAN.md — Port the DuckDB-Wasm Node harness (run.mjs/sqllogic.mjs/package.json/README), apply the openssl !wasm32 vcpkg guard, and run the full 66-file test/sql suite green against the rebuilt .wasm
+- [x] Phase 9: Reference Fixtures & Safe Dependency Bumps (3/3 plans) — completed 2026-10-09
+- [x] Phase 10: Forecast Wrapper Delegates to Crate Models (10/10 plans) — completed 2026-10-09
+- [x] Phase 11: Upstream anofox-forecast Correctness Fixes (11/11 plans + 11-12 addendum, upstream repo) — completed 2026-10-16
+- [x] Phase 12: Statistics Marshalling Moves to Rust (8/8 plans) — completed 2026-10-10
+- [x] Phase 13: Core Statistics, Metrics & Data Quality (4/4 plans) — completed 2026-10-11
+- [x] Phase 14: tsfresh Feature Parity (4/4 plans) — completed 2026-10-12
+- [x] Phase 15: Detection & Decomposition on fdars 0.47 (5/5 plans) — completed 2026-10-14
+- [x] Phase 16: Conformal & Bootstrap Correctness (3/3 plans) — completed 2026-10-14
+- [x] Phase 17: Upstream Consumption & Diagnostics Parity (3/3 plans) — completed 2026-10-15
+- [x] Phase 18: Correctness Regression Suite, Audit & Docs (6/6 plans incl. gap plans 18-05 anofox-forecast 0.16.2, 18-06 ts_detect_periods fix) — completed 2026-10-16
 
-### Phase 8: CI Gating + Dedicated Workflow + Badge
+65/65 requirements. Closed as an override closeout: gsd's staleness heuristic flagged all 10 phase verifications "stale" (all VERIFICATION.md status: passed; integration re-checked green at HEAD). 19 deferred items acknowledged (see STATE.md Deferred Items and the audit's tech_debt list).
 
-**Goal**: WASM load/runtime regressions fail CI automatically, and WASM health is independently observable via a dedicated workflow and a README badge — the local green from Phase 7 is now enforced on every relevant build.
-**Depends on**: Phase 7 (the harness must exist and pass locally before CI can gate on it)
-**Requirements**: CI-01, CI-02, CI-03
-**Success Criteria** (what must be TRUE):
-
-  1. A gating CI job `needs:` the WASM build, downloads the `wasm_eh` artifact, runs the harness, and turns the build red on any WASM load or runtime error (verified by an intentionally broken `.wasm` / failing test producing a red run).
-  2. A dedicated WASM workflow — separate from the main distribution pipeline — runs the harness so WASM status is observable on its own without inspecting the full release pipeline.
-  3. The README shows a WASM status badge wired to the dedicated WASM workflow that flips between passing and failing in step with that workflow's latest run.
-
-**Plans**: 1/1 plans executed planned
-
-- [x] 08-01-ci-gating-wasm-badge-PLAN.md — Add the wasm-runtime-test gating job to MainDistributionPipeline.yml (CI-01), create the dedicated WasmTest.yml workflow (CI-02), and add the README WASM badge (CI-03); negative-control verifies the gate turns red
-
-## Progress
-
-| Phase | Plans Complete | Status | Completed |
-|-------|----------------|--------|-----------|
-| 7. WASM Node Harness + Local Green | 1/1 | Complete ✅ | 2026-09-02 |
-| 8. CI Gating + Dedicated Workflow + Badge | 1/1 | In Progress|  |
+</details>
 
 ## Next
 
-Execute Phase 8 — run `/gsd-execute-phase 8`.
+Start the next milestone — `/gsd-new-milestone`.

@@ -4,7 +4,9 @@ This directory contains tools for profiling table macro functions to measure CPU
 
 ## Background
 
-In #105/#114, `ts_backtest_auto_by` was refactored to use native streaming, achieving:
+In #105/#114, the former `ts_backtest_auto_by` macro (since removed; replaced by the
+`ts_cv_folds_by` + `ts_cv_forecast_by` two-step CV workflow, Phase 12 D-07) was refactored to
+use native streaming, achieving:
 - **31x memory reduction** (1,951 MB -> 63 MB for 1M rows)
 - **1.7x faster execution** (0.54s -> 0.31s)
 
@@ -73,5 +75,5 @@ After profiling, look for:
 
 - #105 - Original segfault investigation
 - #113 - Consolidate ts_fill_gaps_* and ts_fill_forward_* APIs
-- #114 - PR implementing native ts_backtest_auto_by
+- #114 - PR implementing native streaming for the former ts_backtest_auto_by (since removed)
 - #115 - Research streaming API adoption for memory-intensive functions

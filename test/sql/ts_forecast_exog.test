@@ -20,55 +20,61 @@ SELECT length((_ts_forecast_exog(
 ----
 3
 
-# Test exog forecast returns model name
+# Test exog forecast returns model name (plan 10-04, D-10: the crate's own
+# exog-aware AutoARIMA order search needs more than 6 points to fit with a
+# regressor attached — use the same 8-point series as the first test above).
 query I
 SELECT (_ts_forecast_exog(
-    [10.0, 20.0, 15.0, 25.0, 20.0, 30.0],
-    [[1.0, 2.0, 1.0, 2.0, 1.0, 2.0]],
-    [[1.0, 2.0]],
-    2,
+    [10.0, 20.0, 15.0, 25.0, 20.0, 30.0, 25.0, 35.0],
+    [[1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0]],
+    [[1.0, 2.0, 1.0]],
+    3,
     'AutoARIMA'
 )).model IS NOT NULL;
 ----
 true
 
-# Test exog forecast with two regressors
+# Test exog forecast with two regressors (8 points — the crate's own
+# exog-aware AutoARIMA order search, D-10, needs more data than 6 points to
+# fit with two regressors attached).
 query I
 SELECT length((_ts_forecast_exog(
-    [100.0, 120.0, 110.0, 130.0, 125.0, 140.0],         -- y (sales)
-    [[20.0, 22.0, 19.0, 23.0, 21.0, 24.0],              -- X1 (temperature)
-     [0.0, 1.0, 0.0, 1.0, 0.0, 1.0]],                   -- X2 (promotion)
-    [[22.0, 20.0, 21.0],                                 -- future temp
-     [1.0, 0.0, 1.0]],                                   -- future promo
+    [100.0, 120.0, 110.0, 130.0, 125.0, 140.0, 135.0, 150.0],  -- y (sales)
+    [[20.0, 22.0, 19.0, 23.0, 21.0, 24.0, 20.0, 23.0],         -- X1 (temperature)
+     [0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0]],                -- X2 (promotion)
+    [[22.0, 20.0, 21.0],                                        -- future temp
+     [1.0, 0.0, 1.0]],                                          -- future promo
     3,
     'AutoARIMA'
 )).point);
 ----
 3
 
-# Test that model name contains X suffix for exog models
+# Test that model name identifies the real model + the " with regressors"
+# suffix (D-10 — the old "%X" stand-in suffix, e.g. "ARIMAX"/"ThetaX", is
+# gone entirely; model_name now reports what the crate actually fit).
 query I
 SELECT (_ts_forecast_exog(
-    [10.0, 20.0, 15.0, 25.0, 20.0, 30.0],
-    [[1.0, 2.0, 1.0, 2.0, 1.0, 2.0]],
-    [[1.0, 2.0]],
-    2,
+    [10.0, 20.0, 15.0, 25.0, 20.0, 30.0, 25.0, 35.0],
+    [[1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0]],
+    [[1.0, 2.0, 1.0]],
+    3,
     'AutoARIMA'
-)).model LIKE '%X' OR (_ts_forecast_exog(
-    [10.0, 20.0, 15.0, 25.0, 20.0, 30.0],
-    [[1.0, 2.0, 1.0, 2.0, 1.0, 2.0]],
-    [[1.0, 2.0]],
-    2,
+)).model LIKE '%with regressors' AND (_ts_forecast_exog(
+    [10.0, 20.0, 15.0, 25.0, 20.0, 30.0, 25.0, 35.0],
+    [[1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0]],
+    [[1.0, 2.0, 1.0]],
+    3,
     'AutoARIMA'
-)).model LIKE '%ARIMA%';
+)).model LIKE 'AutoARIMA%';
 ----
 true
 
 # Test confidence bounds have correct length
 query I
 SELECT length((_ts_forecast_exog(
-    [10.0, 20.0, 15.0, 25.0, 20.0, 30.0],
-    [[1.0, 2.0, 1.0, 2.0, 1.0, 2.0]],
+    [10.0, 20.0, 15.0, 25.0, 20.0, 30.0, 25.0, 35.0],
+    [[1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0]],
     [[1.0, 2.0, 1.0, 2.0]],
     4,
     'AutoARIMA'
@@ -78,8 +84,8 @@ SELECT length((_ts_forecast_exog(
 
 query I
 SELECT length((_ts_forecast_exog(
-    [10.0, 20.0, 15.0, 25.0, 20.0, 30.0],
-    [[1.0, 2.0, 1.0, 2.0, 1.0, 2.0]],
+    [10.0, 20.0, 15.0, 25.0, 20.0, 30.0, 25.0, 35.0],
+    [[1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0]],
     [[1.0, 2.0, 1.0, 2.0]],
     4,
     'AutoARIMA'
@@ -88,11 +94,15 @@ SELECT length((_ts_forecast_exog(
 4
 
 #######################################
-# Exog Effect Validation Tests
+# Exog Effect Validation Tests (D-10, plan 10-04): every exog-capable model
+# is the crate's OWN exog-aware fit — model_name is the real model identity
+# plus " with regressors", never the old "%X" stand-in suffix.
 #######################################
 
-# Test that exogenous forecasting works with different models
-query I
+# 'ARIMA' with regressors now requires an explicit arima_order, same as the
+# non-exog surface (D-08/D-09) — without one it's a hard error naming
+# arima_order, never the old fixed-AR(1) "ARIMAX" stand-in.
+statement error
 SELECT (_ts_forecast_exog(
     [10.0, 20.0, 15.0, 25.0, 20.0, 30.0],
     [[1.0, 2.0, 1.0, 2.0, 1.0, 2.0]],
@@ -101,7 +111,7 @@ SELECT (_ts_forecast_exog(
     'ARIMA'
 )).model;
 ----
-ARIMAX
+arima_order
 
 query I
 SELECT (_ts_forecast_exog(
@@ -112,7 +122,7 @@ SELECT (_ts_forecast_exog(
     'OptimizedTheta'
 )).model;
 ----
-ThetaX
+OptimizedTheta with regressors
 
 query I
 SELECT (_ts_forecast_exog(
@@ -123,17 +133,22 @@ SELECT (_ts_forecast_exog(
     'MFLES'
 )).model;
 ----
-MFLESX
+MFLES with regressors
 
 #######################################
 # Error Handling Tests
 #######################################
 
-# Test with empty exogenous arrays (should still work, falls back to non-exog)
-# Note: AutoARIMA requires 10+ data points when no exogenous variables are provided
+# Test with empty exogenous arrays (should still work, falls back to
+# forecast() itself — FCST-05/D-10 — with no " with regressors" suffix).
+# Note: with no regressors AND no params, auto_detect_seasonality now
+# defaults to true (matches ts_forecast_by's own default, plan 10-04); a
+# 30-point near-linear series keeps the detected period at 1 (non-seasonal)
+# so AutoARIMA's order search has enough data either way.
 query I
+WITH gen AS (SELECT i, 10.0 + i::DOUBLE + (i % 3)::DOUBLE AS y FROM range(30) AS t(i))
 SELECT length((_ts_forecast_exog(
-    [10.0, 20.0, 15.0, 25.0, 20.0, 30.0, 25.0, 35.0, 30.0, 40.0],
+    (SELECT list(y ORDER BY i) FROM gen),
     [],
     [],
     3,

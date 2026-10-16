@@ -1,0 +1,41 @@
+docs/reference/models/distributional/laplace.md	0	SYNOPSIS	SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col,	Catalog Error: Table with name table does not exist!
+docs/reference/models/distributional/laplace.md	1	PASS	CREATE OR REPLACE TABLE sales_monthly AS	
+docs/reference/models/distributional/laplace.md	2	PASS	CREATE OR REPLACE TABLE sales_daily AS	
+docs/reference/models/distributional/laplace.md	3	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/distributional/laplace.md	4	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/distributional/laplace.md	5	PASS	CREATE OR REPLACE TABLE train AS	
+docs/reference/models/classical/garch.md	0	SYNOPSIS	SELECT * FROM ts_forecast_by(	Catalog Error: Table with name table does not exist!
+docs/reference/models/classical/garch.md	1	SYNOPSIS	params := MAP{'garch_p': '1', 'garch_q': '1'}	Parser Error: syntax error at or near "params"
+docs/reference/models/classical/garch.md	2	PASS	CREATE OR REPLACE TABLE returns AS	
+docs/reference/models/classical/garch.md	3	PASS	SELECT	
+docs/reference/models/classical/garch.md	4	PASS	SELECT	
+docs/reference/models/classical/garch.md	5	PASS	CREATE OR REPLACE TABLE price_history AS	
+docs/reference/models/ensemble/autoensemble.md	0	SYNOPSIS	SELECT * FROM ts_forecast_by(	Catalog Error: Table with name table does not exist!
+docs/reference/models/ensemble/autoensemble.md	1	PASS	CREATE OR REPLACE TABLE sales AS	
+docs/reference/models/ensemble/autoensemble.md	2	PASS	SELECT product_id, forecast_step, ROUND(yhat, 4) AS yhat, yhat_lower, yhat_upper	
+docs/reference/models/ensemble/autoensemble.md	3	PASS	SELECT product_id, forecast_step, ROUND(yhat, 4) AS yhat, model_name	
+docs/reference/models/ensemble/autoensemble.md	4	PASS	SELECT product_id, forecast_step, ROUND(yhat, 4) AS yhat, model_name	
+docs/reference/models/ensemble/autoensemble.md	5	PASS	SELECT product_id, forecast_step, ROUND(yhat, 4) AS yhat, model_name	
+docs/reference/models/ensemble/autoensemble.md	6	PASS	SELECT product_id, forecast_step, ROUND(yhat, 4) AS yhat, model_name	
+docs/reference/models/ensemble/autoensemble.md	7	PASS	SELECT product_id, forecast_step, ROUND(yhat, 4) AS yhat, model_name	
+docs/reference/models/ensemble/autoensemble.md	8	PASS	CREATE OR REPLACE TABLE weekly_sales AS	
+docs/reference/models/ensemble/ensemble_explicit.md	0	SYNOPSIS	SELECT * FROM ts_forecast_ensemble_by(	Catalog Error: Table with name table does not exist!
+docs/reference/models/ensemble/ensemble_explicit.md	1	PASS	CREATE OR REPLACE TABLE ae_test AS	
+docs/reference/models/ensemble/ensemble_explicit.md	2	PASS	SELECT forecast_step, yhat_lower, yhat_upper	
+docs/reference/models/ensemble/ensemble_explicit.md	3	PASS	CREATE OR REPLACE TABLE ets_identity_demo AS	
+docs/reference/models/ensemble/ensemble_explicit.md	4	PASS	SELECT forecast_step, ROUND(yhat, 4) AS yhat	
+docs/reference/models/ensemble/ensemble_explicit.md	5	PASS	SELECT forecast_step, ROUND(yhat, 4) AS yhat, model_name	
+docs/reference/models/ensemble/ensemble_explicit.md	6	PASS	SELECT forecast_step, ROUND(yhat, 4) AS yhat, model_name	
+docs/reference/models/ensemble/ensemble_explicit.md	7	SYNOPSIS	SELECT * FROM ts_forecast_ensemble_by('ae_test', id, ds, y,	Invalid Input Error: Invalid parameter 'members' = 'NotAModel': unknown model name 'NotAModel'; use the same names as ts_forecast_by
+docs/reference/models/ensemble/ensemble_explicit.md	8	SYNOPSIS	SELECT * FROM ts_forecast_ensemble_by('ae_test', id, ds, y,	Invalid Input Error: ts_forecast_ensemble_by: at least 2 members are required. Got 1.
+docs/reference/models/ensemble/ensemble_explicit.md	9	SYNOPSIS	SELECT * FROM ts_forecast_ensemble_by('ae_test', id, ds, y,	Invalid Input Error: Invalid parameter 'members' = 'GARCH': GARCH is not supported as an ensemble member: Forecaster::predict() returns simulated innovations, not level forecasts; use AutoARIMA or Aut
+docs/reference/models/ensemble/ensemble_inspect.md	0	SYNOPSIS	ts_ensemble_inspect_by(	Parser Error: syntax error at or near "ts_ensemble_inspect_by"
+docs/reference/models/ensemble/ensemble_inspect.md	1	PASS	CREATE OR REPLACE TABLE ae_test AS	
+docs/reference/models/ensemble/ensemble_inspect.md	2	PASS	SELECT id, member_name, ROUND(weight, 6) AS weight, score	
+docs/reference/models/ensemble/ensemble_inspect.md	3	PASS	SELECT id, SUM(weight) AS weight_sum	
+docs/reference/models/ensemble/ensemble_inspect.md	4	SYNOPSIS	ts_auto_ensemble_inspect_by(	Parser Error: syntax error at or near "ts_auto_ensemble_inspect_by"
+docs/reference/models/ensemble/ensemble_inspect.md	5	PASS	SELECT id, member_name, score	
+docs/reference/models/ensemble/ensemble_inspect.md	6	PASS	SELECT * FROM ts_auto_ensemble_inspect_by(	
+docs/reference/models/ensemble/ensemble_inspect.md	7	PASS	SELECT * FROM ts_auto_ensemble_inspect_by(	
+docs/reference/models/ensemble/ensemble_inspect.md	8	PASS	SELECT id, member_name, weight, ROUND(score, 8) AS score, rank	
+docs/reference/models/ensemble/ensemble_inspect.md	9	PASS	CREATE OR REPLACE TABLE insp_series AS	

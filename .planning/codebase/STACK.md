@@ -71,7 +71,7 @@
 
 **Build:**
 - `CMakeLists.txt` - Extension compilation with Corrosion FFI integration
-- `Cargo.toml` - Rust workspace with patched argmin (stable Rust 1.86 compat, `DataZooDE/argmin@fix/stable-rust-compat`)
+- `Cargo.toml` - Rust workspace with patched argmin (`DataZooDE/argmin@fix/stable-rust-compat`; the patch predates the 1.89 MSRV and is retained)
 - `Makefile` - Convenience targets for local development (rust, rust_debug, rust_test, fmt, check, header, benchmark)
 - `extension_config.cmake` - DuckDB extension loader with WASM-specific `LINKED_LIBS` configuration
 
@@ -79,7 +79,7 @@
 
 **Development:**
 - CMake 3.20+
-- Rust 1.86+ (stable, due to argmin patch)
+- Rust 1.89+ (workspace `rust-version`; floor set by trueno's AVX-512 code, stabilised in Rust 1.89)
 - C++ compiler supporting C++17 (GCC 14+ preferred on Linux due to symbol deduplication)
 - Python 3.11-3.12
 - DuckDB development headers (via submodule or v1.4.3 fetch)

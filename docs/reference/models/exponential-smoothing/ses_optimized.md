@@ -21,9 +21,7 @@ Optimized Simple Exponential Smoothing. Same as SES but automatically finds the 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
-| `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
-| `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
-| `include_residuals` | BOOLEAN | No | false | Return residuals |
+| `confidence_level` | DOUBLE | No | 0.90 | Confidence for prediction intervals |
 
 ## Returns
 
@@ -34,6 +32,19 @@ Optimized Simple Exponential Smoothing. Same as SES but automatically finds the 
 | `yhat` | DOUBLE | Point forecast |
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
+
+`yhat_lower` / `yhat_upper` are the model's own prediction interval (crate
+`predict_with_intervals`) at `confidence_level` (default 0.90), widening with `h` per
+Hyndman's class-1 `ETS(A,N,N)` analytic variance since anofox-forecast 0.16.0. See
+[Prediction intervals, fitted values and input handling](../../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling);
+for calibrated coverage use the conformal functions.
+
+**R `forecast` parity (FCST-09, Phase 17 plan 17-03):** `SESOptimized` (= `ETS 'ANN'`)
+matches R `ses()` within 1e-6 relative on AirPassengers, the seeded random walk and the
+random-walk-with-drift series. On a zero-inflated intermittent-demand series it is a known
+gap: the crate's own SES optimiser converges to a different `(alpha, l0)` than R's — root
+cause `RC-04` (`validation/reference/README.md`'s "R-parity gap root causes" section),
+with an upstream issue drafted and not yet filed.
 
 ## SQL Example
 
@@ -50,7 +61,7 @@ SELECT * FROM ts_forecast_by(
     MAP{}
 );
 
--- With fitted values for analysis
+-- With an explicit confidence level
 SELECT * FROM ts_forecast_by(
     'weekly_data',
     store_id,
@@ -59,7 +70,7 @@ SELECT * FROM ts_forecast_by(
     'SESOptimized',
     8,
     '1d',
-    MAP{'include_fitted': 'true'}
+    MAP{'confidence_level': '0.80'}
 );
 ```
 

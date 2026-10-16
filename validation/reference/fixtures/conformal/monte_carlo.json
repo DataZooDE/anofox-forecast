@@ -1,0 +1,106 @@
+{
+  "family": "conformal",
+  "generator": "validation/reference/python/gen_conformal_reference.py",
+  "tool_versions": {
+    "python": "3.12.12",
+    "numpy": "2.5.3"
+  },
+  "params": {
+    "trials": 2000,
+    "n_cal": 199,
+    "m_test": 25,
+    "alphas": [
+      0.1,
+      0.2
+    ]
+  },
+  "seeds": {
+    "symmetric_normal": 16041,
+    "symmetric_lognormal": 16042,
+    "asymmetric_normal": 16043,
+    "asymmetric_lognormal": 16044,
+    "adaptive_heteroscedastic": 16103
+  },
+  "results": {
+    "symmetric": {
+      "normal": {
+        "0.1": {
+          "coverage": 0.90086,
+          "mean_width": 3.313623281189632
+        },
+        "0.2": {
+          "coverage": 0.80256,
+          "mean_width": 2.577136209640285
+        }
+      },
+      "lognormal": {
+        "0.1": {
+          "coverage": 0.90006,
+          "mean_width": 2.7087553001028453
+        },
+        "0.2": {
+          "coverage": 0.80186,
+          "mean_width": 1.9971547741980225
+        }
+      }
+    },
+    "asymmetric": {
+      "normal": {
+        "0.1": {
+          "coverage": 0.90064,
+          "mean_width": 3.3350356464397906,
+          "old_construction": {
+            "coverage": 0.95562,
+            "mean_width": 4.095013945426636
+          },
+          "old_over_new_width_ratio": 1.2278771142365859
+        },
+        "0.2": {
+          "coverage": 0.80196,
+          "mean_width": 2.5926350899962674,
+          "old_construction": {
+            "coverage": 0.90532,
+            "mean_width": 3.385346236977055
+          },
+          "old_over_new_width_ratio": 1.3057550019435744
+        }
+      },
+      "lognormal": {
+        "0.1": {
+          "coverage": 0.90194,
+          "mean_width": 3.216603004260219,
+          "old_construction": {
+            "coverage": 0.95478,
+            "mean_width": 5.1855606546527655
+          },
+          "old_over_new_width_ratio": 1.61212330144092
+        },
+        "0.2": {
+          "coverage": 0.80016,
+          "mean_width": 2.264646373916639,
+          "old_construction": {
+            "coverage": 0.90534,
+            "mean_width": 3.7945113775705694
+          },
+          "old_over_new_width_ratio": 1.6755425576700853
+        }
+      }
+    },
+    "adaptive": {
+      "heteroscedastic": {
+        "0.1": {
+          "coverage": 0.8999,
+          "mean_width": 5.819650890686497
+        },
+        "0.2": {
+          "coverage": 0.7991,
+          "mean_width": 4.526793013215951
+        }
+      }
+    }
+  },
+  "tolerance": {
+    "coverage_abs": 0.02,
+    "mean_width_rel": 0.05
+  }
+}

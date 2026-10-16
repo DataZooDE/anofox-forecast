@@ -1,0 +1,14 @@
+docs/api/02-hierarchical.md	6	PASS	SELECT unique_id, quantity FROM ts_aggregate_hierarchy(	
+docs/api/04-data-preparation.md	24	SYNOPSIS	ts_diff_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, diff_order INTEGER, 	Parser Error: syntax error at or near "ts_diff_by"
+docs/api/04-data-preparation.md	25	PASS	SELECT * FROM ts_diff_by('sales', product_id, date, quantity, 1);	
+docs/api/05-period-detection.md	0	PASS	SELECT ts_estimate_period_fft(list_concat([NULL, NULL]::DOUBLE[], v)) = ts_estimate_period_fft(v)	
+docs/api/05a-decomposition.md	0	PASS	SELECT ts_detrend([NULL, 1.0, 2.0, 1.5, 2.5, 1.8, NULL]::DOUBLE[], 'linear')	
+docs/api/05b-peak-detection.md	0	PASS	SELECT ts_detect_peaks([NULL, 1.0, 5.0, 1.0, 4.0, 1.0, NULL]::DOUBLE[])	
+docs/api/06-changepoint-detection.md	0	PASS	SELECT _ts_detect_changepoints_bocpd([NULL, 1.0, 2.0, 1.5, 8.0, 7.5, NULL]::DOUBLE[], 250.0, true)	
+docs/api/10-diagnostics.md	0	PASS	SELECT ts_adf([NULL, 1.0, 2.0, 1.5, 2.5, 1.8, NULL]::DOUBLE[])	
+docs/api/10-diagnostics.md	1	EXPECTED-ERROR	SELECT ts_adf([1.0, 2.0, NULL, 1.5, 2.5]::DOUBLE[]);	Invalid Input Error: ts_adf: Invalid input: interior NULL at position 3
+docs/api/11-conformal-prediction.md	17	PASS	SELECT ts_conformal_quantile([1, NULL, 2, 3]::DOUBLE[], 0.1) = ts_conformal_quantile([1, 2, 3]::DOUB	
+docs/api/11-conformal-prediction.md	18	EXPECTED-ERROR	SELECT ts_conformal_predict_per_step(	Invalid Input Error: ts_conformal_predict_per_step: Invalid input: per-step conformal: residual count 7 is not a multiple of horizon 3
+docs/api/20-feature-extraction.md	0	PASS	CREATE OR REPLACE TABLE fx AS	
+docs/api/22-supported-frequencies.md	0	PASS	CREATE OR REPLACE TABLE me AS	
+plugins/anofox-forecast/skills/anofox-forecast-data-prep/SKILL.md	5	PASS	CREATE TABLE stationary AS	

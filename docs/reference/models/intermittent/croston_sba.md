@@ -21,9 +21,7 @@ Croston's Method with Syntetos-Boylan Approximation (SBA). Applies a bias correc
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
-| `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
-| `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
-| `include_residuals` | BOOLEAN | No | false | Return residuals |
+| `confidence_level` | DOUBLE | No | 0.90 | Confidence for prediction intervals |
 
 ## Returns
 
@@ -34,6 +32,13 @@ Croston's Method with Syntetos-Boylan Approximation (SBA). Applies a bias correc
 | `yhat` | DOUBLE | Point forecast |
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
+
+`yhat_lower` / `yhat_upper` are the model's own prediction interval (crate
+`predict_with_intervals`) at `confidence_level` (default 0.90). See
+[Prediction intervals, fitted values and input handling](../../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling);
+for calibrated coverage use the conformal functions. Like CrostonClassic, interval
+calibration for intermittent demand is not R-validated — prefer the conformal functions for
+calibrated coverage. CrostonSBA does not accept regressors in `ts_forecast_exog_by` (errors).
 
 ## SQL Example
 
@@ -50,6 +55,12 @@ SELECT * FROM ts_forecast_by(
 );
 
 -- For inventory planning
+CREATE OR REPLACE TABLE slow_moving_items AS
+SELECT sku_id, (DATE '2020-01-01' + INTERVAL (i) DAY) AS date,
+       CASE WHEN (i + sku_id) % 8 = 0 THEN GREATEST(0.0, 4.0 - 0.02 * i) ELSE 0.0 END AS demand
+FROM range(0, 60) t(i)
+CROSS JOIN (SELECT unnest([1, 2]) AS sku_id);
+
 SELECT * FROM ts_forecast_by(
     'slow_moving_items',
     sku_id,

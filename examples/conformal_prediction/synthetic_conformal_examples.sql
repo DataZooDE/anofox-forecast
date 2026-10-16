@@ -9,8 +9,8 @@
 
 -- Load extension
 LOAD anofox_forecast;
-INSTALL json;
-LOAD json;
+-- Phase 16: the conformal macros below read params json-free via
+-- params::MAP(VARCHAR, VARCHAR); the json extension is no longer required.
 
 .print '============================================================================='
 .print 'CONFORMAL PREDICTION EXAMPLES - Using *_by Table Macros'
@@ -97,7 +97,7 @@ ORDER BY product_id;
 .print ''
 .print 'Section 1.1: Conformal Prediction Intervals (90% coverage)'
 
-SELECT * FROM ts_conformal_by('backtest_with_forecasts', product_id, actual, forecast, point_forecast, MAP{});
+SELECT * FROM ts_conformal_by('backtest_with_forecasts', product_id, period, actual, forecast, point_forecast, MAP{});
 
 -- ============================================================================
 -- SECTION 2: Conformal with Different Alpha Levels
@@ -110,14 +110,14 @@ SELECT * FROM ts_conformal_by('backtest_with_forecasts', product_id, actual, for
 -- 2.1: 95% coverage (alpha=0.05)
 .print 'Section 2.1: 95% Coverage Intervals'
 
-SELECT * FROM ts_conformal_by('backtest_with_forecasts', product_id, actual, forecast, point_forecast,
+SELECT * FROM ts_conformal_by('backtest_with_forecasts', product_id, period, actual, forecast, point_forecast,
     MAP{'alpha': '0.05'});
 
 -- 2.2: 80% coverage (alpha=0.20)
 .print ''
 .print 'Section 2.2: 80% Coverage Intervals'
 
-SELECT * FROM ts_conformal_by('backtest_with_forecasts', product_id, actual, forecast, point_forecast,
+SELECT * FROM ts_conformal_by('backtest_with_forecasts', product_id, period, actual, forecast, point_forecast,
     MAP{'alpha': '0.20'});
 
 -- ============================================================================
@@ -149,11 +149,13 @@ SELECT * FROM (
     FROM generate_series(51, 55) AS t(i)
 );
 
--- 3.1: Asymmetric conformal prediction
+-- 3.1: Asymmetric conformal prediction (Phase 16: the old 'asymmetric' key was
+-- silently ignored by the pre-16-01 macro -- 'method': 'asymmetric' is the
+-- real key that selects the asymmetric branch)
 .print 'Section 3.1: Asymmetric Intervals for Skewed Residuals'
 
-SELECT * FROM ts_conformal_by('skewed_backtest', series_id, actual, forecast, point_forecast,
-    MAP{'asymmetric': 'true'});
+SELECT * FROM ts_conformal_by('skewed_backtest', series_id, period, actual, forecast, point_forecast,
+    MAP{'method': 'asymmetric'});
 
 -- ============================================================================
 -- SECTION 4: Real-World Scenarios
@@ -208,14 +210,19 @@ SELECT * FROM (
 );
 
 .print 'Store-specific prediction intervals:'
-SELECT * FROM ts_conformal_by('retail_backtest', store_id, actual_demand, forecast_demand, new_forecast, MAP{});
+SELECT * FROM ts_conformal_by('retail_backtest', store_id, date, actual_demand, forecast_demand, new_forecast, MAP{});
 
 -- ============================================================================
--- SECTION 5: Using ts_conformal_apply_by with Pre-Computed Score
+-- SECTION 5: Using ts_conformal_apply_by with a Calibration Table
 -- ============================================================================
+-- Phase 16 (D-14): ts_conformal_apply_by now takes a calibration TABLE (the
+-- shape ts_conformal_calibrate returns: group_col, method, conformity_score)
+-- instead of a bare DOUBLE score. A literal score is applied through a
+-- one-row table with group_col = NULL (the "pooled" convention); per-group
+-- calibration flows straight from ts_conformal_calibrate.
 
 .print ''
-.print '>>> SECTION 5: Apply Pre-Computed Conformity Score'
+.print '>>> SECTION 5: Apply a Calibration Table'
 .print '-----------------------------------------------------------------------------'
 
 -- Create forecast table
@@ -231,10 +238,27 @@ FROM (
         ('Product_C', 46, 207.5), ('Product_C', 47, 209.0), ('Product_C', 48, 210.5)
 ) AS t(product_id, period, point_forecast);
 
--- Apply a known conformity score (e.g., from previous calibration)
-.print 'Applying conformity score of 15.0 to all series:'
+-- 5.1: Apply a known literal conformity score (e.g. from an external
+-- calibration) to every series, via a one-row group_col = NULL table
+.print 'Section 5.1: Applying a literal conformity score of 15.0 to all series'
 
-SELECT * FROM ts_conformal_apply_by('future_forecasts', product_id, point_forecast, 15.0);
+CREATE OR REPLACE TABLE literal_calibration AS
+SELECT NULL::VARCHAR AS group_col, 'symmetric' AS method, 15.0 AS conformity_score;
+
+SELECT * FROM ts_conformal_apply_by('future_forecasts', product_id, period, point_forecast, 'literal_calibration');
+
+-- 5.2: Calibrate per series from the backtest data, then apply each series'
+-- own conformity score (the default, non-pooled calibration shape)
+.print ''
+.print 'Section 5.2: Per-series calibration -> per-series application'
+
+CREATE OR REPLACE TABLE per_series_calibration AS
+SELECT * FROM ts_conformal_calibrate('backtest_with_forecasts', product_id, actual, forecast);
+
+.print 'Calibration profile per series:'
+SELECT * FROM per_series_calibration ORDER BY group_col;
+
+SELECT * FROM ts_conformal_apply_by('future_forecasts', product_id, period, point_forecast, 'per_series_calibration');
 
 -- ============================================================================
 -- SECTION 6: Comparing Interval Widths Across Series
@@ -246,24 +270,118 @@ SELECT * FROM ts_conformal_apply_by('future_forecasts', product_id, point_foreca
 
 .print 'Interval width reflects forecast uncertainty per series:'
 
+-- Phase 16: ts_conformal_by now returns one row per (group, date) rather than
+-- one row per group with list columns, so interval width is a per-group
+-- AGGREGATION of the long-format rows (conformity_score is constant within a
+-- group, so MAX/AVG/ANY_VALUE all agree) -- no list_avg() arithmetic.
 WITH conformal_results AS (
-    SELECT * FROM ts_conformal_by('backtest_with_forecasts', product_id, actual, forecast, point_forecast, MAP{})
+    SELECT * FROM ts_conformal_by('backtest_with_forecasts', product_id, period, actual, forecast, point_forecast, MAP{})
 )
 SELECT
     group_col AS product,
-    ROUND(conformity_score, 2) AS score,
-    ROUND(list_avg(upper) - list_avg(lower), 2) AS avg_interval_width,
+    ROUND(MAX(conformity_score), 2) AS score,
+    ROUND(AVG(upper) - AVG(lower), 2) AS avg_interval_width,
     CASE
-        WHEN conformity_score < 10 THEN 'Narrow (good accuracy)'
-        WHEN conformity_score < 20 THEN 'Medium'
+        WHEN MAX(conformity_score) < 10 THEN 'Narrow (good accuracy)'
+        WHEN MAX(conformity_score) < 20 THEN 'Medium'
         ELSE 'Wide (high uncertainty)'
     END AS uncertainty_level
 FROM conformal_results
-ORDER BY conformity_score;
+GROUP BY group_col
+ORDER BY score;
 
 -- ============================================================================
 -- Note: ts_conformal_by returns group_col, not id
 -- ============================================================================
+
+-- ============================================================================
+-- SECTION 7: Adaptive Conformal Prediction (Phase 16 D-08)
+-- ============================================================================
+-- Adaptive conformal scales the interval by an explicit per-row DIFFICULTY
+-- column (e.g. a volatility proxy) at BOTH calibration and prediction time:
+-- scores are |residual| / difficulty, and bounds are point +/- q * difficulty
+-- USING THE DIFFICULTY AS GIVEN -- no batch-mean normalisation, so a row's
+-- interval never depends on which other forecasts happen to be in the same
+-- batch.
+
+.print ''
+.print '>>> SECTION 7: Adaptive Conformal Prediction'
+.print '-----------------------------------------------------------------------------'
+
+-- A per-period rolling volatility proxy stands in for a real difficulty
+-- estimate: periods with larger recent swings get a larger difficulty value,
+-- so their prediction interval widens accordingly.
+CREATE OR REPLACE TABLE adaptive_backtest AS
+SELECT
+    product_id,
+    period,
+    actual,
+    forecast,
+    point_forecast,
+    -- difficulty: 1.0 in the calm first half, 3.0 in the volatile second half
+    CASE WHEN period <= 20 THEN 1.0 ELSE 3.0 END AS difficulty
+FROM backtest_with_forecasts
+WHERE product_id = 'Product_A';
+
+.print 'Section 7.1: One-step adaptive conformal via ts_conformal_by'
+SELECT * FROM ts_conformal_by(
+    'adaptive_backtest', product_id, period, actual, forecast, point_forecast,
+    params := {'method': 'adaptive'}, difficulty_col := difficulty
+);
+
+.print ''
+.print 'Section 7.2: Two-step adaptive conformal (calibrate -> apply)'
+CREATE OR REPLACE TABLE adaptive_calibration AS
+SELECT * FROM ts_conformal_calibrate(
+    'adaptive_backtest', product_id, actual, forecast,
+    params := {'method': 'adaptive'}, difficulty_col := difficulty
+);
+
+.print 'Adaptive calibration profile:'
+SELECT * FROM adaptive_calibration;
+
+CREATE OR REPLACE TABLE adaptive_future AS
+SELECT product_id, period, point_forecast,
+    CASE WHEN period <= 42 THEN 1.0 ELSE 3.0 END AS difficulty
+FROM backtest_with_forecasts
+WHERE product_id = 'Product_A' AND point_forecast IS NOT NULL;
+
+SELECT * FROM ts_conformal_apply_by(
+    'adaptive_future', product_id, period, point_forecast, 'adaptive_calibration',
+    difficulty_col := difficulty
+);
+
+-- ============================================================================
+-- SECTION 8: Insufficient Calibration (Phase 16 D-05)
+-- ============================================================================
+-- When ceil((n+1)(1-alpha)) > n, no finite-sample interval exists at this
+-- (n, alpha) -- the macros report NULL bounds/score/coverage plus an
+-- explicit calibration_insufficient = true flag, instead of silently
+-- clamping to the maximum observed residual.
+
+.print ''
+.print '>>> SECTION 8: Insufficient Calibration'
+.print '-----------------------------------------------------------------------------'
+
+CREATE OR REPLACE TABLE tiny_backtest AS
+SELECT * FROM (
+    VALUES
+        ('Tiny_Series', 1, 101.0, 100.0, NULL::DOUBLE),
+        ('Tiny_Series', 2, 102.0, 100.0, NULL::DOUBLE),
+        ('Tiny_Series', 3, 103.0, 100.0, NULL::DOUBLE),
+        ('Tiny_Series', 4, 104.0, 100.0, NULL::DOUBLE),
+        ('Tiny_Series', 5, 105.0, 100.0, NULL::DOUBLE),
+        ('Tiny_Series', 6, NULL, NULL, 10.0)
+) AS t(series_id, period, actual, forecast, point_forecast);
+
+.print 'With only 5 calibration residuals, alpha 0.1 is INSUFFICIENT (ceil(6*0.9)=6 > 5):'
+SELECT * FROM ts_conformal_by('tiny_backtest', series_id, period, actual, forecast, point_forecast,
+    MAP{'alpha': '0.1'});
+
+.print ''
+.print 'The same series at alpha 0.2 is sufficient (ceil(6*0.8)=5 <= 5):'
+SELECT * FROM ts_conformal_by('tiny_backtest', series_id, period, actual, forecast, point_forecast,
+    MAP{'alpha': '0.2'});
 
 -- ============================================================================
 -- CLEANUP
@@ -277,6 +395,12 @@ DROP TABLE IF EXISTS backtest_with_forecasts;
 DROP TABLE IF EXISTS skewed_backtest;
 DROP TABLE IF EXISTS retail_backtest;
 DROP TABLE IF EXISTS future_forecasts;
+DROP TABLE IF EXISTS literal_calibration;
+DROP TABLE IF EXISTS per_series_calibration;
+DROP TABLE IF EXISTS adaptive_backtest;
+DROP TABLE IF EXISTS adaptive_calibration;
+DROP TABLE IF EXISTS adaptive_future;
+DROP TABLE IF EXISTS tiny_backtest;
 
 .print 'All tables cleaned up.'
 .print ''

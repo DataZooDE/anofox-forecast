@@ -104,6 +104,11 @@ struct MetricsOutputRow {
     string group_key;
     vector<Value> group_values;
     double metric_value;
+    // D-07: MAPE returns NULL when any pairwise-complete actual is exactly
+    // zero. Every other metric path leaves this false and continues to
+    // encode "no value" via a NaN metric_value (pre-existing behavior,
+    // unchanged by this plan).
+    bool metric_is_null = false;
 };
 
 // ============================================================================
@@ -174,8 +179,12 @@ static int64_t DateValueToInt64(const Value &date_val, DateColumnType date_type)
 // Helper: Compute metric
 // ============================================================================
 
+// `out_is_null` (D-07) is set true only on the MAPE branch, when any
+// pairwise-complete actual is exactly zero. Every other metric's path is
+// unchanged: a failed FFI call still surfaces as a NaN metric_value.
 static double ComputeMetric(TsMetricType type, const vector<double> &actuals,
-                           const vector<double> &forecasts) {
+                           const vector<double> &forecasts, bool &out_is_null) {
+    out_is_null = false;
     if (actuals.size() != forecasts.size() || actuals.empty()) {
         return std::nan("");
     }
@@ -186,38 +195,43 @@ static double ComputeMetric(TsMetricType type, const vector<double> &actuals,
 
     switch (type) {
         case TsMetricType::MAE:
-            success = anofox_ts_mae(actuals.data(), actuals.size(),
-                                    forecasts.data(), forecasts.size(),
+            success = anofox_ts_mae(actuals.data(), nullptr, actuals.size(),
+                                    forecasts.data(), nullptr, forecasts.size(),
                                     &result, &error);
             break;
         case TsMetricType::MSE:
-            success = anofox_ts_mse(actuals.data(), actuals.size(),
-                                    forecasts.data(), forecasts.size(),
+            success = anofox_ts_mse(actuals.data(), nullptr, actuals.size(),
+                                    forecasts.data(), nullptr, forecasts.size(),
                                     &result, &error);
             break;
         case TsMetricType::RMSE:
-            success = anofox_ts_rmse(actuals.data(), actuals.size(),
-                                     forecasts.data(), forecasts.size(),
+            success = anofox_ts_rmse(actuals.data(), nullptr, actuals.size(),
+                                     forecasts.data(), nullptr, forecasts.size(),
                                      &result, &error);
             break;
-        case TsMetricType::MAPE:
-            success = anofox_ts_mape(actuals.data(), actuals.size(),
-                                     forecasts.data(), forecasts.size(),
-                                     &result, &error);
+        case TsMetricType::MAPE: {
+            bool mape_is_null = false;
+            success = anofox_ts_mape(actuals.data(), nullptr, actuals.size(),
+                                     forecasts.data(), nullptr, forecasts.size(),
+                                     &result, &mape_is_null, &error);
+            if (success && mape_is_null) {
+                out_is_null = true;
+            }
             break;
+        }
         case TsMetricType::SMAPE:
-            success = anofox_ts_smape(actuals.data(), actuals.size(),
-                                      forecasts.data(), forecasts.size(),
+            success = anofox_ts_smape(actuals.data(), nullptr, actuals.size(),
+                                      forecasts.data(), nullptr, forecasts.size(),
                                       &result, &error);
             break;
         case TsMetricType::R2:
-            success = anofox_ts_r2(actuals.data(), actuals.size(),
-                                   forecasts.data(), forecasts.size(),
+            success = anofox_ts_r2(actuals.data(), nullptr, actuals.size(),
+                                   forecasts.data(), nullptr, forecasts.size(),
                                    &result, &error);
             break;
         case TsMetricType::BIAS:
-            success = anofox_ts_bias(actuals.data(), actuals.size(),
-                                     forecasts.data(), forecasts.size(),
+            success = anofox_ts_bias(actuals.data(), nullptr, actuals.size(),
+                                     forecasts.data(), nullptr, forecasts.size(),
                                      &result, &error);
             break;
     }
@@ -458,13 +472,15 @@ static OperatorFinalizeResultType TsMetricsNativeFinalize(
             }
 
             // Compute metric
-            double metric_val = ComputeMetric(bind_data.metric_type, sorted_actuals, sorted_forecasts);
+            bool metric_is_null = false;
+            double metric_val = ComputeMetric(bind_data.metric_type, sorted_actuals, sorted_forecasts, metric_is_null);
 
             // Add to results
             MetricsOutputRow row;
             row.group_key = group_key;
             row.group_values = grp.group_values;
             row.metric_value = metric_val;
+            row.metric_is_null = metric_is_null;
             gstate.results.push_back(std::move(row));
         }
 
@@ -495,7 +511,11 @@ static OperatorFinalizeResultType TsMetricsNativeFinalize(
 
         // Output metric value
         idx_t metric_col = row.group_values.size();
-        output.data[metric_col].SetValue(i, Value::DOUBLE(row.metric_value));
+        if (row.metric_is_null) {
+            FlatVector::SetNull(output.data[metric_col], i, true);
+        } else {
+            output.data[metric_col].SetValue(i, Value::DOUBLE(row.metric_value));
+        }
     }
 
     gstate.output_offset += to_output;
@@ -531,15 +551,27 @@ void RegisterTsMetricsNativeFunction(ExtensionLoader &loader) {
 
 // ============================================================================
 // ============================================================================
-// _ts_mase_native - MASE metric with GROUP BY ALL
-// ============================================================================
+// _ts_mase_native - Hyndman-Koehler MASE with GROUP BY ALL (D-08, plan 13-04)
+//
+// Signature: (TABLE, date VARCHAR, actual VARCHAR, forecast VARCHAR,
+// seasonal_period ANY). The old 5th-argument baseline-column form (a VARCHAR
+// column name) is REMOVED -- detected by type at bind time and rejected
+// naming ts_rmae_by, which still provides that relative-MAE computation.
+//
+// Per group (sorted by date): the first date whose forecast is non-NULL is
+// t0; rows strictly before t0 are the in-sample (actual values, with
+// validity, in date order); rows at/after t0 are the evaluation pairs
+// (actual+forecast, with validity -- NOT pre-filtered in C++, unlike the
+// shared _ts_metrics_native path, since the Rust-side missing-data policy
+// for MASE differs between the two roles: complete_cases for the evaluation
+// pair, but NEVER-splice for the in-sample lag scale).
 // ============================================================================
 
 struct TsMaseNativeBindData : public TableFunctionData {
     idx_t date_col_idx = 0;
     idx_t actual_col_idx = 0;
     idx_t forecast_col_idx = 0;
-    idx_t baseline_col_idx = 0;
+    int64_t seasonal_period = 1;
 
     vector<idx_t> group_col_indices;
     vector<string> output_col_names;
@@ -555,14 +587,16 @@ struct MaseGroupData {
     vector<Value> group_values;
     vector<int64_t> dates;
     vector<double> actuals;
+    vector<bool> actual_valid;
     vector<double> forecasts;
-    vector<double> baselines;
+    vector<bool> forecast_valid;
 };
 
 struct MaseOutputRow {
     string group_key;
     vector<Value> group_values;
     double metric_value;
+    bool metric_is_null = true;
 };
 
 struct TsMaseNativeGlobalState : public GlobalTableFunctionState {
@@ -596,18 +630,38 @@ static unique_ptr<FunctionData> TsMaseNativeBind(
 
     if (input.inputs.size() < 5) {
         throw InvalidInputException(
-            "_ts_mase_native requires: (input_table, date_col, actual_col, forecast_col, baseline_col)");
+            "_ts_mase_native requires: (input_table, date_col, actual_col, forecast_col, seasonal_period)");
+    }
+
+    // Old 5-argument form passed a baseline COLUMN NAME (VARCHAR) here; the
+    // new form passes an integer seasonal_period. DuckDB 1.5.6 lets a
+    // defaulted macro parameter also be passed positionally, so the old call
+    // binds its baseline_col string literal to this slot -- detectable by type.
+    if (input.inputs[4].type().id() == LogicalTypeId::VARCHAR) {
+        throw InvalidInputException(
+            "ts_mase_by no longer takes a baseline column: MASE is now Hyndman-Koehler, scaled by the "
+            "in-sample seasonal-naive MAE. For the old relative-MAE result use "
+            "ts_rmae_by(source, date_col, actual_col, forecast_col, baseline_col); for MASE pass "
+            "seasonal_period (default 1) and include each group's history rows with a NULL forecast.");
+    }
+    if (input.inputs[4].IsNull()) {
+        bind_data->seasonal_period = 1;
+    } else {
+        bind_data->seasonal_period = input.inputs[4].GetValue<int64_t>();
+    }
+    if (bind_data->seasonal_period < 1) {
+        throw InvalidInputException("ts_mase_by: seasonal_period must be >= 1, got %lld",
+                                    (long long)bind_data->seasonal_period);
     }
 
     string date_col_name = input.inputs[1].GetValue<string>();
     string actual_col_name = input.inputs[2].GetValue<string>();
     string forecast_col_name = input.inputs[3].GetValue<string>();
-    string baseline_col_name = input.inputs[4].GetValue<string>();
 
     auto &col_names = input.input_table_names;
     auto &col_types = input.input_table_types;
 
-    bool found_date = false, found_actual = false, found_forecast = false, found_baseline = false;
+    bool found_date = false, found_actual = false, found_forecast = false;
 
     for (idx_t i = 0; i < col_names.size(); i++) {
         if (col_names[i] == date_col_name) {
@@ -629,23 +683,18 @@ static unique_ptr<FunctionData> TsMaseNativeBind(
         } else if (col_names[i] == forecast_col_name) {
             bind_data->forecast_col_idx = i;
             found_forecast = true;
-        } else if (col_names[i] == baseline_col_name) {
-            bind_data->baseline_col_idx = i;
-            found_baseline = true;
         }
     }
 
     if (!found_date) throw InvalidInputException("Column '%s' not found", date_col_name);
     if (!found_actual) throw InvalidInputException("Column '%s' not found", actual_col_name);
     if (!found_forecast) throw InvalidInputException("Column '%s' not found", forecast_col_name);
-    if (!found_baseline) throw InvalidInputException("Column '%s' not found", baseline_col_name);
 
-    // Exclude date, actual, forecast, baseline from grouping
+    // Exclude date, actual, forecast from grouping
     for (idx_t i = 0; i < col_names.size(); i++) {
         if (i != bind_data->date_col_idx &&
             i != bind_data->actual_col_idx &&
-            i != bind_data->forecast_col_idx &&
-            i != bind_data->baseline_col_idx) {
+            i != bind_data->forecast_col_idx) {
             bind_data->group_col_indices.push_back(i);
             bind_data->output_col_names.push_back(col_names[i]);
             bind_data->output_col_types.push_back(col_types[i]);
@@ -688,8 +737,9 @@ static OperatorResultType TsMaseNativeInOut(
         vector<Value> group_vals;
         int64_t date_int;
         double actual_dbl;
+        bool actual_valid;
         double forecast_dbl;
-        double baseline_dbl;
+        bool forecast_valid;
     };
     vector<LocalEntry> batch;
     batch.reserve(input.size());
@@ -706,14 +756,14 @@ static OperatorResultType TsMaseNativeInOut(
 
         Value actual_val = input.data[bind_data.actual_col_idx].GetValue(i);
         Value forecast_val = input.data[bind_data.forecast_col_idx].GetValue(i);
-        Value baseline_val = input.data[bind_data.baseline_col_idx].GetValue(i);
 
         batch.push_back({
             std::move(group_key), std::move(group_vals),
             DateValueToInt64(date_val, bind_data.date_col_type),
-            actual_val.IsNull() ? std::nan("") : actual_val.GetValue<double>(),
-            forecast_val.IsNull() ? std::nan("") : forecast_val.GetValue<double>(),
-            baseline_val.IsNull() ? std::nan("") : baseline_val.GetValue<double>()
+            actual_val.IsNull() ? 0.0 : actual_val.GetValue<double>(),
+            !actual_val.IsNull(),
+            forecast_val.IsNull() ? 0.0 : forecast_val.GetValue<double>(),
+            !forecast_val.IsNull()
         });
     }
 
@@ -730,13 +780,29 @@ static OperatorResultType TsMaseNativeInOut(
             auto &grp = gstate.groups[entry.group_key];
             grp.dates.push_back(entry.date_int);
             grp.actuals.push_back(entry.actual_dbl);
+            grp.actual_valid.push_back(entry.actual_valid);
             grp.forecasts.push_back(entry.forecast_dbl);
-            grp.baselines.push_back(entry.baseline_dbl);
+            grp.forecast_valid.push_back(entry.forecast_valid);
         }
     }
 
     output.SetCardinality(0);
     return OperatorResultType::NEED_MORE_INPUT;
+}
+
+// Appends `value` to `values`/`validity` (one bit per element, LSB-first
+// within each 64-bit word) -- the exact bitmask layout `anofox_ts_mase`
+// expects (mirrors ListDoubleReader::Read).
+static void AppendWithValidity(vector<double> &values, vector<uint64_t> &validity, double value, bool is_valid) {
+    idx_t i = values.size();
+    values.push_back(value);
+    size_t word_idx = i / 64;
+    if (validity.size() <= word_idx) {
+        validity.resize(word_idx + 1, 0);
+    }
+    if (is_valid) {
+        validity[word_idx] |= (1ULL << (i % 64));
+    }
 }
 
 static OperatorFinalizeResultType TsMaseNativeFinalize(
@@ -765,38 +831,68 @@ static OperatorFinalizeResultType TsMaseNativeFinalize(
     if (!gstate.processed) {
         for (const auto &group_key : gstate.group_order) {
             auto &grp = gstate.groups[group_key];
-            if (grp.dates.empty()) continue;
+
+            MaseOutputRow row;
+            row.group_key = group_key;
+            row.group_values = grp.group_values;
+            row.metric_is_null = true;
+
+            if (grp.dates.empty()) {
+                gstate.results.push_back(std::move(row));
+                continue;
+            }
 
             vector<size_t> indices(grp.dates.size());
             for (size_t j = 0; j < indices.size(); j++) indices[j] = j;
             std::sort(indices.begin(), indices.end(),
                 [&grp](size_t a, size_t b) { return grp.dates[a] < grp.dates[b]; });
 
-            vector<double> sorted_actuals, sorted_forecasts, sorted_baselines;
-            for (size_t j : indices) {
-                if (!std::isnan(grp.actuals[j]) && !std::isnan(grp.forecasts[j]) && !std::isnan(grp.baselines[j])) {
-                    sorted_actuals.push_back(grp.actuals[j]);
-                    sorted_forecasts.push_back(grp.forecasts[j]);
-                    sorted_baselines.push_back(grp.baselines[j]);
+            // t0 = position (in sorted order) of the first row with a
+            // non-NULL forecast; rows before it are in-sample, at/after are
+            // the evaluation window.
+            idx_t t0 = indices.size();
+            for (idx_t j = 0; j < indices.size(); j++) {
+                if (grp.forecast_valid[indices[j]]) {
+                    t0 = j;
+                    break;
                 }
             }
 
-            double metric_val = std::nan("");
-            if (!sorted_actuals.empty()) {
-                AnofoxError error;
-                double result;
-                bool success = anofox_ts_mase(
-                    sorted_actuals.data(), sorted_actuals.size(),
-                    sorted_forecasts.data(), sorted_forecasts.size(),
-                    sorted_baselines.data(), sorted_baselines.size(),
-                    &result, &error);
-                if (success) metric_val = result;
+            if (t0 == 0 || t0 == indices.size()) {
+                // No in-sample rows, or no forecast row at all -> NULL.
+                gstate.results.push_back(std::move(row));
+                continue;
             }
 
-            MaseOutputRow row;
-            row.group_key = group_key;
-            row.group_values = grp.group_values;
-            row.metric_value = metric_val;
+            vector<double> insample_values;
+            vector<uint64_t> insample_validity;
+            for (idx_t j = 0; j < t0; j++) {
+                size_t idx = indices[j];
+                AppendWithValidity(insample_values, insample_validity, grp.actuals[idx], grp.actual_valid[idx]);
+            }
+
+            vector<double> eval_actuals, eval_forecasts;
+            vector<uint64_t> eval_actual_validity, eval_forecast_validity;
+            for (idx_t j = t0; j < indices.size(); j++) {
+                size_t idx = indices[j];
+                AppendWithValidity(eval_actuals, eval_actual_validity, grp.actuals[idx], grp.actual_valid[idx]);
+                AppendWithValidity(eval_forecasts, eval_forecast_validity, grp.forecasts[idx], grp.forecast_valid[idx]);
+            }
+
+            AnofoxError error;
+            double result;
+            bool is_null = false;
+            bool success = anofox_ts_mase(
+                eval_actuals.data(), eval_actual_validity.empty() ? nullptr : eval_actual_validity.data(), eval_actuals.size(),
+                eval_forecasts.data(), eval_forecast_validity.empty() ? nullptr : eval_forecast_validity.data(), eval_forecasts.size(),
+                insample_values.data(), insample_validity.empty() ? nullptr : insample_validity.data(), insample_values.size(),
+                bind_data.seasonal_period,
+                &result, &is_null, &error);
+
+            if (success && !is_null) {
+                row.metric_value = result;
+                row.metric_is_null = false;
+            }
             gstate.results.push_back(std::move(row));
         }
         gstate.processed = true;
@@ -820,7 +916,12 @@ static OperatorFinalizeResultType TsMaseNativeFinalize(
         for (idx_t col = 0; col < row.group_values.size(); col++) {
             output.data[col].SetValue(i, row.group_values[col]);
         }
-        output.data[row.group_values.size()].SetValue(i, Value::DOUBLE(row.metric_value));
+        idx_t metric_col = row.group_values.size();
+        if (row.metric_is_null) {
+            FlatVector::SetNull(output.data[metric_col], i, true);
+        } else {
+            output.data[metric_col].SetValue(i, Value::DOUBLE(row.metric_value));
+        }
     }
 
     gstate.output_offset += to_output;
@@ -832,7 +933,7 @@ static OperatorFinalizeResultType TsMaseNativeFinalize(
 void RegisterTsMaseNativeFunction(ExtensionLoader &loader) {
     TableFunction func(
         "_ts_mase_native",
-        {LogicalType::TABLE, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR},
+        {LogicalType::TABLE, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::ANY},
         nullptr, TsMaseNativeBind, TsMaseNativeInitGlobal, TsMaseNativeInitLocal);
     func.in_out_function = TsMaseNativeInOut;
     func.in_out_function_final = TsMaseNativeFinalize;
@@ -1081,9 +1182,9 @@ static OperatorFinalizeResultType TsRmaeNativeFinalize(
                 AnofoxError error;
                 double result;
                 bool success = anofox_ts_rmae(
-                    sorted_actuals.data(), sorted_actuals.size(),
-                    sorted_pred1s.data(), sorted_pred1s.size(),
-                    sorted_pred2s.data(), sorted_pred2s.size(),
+                    sorted_actuals.data(), nullptr, sorted_actuals.size(),
+                    sorted_pred1s.data(), nullptr, sorted_pred1s.size(),
+                    sorted_pred2s.data(), nullptr, sorted_pred2s.size(),
                     &result, &error);
                 if (success) metric_val = result;
             }
@@ -1376,9 +1477,10 @@ static OperatorFinalizeResultType TsCoverageNativeFinalize(
                 AnofoxError error;
                 double result;
                 bool success = anofox_ts_coverage(
-                    sorted_actuals.data(), sorted_actuals.size(),
-                    sorted_lowers.data(),
-                    sorted_uppers.data(),
+                    sorted_actuals.data(), nullptr,
+                    sorted_lowers.data(), nullptr,
+                    sorted_uppers.data(), nullptr,
+                    sorted_actuals.size(),
                     &result, &error);
                 if (success) metric_val = result;
             }
@@ -1662,8 +1764,8 @@ static OperatorFinalizeResultType TsQuantileLossNativeFinalize(
                 AnofoxError error;
                 double result;
                 bool success = anofox_ts_quantile_loss(
-                    sorted_actuals.data(), sorted_actuals.size(),
-                    sorted_forecasts.data(), sorted_forecasts.size(),
+                    sorted_actuals.data(), nullptr, sorted_actuals.size(),
+                    sorted_forecasts.data(), nullptr, sorted_forecasts.size(),
                     bind_data.quantile,
                     &result, &error);
                 if (success) metric_val = result;

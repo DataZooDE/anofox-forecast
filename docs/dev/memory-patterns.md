@@ -64,7 +64,7 @@ At certain memory levels, DuckDB allows the query to proceed, but FFI allocation
 ## Patterns That Cause Memory Issues
 
 ### 1. LIST() with Large Datasets
-```sql
+```text
 -- PROBLEMATIC: Cannot spill to disk
 SELECT group_id, LIST(value ORDER BY date) AS values
 FROM large_table
@@ -72,7 +72,7 @@ GROUP BY group_id
 ```
 
 ### 2. CROSS JOIN Row Expansion
-```sql
+```text
 -- PROBLEMATIC: Multiplies row count
 SELECT s.*, f.fold_id
 FROM source s
@@ -88,7 +88,7 @@ return true; // Returns success even if allocation failed
 ```
 
 ### 4. Multiple Large CTEs
-```sql
+```text
 -- PROBLEMATIC: All may be materialized
 WITH
   large_cte1 AS (...),    -- 2.5M rows
@@ -258,8 +258,9 @@ See GitHub issues:
 For users hitting memory issues:
 
 ```sql
--- Reduce memory limit to trigger graceful OOM earlier
-SET memory_limit = '50%';
+-- Reduce memory limit to trigger graceful OOM earlier (DuckDB requires an
+-- absolute unit -- KB/MB/GB/TB or KiB/MiB/GiB/TiB -- not a percentage)
+SET memory_limit = '4GB';
 
 -- Configure temp directory for spilling
 SET temp_directory = '/path/to/fast/ssd';

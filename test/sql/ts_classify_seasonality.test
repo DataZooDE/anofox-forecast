@@ -68,9 +68,14 @@ true
 # ts_classify_seasonality - Value Verification
 #######################################
 
-# timing_classification should be a valid classification string
+# timing_classification should be a valid classification string. Re-pinned (Phase 18,
+# 18-01, class D): the real enum (crates/anofox-fcst-core/src/seasonality.rs
+# SeasonalType::as_str, rewritten in Phase 15's fdars-core 0.47 bump, commit b528af1 /
+# 15-01-SUMMARY.md) is {non_seasonal, stable_seasonal, variable_timing,
+# intermittent_seasonal} -- the test's IN-list named two values that never existed
+# ('seasonal', 'variable_seasonal') instead of the real 'variable_timing'.
 query I
-SELECT (ts_classify_seasonality([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4.0)).timing_classification IN ('non_seasonal', 'seasonal', 'stable_seasonal', 'variable_seasonal', 'intermittent_seasonal');
+SELECT (ts_classify_seasonality([10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0], 4.0)).timing_classification IN ('non_seasonal', 'stable_seasonal', 'variable_timing', 'intermittent_seasonal');
 ----
 true
 
@@ -128,11 +133,19 @@ SELECT ts_classify_seasonality([1.0, 2.0, 3.0, 4.0], 4.0) IS NULL;
 ----
 true
 
-# Period of 0 should return NULL
-query I
+# Re-pinned (Phase 18, 18-01, class D): a period <= 0 is now a SQL error, not a silent
+# NULL. Commits aed6c01 "fix(15): CR-06/WR-04 ts_classify_seasonality delegate period
+# validation to core" and 86802cc "fix(15): WR-03 remove stale FFI period<=0.0
+# pre-checks; complete CR-05" removed src/table_functions/ts_seasonality.cpp's local
+# `period <= 0 -> SetNull` pre-check entirely and delegate to
+# crates/anofox-fcst-core/src/seasonality.rs, which rejects period <= 0 as
+# InvalidParameter -- unifying this function's error behavior with its 8 period-taking
+# siblings (ts_seasonal_strength, ts_decompose_seasonal, etc). Matches the v2026.10.16 goal
+# "silent model/parameter fallbacks become errors" (PROJECT.md).
+statement error
 SELECT ts_classify_seasonality([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0], 0.0) IS NULL;
 ----
-true
+Period must be a positive finite number
 
 #######################################
 # ts_classify_seasonality_agg - Aggregate Function Tests

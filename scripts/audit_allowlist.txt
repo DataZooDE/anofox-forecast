@@ -1,0 +1,65 @@
+# Allow-list for scripts/audit_no_stats_in_cpp.py (Phase 18, 18-03, D-04, RUST-10)
+#
+# Format: path | regex | justification
+#   path          relative to repo root
+#   regex         a Python regex, searched against the comment/string-stripped
+#                 text of the offending line (SQL hits: searched against the
+#                 raw-string content with `-- ...` line comments stripped)
+#   justification must name the marshalling class this hit belongs to --
+#                 row/index ordering by date or group key; date/timestamp
+#                 arithmetic; list marshalling (sizes, offsets, validity);
+#                 reporting aggregates of Rust-computed per-group results;
+#                 counting/structural rollup of already-computed quantities.
+#
+# Every entry below was read in full context (see 18-03-SUMMARY.md's HEAD hit
+# disposition table) before being added -- none is a bare whole-file pattern;
+# each regex requires the specific variable names on the intended line(s), so
+# a new, differently-named std::sort/accumulator added later in the same file
+# will NOT match and will correctly fail the audit.
+
+# --- src/aggregate_functions/*_agg.cpp: sort the raw (timestamp, value) pairs
+#     by timestamp before handing them to the Rust FFI call -- row ordering by
+#     date, not a statistic of series values.
+src/aggregate_functions/ts_changepoints_agg.cpp | std::sort\(sorted_pairs\.begin\(\), sorted_pairs\.end\(\)\); | row ordering by timestamp before BOCPD FFI call
+src/aggregate_functions/ts_classify_seasonality_agg.cpp | std::sort\(sorted_pairs\.begin\(\), sorted_pairs\.end\(\)\); | row ordering by timestamp before seasonality-classification FFI call
+src/aggregate_functions/ts_detect_periods_agg.cpp | std::sort\(sorted_pairs\.begin\(\), sorted_pairs\.end\(\)\); | row ordering by timestamp before period-detection FFI call
+src/aggregate_functions/ts_features_agg.cpp | std::sort\(sorted_triples\.begin\(\), sorted_triples\.end\(\), | row ordering by (timestamp, validity) before feature-extraction FFI call
+src/aggregate_functions/ts_forecast_agg.cpp | std::sort\(order\.begin\(\), order\.end\(\), \[&data\]\(size_t a, size_t b\) \{ | row ordering by (timestamp, validity) before forecast FFI call
+src/aggregate_functions/ts_data_quality_agg.cpp | std::stable_sort\(order\.begin\(\), order\.end\(\), \[&data\]\(size_t a, size_t b\) \{ | row ordering by timestamp (stable: ties keep arrival order) before data-quality FFI call
+src/aggregate_functions/ts_stats_agg.cpp | std::stable_sort\(order\.begin\(\), order\.end\(\), \[&data\]\(size_t a, size_t b\) \{ | row ordering by timestamp (stable: ties keep arrival order) before stats FFI call
+
+# --- src/macros/ts_macros.cpp: reporting aggregates of Rust-computed per-group
+#     results across groups (mean of an already-computed per-series quantity).
+src/macros/ts_macros.cpp | AVG\(length\) AS avg_length, | reporting aggregate: mean of ts_stats' per-series `length` column across groups, not a statistic of series values
+src/macros/ts_macros.cpp | AVG\(\(_quality\)\.overall_score\) AS avg_score, | reporting aggregate: mean of _ts_data_quality's per-group Rust-computed overall_score, not a statistic of series values
+
+# --- scalar/table functions: sort row indices by date before marshalling into
+#     the per-row call or output (row/index ordering by date).
+src/scalar_functions/ts_forecast_scalar.cpp | std::sort\(indices\.begin\(\), indices\.end\(\), | row-index ordering by date before forecast FFI call
+src/table_functions/ts_changepoints.cpp | std::sort\(sorted_data\.begin\(\), sorted_data\.end\(\)\); | row ordering by (timestamp, value) pair before BOCPD FFI call
+src/table_functions/ts_cv_folds_native.cpp | std::sort\(indices\.begin\(\), indices\.end\(\), | row-index ordering by date before per-group fold-boundary computation
+src/table_functions/ts_cv_forecast_native.cpp | std::sort\(train_indices\.begin\(\), train_indices\.end\(\), | row-index ordering by date (training fold) before forecast FFI call
+src/table_functions/ts_cv_forecast_native.cpp | std::sort\(test_indices\.begin\(\), test_indices\.end\(\), | row-index ordering by date (test fold) before forecast FFI call
+src/table_functions/ts_cv_hydrate_native.cpp | std::sort\(gstate\.rows\.begin\(\), gstate\.rows\.end\(\), | row ordering by (group, fold_id, date) key before output marshalling
+src/table_functions/ts_cv_split_native.cpp | std::sort\(train_ends\.begin\(\), train_ends\.end\(\)\); | date arithmetic: ordering explicit train_end boundaries to compute position-based fold bounds, not a statistic
+src/table_functions/ts_cv_split_native.cpp | std::sort\(indices\.begin\(\), indices\.end\(\), | row-index ordering by date before per-group fold/embargo computation
+src/table_functions/ts_features_native.cpp | std::sort\(sorted_triples\.begin\(\), sorted_triples\.end\(\), | row ordering by (timestamp, value, validity) before feature-extraction FFI call
+src/table_functions/ts_forecast_ensemble_native.cpp | std::sort\(indices\.begin\(\), indices\.end\(\), | row-index ordering by date before ensemble forecast FFI call
+src/table_functions/ts_forecast_native.cpp | std::sort\(indices\.begin\(\), indices\.end\(\), | row-index ordering by date before forecast FFI call
+src/table_functions/ts_forecast_panel_native.cpp | std::sort\(indices\.begin\(\), indices\.end\(\), | row-index ordering by date, per panel member, before global/panel forecast FFI call
+src/table_functions/ts_forecast_var_native.cpp | std::sort\(indices\.begin\(\), indices\.end\(\), | row-index ordering by date (all VAR variables together) before VAR forecast FFI call
+src/table_functions/ts_metrics_native.cpp | std::sort\(indices\.begin\(\), indices\.end\(\), | row-index ordering by date before metric computation (shared idiom across 5 metric functions in this file: mae/mse/..., mase/rmae, coverage, quantile_loss, and the paired-prediction metric)
+src/table_functions/ts_mstl_decomposition_native.cpp | std::sort\(indices\.begin\(\), indices\.end\(\), | row-index ordering by date before MSTL decomposition FFI call
+src/table_functions/ts_stats.cpp | std::sort\(order\.begin\(\), order\.end\(\), \[&grp\]\(size_t a, size_t b\) \{ | row ordering by (timestamp, validity, value) -- order-dependent stats (autocorr, strength, ...) are defined on the date-ordered series; this orders rows, it does not compute a statistic itself
+src/table_functions/ts_aggregate_hierarchy.cpp | std::sort\(gstate\.results\.begin\(\), gstate\.results\.end\(\), | row ordering by (unique_id, date) key for deterministic output marshalling
+
+# --- src/table_functions/ts_aggregate_hierarchy.cpp: hierarchy rollup is a
+#     plain additive SUM of sibling raw values at the same timestamp across a
+#     GROUP BY hierarchy level -- equivalent to SQL's own SUM()/GROUP BY
+#     aggregate (exact, no model, no bias/variance correction), not a derived
+#     statistic (mean/variance/quantile) of a single series' history.
+src/table_functions/ts_aggregate_hierarchy.cpp | cell\.sum \+= row\.value; | structural rollup: additive SUM across hierarchy siblings at a fixed date, equivalent to SQL SUM()/GROUP BY, not a statistic of series values
+
+# --- src/table_functions/ts_periods.cpp: list marshalling (reserving output
+#     ListVector capacity from a sum of already Rust-computed per-row sizes).
+src/table_functions/ts_periods.cpp | total_periods \+= row_results\[row_idx\]\.result\.n_periods; | list marshalling: pre-reserves ListVector capacity from the sum of Rust-computed per-row n_periods counts (3 near-identical period-detection variants in this file)

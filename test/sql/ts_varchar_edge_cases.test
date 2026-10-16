@@ -70,7 +70,8 @@ WHERE yhat IS NOT NULL AND typeof(yhat) = 'DOUBLE';
 6
 
 #######################################
-# Bug 4: ts_backtest_auto with VARCHAR frequency parameter
+# Bug 4: CV two-step workflow (ts_cv_folds_by + ts_cv_forecast_by) with a
+# VARCHAR target column — replaces the removed one-line backtest-auto macro (D-07)
 #######################################
 
 # Create properly typed data for backtest
@@ -82,21 +83,24 @@ SELECT
     (10.0 + i * 0.5 + sin(i * 3.14159 / 7) * 2)::VARCHAR AS y
 FROM generate_series(0, 99) AS t(i);
 
-# ts_backtest_auto with string frequency parameter (Polars style)
+# Step 1: create folds on the VARCHAR-typed y column
+statement ok
+CREATE TABLE varchar_cv_folds AS
+SELECT * FROM ts_cv_folds_by('backtest_data', id, ds, y, 2, 7, MAP{});
+
+# Step 2: forecast each fold's train set against its test set (MAP{} params)
 query I
-SELECT COUNT(*) > 0 FROM ts_backtest_auto_by(
-    'backtest_data', id, ds, y, 7, 2, '1d',
-    MAP {'method': 'Naive'}
-);
+SELECT COUNT(*) > 0 FROM ts_cv_forecast_by('varchar_cv_folds', id, ds, y, 'Naive', MAP{});
 ----
 true
 
-# ts_backtest_auto with INTERVAL style frequency
+# Same workflow with an explicit params MAP (method as a STRUCT/MAP argument, Polars style)
+statement ok
+CREATE TABLE varchar_cv_folds_2 AS
+SELECT * FROM ts_cv_folds_by('backtest_data', id, ds, y, 2, 7, MAP{'window_type': 'expanding'});
+
 query I
-SELECT COUNT(*) > 0 FROM ts_backtest_auto_by(
-    'backtest_data', id, ds, y, 7, 2, '1 day',
-    MAP {'method': 'Naive'}
-);
+SELECT COUNT(*) > 0 FROM ts_cv_forecast_by('varchar_cv_folds_2', id, ds, y, 'Naive', MAP{'seasonal_period': '1'});
 ----
 true
 
@@ -115,9 +119,12 @@ SELECT COUNT(*) FROM ts_data_quality('varchar_data', id, ds, y, 10, '1d');
 ----
 2
 
-# Verify quality scores are computed
+# Verify quality scores are computed. Class A fix (Phase 18, 18-01):
+# ts_data_quality's output has always been the flattened score columns directly
+# (overall_score, structural_score, ...) -- there is no "quality" struct column;
+# confirmed directly via DESCRIBE.
 query I
-SELECT (quality).overall_score IS NOT NULL
+SELECT overall_score IS NOT NULL
 FROM ts_data_quality('varchar_data', id, ds, y, 10, '1d')
 WHERE unique_id = 'A';
 ----
@@ -170,8 +177,11 @@ SELECT
     (100 + sin(i * 2 * 3.14159 / 7) * 20)::VARCHAR AS y
 FROM generate_series(0, 55) AS t(i);
 
+# Class A fix (Phase 18, 18-01): ts_mstl_decomposition_by's output has always been
+# direct columns (id, trend, seasonal, remainder, periods) -- there is no
+# "decomposition" struct column; confirmed directly via DESCRIBE.
 query I
-SELECT (decomposition).trend IS NOT NULL
+SELECT trend IS NOT NULL
 FROM ts_mstl_decomposition_by('seasonal_varchar', id, ds, y, MAP {})
 WHERE id = 'S1';
 ----

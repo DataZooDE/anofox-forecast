@@ -115,9 +115,18 @@ FetchContent_MakeAvailable(Corrosion)
 
 # Import Rust FFI crate
 # Note: Corrosion converts hyphens to underscores in target names
+# WASM builds run on DuckDB extension-ci-tools' pinned rustc 1.86 (no override
+# input), below the workspace rust-version 1.89. That floor comes from trueno's
+# x86-only AVX-512 code, which the wasm32 target never compiles, so skip the
+# rust-version check there only. Native builds keep enforcing 1.89 (rust-msrv CI job).
+set(_ANOFOX_CARGO_FLAGS "")
+if(WASM_BUILD)
+    set(_ANOFOX_CARGO_FLAGS FLAGS --ignore-rust-version)
+endif()
 corrosion_import_crate(
     MANIFEST_PATH ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
     CRATES anofox-fcst-ffi
+    ${_ANOFOX_CARGO_FLAGS}
 )
 
 # The Rust target name (with underscores)
@@ -168,13 +177,10 @@ set(EXTENSION_SOURCES
     src/table_functions/ts_decomposition.cpp
     src/table_functions/ts_changepoints.cpp
     src/table_functions/ts_features.cpp
-    src/table_functions/ts_imputation.cpp
-    src/table_functions/ts_filter.cpp
     src/table_functions/ts_gaps.cpp
     src/table_functions/ts_fill_gaps_native.cpp
     src/table_functions/ts_fill_forward_native.cpp
     src/table_functions/ts_fill_forward_operator.cpp
-    src/table_functions/ts_backtest_native.cpp
     src/table_functions/ts_forecast_native.cpp
     src/table_functions/ts_forecast_panel_native.cpp
     src/table_functions/ts_forecast_var_native.cpp
@@ -200,6 +206,7 @@ set(EXTENSION_SOURCES
     src/scalar_functions/diagnostics.cpp
     src/scalar_functions/ts_forecast_scalar.cpp
     src/scalar_functions/ts_forecast_inspect_scalar.cpp
+    src/scalar_functions/series_transforms.cpp
     src/aggregate_functions/ts_forecast_agg.cpp
     src/aggregate_functions/ts_changepoints_agg.cpp
     src/aggregate_functions/ts_features_agg.cpp

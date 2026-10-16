@@ -97,6 +97,41 @@ SELECT * FROM ts_smape_by((SELECT product_id, date, actual, predicted FROM forec
 .print ''
 .print 'Note: SMAPE is bounded [0, 200%], while MAPE can exceed 100%'
 
+-- 2.3: MAPE with a zero actual -> NULL (D-07) -- MAPE is undefined there
+.print ''
+.print 'Section 2.3: MAPE returns NULL when any actual is exactly 0 (D-07)'
+
+SELECT ts_mape([0.0, 2.0, 4.0], [1.0, 2.0, 5.0]) IS NULL AS mape_is_null_for_zero_actual;
+
+.print ''
+.print 'Use ts_smape or ts_mase instead of ts_mape for intermittent-demand series.'
+
+-- 2.4: MASE (Hyndman-Koehler, D-08): scalar function, scaled by the in-sample
+-- seasonal-naive MAE. ts_mase(actual, forecast, insample, seasonal_period) --
+-- seasonal_period is a required 4th positional argument.
+.print ''
+.print 'Section 2.4: MASE (Hyndman-Koehler) per series'
+
+SELECT
+    product_id,
+    ts_mase(
+        LIST(actual ORDER BY date) FILTER (WHERE date >= DATE '2024-01-11'),
+        LIST(predicted ORDER BY date) FILTER (WHERE date >= DATE '2024-01-11'),
+        LIST(actual ORDER BY date) FILTER (WHERE date < DATE '2024-01-11'),
+        7
+    ) AS mase
+FROM forecast_results
+GROUP BY product_id
+ORDER BY product_id;
+
+.print ''
+.print 'Note: the pre-v2026.10.16 3-argument ts_mase(actual, forecast, baseline) form was'
+.print 'removed in v2026.10.16 -- it computed a relative MAE, not MASE. Calling it now'
+.print 'raises an error naming the replacement: use ts_rmae(actual, forecast, baseline)'
+.print 'for that relative-MAE comparison, or ts_mase(actual, forecast, insample,'
+.print 'seasonal_period) for Hyndman-Koehler MASE (see test/sql/ts_metrics_reference.test'
+.print 'for a runnable assertion of this error).'
+
 -- ============================================================================
 -- SECTION 3: Additional Metrics
 -- ============================================================================
@@ -170,7 +205,7 @@ SELECT * FROM ts_coverage_by((SELECT product_id, date, actual, lower_90, upper_9
 .print ''
 .print 'Section 4.2: Mean Interval Width'
 
-SELECT * FROM ts_interval_width_by('interval_forecasts', product_id, lower_90, upper_90);
+SELECT * FROM ts_interval_width_by('interval_forecasts', product_id, date, lower_90, upper_90);
 
 -- ============================================================================
 -- SECTION 5: Comparing Multiple Models

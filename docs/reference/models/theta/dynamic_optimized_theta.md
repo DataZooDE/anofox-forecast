@@ -21,12 +21,8 @@ Dynamic Optimized Theta Method. Combines dynamic theta adaptation with automatic
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
-| `seasonal_period` | INTEGER | No* | — | Seasonal period (required for seasonal data) |
-| `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
-| `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
-| `include_residuals` | BOOLEAN | No | false | Return residuals |
-
-*Seasonality is NOT auto-detected. Pass `seasonal_period` explicitly for seasonal data.
+| `seasonal_period` | INTEGER | No | auto-detected | Seasonal period; auto-detected when both `seasonal_period` and `seasonal_periods` are omitted |
+| `confidence_level` | DOUBLE | No | 0.90 | Confidence for prediction intervals |
 
 ## Returns
 
@@ -37,6 +33,20 @@ Dynamic Optimized Theta Method. Combines dynamic theta adaptation with automatic
 | `yhat` | DOUBLE | Point forecast |
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
+
+`yhat_lower` / `yhat_upper` are the crate `DynamicOptimizedTheta` model's own prediction
+interval at `confidence_level` — see
+[07-forecasting.md's "Prediction intervals, fitted values and input handling"](../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling)
+for calibration caveats shared across all models.
+
+> **R `forecast` parity:** `Theta`'s point forecast and 95% bounds match R `thetaf()` within
+> the tolerances documented on [theta.md](theta.md) (FCST-09, Phase 17 plan 17-03,
+> `crates/anofox-fcst-core/tests/r_forecast_parity.rs`). This variant uses the same
+> corrected 0.16.0 interval formula as the rest of the Theta family but is not individually
+> R-parity-tested.
+
+`DynamicOptimizedTheta` accepts exogenous regressors via `ts_forecast_exog_by` and stays
+itself — `model_name` reports `"DynamicOptimizedTheta with regressors"`.
 
 ## SQL Example
 
@@ -63,6 +73,28 @@ SELECT * FROM ts_forecast_by(
     '3mo',
     MAP{'seasonal_period': '4'}
 );
+
+-- With exogenous variables — DynamicOptimizedTheta stays itself ("... with regressors")
+CREATE OR REPLACE TABLE sales_history AS
+SELECT product_id,
+       (DATE '2024-01-01' + INTERVAL (i) DAY) AS date,
+       100.0 + product_id * 10.0 + 0.5 * i + 15.0 * temp AS revenue,
+       temp AS temperature
+FROM (SELECT i, 0.8 + (i % 5) * 0.02 AS temp FROM range(0, 60) t(i)) d
+CROSS JOIN (SELECT unnest([1, 2]) AS product_id);
+
+CREATE OR REPLACE TABLE future_weather AS
+SELECT product_id,
+       (DATE '2024-03-01' + INTERVAL (i) DAY) AS date,
+       0.9 + (i % 5) * 0.02 AS temperature
+FROM range(0, 7) t(i)
+CROSS JOIN (SELECT unnest([1, 2]) AS product_id);
+
+SELECT DISTINCT model_name FROM ts_forecast_exog_by(
+    'sales_history', product_id, date, revenue, ['temperature'],
+    'future_weather', date, ['temperature'], '1d', 'DynamicOptimizedTheta', 7, MAP{}
+);
+-- model_name = 'DynamicOptimizedTheta with regressors'
 ```
 
 ## Best For

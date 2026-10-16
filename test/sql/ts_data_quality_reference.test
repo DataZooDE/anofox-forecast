@@ -1,0 +1,302 @@
+# name: test/sql/ts_data_quality_reference.test
+# description: ts_data_quality(_by)/summary value assertions against the shared gap counter
+#   (Phase 13 plan 13-03: WRAP-02, D-05) -- real gap counts, temporal below 1, n_short,
+#   frequency, determinism.
+# group: [sql]
+#
+# Non-json-gated so it runs on every native build.
+
+require anofox_forecast
+
+# --- dq_gap20: 60 daily dates from 2024-01-01, days 20..39 missing (one 20-day run) ---
+statement ok
+CREATE TABLE dq_gap20 AS
+SELECT 'g20' AS id,
+       (DATE '2024-01-01' + INTERVAL (i) DAY)::TIMESTAMP AS ds,
+       (i % 7 + 0.1 * i)::DOUBLE AS v
+FROM range(0, 60) t(i)
+WHERE i < 20 OR i >= 40;
+
+# n_gaps (missing periods) = 20, n_gap_runs = 1 (one run), temporal_score < 1.0
+query III
+SELECT n_gaps, n_gap_runs, temporal_score < 1.0
+FROM ts_data_quality_by('dq_gap20', id, ds, v, 10, '1d');
+----
+20	1	true
+
+# frequency honoured: '2d' on the same 21-day jump -> 11 steps of 2 days -> n_gaps 10
+query I
+SELECT n_gaps
+FROM ts_data_quality_by('dq_gap20', id, ds, v, 10, '2d');
+----
+10
+
+# NULL frequency (auto-detect) on dq_gap20 equals '1d'
+query I
+SELECT n_gaps
+FROM ts_data_quality_by('dq_gap20', id, ds, v, 10, NULL);
+----
+20
+
+# --- CR-01 regression (13-03 deferred item): calendar multiplier ('2mo'/'3q'/'5y')
+# must be honored, not silently dropped (every pair was previously misclassified
+# as "1 missing single-unit period" regardless of the declared multiplier) ---
+
+statement ok
+CREATE TABLE dq_bimonthly AS
+SELECT 'bm' AS id,
+       ('2023-' || LPAD(CAST((m - 1) * 2 + 1 AS VARCHAR), 2, '0') || '-01')::TIMESTAMP AS ds,
+       (100 + m * 10)::DOUBLE AS v
+FROM generate_series(1, 4) AS t(m);
+
+# 4 correctly-spaced bi-monthly observations ('2mo'): n_gaps must be 0.
+query I
+SELECT n_gaps
+FROM ts_data_quality_by('dq_bimonthly', id, ds, v, 1, '2mo');
+----
+0
+
+statement ok
+DROP TABLE dq_bimonthly;
+
+statement ok
+CREATE TABLE dq_triquarterly AS
+SELECT 'tq' AS id,
+       ds::TIMESTAMP AS ds,
+       100.0 AS v
+FROM (VALUES ('2023-01-01'), ('2025-04-01')) AS t(ds);
+
+# Jan 2023 -> Apr 2025 is exactly 27 months (3 steps of '3q' = 9 months each):
+# 2 missing tri-quarterly periods (Oct 2023, Jul 2024), not misclassified as 8
+# missing single quarters.
+query I
+SELECT n_gaps
+FROM ts_data_quality_by('dq_triquarterly', id, ds, v, 1, '3q');
+----
+2
+
+statement ok
+DROP TABLE dq_triquarterly;
+
+statement ok
+CREATE TABLE dq_quinquennial AS
+SELECT 'qy' AS id,
+       ds::TIMESTAMP AS ds,
+       100.0 AS v
+FROM (VALUES ('2010-01-01'), ('2015-01-01')) AS t(ds);
+
+# 2010 -> 2015 is exactly one '5y' step: n_gaps must be 0.
+query I
+SELECT n_gaps
+FROM ts_data_quality_by('dq_quinquennial', id, ds, v, 1, '5y');
+----
+0
+
+statement ok
+DROP TABLE dq_quinquennial;
+
+# n_short 10: present count (40) >= n_short -> is_short false, structural_score 1.0
+query II
+SELECT is_short, structural_score
+FROM ts_data_quality_by('dq_gap20', id, ds, v, 10, '1d');
+----
+false	1.0
+
+# n_short 100: present count (40) < n_short -> is_short true, structural_score 0.7 + 0.3*40/100 = 0.82
+query II
+SELECT is_short, structural_score
+FROM ts_data_quality_by('dq_gap20', id, ds, v, 100, '1d');
+----
+true	0.82
+
+statement ok
+DROP TABLE dq_gap20;
+
+# --- dq_gap3: 60 daily dates, 3 separate single-day holes ---
+statement ok
+CREATE TABLE dq_gap3 AS
+SELECT 'g3' AS id,
+       (DATE '2024-01-01' + INTERVAL (i) DAY)::TIMESTAMP AS ds,
+       (i % 7 + 0.1 * i)::DOUBLE AS v
+FROM range(0, 60) t(i)
+WHERE i NOT IN (10, 30, 50);
+
+# n_gaps 3, n_gap_runs 3, temporal_score = 1 - 5*3/60 = 0.75
+query III
+SELECT n_gaps, n_gap_runs, temporal_score
+FROM ts_data_quality_by('dq_gap3', id, ds, v, 10, '1d');
+----
+3	3	0.75
+
+statement ok
+DROP TABLE dq_gap3;
+
+# --- dq_tie: alternating 1-day/2-day steps (tied counts) -- determinism ---
+statement ok
+CREATE TABLE dq_tie AS
+SELECT * FROM (VALUES
+    ('tie', TIMESTAMP '2024-01-01', 1.0),
+    ('tie', TIMESTAMP '2024-01-02', 2.0),
+    ('tie', TIMESTAMP '2024-01-04', 3.0)
+) t(id, ds, v);
+
+# Run 3 times: n_gaps reflects the 1-day step (smaller-step tie rule), identical every time.
+query I
+SELECT n_gaps FROM ts_data_quality_by('dq_tie', id, ds, v, 1, NULL);
+----
+1
+
+query I
+SELECT n_gaps FROM ts_data_quality_by('dq_tie', id, ds, v, 1, NULL);
+----
+1
+
+query I
+SELECT n_gaps FROM ts_data_quality_by('dq_tie', id, ds, v, 1, NULL);
+----
+1
+
+statement ok
+DROP TABLE dq_tie;
+
+# --- Every data-quality macro passes dates/frequency/n_short through to _ts_data_quality ---
+statement ok
+CREATE TABLE dq_macros AS
+SELECT 'm' AS id,
+       (DATE '2024-01-01' + INTERVAL (i) DAY)::TIMESTAMP AS ds,
+       (i % 7 + 0.1 * i)::DOUBLE AS v
+FROM range(0, 60) t(i)
+WHERE i < 20 OR i >= 40;
+
+query III
+SELECT n_gaps, n_gap_runs, is_short
+FROM ts_data_quality('dq_macros', id, ds, v, 10, '1d');
+----
+20	1	false
+
+query III
+SELECT n_gaps, n_gap_runs, is_short
+FROM ts_data_quality_by('dq_macros', id, ds, v, 10, '1d');
+----
+20	1	false
+
+query I
+SELECT n_total FROM ts_data_quality_summary('dq_macros', id, ds, v, 10);
+----
+1
+
+statement ok
+DROP TABLE dq_macros;
+
+# --- behavioral_score redesign (D-06, STAT-04): smooth sine, no ACF1 penalty ---
+statement ok
+CREATE TABLE dq_smooth_sine AS
+SELECT 's' AS id,
+       (DATE '2024-01-01' + INTERVAL (i) DAY)::TIMESTAMP AS ds,
+       sin(2 * pi() * i / 50.0 + 0.1)::DOUBLE AS v
+FROM range(0, 100) t(i);
+
+query I
+SELECT behavioral_score
+FROM ts_data_quality_by('dq_smooth_sine', id, ds, v, 3, '1d');
+----
+1.0
+
+statement ok
+DROP TABLE dq_smooth_sine;
+
+# --- ts_data_quality_agg matches ts_data_quality_by(n_short:=30, frequency:=NULL) on a
+# NULL-value-containing table (Phase 12 deferred item (a), fixed by task 2) ---
+statement ok
+CREATE TABLE dq_gap20_null AS
+SELECT 'g20n' AS id,
+       (DATE '2024-01-01' + INTERVAL (i) DAY)::TIMESTAMP AS ds,
+       (i % 7 + 0.1 * i)::DOUBLE AS v
+FROM range(0, 60) t(i)
+WHERE i < 20 OR i >= 40
+UNION ALL
+SELECT 'g20n', (DATE '2024-01-01' + INTERVAL (60) DAY)::TIMESTAMP, NULL::DOUBLE;
+
+query I
+SELECT n_missing FROM ts_data_quality_by('dq_gap20_null', id, ds, v, 30, NULL);
+----
+1
+
+query I
+SELECT (ts_data_quality_agg(ds, v)).n_missing FROM dq_gap20_null;
+----
+1
+
+query I
+SELECT count(*) FROM (
+    SELECT structural_score, temporal_score, magnitude_score, behavioral_score,
+           overall_score, n_gaps, n_gap_runs, n_missing, is_constant, is_short
+    FROM ts_data_quality_by('dq_gap20_null', id, ds, v, 30, NULL)
+    EXCEPT
+    SELECT (ts_data_quality_agg(ds, v)).structural_score, (ts_data_quality_agg(ds, v)).temporal_score,
+           (ts_data_quality_agg(ds, v)).magnitude_score, (ts_data_quality_agg(ds, v)).behavioral_score,
+           (ts_data_quality_agg(ds, v)).overall_score, (ts_data_quality_agg(ds, v)).n_gaps,
+           (ts_data_quality_agg(ds, v)).n_gap_runs, (ts_data_quality_agg(ds, v)).n_missing,
+           (ts_data_quality_agg(ds, v)).is_constant, (ts_data_quality_agg(ds, v)).is_short
+    FROM dq_gap20_null
+);
+----
+0
+
+statement ok
+DROP TABLE dq_gap20_null;
+
+# === CR-02 regression (iteration 2): a single NULL-dated row inside an otherwise
+# valid group must be DROPPED (value+date together), not turn the whole
+# ts_stats()/ts_data_quality()/ts_data_quality_by() call into a hard failure.
+# Exercises the macros' LIST(date_col ...) GROUP BY aggregation path directly
+# (not the underlying scalar function with a hand-built literal array), which
+# is where the iteration-1 fix was not exercised. ===
+statement ok
+CREATE TABLE null_date_row AS
+SELECT 'A' AS id,
+       CASE WHEN i = 5 THEN NULL
+            ELSE ('2023-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP
+       END AS ds,
+       (i + 1)::DOUBLE AS v
+FROM generate_series(0, 9) AS g(i);
+
+# ts_stats_by already dropped the NULL-dated row (length 9, not 10): the
+# baseline every other dates-aware surface must now match.
+query III
+SELECT length, n_gaps, n_gap_runs
+FROM ts_stats_by('null_date_row', id, ds, v, '1d');
+----
+9	1	1
+
+# ts_stats (macro, scalar _ts_stats_with_dates under the hood) must agree with
+# ts_stats_by instead of throwing "dates list ... contains a NULL element".
+query III
+SELECT length, n_gaps, n_gap_runs
+FROM ts_stats('null_date_row', id, ds, v, '1d');
+----
+9	1	1
+
+# ts_data_quality / ts_data_quality_by (same macro-level LIST(date_col ...) path,
+# same scalar function family) must also agree with each other instead of one
+# throwing.
+query II
+SELECT n_gaps, n_gap_runs
+FROM ts_data_quality('null_date_row', id, ds, v, 3, '1d');
+----
+1	1
+
+query II
+SELECT n_gaps, n_gap_runs
+FROM ts_data_quality_by('null_date_row', id, ds, v, 3, '1d');
+----
+1	1
+
+# ts_data_quality_summary must not throw either (sanity: n_total = 1, no error).
+query I
+SELECT n_total FROM ts_data_quality_summary('null_date_row', id, ds, v, 3);
+----
+1
+
+statement ok
+DROP TABLE null_date_row;

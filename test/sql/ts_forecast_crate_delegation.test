@@ -1,0 +1,725 @@
+# name: test/sql/ts_forecast_crate_delegation.test
+# description: Natively-run SQL value assertions for FCST-01/02/03/04 (D-01..D-04,
+#              D-08/D-09) against the R AirPassengers fixture. Runs WITHOUT `require
+#              json` so it exercises the built extension directly (extended by
+#              plans 10-03/10-04 for FCST-05..08).
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup: AirPassengers (144 monthly values, validation/reference/fixtures/r_forecast/air_passengers.json)
+#######################################
+
+statement ok
+CREATE TABLE air AS
+SELECT
+    'A' AS id,
+    ('1949-01-01'::DATE + (i || ' months')::INTERVAL)::DATE AS ds,
+    y::DOUBLE AS y
+FROM (
+    SELECT unnest(range(144)) AS i,
+           unnest([112, 118, 132, 129, 121, 135, 148, 148, 136, 119, 104, 118,
+                   115, 126, 141, 135, 125, 149, 170, 170, 158, 133, 114, 140,
+                   145, 150, 178, 163, 172, 178, 199, 199, 184, 162, 146, 166,
+                   171, 180, 193, 181, 183, 218, 230, 242, 209, 191, 172, 194,
+                   196, 196, 236, 235, 229, 243, 264, 272, 237, 211, 180, 201,
+                   204, 188, 235, 227, 234, 264, 302, 293, 259, 229, 203, 229,
+                   242, 233, 267, 269, 270, 315, 364, 347, 312, 274, 237, 278,
+                   284, 277, 317, 313, 318, 374, 413, 405, 355, 306, 271, 306,
+                   315, 301, 356, 348, 355, 422, 465, 467, 404, 347, 305, 336,
+                   340, 318, 362, 348, 363, 435, 491, 505, 404, 359, 310, 337,
+                   360, 342, 406, 396, 420, 472, 548, 559, 463, 407, 362, 405,
+                   417, 391, 419, 461, 472, 535, 622, 606, 508, 461, 390, 432]) AS y
+);
+
+#######################################
+# FCST-01: Naive 95% h=1 half-width matches R naive() — not the old ~234
+# fabricated half-width. The crate's own z comes from a private
+# Abramowitz & Stegun 26.2.23 approximation (documented in
+# crates/anofox-fcst-core/tests/forecast_intervals.rs /
+# crates/anofox-fcst-ffi/tests/core_ffi_parity.rs::naive_intervals_match_r_naive_through_ffi,
+# plan 10-01), so this is asserted at 0.1 absolute — not exact R-bit parity —
+# while being two orders of magnitude tighter than the old fabrication would
+# allow (234 - 66 = 168 >> 0.1).
+#######################################
+
+query I
+SELECT abs((yhat_upper - yhat) - 66.07118560930098) < 0.1
+FROM ts_forecast_by('air', id, ds, y, 'Naive', 12, '1mo', MAP{'confidence_level': '0.95'})
+WHERE forecast_step = 1;
+----
+true
+
+query I
+SELECT (yhat_upper - yhat) < 100
+FROM ts_forecast_by('air', id, ds, y, 'Naive', 12, '1mo', MAP{'confidence_level': '0.95'})
+WHERE forecast_step = 1;
+----
+true
+
+#######################################
+# FCST-02: confidence_level -> quantile comes exclusively from the crate's own
+# quantile source (no step-table). The 0.80/0.95 half-width ratio is asserted
+# against R's exact-normal-CDF ratio at the same 1e-3 relative tolerance as
+# forecast_intervals.rs::z_is_exact_inverse_normal (same crate z-approximation
+# root cause, not a step-table regression).
+#######################################
+
+query I
+SELECT abs(
+    (SELECT (yhat_upper - yhat) FROM ts_forecast_by('air', id, ds, y, 'Naive', 12, '1mo', MAP{'confidence_level': '0.80'}) WHERE forecast_step = 1)
+    /
+    (SELECT (yhat_upper - yhat) FROM ts_forecast_by('air', id, ds, y, 'Naive', 12, '1mo', MAP{'confidence_level': '0.95'}) WHERE forecast_step = 1)
+    - 0.6538648544837132
+) < 1e-3;
+----
+true
+
+#######################################
+# FCST-03: MSE no longer identical across model families (was universally
+# 2090.28 via the old SES(alpha=0.3) stand-in fitted/residual formula).
+#
+# Phase 17 plan 17-01 (anofox-forecast 0.16.1 PR #222): the Theta/
+# CrostonClassic MSE coincidence documented below (pre-0.16) NO LONGER
+# HOLDS — Theta's alpha is now optimised per-series instead of fixed at
+# 0.1, so Theta's in-sample MSE diverges from Croston's (which still uses
+# a fixed alpha=0.1). Expectation changes from 4 distinct to 5 distinct
+# (every model now produces a genuinely different MSE on this series).
+#
+# Historical note (pre-0.16 deviation, same class as 10-01's documented
+# ADIDA/IMAPA-vs-fabricated-width and SES-vs-2090.28 coincidences): on this
+# specific AirPassengers series, Theta's and CrostonClassic's MSE used to be
+# bit-identical because both were genuinely SES(alpha=0.1)-based in-sample —
+# `anofox-forecast`'s `Theta::fit` computed in-sample fitted/residuals from
+# the plain SES level component only (the theta-drift term `b` is applied
+# to the h-step-ahead point forecast, never to in-sample fitted), and
+# Croston's default alpha was also 0.1; on AirPassengers (strictly positive,
+# no zero-demand gaps) Croston's demand-interval component degenerates to
+# interval=1 always, making it plain SES(0.1) too. The stronger,
+# unconditional claim (no mse within 0.01 of the OLD universal 2090.28
+# fabrication) is asserted separately below and still holds for all 5 models.
+#######################################
+
+query I
+SELECT count(DISTINCT round(mse, 6)) FROM (
+    SELECT (_ts_forecast(
+        [112, 118, 132, 129, 121, 135, 148, 148, 136, 119, 104, 118,
+         115, 126, 141, 135, 125, 149, 170, 170, 158, 133, 114, 140,
+         145, 150, 178, 163, 172, 178, 199, 199, 184, 162, 146, 166,
+         171, 180, 193, 181, 183, 218, 230, 242, 209, 191, 172, 194,
+         196, 196, 236, 235, 229, 243, 264, 272, 237, 211, 180, 201,
+         204, 188, 235, 227, 234, 264, 302, 293, 259, 229, 203, 229,
+         242, 233, 267, 269, 270, 315, 364, 347, 312, 274, 237, 278,
+         284, 277, 317, 313, 318, 374, 413, 405, 355, 306, 271, 306,
+         315, 301, 356, 348, 355, 422, 465, 467, 404, 347, 305, 336,
+         340, 318, 362, 348, 363, 435, 491, 505, 404, 359, 310, 337,
+         360, 342, 406, 396, 420, 472, 548, 559, 463, 407, 362, 405,
+         417, 391, 419, 461, 472, 535, 622, 606, 508, 461, 390, 432],
+        12, m
+    )).mse AS mse
+    FROM (VALUES ('SES'), ('Holt'), ('AutoARIMA'), ('Theta'), ('CrostonClassic')) AS t(m)
+);
+----
+5
+
+# Deviation (verified, matches 10-01's documented forecast_intervals.rs
+# `mse_is_crate_residual_mse` exception): SES's OWN real residual MSE on this
+# series is ~2090.284, coincidentally within 0.01 of the OLD universal
+# SES(alpha=0.3)-stand-in constant 2090.28 that every model used to produce —
+# because 'SES' genuinely IS SimpleExponentialSmoothing::new(0.3), 2090.28
+# was never a fabrication unique to SES. Excluded here with the same
+# justification; Holt/AutoARIMA/Theta/CrostonClassic are asserted against
+# the unconditional claim.
+query I
+SELECT count(*) FROM (
+    SELECT (_ts_forecast(
+        [112, 118, 132, 129, 121, 135, 148, 148, 136, 119, 104, 118,
+         115, 126, 141, 135, 125, 149, 170, 170, 158, 133, 114, 140,
+         145, 150, 178, 163, 172, 178, 199, 199, 184, 162, 146, 166,
+         171, 180, 193, 181, 183, 218, 230, 242, 209, 191, 172, 194,
+         196, 196, 236, 235, 229, 243, 264, 272, 237, 211, 180, 201,
+         204, 188, 235, 227, 234, 264, 302, 293, 259, 229, 203, 229,
+         242, 233, 267, 269, 270, 315, 364, 347, 312, 274, 237, 278,
+         284, 277, 317, 313, 318, 374, 413, 405, 355, 306, 271, 306,
+         315, 301, 356, 348, 355, 422, 465, 467, 404, 347, 305, 336,
+         340, 318, 362, 348, 363, 435, 491, 505, 404, 359, 310, 337,
+         360, 342, 406, 396, 420, 472, 548, 559, 463, 407, 362, 405,
+         417, 391, 419, 461, 472, 535, 622, 606, 508, 461, 390, 432],
+        12, m
+    )).mse AS mse
+    FROM (VALUES ('Holt'), ('AutoARIMA'), ('Theta'), ('CrostonClassic')) AS t(m)
+)
+WHERE abs(mse - 2090.28) < 0.01;
+----
+0
+
+#######################################
+# FCST-04: ARIMA(0,1,1)(0,1,1)[12] through ts_forecast_by must match R's
+# Arima(order=c(0,1,1), seasonal=c(0,1,1)) within 1% per-step (fixture
+# tolerance.model_point_rel), report the exact seasonal model_name (d+D=2,
+# so the crate never fits a constant), and every ARIMA misuse / malformed
+# option string must be a clear SQL error.
+#######################################
+
+statement ok
+CREATE TABLE r_airline (forecast_step INTEGER, r_point DOUBLE);
+
+statement ok
+INSERT INTO r_airline VALUES
+    (1, 447.053211074412), (2, 421.877427957911), (3, 453.52620219413),
+    (4, 489.900824318081), (5, 502.183491675), (6, 564.224620230391),
+    (7, 649.795269734021), (8, 636.71464217539), (9, 538.920898406675),
+    (10, 491.06721997947), (11, 422.824267320501), (12, 464.752553525088);
+
+query I
+SELECT count(*) FROM (
+    SELECT f.forecast_step, f.yhat, r.r_point
+    FROM ts_forecast_by(
+        'air', id, ds, y, 'ARIMA', 12, '1mo',
+        MAP{'arima_order': '[0,1,1]', 'seasonal_order': '[0,1,1]', 'seasonal_period': '12'}
+    ) AS f
+    JOIN r_airline AS r USING (forecast_step)
+)
+WHERE abs(yhat - r_point) / r_point > 0.01;
+----
+0
+
+query I
+SELECT DISTINCT model_name FROM ts_forecast_by(
+    'air', id, ds, y, 'ARIMA', 12, '1mo',
+    MAP{'arima_order': '[0,1,1]', 'seasonal_order': '[0,1,1]', 'seasonal_period': '12'}
+);
+----
+ARIMA(0,1,1)(0,1,1)[12]
+
+# ARIMA without arima_order -> error naming arima_order (and AutoARIMA as the alternative)
+statement error
+SELECT * FROM ts_forecast_by('air', id, ds, y, 'ARIMA', 12, '1mo', MAP{});
+----
+arima_order
+
+# Malformed arima_order (wrong element count)
+statement error
+SELECT * FROM ts_forecast_by('air', id, ds, y, 'ARIMA', 12, '1mo', MAP{'arima_order': '[0,1]'});
+----
+arima_order
+
+# arima_order on a non-ARIMA model -> InvalidParameter naming method='ARIMA'
+statement error
+SELECT * FROM ts_forecast_by('air', id, ds, y, 'AutoARIMA', 12, '1mo', MAP{'arima_order': '[1,1,1]'});
+----
+only valid when method='ARIMA'
+
+# WR-03: an over-long arima_order string (>31 chars, the fixed FFI buffer
+# size) must raise an explicit "too long" validation error at bind time —
+# never silently truncate into a different, possibly-still-parseable
+# triplet via strncpy. The literal below is 33 characters.
+statement error
+SELECT * FROM ts_forecast_by('air', id, ds, y, 'ARIMA', 12, '1mo', MAP{'arima_order': '[0,1,1,0,1,1,0,1,1,0,1,1,0,1,1,0]'});
+----
+too long
+
+# Same check applies to seasonal_order (also 33 characters).
+statement error
+SELECT * FROM ts_forecast_by('air', id, ds, y, 'ARIMA', 12, '1mo', MAP{'arima_order': '[0,1,1]', 'seasonal_order': '[0,1,1,0,1,1,0,1,1,0,1,1,0,1,1,0]', 'seasonal_period': '12'});
+----
+too long
+
+# Unparsable seasonal_periods entry on MSTL -> error, not silently dropped
+statement error
+SELECT * FROM ts_forecast_by('air', id, ds, y, 'MSTL', 12, '1mo', MAP{'seasonal_periods': '[12, abc]'});
+----
+seasonal_periods
+
+#######################################
+# FCST-07: an explicit ['ETS', 'ETS'] ensemble (Mean) equals standalone 'ETS'
+# at every step (D-05/FCST-07) — build_forecaster's ETS arm uses the exact
+# same new_auto_ets constructor as the standalone path, so the Mean of two
+# identical members reproduces the standalone point exactly. model_name is
+# asserted against the ^ETS\([AM],(N|A|Ad),(N|A|M)\)$ pattern (the crate's
+# AICc search result), not a hardcoded spec string.
+#######################################
+
+query I
+SELECT count(*) FROM (
+    SELECT e.forecast_step, e.yhat AS e_yhat, s.yhat AS s_yhat
+    FROM ts_forecast_ensemble_by(
+        'air', id, ds, y, ['ETS', 'ETS'], 12, '1mo',
+        combination_method := 'mean', seasonal_period := 12
+    ) AS e
+    JOIN ts_forecast_by(
+        'air', id, ds, y, 'ETS', 12, '1mo', MAP{'seasonal_period': '12'}
+    ) AS s USING (forecast_step)
+)
+WHERE abs(e_yhat - s_yhat) > 1e-9;
+----
+0
+
+query I
+SELECT DISTINCT regexp_matches(model_name, '^ETS\([AM],(N|A|Ad),(N|A|M)\)$')
+FROM ts_forecast_by('air', id, ds, y, 'ETS', 12, '1mo', MAP{'seasonal_period': '12'});
+----
+true
+
+#######################################
+# FCST-01 (ensemble): yhat_lower/yhat_upper are the crate Ensemble's own
+# prediction interval — non-NULL and bracketing yhat at every step (D-01).
+#######################################
+
+query I
+SELECT count(*) FROM ts_forecast_ensemble_by(
+    'air', id, ds, y, ['ETS', 'ETS'], 12, '1mo',
+    combination_method := 'mean', seasonal_period := 12
+)
+WHERE yhat_lower IS NULL OR yhat_upper IS NULL OR NOT (yhat_lower < yhat AND yhat < yhat_upper);
+----
+0
+
+#######################################
+# FCST-06: AutoMFLES/AutoMSTL report the non-Auto family name exactly;
+# Kalman reports its spec in model_name; HoltWinters/Kalman/panel-Croston
+# misuse are clear SQL errors naming the offending parameter (D-06/D-07).
+#######################################
+
+query I
+SELECT DISTINCT model_name FROM ts_forecast_by('air', id, ds, y, 'AutoMSTL', 12, '1mo', MAP{'seasonal_period': '12'});
+----
+MSTL
+
+query I
+SELECT DISTINCT model_name FROM ts_forecast_by('air', id, ds, y, 'AutoMFLES', 12, '1mo', MAP{'seasonal_period': '12'});
+----
+MFLES
+
+query I
+SELECT DISTINCT model_name FROM ts_forecast_by('air', id, ds, y, 'Kalman', 12, '1mo', MAP{});
+----
+Kalman(local_level)
+
+statement ok
+CREATE TABLE ramp24 AS
+SELECT 'A' AS id,
+       ('2020-01-01'::DATE + (i || ' days')::INTERVAL)::DATE AS ds,
+       (100 + i * 2)::DOUBLE AS y
+FROM (SELECT unnest(range(24)) AS i);
+
+# HoltWinters on a 24-point linear ramp (no detectable seasonality), no
+# explicit seasonal_period -> hard error naming "seasonal period" (D-07) —
+# never a silent default of 12.
+statement error
+SELECT * FROM ts_forecast_by('ramp24', id, ds, y, 'HoltWinters', 5, '1d', MAP{});
+----
+seasonal period
+
+# Unknown kalman_model -> error naming kalman_model (D-07)
+statement error
+SELECT * FROM ts_forecast_by('air', id, ds, y, 'Kalman', 12, '1mo', MAP{'kalman_model': 'local_lvl'});
+----
+kalman_model
+
+# Misspelled panel croston_variant -> error naming croston_variant (D-07).
+# ts_forecast_panel_by requires >= 3 series for cross-series global
+# learning, so a 3-series panel is built here (the 'air' table above is a
+# single series).
+statement ok
+CREATE TABLE panel3 AS
+SELECT s.sid AS id, m.ds, (s.sid * 10 + m.i)::DOUBLE AS y
+FROM (VALUES (1), (2), (3)) AS s(sid)
+CROSS JOIN (
+    SELECT i, ('2020-01-01'::DATE + (i || ' months')::INTERVAL)::DATE AS ds
+    FROM range(12) AS t(i)
+) AS m;
+
+statement error
+SELECT * FROM ts_forecast_panel_by('panel3', id, ds, y, 'GlobalCroston', 4, '1mo', MAP{'croston_variant': 'sab'});
+----
+croston_variant
+
+#######################################
+# FCST-05 (plan 10-04, D-10): the SQL exog surface routes through the
+# crate's own exog support — AutoARIMA's real order search, OptimizedTheta
+# staying itself, a constant-in-history regressor getting 0 effect, a
+# non-exog model + regressor erroring, and params (GARCH p/q) reaching the
+# 6-argument _ts_forecast_exog overload. All literal-LIST, no `require json`.
+#######################################
+
+# AutoARIMA with one informative regressor -> real selected order + " with regressors"
+query I
+SELECT regexp_matches((fcst).model, '^AutoARIMA\(\d+,\d+,\d+\)(\(\d+,\d+,\d+\)\[\d+\])? with regressors$')
+FROM (
+    WITH gen AS (
+        SELECT i, 50.0 + 3.0 * sin(i * 0.37) + (i % 5)::DOUBLE AS y, sin(i * 0.37) AS x1
+        FROM range(120) AS t(i)
+    ), fut AS (
+        SELECT sin((120 + i) * 0.37) AS x1 FROM range(6) AS t(i)
+    )
+    SELECT _ts_forecast_exog(
+        (SELECT list(y ORDER BY i) FROM gen),
+        [(SELECT list(x1 ORDER BY i) FROM gen)],
+        [(SELECT list(x1) FROM fut)],
+        6, 'AutoARIMA'
+    ) AS fcst
+);
+----
+true
+
+# OptimizedTheta with a regressor stays itself (never a "ThetaX" stand-in)
+query I
+SELECT (fcst).model
+FROM (
+    WITH gen AS (
+        SELECT i, 50.0 + 3.0 * sin(i * 0.37) + (i % 5)::DOUBLE AS y, sin(i * 0.37) AS x1
+        FROM range(120) AS t(i)
+    ), fut AS (
+        SELECT sin((120 + i) * 0.37) AS x1 FROM range(6) AS t(i)
+    )
+    SELECT _ts_forecast_exog(
+        (SELECT list(y ORDER BY i) FROM gen),
+        [(SELECT list(x1 ORDER BY i) FROM gen)],
+        [(SELECT list(x1) FROM fut)],
+        6, 'OptimizedTheta'
+    ) AS fcst
+);
+----
+OptimizedTheta with regressors
+
+# A regressor that is 0 in history and 1 in the future (constant in
+# history) leaves every point identical (and finite) to the x1-only run.
+query I
+SELECT max(abs(a - b)) < 1e-9
+FROM (
+    WITH gen AS (
+        SELECT i, 50.0 + 3.0 * sin(i * 0.37) + (i % 5)::DOUBLE AS y, sin(i * 0.37) AS x1
+        FROM range(120) AS t(i)
+    ), fut AS (
+        SELECT sin((120 + i) * 0.37) AS x1 FROM range(6) AS t(i)
+    )
+    SELECT
+        unnest((SELECT _ts_forecast_exog(
+            (SELECT list(y ORDER BY i) FROM gen),
+            [(SELECT list(x1 ORDER BY i) FROM gen)],
+            [(SELECT list(x1) FROM fut)],
+            6, 'OptimizedTheta'
+        )).point) AS a,
+        unnest((SELECT _ts_forecast_exog(
+            (SELECT list(y ORDER BY i) FROM gen),
+            [(SELECT list(x1 ORDER BY i) FROM gen), (SELECT list(0.0::DOUBLE) FROM range(120))],
+            [(SELECT list(x1) FROM fut), (SELECT list(1.0::DOUBLE) FROM range(6))],
+            6, 'OptimizedTheta'
+        )).point) AS b
+);
+----
+true
+
+# HoltWinters given a regressor -> hard error naming the problem (D-04 spirit)
+statement error
+SELECT _ts_forecast_exog(
+    [1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0],
+    [[1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0]],
+    [[1.0,2.0,3.0]],
+    3, 'HoltWinters'
+);
+----
+does not support exogenous regressors
+
+# GARCH with no regressors + params garch_p via the 6-argument overload ->
+# every ts_forecast_by option is honoured on the exog surface too.
+query I
+SELECT (_ts_forecast_exog(
+    (SELECT list(y) FROM (SELECT unnest([112, 118, 132, 129, 121, 135, 148, 148, 136, 119, 104, 118,
+                                          115, 126, 141, 135, 125, 149, 170, 170, 158, 133, 114, 140,
+                                          145, 150, 178, 163, 172, 178, 199, 199, 184, 162, 146, 166,
+                                          171, 180, 193, 181, 183, 218, 230, 242, 209, 191, 172, 194,
+                                          196, 196, 236, 235, 229, 243, 264, 272, 237, 211, 180, 201]) AS y)),
+    []::DOUBLE[][], []::DOUBLE[][], 6, 'GARCH', MAP{'garch_p': '2'}
+)).model;
+----
+GARCH(2,1)
+
+# Future regressor NULL -> statement error mentioning "future"
+statement error
+SELECT _ts_forecast_exog(
+    [1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0,11.0,12.0,13.0,14.0,15.0],
+    [[1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0,11.0,12.0,13.0,14.0,15.0]],
+    [[1.0, NULL, 3.0]],
+    3, 'OptimizedTheta'
+);
+----
+future
+
+# Historical interior regressor NULL -> succeeds (interpolated, not an error)
+query I
+SELECT len((fcst).point)
+FROM (
+    WITH gen AS (
+        SELECT i, 50.0 + 3.0 * sin(i * 0.37) + (i % 5)::DOUBLE AS y,
+               CASE WHEN i = 60 THEN NULL ELSE sin(i * 0.37) END AS x1
+        FROM range(120) AS t(i)
+    ), fut AS (
+        SELECT sin((120 + i) * 0.37) AS x1 FROM range(6) AS t(i)
+    )
+    SELECT _ts_forecast_exog(
+        (SELECT list(y ORDER BY i) FROM gen),
+        [(SELECT list(x1 ORDER BY i) FROM gen)],
+        [(SELECT list(x1) FROM fut)],
+        6, 'OptimizedTheta'
+    ) AS fcst
+);
+----
+6
+
+#######################################
+# FCST-08 (y side, D-11/D-12): all-NULL series -> NULL result; a valid NaN
+# behaves exactly like NULL at that position, including for the exported
+# residuals list; trailing-NULL y still realigns forecast_step=1 to the
+# period after the ORIGINAL last row.
+#######################################
+
+query I
+SELECT _ts_forecast([NULL, NULL, NULL, NULL]::DOUBLE[], 3) IS NULL;
+----
+true
+
+query I
+WITH gen AS (SELECT i, 50.0 + 3.0 * sin(i * 0.37) + (i % 5)::DOUBLE AS y FROM range(40) AS t(i))
+SELECT
+    (SELECT (_ts_forecast((SELECT list(CASE WHEN i = 10 THEN 'NaN'::DOUBLE ELSE y END ORDER BY i) FROM gen), 3, 'OptimizedTheta')).point)
+    =
+    (SELECT (_ts_forecast((SELECT list(CASE WHEN i = 10 THEN NULL ELSE y END ORDER BY i) FROM gen), 3, 'OptimizedTheta')).point);
+----
+true
+
+query I
+WITH gen AS (SELECT i, 50.0 + 3.0 * sin(i * 0.37) + (i % 5)::DOUBLE AS y FROM range(40) AS t(i))
+SELECT (_ts_forecast((SELECT list(CASE WHEN i = 10 THEN 'NaN'::DOUBLE ELSE y END ORDER BY i) FROM gen), 3, 'OptimizedTheta')).residuals[11] IS NULL;
+----
+true
+
+statement ok
+CREATE TABLE rwd_trailing_null AS
+SELECT 'A' AS id,
+       ('2020-01-01'::DATE + (i || ' days')::INTERVAL)::DATE AS ds,
+       CASE WHEN i >= 30 THEN NULL ELSE i::DOUBLE END AS y
+FROM range(32) AS t(i);
+
+query I
+SELECT yhat = 32.0 AND ds = DATE '2020-02-02'
+FROM ts_forecast_by('rwd_trailing_null', id, ds, y, 'RandomWalkDrift', 3, '1d', MAP{})
+WHERE forecast_step = 1;
+----
+true
+
+#######################################
+# FCST-01 (D-02 NULL bounds): a model fit with regressors but without a
+# native exog interval override (MSTL's predict_with_exog_intervals falls
+# back to point-only) returns SQL NULL lower/upper, not a fabricated width.
+#######################################
+
+query I
+SELECT (fcst).lower IS NULL AND (fcst).upper IS NULL
+FROM (
+    WITH gen AS (
+        SELECT i, 50.0 + 3.0 * sin(i * 0.37) + (i % 5)::DOUBLE AS y, sin(i * 0.37) AS x1
+        FROM range(120) AS t(i)
+    ), fut AS (
+        SELECT sin((120 + i) * 0.37) AS x1 FROM range(6) AS t(i)
+    )
+    SELECT _ts_forecast_exog(
+        (SELECT list(y ORDER BY i) FROM gen),
+        [(SELECT list(x1 ORDER BY i) FROM gen)],
+        [(SELECT list(x1) FROM fut)],
+        6, 'MSTL', MAP{'seasonal_period': '4'}
+    ) AS fcst
+);
+----
+true
+
+#######################################
+# FCST-06 / FCST-01 gap closure 10-10: ts_forecast_agg parity with
+# ts_forecast_by (10-VERIFICATION.md gap — the aggregate used to silently
+# drop every params-MAP key except model/arima_order/seasonal_order/
+# seasonal_period and hardcode confidence_level to 0.90). All on table
+# `air` (agg date arg cast to TIMESTAMP, matching the aggregate's TIMESTAMP
+# date_col signature).
+#######################################
+
+# Unknown key -> the same closed-key-set error ts_forecast_by/native raise.
+statement error
+SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'Naive', 3, MAP{'bogus_key': '1'}) FROM air;
+----
+Unknown parameter(s): 'bogus_key'
+
+# Same via the alias.
+statement error
+SELECT anofox_fcst_ts_forecast_agg(ds::TIMESTAMP, y, 'Naive', 3, MAP{'bogus_key': '1'}) FROM air;
+----
+Unknown parameter(s): 'bogus_key'
+
+# croston_variant is a panel-only key (ts_forecast_panel_by's GlobalCroston) —
+# unrecognized here too, identical to ts_forecast_by.
+statement error
+SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'CrostonClassic', 3, MAP{'croston_variant': 'sba'}) FROM air;
+----
+Unknown parameter(s): 'croston_variant'
+
+# Unknown kalman_model value -> error naming kalman_model (D-07), same as
+# ts_forecast_by.
+statement error
+SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'Kalman', 3, MAP{'kalman_model': 'bogus'}) FROM air;
+----
+Invalid parameter 'kalman_model' = 'bogus'
+
+# kalman_model now actually threads through (previously silently dropped) —
+# model_name reports the spec, exactly like ts_forecast_by.
+query I
+SELECT (ts_forecast_agg(ds::TIMESTAMP, y, 'Kalman', 3, MAP{'kalman_model': 'local_linear_trend'})).model_name
+FROM air;
+----
+Kalman(local_linear_trend)
+
+# garch_p now threads through on the agg surface too — run on the 60-row
+# prefix so GARCH fits quickly.
+query I
+SELECT (ts_forecast_agg(ds::TIMESTAMP, y, 'GARCH', 6, MAP{})).model_name
+FROM air WHERE ds < DATE '1954-01-01';
+----
+GARCH(1,1)
+
+query I
+SELECT (ts_forecast_agg(ds::TIMESTAMP, y, 'GARCH', 6, MAP{'garch_p': '2'})).model_name
+FROM air WHERE ds < DATE '1954-01-01';
+----
+GARCH(2,1)
+
+# 'ARIMA' without arima_order -> hard SQL error naming arima_order (D-09),
+# not a silently-defaulted fixed-coefficient model.
+statement error
+SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'ARIMA', 3, MAP{}) FROM air;
+----
+arima_order
+
+# Default field names unchanged when confidence_level is omitted.
+query I
+SELECT len((ts_forecast_agg(ds::TIMESTAMP, y, 'Naive', 3, MAP{})).lower_90)
+FROM air;
+----
+3
+
+# confidence_level now actually widens/narrows the interval (previously
+# hardcoded to 0.90 regardless of the params MAP) — 95% must be wider than
+# 80% at h=1, and the bound fields must be named lower_95/upper_95 resp.
+# lower_80/upper_80 (two separately-bound aggregate calls, cross joined).
+query I
+SELECT (f95).upper_95[1] - (f95).lower_95[1] > (f80).upper_80[1] - (f80).lower_80[1]
+FROM (SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'Naive', 3, MAP{'confidence_level': '0.95'}) AS f95 FROM air) t95
+CROSS JOIN (SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'Naive', 3, MAP{'confidence_level': '0.80'}) AS f80 FROM air) t80;
+----
+true
+
+# Naive 95% h=1 half-width matches the same R AirPassengers fixture
+# ts_forecast_by asserts above (D-01) — not the old hardcoded-0.90 output.
+query I
+SELECT abs((f).upper_95[1] - (f).point_forecast[1] - 66.07118560930098) < 0.1
+FROM (SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'Naive', 12, MAP{'confidence_level': '0.95'}) AS f FROM air) t;
+----
+true
+
+# A non-constant confidence_level is an SQL error, not a mislabelled field —
+# the bound field names (lower_<pct>/upper_<pct>) are fixed at bind time.
+statement error
+SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'Naive', 3,
+    map(['confidence_level'], [CASE WHEN y > 0 THEN '0.95' ELSE '0.95' END])) FROM air;
+----
+must be a constant expression
+
+# Parity (a): AutoETS seasonal_period=12 @0.95 — ts_forecast_agg must equal
+# ts_forecast_by for every forecast step on the same complete series.
+query I
+SELECT count(*) FROM (
+    WITH agg AS (
+        SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'AutoETS', 12,
+            MAP{'seasonal_period': '12', 'confidence_level': '0.95'}) AS f
+        FROM air
+    ), agg_rows AS (
+        SELECT unnest((f).forecast_step) AS forecast_step,
+               unnest((f).point_forecast) AS agg_yhat,
+               unnest((f).lower_95) AS agg_lower,
+               unnest((f).upper_95) AS agg_upper,
+               (f).model_name AS agg_model
+        FROM agg
+    )
+    SELECT *
+    FROM agg_rows
+    JOIN ts_forecast_by('air', id, ds, y, 'AutoETS', 12, '1mo',
+        MAP{'seasonal_period': '12', 'confidence_level': '0.95'}) AS byt
+        USING (forecast_step)
+    WHERE agg_model = byt.model_name
+      AND abs(agg_yhat - byt.yhat) <= 1e-9 * greatest(1.0, abs(byt.yhat))
+      AND ((agg_lower IS NULL AND byt.yhat_lower IS NULL)
+           OR abs(agg_lower - byt.yhat_lower) <= 1e-9 * greatest(1.0, abs(byt.yhat_lower)))
+      AND ((agg_upper IS NULL AND byt.yhat_upper IS NULL)
+           OR abs(agg_upper - byt.yhat_upper) <= 1e-9 * greatest(1.0, abs(byt.yhat_upper)))
+);
+----
+12
+
+# Parity (b): Kalman local_linear_trend @0.80.
+query I
+SELECT count(*) FROM (
+    WITH agg AS (
+        SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'Kalman', 6,
+            MAP{'kalman_model': 'local_linear_trend', 'confidence_level': '0.80'}) AS f
+        FROM air
+    ), agg_rows AS (
+        SELECT unnest((f).forecast_step) AS forecast_step,
+               unnest((f).point_forecast) AS agg_yhat,
+               unnest((f).lower_80) AS agg_lower,
+               unnest((f).upper_80) AS agg_upper,
+               (f).model_name AS agg_model
+        FROM agg
+    )
+    SELECT *
+    FROM agg_rows
+    JOIN ts_forecast_by('air', id, ds, y, 'Kalman', 6, '1mo',
+        MAP{'kalman_model': 'local_linear_trend', 'confidence_level': '0.80'}) AS byt
+        USING (forecast_step)
+    WHERE agg_model = byt.model_name
+      AND abs(agg_yhat - byt.yhat) <= 1e-9 * greatest(1.0, abs(byt.yhat))
+      AND ((agg_lower IS NULL AND byt.yhat_lower IS NULL)
+           OR abs(agg_lower - byt.yhat_lower) <= 1e-9 * greatest(1.0, abs(byt.yhat_lower)))
+      AND ((agg_upper IS NULL AND byt.yhat_upper IS NULL)
+           OR abs(agg_upper - byt.yhat_upper) <= 1e-9 * greatest(1.0, abs(byt.yhat_upper)))
+);
+----
+6
+
+# Parity (c): HoltWinters with an auto-detected period (MAP{}, lower_90/
+# upper_90 defaults) — the aggregate's auto-detection must match
+# ts_forecast_by's, not just its explicit-period path.
+query I
+SELECT count(*) FROM (
+    WITH agg AS (
+        SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'HoltWinters', 12, MAP{}) AS f
+        FROM air
+    ), agg_rows AS (
+        SELECT unnest((f).forecast_step) AS forecast_step,
+               unnest((f).point_forecast) AS agg_yhat,
+               unnest((f).lower_90) AS agg_lower,
+               unnest((f).upper_90) AS agg_upper,
+               (f).model_name AS agg_model
+        FROM agg
+    )
+    SELECT *
+    FROM agg_rows
+    JOIN ts_forecast_by('air', id, ds, y, 'HoltWinters', 12, '1mo', MAP{}) AS byt
+        USING (forecast_step)
+    WHERE agg_model = byt.model_name
+      AND abs(agg_yhat - byt.yhat) <= 1e-9 * greatest(1.0, abs(byt.yhat))
+      AND ((agg_lower IS NULL AND byt.yhat_lower IS NULL)
+           OR abs(agg_lower - byt.yhat_lower) <= 1e-9 * greatest(1.0, abs(byt.yhat_lower)))
+      AND ((agg_upper IS NULL AND byt.yhat_upper IS NULL)
+           OR abs(agg_upper - byt.yhat_upper) <= 1e-9 * greatest(1.0, abs(byt.yhat_upper)))
+);
+----
+12

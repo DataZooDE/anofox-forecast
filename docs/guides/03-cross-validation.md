@@ -46,12 +46,21 @@ SELECT * FROM ts_cv_forecast_by(
 - `date` - forecast date
 - `y` - actual value
 - `yhat` - point forecast
-- `yhat_lower` / `yhat_upper` - prediction interval
+- `yhat_lower` / `yhat_upper` - each model's own crate-native prediction interval at
+  `confidence_level`; see
+  [07-forecasting.md#prediction-intervals-fitted-values-and-input-handling](../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling)
+  for known per-model calibration caveats — calibrate with conformal prediction intervals
+  (`docs/api/11-conformal-prediction.md`) for guaranteed coverage
 - `model_name` - model used
 
 Compute per-fold errors with the metric functions:
 
 ```sql
+CREATE TABLE cv_folds AS
+SELECT * FROM ts_cv_folds_by('sales', product_id, date, quantity, 3, 7, MAP{});
+CREATE TABLE cv_results AS
+SELECT * FROM ts_cv_forecast_by('cv_folds', product_id, date, quantity, 'Naive', MAP{});
+
 SELECT
     product_id, fold_id,
     ts_rmse(LIST(y ORDER BY date), LIST(yhat ORDER BY date)) AS rmse,
@@ -165,18 +174,18 @@ functions, so you can report any metric you like from the same run:
 
 ```sql
 CREATE TABLE cv_folds AS
-SELECT * FROM ts_cv_folds_by('sales', id, date, val, 3, 7, MAP{});
+SELECT * FROM ts_cv_folds_by('sales', product_id, date, quantity, 3, 7, MAP{});
 CREATE TABLE cv_results AS
-SELECT * FROM ts_cv_forecast_by('cv_folds', id, date, val, 'Naive', MAP{});
+SELECT * FROM ts_cv_forecast_by('cv_folds', product_id, date, quantity, 'Naive', MAP{});
 
 SELECT
-    id, fold_id,
+    product_id, fold_id,
     ts_rmse(LIST(y ORDER BY date), LIST(yhat ORDER BY date))  AS rmse,
     ts_mae(LIST(y ORDER BY date), LIST(yhat ORDER BY date))   AS mae,
     ts_mape(LIST(y ORDER BY date), LIST(yhat ORDER BY date))  AS mape,
     ts_smape(LIST(y ORDER BY date), LIST(yhat ORDER BY date)) AS smape
 FROM cv_results
-GROUP BY id, fold_id;
+GROUP BY product_id, fold_id;
 
 -- Available metric functions: ts_rmse, ts_mae, ts_mse, ts_mape, ts_smape, ts_bias, ts_r2, ts_coverage
 ```
@@ -185,7 +194,7 @@ GROUP BY id, fold_id;
 |--------|------------|
 | RMSE | Default; penalizes large errors |
 | MAE | Robust to outliers |
-| MAPE | Percentage-based comparison |
+| MAPE | Percentage-based comparison; `NULL` if any actual is exactly 0 (use sMAPE/MASE for intermittent demand) |
 | sMAPE | Symmetric percentage |
 | Coverage | Evaluate prediction intervals |
 
@@ -195,14 +204,19 @@ All examples below assume `cv_results` was produced by the two-step workflow:
 
 ```sql
 CREATE TABLE cv_folds AS
-SELECT * FROM ts_cv_folds_by('sales', id, date, val, 5, 7, MAP{});
+SELECT * FROM ts_cv_folds_by('sales', product_id, date, quantity, 5, 7, MAP{});
 CREATE TABLE cv_results AS
-SELECT * FROM ts_cv_forecast_by('cv_folds', id, date, val, 'Naive', MAP{});
+SELECT * FROM ts_cv_forecast_by('cv_folds', product_id, date, quantity, 'Naive', MAP{});
 ```
 
 ### Aggregate by Model
 
 ```sql
+CREATE OR REPLACE TABLE cv_folds AS
+SELECT * FROM ts_cv_folds_by('sales', product_id, date, quantity, 5, 7, MAP{});
+CREATE OR REPLACE TABLE cv_results AS
+SELECT * FROM ts_cv_forecast_by('cv_folds', product_id, date, quantity, 'Naive', MAP{});
+
 SELECT
     model_name,
     COUNT(*) AS n_forecasts,
@@ -215,8 +229,13 @@ GROUP BY model_name;
 ### By Forecast Horizon
 
 ```sql
+CREATE OR REPLACE TABLE cv_folds AS
+SELECT * FROM ts_cv_folds_by('sales', product_id, date, quantity, 5, 7, MAP{});
+CREATE OR REPLACE TABLE cv_results AS
+SELECT * FROM ts_cv_forecast_by('cv_folds', product_id, date, quantity, 'Naive', MAP{});
+
 WITH results AS (
-    SELECT *, ROW_NUMBER() OVER (PARTITION BY fold_id, id ORDER BY date) AS step
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY fold_id, product_id ORDER BY date) AS step
     FROM cv_results
 )
 SELECT
@@ -232,12 +251,17 @@ Typically, error increases with forecast horizon.
 ### By Series
 
 ```sql
+CREATE OR REPLACE TABLE cv_folds AS
+SELECT * FROM ts_cv_folds_by('sales', product_id, date, quantity, 5, 7, MAP{});
+CREATE OR REPLACE TABLE cv_results AS
+SELECT * FROM ts_cv_forecast_by('cv_folds', product_id, date, quantity, 'Naive', MAP{});
+
 SELECT
-    id,
+    product_id,
     ROUND(AVG(abs(y - yhat)), 2) AS avg_mae,
     COUNT(*) AS n_obs
 FROM cv_results
-GROUP BY id
+GROUP BY product_id
 ORDER BY avg_mae DESC;
 ```
 
@@ -246,15 +270,15 @@ ORDER BY avg_mae DESC;
 ```sql
 -- Generate the folds ONCE so every model is evaluated on identical splits
 CREATE TABLE cv_folds AS
-SELECT * FROM ts_cv_folds_by('sales', id, date, val, 3, 7, MAP{});
+SELECT * FROM ts_cv_folds_by('sales', product_id, date, quantity, 3, 7, MAP{});
 
 -- Forecast each model on the same folds
 WITH comparisons AS (
-    SELECT 'AutoETS' AS model, * FROM ts_cv_forecast_by('cv_folds', id, date, val, 'AutoETS', MAP{})
+    SELECT 'AutoETS' AS model, * FROM ts_cv_forecast_by('cv_folds', product_id, date, quantity, 'AutoETS', MAP{})
     UNION ALL
-    SELECT 'Theta' AS model, * FROM ts_cv_forecast_by('cv_folds', id, date, val, 'Theta', MAP{})
+    SELECT 'Theta' AS model, * FROM ts_cv_forecast_by('cv_folds', product_id, date, quantity, 'Theta', MAP{})
     UNION ALL
-    SELECT 'Naive' AS model, * FROM ts_cv_forecast_by('cv_folds', id, date, val, 'Naive', MAP{})
+    SELECT 'Naive' AS model, * FROM ts_cv_forecast_by('cv_folds', product_id, date, quantity, 'Naive', MAP{})
 )
 SELECT
     model,
@@ -270,7 +294,10 @@ ORDER BY mae;
 1. **Use at least 3-5 folds** for reliable estimates
 2. **Match horizon to business needs** - don't validate 7-day if you need 30-day
 3. **Include a Naive baseline** - if you can't beat Naive, rethink your approach
-4. **Check coverage** - prediction intervals should cover ~90% of actuals
+4. **Check coverage** - empirically measure how often actuals fall within the prediction
+   interval; several models have known calibration issues (see
+   `docs/api/07-forecasting.md`'s known-issues table), so do not assume every model's
+   interval matches the nominal confidence level without checking
 5. **Examine errors by horizon** - later horizons are harder
 6. **Consider business cost** - sometimes under-forecasting is worse than over-forecasting
 

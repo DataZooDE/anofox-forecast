@@ -32,6 +32,12 @@ typedef enum ConformalMethodFFI {
  * Conformal strategy enumeration for FFI.
  *
  * The strategy determines how residuals are used for calibration.
+ *
+ * D-09/G15 (Phase 16): a `JackknifePlus` enumerator existed here before
+ * Phase 16 but is removed outright, not kept as a permanently-unreachable
+ * slot -- `anofox_ts_conformal_parse_strategy` is the only path C++ uses to
+ * produce a `ConformalStrategyFFI` from a string, and it never returns this
+ * type for a jackknife+ alias (it reports an error instead).
  */
 typedef enum ConformalStrategyFFI {
     /**
@@ -42,10 +48,6 @@ typedef enum ConformalStrategyFFI {
      * Cross-validation conformal - uses CV residuals
      */
     CROSS_VAL = 1,
-    /**
-     * Jackknife+ conformal - stores full residual distribution
-     */
-    JACKKNIFE_PLUS = 2,
 } ConformalStrategyFFI;
 
 /**
@@ -234,11 +236,11 @@ typedef struct TsStatsResult {
      */
     double autocorr_lag1;
     /**
-     * Trend strength (0-1)
+     * Trend strength (D-02, STAT-02); valid only when `has_trend_strength`
      */
     double trend_strength;
     /**
-     * Seasonality strength (0-1)
+     * Seasonality strength (D-02, STAT-02); valid only when `has_seasonality_strength`
      */
     double seasonality_strength;
     /**
@@ -254,13 +256,29 @@ typedef struct TsStatsResult {
      */
     size_t expected_length;
     /**
-     * Number of gaps (missing time periods) in the series
+     * Number of missing periods (D-04; was "gap occurrences" pre-v2026.10.16)
      */
     size_t n_gaps;
     /**
-     * Whether date-based metrics (expected_length, n_gaps) are valid
+     * Number of gap runs/intervals (D-04; the pre-v2026.10.16 meaning of `n_gaps`)
+     */
+    size_t n_gap_runs;
+    /**
+     * Whether date-based metrics (expected_length, n_gaps, n_gap_runs) are valid
      */
     bool has_date_metrics;
+    /**
+     * Whether `entropy` is valid (None in Rust -> false here, D-03)
+     */
+    bool has_entropy;
+    /**
+     * Whether `trend_strength` is valid (None in Rust -> false here, D-02)
+     */
+    bool has_trend_strength;
+    /**
+     * Whether `seasonality_strength` is valid (None in Rust -> false here, D-02)
+     */
+    bool has_seasonality_strength;
 } TsStatsResult;
 
 /**
@@ -1118,6 +1136,20 @@ typedef struct ForecastOptions {
      * Only consulted when model is "AutoEnsemble".
      */
     char ensemble_method[32];
+    /**
+     * ARIMA non-seasonal order as a string, e.g. "[1,1,1]". Empty = unset
+     * (D-08/D-09: "ARIMA" without this is an error naming "AutoARIMA").
+     * Only consulted when model is "ARIMA"; parsed and bounds-checked by
+     * `anofox_fcst_core::parse_order_triplet`.
+     */
+    char arima_order_str[32];
+    /**
+     * ARIMA seasonal order as a string, e.g. "[0,1,1]". Empty = unset
+     * (non-seasonal). Requires `seasonal_period > 1` when non-zero. Only
+     * consulted when model is "ARIMA"; parsed and bounds-checked by
+     * `anofox_fcst_core::parse_order_triplet`.
+     */
+    char seasonal_order_str[32];
 } ForecastOptions;
 
 /**
@@ -1168,6 +1200,17 @@ typedef struct ForecastResult {
      * Mean Squared Error
      */
     double mse;
+    /**
+     * Number of residuals.
+     *
+     * Appended additively (plan 10-02) to fix a pre-existing correctness gap:
+     * `fitted_values` and `residuals` used to share the single `n_fitted`
+     * length field, which silently truncated `residuals` to length 0 whenever
+     * a crate model's `fitted_values()` was `None` while `residuals()` was
+     * `Some` (e.g. GARCH always, by crate design; AutoARIMA on some series).
+     * Callers reading `residuals` MUST use `n_residuals`, not `n_fitted`.
+     */
+    size_t n_residuals;
 } ForecastResult;
 
 /**
@@ -1192,6 +1235,20 @@ typedef struct ExogenousRegressor {
      * Number of future values (must match horizon)
      */
     size_t n_future;
+    /**
+     * Validity bitmask for `values` (D-12, FCST-08). `null` = every
+     * historical value is valid; otherwise `ceil(n_values / 64)` words,
+     * where bit `i` (`word i/64`, bit `i % 64`) set means `values[i]` is
+     * valid. Added in plan 10-04 Task 1; read by the FFI boundary starting
+     * in Task 2 — until then every caller must pass `null` here.
+     */
+    const uint64_t *validity;
+    /**
+     * Validity bitmask for `future_values`, same encoding as `validity`
+     * but sized `ceil(n_future / 64)` words. `null` = every future value
+     * is valid.
+     */
+    const uint64_t *future_validity;
 } ExogenousRegressor;
 
 /**
@@ -1296,6 +1353,14 @@ typedef struct ForecastOptionsExog {
      * Only consulted when model is "AutoEnsemble".
      */
     char ensemble_method[32];
+    /**
+     * ARIMA non-seasonal order string. See [`ForecastOptions::arima_order_str`].
+     */
+    char arima_order_str[32];
+    /**
+     * ARIMA seasonal order string. See [`ForecastOptions::seasonal_order_str`].
+     */
+    char seasonal_order_str[32];
 } ForecastOptionsExog;
 
 /**
@@ -1323,17 +1388,28 @@ typedef struct DataQualityResult {
      */
     double overall_score;
     /**
-     * Number of gaps
+     * Number of missing periods (D-04/D-05: expected timestamps absent under the
+     * declared/detected frequency) -- matches `TsStatsResult::n_gaps`'s meaning, not
+     * the pre-v2026.10.16 "gap occurrence count" (see `n_gap_runs`).
      */
     size_t n_gaps;
     /**
-     * Number of missing values
+     * Number of gap occurrences/runs (D-05): the pre-v2026.10.16 `n_gaps` meaning.
+     */
+    size_t n_gap_runs;
+    /**
+     * Number of missing values (NULL or NaN)
      */
     size_t n_missing;
     /**
      * Is constant series
      */
     bool is_constant;
+    /**
+     * Whether the present-value count is below the caller's `n_short` threshold
+     * (D-05, WRAP-02).
+     */
+    bool is_short;
 } DataQualityResult;
 
 /**
@@ -1397,18 +1473,68 @@ typedef struct ConformalResultFFI {
      */
     size_t n_forecasts;
     /**
-     * Nominal coverage level (1 - alpha)
+     * Empirical coverage on the calibration residuals (Phase 16 D-02) --
+     * NOT the requested level; see `nominal_level` for that.
      */
     double coverage;
+    /**
+     * The requested coverage level (1 - alpha) (Phase 16 D-02).
+     */
+    double nominal_level;
     /**
      * The computed conformity score (quantile threshold)
      */
     double conformity_score;
     /**
+     * Number of calibration residuals actually used (Phase 16 D-02).
+     */
+    size_t n_calibration;
+    /**
      * Method used for conformal prediction
      */
     char method[32];
+    /**
+     * `true` when no finite-sample interval exists at this
+     * `(n_calibration, alpha)` (Phase 16 D-05/G12). When set,
+     * `conformity_score`/`coverage` are NaN and every `lower`/`upper`
+     * entry is NaN (unbounded).
+     */
+    bool calibration_insufficient;
 } ConformalResultFFI;
+
+/**
+ * Result of calibrating a conformal predictor from per-row `(actual,
+ * forecast)` pairs, without applying it to any point forecasts yet
+ * (Phase 16 D-03).
+ */
+typedef struct ConformalCalibrationFFI {
+    /**
+     * Empirical coverage on the calibration residuals.
+     */
+    double coverage;
+    /**
+     * The requested coverage level (1 - alpha).
+     */
+    double nominal_level;
+    /**
+     * The computed conformity score (quantile threshold).
+     */
+    double conformity_score;
+    /**
+     * Number of calibration residuals actually used.
+     */
+    size_t n_calibration;
+    /**
+     * Method used for calibration ("symmetric" or "adaptive").
+     */
+    char method[32];
+    /**
+     * `true` when no finite-sample interval exists at this
+     * `(n_calibration, alpha)` (Phase 16 D-05/G12); see
+     * `ConformalResultFFI::calibration_insufficient`.
+     */
+    bool calibration_insufficient;
+} ConformalCalibrationFFI;
 
 /**
  * Result of conformal prediction with multiple coverage levels.
@@ -1458,7 +1584,7 @@ typedef struct CalibrationProfileFFI {
      */
     enum ConformalMethodFFI method;
     /**
-     * Strategy used (split, crossval, jackknife+)
+     * Strategy used (split, crossval)
      */
     enum ConformalStrategyFFI strategy;
     /**
@@ -1466,9 +1592,7 @@ typedef struct CalibrationProfileFFI {
      */
     double *alphas;
     /**
-     * State vector (strategy-specific):
-     * - Split/CrossVal: [lower_q1, ..., upper_q1, ...]
-     * - JackknifePlus: sorted absolute residuals
+     * State vector: [lower_q1, ..., upper_q1, ...]
      */
     double *state_vector;
     /**
@@ -1647,31 +1771,40 @@ typedef struct ConformalPerStepResultFFI {
  */
 typedef struct AnofoxStationarityResult {
     /**
-     * ADF t-statistic (negative; more negative → stronger evidence of stationarity)
+     * ADF t-statistic (negative; more negative → stronger evidence of
+     * stationarity) or KPSS statistic (positive; larger → stronger evidence
+     * AGAINST stationarity). `NaN` when the input is degenerate (too short,
+     * or an exactly-collinear regression) — see `cv_1pct` below.
      */
     double statistic;
     /**
-     * Approximate p-value (MacKinnon 9-point lookup table)
+     * p-value from MacKinnon (1994) (ADF) or the `tseries` table (KPSS),
+     * clamped to `[0.01, 0.10]` for KPSS. `NaN` iff `statistic` is `NaN`.
      */
     double p_value;
     /**
-     * Number of lags used (AIC-selected or override)
+     * Number of lags used (AIC-selected or override, ADF) or the Bartlett
+     * bandwidth (KPSS).
      */
     size_t lags;
     /**
-     * `true` if series is stationary at the 5% level (`statistic < cv_5pct`)
+     * `true` if series is stationary at the 5% level (`statistic < cv_5pct`
+     * for ADF and KPSS alike); forced `false` whenever `statistic` is `NaN`.
      */
     bool is_stationary;
     /**
-     * Critical value at 1% significance (constant regression: -3.43)
+     * Critical value at 1% significance. Depends on the `regression`
+     * ("c" / "ct") and, for ADF, the effective sample size (MacKinnon
+     * finite-sample surface) — never a single hardcoded constant. `NaN`
+     * when `statistic` is `NaN` (never the crate's raw `0.0` default).
      */
     double cv_1pct;
     /**
-     * Critical value at 5% significance (constant regression: -2.86)
+     * Critical value at 5% significance. See `cv_1pct`.
      */
     double cv_5pct;
     /**
-     * Critical value at 10% significance (constant regression: -2.57)
+     * Critical value at 10% significance. See `cv_1pct`.
      */
     double cv_10pct;
 } AnofoxStationarityResult;
@@ -1710,8 +1843,11 @@ typedef struct AnofoxCombinedStationarityResult {
      */
     bool kpss_is_stationary;
     /**
-     * Four-way verdict, NUL-terminated:
-     * `stationary` / `trend_stationary` / `difference_stationary` / `non_stationary`
+     * D-04 four-way verdict, NUL-terminated: `stationary` / `non_stationary`
+     * / `trend_stationary` / `difference_stationary` / `constant`. An
+     * EMPTY string (NUL at index 0) means SQL NULL -- either test's
+     * statistic was `NaN` (too-short series, or a collinear regression
+     * under `regression`).
      */
     char verdict[32];
 } AnofoxCombinedStationarityResult;
@@ -1925,29 +2061,19 @@ extern "C" {
 bool anofox_ts_stats(const double *values,
                      const uint64_t *validity,
                      size_t length,
+                     size_t seasonal_period,
                      struct TsStatsResult *out_result,
                      struct AnofoxError *out_error);
-
-/**
- * Compute time series statistics with date information for gap detection.
- *
- * # Safety
- * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
- * The dates array must have the same length as the values array.
- */
-bool anofox_ts_stats_with_dates(const double *values,
-                                const uint64_t *validity,
-                                const int64_t *dates,
-                                size_t length,
-                                int64_t frequency_micros,
-                                struct TsStatsResult *out_result,
-                                struct AnofoxError *out_error);
 
 /**
  * Compute time series statistics with date information and frequency type for gap detection.
  *
  * This version properly handles calendar frequencies (monthly, quarterly, yearly) which
  * have variable durations that cannot be accurately represented in microseconds.
+ *
+ * `period_count` is the user-declared calendar multiplier for Monthly/Quarterly/Yearly
+ * frequencies (e.g. `2` for `'2mo'`, `3` for `'3q'`, `5` for `'5y'`; `1` for the
+ * single-unit strings); ignored for `Fixed` (CR-01 fix, 13-03 deferred item).
  *
  * # Safety
  * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
@@ -1959,6 +2085,8 @@ bool anofox_ts_stats_with_dates_and_type(const double *values,
                                          size_t length,
                                          int64_t frequency_micros,
                                          enum FrequencyType frequency_type,
+                                         size_t seasonal_period,
+                                         size_t period_count,
                                          struct TsStatsResult *out_result,
                                          struct AnofoxError *out_error);
 
@@ -1966,11 +2094,15 @@ bool anofox_ts_stats_with_dates_and_type(const double *values,
  * Mean Absolute Error
  *
  * # Safety
- * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+ * All pointer arguments must be valid and non-null (except the two `*_validity`
+ * pointers, which may be null to mean "all valid"). Arrays must have the specified
+ * lengths.
  */
 bool anofox_ts_mae(const double *actual,
+                   const uint64_t *actual_validity,
                    size_t actual_len,
                    const double *forecast,
+                   const uint64_t *forecast_validity,
                    size_t forecast_len,
                    double *out_result,
                    struct AnofoxError *out_error);
@@ -1982,8 +2114,10 @@ bool anofox_ts_mae(const double *actual,
  * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
  */
 bool anofox_ts_mse(const double *actual,
+                   const uint64_t *actual_validity,
                    size_t actual_len,
                    const double *forecast,
+                   const uint64_t *forecast_validity,
                    size_t forecast_len,
                    double *out_result,
                    struct AnofoxError *out_error);
@@ -1995,23 +2129,32 @@ bool anofox_ts_mse(const double *actual,
  * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
  */
 bool anofox_ts_rmse(const double *actual,
+                    const uint64_t *actual_validity,
                     size_t actual_len,
                     const double *forecast,
+                    const uint64_t *forecast_validity,
                     size_t forecast_len,
                     double *out_result,
                     struct AnofoxError *out_error);
 
 /**
- * Mean Absolute Percentage Error
+ * Mean Absolute Percentage Error. `*out_is_null` is set `true` (call still
+ * returns `true` for "no error") when any pairwise-complete actual is
+ * exactly zero -- MAPE is undefined there (D-07); callers must check
+ * `*out_is_null` before trusting `*out_result`.
  *
  * # Safety
- * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+ * All pointer arguments must be valid and non-null (except the `*_validity`
+ * pointers). Arrays must have the specified lengths.
  */
 bool anofox_ts_mape(const double *actual,
+                    const uint64_t *actual_validity,
                     size_t actual_len,
                     const double *forecast,
+                    const uint64_t *forecast_validity,
                     size_t forecast_len,
                     double *out_result,
+                    bool *out_is_null,
                     struct AnofoxError *out_error);
 
 /**
@@ -2021,8 +2164,10 @@ bool anofox_ts_mape(const double *actual,
  * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
  */
 bool anofox_ts_smape(const double *actual,
+                     const uint64_t *actual_validity,
                      size_t actual_len,
                      const double *forecast,
+                     const uint64_t *forecast_validity,
                      size_t forecast_len,
                      double *out_result,
                      struct AnofoxError *out_error);
@@ -2034,8 +2179,10 @@ bool anofox_ts_smape(const double *actual,
  * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
  */
 bool anofox_ts_r2(const double *actual,
+                  const uint64_t *actual_validity,
                   size_t actual_len,
                   const double *forecast,
+                  const uint64_t *forecast_validity,
                   size_t forecast_len,
                   double *out_result,
                   struct AnofoxError *out_error);
@@ -2047,81 +2194,126 @@ bool anofox_ts_r2(const double *actual,
  * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
  */
 bool anofox_ts_bias(const double *actual,
+                    const uint64_t *actual_validity,
                     size_t actual_len,
                     const double *forecast,
+                    const uint64_t *forecast_validity,
                     size_t forecast_len,
                     double *out_result,
                     struct AnofoxError *out_error);
 
 /**
- * Relative MAE comparing two models.
+ * Relative MAE comparing two models. `*_validity` pointers may each be null
+ * (all valid); rows missing in ANY of actual/pred1/pred2 are dropped (D-02).
  *
  * # Safety
- * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+ * All pointer arguments must be valid and non-null (except the `*_validity`
+ * pointers). Arrays must have the specified lengths.
  */
 bool anofox_ts_rmae(const double *actual,
+                    const uint64_t *actual_validity,
                     size_t actual_len,
                     const double *pred1,
+                    const uint64_t *pred1_validity,
                     size_t pred1_len,
                     const double *pred2,
+                    const uint64_t *pred2_validity,
                     size_t pred2_len,
                     double *out_result,
                     struct AnofoxError *out_error);
 
 /**
- * Mean Absolute Scaled Error.
+ * Mean Absolute Scaled Error (Hyndman & Koehler 2006, D-08). `actual_validity`/
+ * `forecast_validity` may each be null (all valid); rows missing in EITHER
+ * actual or forecast are dropped before computing the evaluation MAE (D-02,
+ * same `complete_cases` policy as every other metric). `insample_validity`
+ * may also be null (all valid); unlike `actual`/`forecast`, missing in-sample
+ * positions are NOT dropped/complete-cased -- they are preserved exactly so
+ * the lag-`seasonal_period` scale only skips the specific pairs touching a
+ * missing value (never splices across one).
+ *
+ * `*out_is_null` is set `true` (with the call still returning `true` for
+ * "no error") when the in-sample scale is numerically zero -- MASE is
+ * undefined there (R's `forecast::accuracy()` returns `Inf`; this product
+ * returns SQL NULL instead). Always write to `*out_is_null` on a `true`
+ * return; callers must check it before trusting `*out_result`.
  *
  * # Safety
- * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+ * All pointer arguments must be valid and non-null (except the `*_validity`
+ * pointers). Arrays must have the specified lengths.
  */
 bool anofox_ts_mase(const double *actual,
+                    const uint64_t *actual_validity,
                     size_t actual_len,
                     const double *forecast,
+                    const uint64_t *forecast_validity,
                     size_t forecast_len,
-                    const double *baseline,
-                    size_t baseline_len,
+                    const double *insample,
+                    const uint64_t *insample_validity,
+                    size_t insample_len,
+                    int64_t seasonal_period,
                     double *out_result,
+                    bool *out_is_null,
                     struct AnofoxError *out_error);
 
 /**
- * Quantile loss function.
+ * Quantile loss function. `*_validity` pointers may each be null (all valid);
+ * pairs missing in either actual or forecast are dropped (D-02).
  *
  * # Safety
- * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+ * All pointer arguments must be valid and non-null (except the `*_validity`
+ * pointers). Arrays must have the specified lengths.
  */
 bool anofox_ts_quantile_loss(const double *actual,
+                             const uint64_t *actual_validity,
                              size_t actual_len,
                              const double *forecast,
+                             const uint64_t *forecast_validity,
                              size_t forecast_len,
                              double quantile,
                              double *out_result,
                              struct AnofoxError *out_error);
 
 /**
- * Multi-quantile loss function.
+ * Multi-quantile loss function. `quantiles is a 2D array: n_levels arrays,
+ * each of length actual_len. `quantiles_validity` is a nullable array of
+ * `n_levels` nullable per-level bitmasks (a null entry means "all valid" for
+ * that level); `actual_validity` may be null (all valid). `levels` itself is
+ * a PARAMETER list — NULL levels are rejected before the FFI call
+ * (`ListDoubleReader::ReadNoNulls` on the C++ side), so there is no
+ * `levels_validity` parameter. Each quantile level independently drops rows
+ * missing in either `actual` or that level's forecast (D-02).
  *
  * # Safety
- * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
- * quantiles is a 2D array: n_levels arrays, each of length actual_len.
+ * All pointer arguments must be valid and non-null (except `actual_validity`
+ * and `quantiles_validity`, and each per-level pointer inside
+ * `quantiles_validity`). Arrays must have the specified lengths.
  */
 bool anofox_ts_mqloss(const double *actual,
+                      const uint64_t *actual_validity,
                       size_t actual_len,
                       const double *const *quantiles,
+                      const uint64_t *const *quantiles_validity,
                       size_t n_levels,
                       const double *levels,
                       double *out_result,
                       struct AnofoxError *out_error);
 
 /**
- * Coverage of prediction intervals.
+ * Coverage of prediction intervals. `*_validity` pointers may each be null
+ * (all valid); rows missing in ANY of actual/lower/upper are dropped (D-02).
  *
  * # Safety
- * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+ * All pointer arguments must be valid and non-null (except the `*_validity`
+ * pointers). Arrays must have the specified lengths.
  */
 bool anofox_ts_coverage(const double *actual,
-                        size_t actual_len,
+                        const uint64_t *actual_validity,
                         const double *lower,
+                        const uint64_t *lower_validity,
                         const double *upper,
+                        const uint64_t *upper_validity,
+                        size_t length,
                         double *out_result,
                         struct AnofoxError *out_error);
 
@@ -2703,14 +2895,30 @@ bool anofox_ts_forecast_explain(const double *values,
                                 struct AnofoxError *out_error);
 
 /**
- * Compute data quality metrics.
+ * Compute data quality metrics (D-05, WRAP-02): dates/frequency/n_short-aware,
+ * using the shared missing-period gap counter from plan 13-01.
+ *
+ * `dates` may be null, meaning "no date information" -- `n_gaps`/`n_gap_runs` are
+ * `0` and `temporal_score` is `1.0`. When non-null it must have exactly `length`
+ * entries. `frequency_type == Fixed` with `frequency_micros <= 0` auto-detects the
+ * step from `dates`. `n_short` must be `>= 1` (`InvalidInput` otherwise, surfaced as
+ * `ErrorCode::InvalidInput`). `period_count` is the user-declared calendar
+ * multiplier for Monthly/Quarterly/Yearly frequencies (e.g. `2` for `'2mo'`); ignored
+ * for `Fixed` (CR-01 fix, 13-03 deferred item).
  *
  * # Safety
- * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+ * `values` and `out_result` must be valid and non-null. `validity` and `dates` may
+ * be null (meaning all-valid / no dates respectively). `values` (and `dates`, when
+ * non-null) must have at least `length` elements.
  */
 bool anofox_ts_data_quality(const double *values,
                             const uint64_t *validity,
+                            const int64_t *dates,
                             size_t length,
+                            int64_t frequency_micros,
+                            enum FrequencyType frequency_type,
+                            size_t n_short,
+                            size_t period_count,
                             struct DataQualityResult *out_result,
                             struct AnofoxError *out_error);
 
@@ -2740,17 +2948,42 @@ bool anofox_ts_fill_nulls_mean(const double *values,
                                struct AnofoxError *out_error);
 
 /**
- * Compute differences of a time series.
+ * Compute d-th order, lag-`seasonal_lag` differences of a time series,
+ * row-aligned: `out_values`/`out_validity` have exactly `length` entries,
+ * with the first `order * seasonal_lag` entries NULL (D-05/D-06) and any
+ * difference touching a missing (invalid) input NULL (SQL row-wise policy).
  *
  * # Safety
- * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+ * `values`, `out_values`, `out_validity` and `out_error` must be valid and
+ * non-null. `values` must have `length` elements; `validity` must have
+ * `length.div_ceil(64)` words or be null (meaning all-valid). `out_values`
+ * must have room for `length` doubles; `out_validity` must have room for
+ * `length.div_ceil(64)` words — every word is overwritten by this call.
  */
 bool anofox_ts_diff(const double *values,
+                    const uint64_t *validity,
                     size_t length,
                     int order,
-                    double **out_values,
-                    size_t *out_length,
+                    int seasonal_lag,
+                    double *out_values,
+                    uint64_t *out_validity,
                     struct AnofoxError *out_error);
+
+/**
+ * Checks whether a series is constant (Phase 12 D-09 single source of truth
+ * for `ts_drop_constant_by`): groups with fewer than two non-missing values
+ * (including an all-missing group) classify as constant.
+ *
+ * # Safety
+ * `values` and `out_result` must be valid and non-null. `validity` may be
+ * null (meaning all-valid). `length` must equal the number of `f64`
+ * elements at `values`.
+ */
+bool anofox_ts_is_constant(const double *values,
+                           const uint64_t *validity,
+                           size_t length,
+                           bool *out_result,
+                           struct AnofoxError *out_error);
 
 /**
  * Fill gaps in a time series with new timestamps.
@@ -2765,6 +2998,9 @@ bool anofox_ts_diff(const double *values,
  * * `length` - Number of elements
  * * `frequency_micros` - Frequency in microseconds (used for Fixed type)
  * * `frequency_type` - Type of frequency (0=Fixed, 1=Monthly, 2=Quarterly, 3=Yearly)
+ * * `period_count` - User-declared calendar multiplier for Monthly/Quarterly/Yearly
+ *   frequencies (e.g. `2` for `'2mo'`, `3` for `'3q'`, `5` for `'5y'`; `1` for the
+ *   single-unit strings); ignored for Fixed (CR-01 fix, 13-03 deferred item)
  * * `out_result` - Output result structure
  * * `out_error` - Output error structure
  */
@@ -2774,6 +3010,7 @@ bool anofox_ts_fill_gaps(const int64_t *dates,
                          size_t length,
                          int64_t frequency_micros,
                          enum FrequencyType frequency_type,
+                         size_t period_count,
                          struct GapFillResult *out_result,
                          struct AnofoxError *out_error);
 
@@ -2791,6 +3028,9 @@ bool anofox_ts_fill_gaps(const int64_t *dates,
  * * `target_date` - Target date to extend to (microseconds since epoch)
  * * `frequency_micros` - Frequency in microseconds (used for Fixed type)
  * * `frequency_type` - Type of frequency (0=Fixed, 1=Monthly, 2=Quarterly, 3=Yearly)
+ * * `period_count` - User-declared calendar multiplier for Monthly/Quarterly/Yearly
+ *   frequencies (e.g. `2` for `'2mo'`, `3` for `'3q'`, `5` for `'5y'`; `1` for the
+ *   single-unit strings); ignored for Fixed (CR-01 fix, 13-03 deferred item)
  * * `out_result` - Output result structure
  * * `out_error` - Output error structure
  */
@@ -2801,11 +3041,17 @@ bool anofox_ts_fill_forward_dates(const int64_t *dates,
                                   int64_t target_date,
                                   int64_t frequency_micros,
                                   enum FrequencyType frequency_type,
+                                  size_t period_count,
                                   struct GapFillResult *out_result,
                                   struct AnofoxError *out_error);
 
 /**
  * Detect the frequency of a time series.
+ *
+ * `out_frequency` is written in MICROSECONDS (the same unit every `dates` array in
+ * this FFI boundary uses) -- previously undocumented at this boundary (Phase 12
+ * deferred item (e), G23/WRAP-03). See `anofox_fcst_core::detect_frequency`'s doc
+ * comment for the tie-break rule.
  *
  * # Safety
  * All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
@@ -2814,6 +3060,34 @@ bool anofox_ts_detect_frequency(const int64_t *dates,
                                 size_t length,
                                 int64_t *out_frequency,
                                 struct AnofoxError *out_error);
+
+/**
+ * Compute `horizon` future dates (microseconds) from an observed date
+ * series, using the D-12 calendar rule (plan 12-05).
+ *
+ * `step_months == 0 && step_micros == 0` -> auto-detect via
+ * `anofox_fcst_core::detect_step`. `step_months > 0 && step_micros == 0` ->
+ * explicit `Months(step_months)`. `step_months == 0 && step_micros > 0` ->
+ * explicit `Fixed(step_micros)`. Any negative value, or both non-zero, is
+ * `INVALID_INPUT`. `horizon == 0` returns `true` immediately (`out_dates`
+ * may be null in that case). `length == 0` is `INVALID_INPUT`.
+ *
+ * `out_dates` is CALLER-allocated with exactly `horizon` entries; this
+ * function writes exactly `horizon` values into it (T-12-17 — never more,
+ * never fewer).
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null (except `out_dates` when
+ * `horizon == 0`). `dates` must have at least `length` entries; `out_dates`
+ * must have at least `horizon` entries.
+ */
+bool anofox_ts_future_dates(const int64_t *dates,
+                            size_t length,
+                            size_t horizon,
+                            int64_t step_months,
+                            int64_t step_micros,
+                            int64_t *out_dates,
+                            struct AnofoxError *out_error);
 
 /**
  * Fill NULL values with forward fill.
@@ -2875,6 +3149,7 @@ bool anofox_ts_conformal_quantile(const double *residuals,
  * All pointer arguments must be valid and non-null.
  */
 bool anofox_ts_conformal_intervals(const double *forecasts,
+                                   const uint64_t *forecasts_validity,
                                    size_t length,
                                    double conformity_score,
                                    double **out_lower,
@@ -2893,10 +3168,69 @@ bool anofox_ts_conformal_predict(const double *residuals,
                                  const uint64_t *residuals_validity,
                                  size_t residuals_length,
                                  const double *forecasts,
+                                 const uint64_t *forecasts_validity,
                                  size_t forecasts_length,
                                  double alpha,
                                  struct ConformalResultFFI *out_result,
                                  struct AnofoxError *out_error);
+
+/**
+ * Compute conformal prediction intervals directly from per-row calibration
+ * (actual, forecast) pairs and a list of point forecasts (Phase 16 D-01/D-02).
+ *
+ * A null method pointer means "symmetric"; otherwise the method name is
+ * parsed strictly via `ConformalMethod::from_str` (an unknown name is an
+ * `InvalidInput` error, not a silent fallback).
+ *
+ * # Safety
+ * All non-null pointer arguments must be valid. A data pointer may be null
+ * only when its paired length is 0 (never calls `from_raw_parts` on a null
+ * pointer with a nonzero length).
+ */
+bool anofox_ts_conformal_from_pairs(const double *cal_actuals,
+                                    const uint64_t *cal_actuals_validity,
+                                    size_t cal_actuals_len,
+                                    const double *cal_forecasts,
+                                    const uint64_t *cal_forecasts_validity,
+                                    size_t cal_forecasts_len,
+                                    const double *cal_difficulty,
+                                    const uint64_t *cal_difficulty_validity,
+                                    size_t cal_difficulty_len,
+                                    const double *point_forecasts,
+                                    const uint64_t *point_validity,
+                                    size_t point_len,
+                                    const double *point_difficulty,
+                                    const uint64_t *point_difficulty_validity,
+                                    size_t point_difficulty_len,
+                                    double alpha,
+                                    const char *method,
+                                    struct ConformalResultFFI *out_result,
+                                    struct AnofoxError *out_error);
+
+/**
+ * Calibrate a conformal predictor from per-row `(actual, forecast)` pairs,
+ * without applying it to any point forecasts yet (Phase 16 D-03).
+ *
+ * A null method pointer means "symmetric"; otherwise the method name is
+ * parsed strictly via `ConformalMethod::from_str`.
+ *
+ * # Safety
+ * All non-null pointer arguments must be valid. A data pointer may be null
+ * only when its paired length is 0.
+ */
+bool anofox_ts_conformal_calibrate(const double *actuals,
+                                   const uint64_t *actuals_validity,
+                                   size_t actuals_len,
+                                   const double *forecasts,
+                                   const uint64_t *forecasts_validity,
+                                   size_t forecasts_len,
+                                   const double *difficulty,
+                                   const uint64_t *difficulty_validity,
+                                   size_t difficulty_len,
+                                   double alpha,
+                                   const char *method,
+                                   struct ConformalCalibrationFFI *out_result,
+                                   struct AnofoxError *out_error);
 
 /**
  * Perform conformal prediction with multiple coverage levels.
@@ -2917,24 +3251,6 @@ bool anofox_ts_conformal_predict_multi(const double *residuals,
                                        struct AnofoxError *out_error);
 
 /**
- * Perform locally-adaptive conformal prediction.
- *
- * Scales intervals based on local difficulty estimates.
- *
- * # Safety
- * All pointer arguments must be valid and non-null.
- */
-bool anofox_ts_conformal_predict_adaptive(const double *residuals,
-                                          const uint64_t *residuals_validity,
-                                          size_t residuals_length,
-                                          const double *forecasts,
-                                          const double *difficulty,
-                                          size_t forecasts_length,
-                                          double alpha,
-                                          struct ConformalResultFFI *out_result,
-                                          struct AnofoxError *out_error);
-
-/**
  * Perform asymmetric conformal prediction.
  *
  * Uses separate quantiles for positive and negative residuals.
@@ -2946,6 +3262,7 @@ bool anofox_ts_conformal_predict_asymmetric(const double *residuals,
                                             const uint64_t *residuals_validity,
                                             size_t residuals_length,
                                             const double *forecasts,
+                                            const uint64_t *forecasts_validity,
                                             size_t forecasts_length,
                                             double alpha,
                                             struct ConformalResultFFI *out_result,
@@ -2970,7 +3287,9 @@ bool anofox_ts_interval_width(const double *lower,
  * All pointer arguments must be valid and non-null.
  */
 bool anofox_ts_mean_interval_width(const double *lower,
+                                   const uint64_t *lower_validity,
                                    const double *upper,
+                                   const uint64_t *upper_validity,
                                    size_t length,
                                    double *out_result,
                                    struct AnofoxError *out_error);
@@ -2989,6 +3308,7 @@ bool anofox_ts_conformal_learn(const double *residuals,
                                enum ConformalMethodFFI method,
                                enum ConformalStrategyFFI strategy,
                                const double *difficulty,
+                               const uint64_t *difficulty_validity,
                                struct CalibrationProfileFFI *out_profile,
                                struct AnofoxError *out_error);
 
@@ -2999,11 +3319,69 @@ bool anofox_ts_conformal_learn(const double *residuals,
  * All pointer arguments must be valid and non-null.
  */
 bool anofox_ts_conformal_apply(const double *forecasts,
+                               const uint64_t *forecasts_validity,
                                size_t n_forecasts,
                                const struct CalibrationProfileFFI *profile,
                                const double *difficulty,
+                               const uint64_t *difficulty_validity,
                                struct PredictionIntervalsFFI *out_intervals,
                                struct AnofoxError *out_error);
+
+/**
+ * Applies a single pre-computed conformity `score` to `forecasts`,
+ * optionally scaled by a per-row `difficulty` (Phase 16 D-08, CONF-04).
+ * Backs the SQL `ts_conformal_intervals(forecasts, conformity_score,
+ * method, difficulty)` 4-arg overload.
+ *
+ * A null `method` pointer means "symmetric". A null `difficulty` pointer
+ * or zero `difficulty_len` means "no difficulty_col at all" (never calls
+ * `from_raw_parts` on a null pointer with nonzero length).
+ *
+ * # Safety
+ * All non-null pointer arguments must be valid.
+ */
+bool anofox_ts_conformal_apply_score(const double *forecasts,
+                                     const uint64_t *forecasts_validity,
+                                     size_t n_forecasts,
+                                     double score,
+                                     const char *method,
+                                     const double *difficulty,
+                                     const uint64_t *difficulty_validity,
+                                     size_t difficulty_len,
+                                     double **out_lower,
+                                     double **out_upper,
+                                     struct AnofoxError *out_error);
+
+/**
+ * Parse a conformal strategy name, matching
+ * `anofox_fcst_core::ConformalStrategy::from_str` exactly -- including the
+ * D-09/G15 explanatory error for every removed `jackknife+` alias and the
+ * "unknown conformal strategy" error for anything else. C++'s
+ * `ParseConformalStrategy` wraps this instead of re-implementing the
+ * parse/default logic, so there is exactly one place that recognizes a
+ * strategy name.
+ *
+ * # Safety
+ * `name` and `out_strategy` must be valid, non-null pointers; `name` must
+ * point to a NUL-terminated C string.
+ */
+bool anofox_ts_conformal_parse_strategy(const char *name,
+                                        enum ConformalStrategyFFI *out_strategy,
+                                        struct AnofoxError *out_error);
+
+/**
+ * Parse a conformal method name, matching
+ * `anofox_fcst_core::ConformalMethod::from_str` exactly. C++'s
+ * `ParseConformalMethod` wraps this instead of re-implementing the
+ * parse/default logic.
+ *
+ * # Safety
+ * `name` and `out_method` must be valid, non-null pointers; `name` must
+ * point to a NUL-terminated C string.
+ */
+bool anofox_ts_conformal_parse_method(const char *name,
+                                      enum ConformalMethodFFI *out_method,
+                                      struct AnofoxError *out_error);
 
 /**
  * Compute empirical coverage of prediction intervals.
@@ -3012,8 +3390,11 @@ bool anofox_ts_conformal_apply(const double *forecasts,
  * All pointer arguments must be valid and non-null.
  */
 bool anofox_ts_conformal_coverage(const double *actuals,
+                                  const uint64_t *actuals_validity,
                                   const double *lower,
+                                  const uint64_t *lower_validity,
                                   const double *upper,
+                                  const uint64_t *upper_validity,
                                   size_t length,
                                   double *out_coverage,
                                   struct AnofoxError *out_error);
@@ -3025,8 +3406,11 @@ bool anofox_ts_conformal_coverage(const double *actuals,
  * All pointer arguments must be valid and non-null.
  */
 bool anofox_ts_conformal_evaluate(const double *actuals,
+                                  const uint64_t *actuals_validity,
                                   const double *lower,
+                                  const uint64_t *lower_validity,
                                   const double *upper,
+                                  const uint64_t *upper_validity,
                                   size_t length,
                                   double alpha,
                                   struct ConformalEvaluationFFI *out_eval,
@@ -3039,8 +3423,10 @@ bool anofox_ts_conformal_evaluate(const double *actuals,
  * All pointers must be valid. Output struct must be zeroed before calling.
  */
 bool anofox_ts_bootstrap_intervals(const double *residuals,
+                                   const uint64_t *residuals_validity,
                                    size_t residuals_len,
                                    const double *forecasts,
+                                   const uint64_t *forecasts_validity,
                                    size_t forecasts_len,
                                    int n_paths,
                                    double coverage,
@@ -3055,8 +3441,10 @@ bool anofox_ts_bootstrap_intervals(const double *residuals,
  * All pointers must be valid. Output struct must be zeroed before calling.
  */
 bool anofox_ts_bootstrap_quantiles(const double *residuals,
+                                   const uint64_t *residuals_validity,
                                    size_t residuals_len,
                                    const double *forecasts,
+                                   const uint64_t *forecasts_validity,
                                    size_t forecasts_len,
                                    int n_paths,
                                    const double *quantile_levels,
@@ -3084,17 +3472,27 @@ void anofox_free_bootstrap_quantile_result(struct BootstrapQuantileResultFFI *re
 /**
  * Compute per-step conformal prediction intervals.
  *
- * Each horizon step gets its own interval width. Requires fold-organized data.
+ * Each horizon step gets its own interval width. Requires fold-organized,
+ * FLAT data: `fold_forecasts`/`fold_actuals` are `fold_forecasts_len`
+ * elements long (fold-major), validated against `horizon` in Rust (D-10 —
+ * `fold_forecasts_len` must be an exact multiple of `horizon`; the caller
+ * never computes `n_folds` itself). Validity bitmasks make the per-step
+ * quantile computation pairwise-complete (D-02); a missing `point_forecasts`
+ * entry is position-preserving in the output (NaN at that position only).
  *
  * # Safety
- * All pointers must be valid. fold_forecasts and fold_actuals are flat arrays
- * of n_folds * horizon doubles. Output struct must be zeroed before calling.
+ * All pointers must be valid (validity pointers may be null = all valid).
+ * Output struct must be zeroed before calling.
  */
 bool anofox_ts_conformal_predict_per_step(const double *fold_forecasts,
+                                          const uint64_t *fold_forecasts_validity,
+                                          size_t fold_forecasts_len,
                                           const double *fold_actuals,
-                                          size_t n_folds,
+                                          const uint64_t *fold_actuals_validity,
+                                          size_t fold_actuals_len,
                                           size_t horizon,
                                           const double *point_forecasts,
+                                          const uint64_t *point_validity,
                                           size_t n_point_forecasts,
                                           double alpha,
                                           struct ConformalPerStepResultFFI *out_result,
@@ -3321,7 +3719,12 @@ void anofox_free_prediction_intervals(struct PredictionIntervalsFFI *result);
  *                  NULL entries become `NaN` in the series passed to the crate.
  * * `length`     — Number of elements in `values`.
  * * `max_lags`   — Maximum lag count for AIC selection. Pass `-1` for automatic
- *                  selection (`floor((n-1)^(1/3))`). Clamped to `[0, n/2-1]` by the crate.
+ *                  selection (`floor((n-1)^(1/3))`). Clamped the way statsmodels
+ *                  does by the crate.
+ * * `regression` — Optional NUL-terminated C string, `"c"` or `"ct"`
+ *                  (case-insensitive). `null` means `"c"` (D-05). Any other
+ *                  value is `ErrorCode::InvalidInput` with message
+ *                  "expected one of: c, ct".
  * * `out_result` — Pointer to caller-allocated `AnofoxStationarityResult`.
  *                  Initialised to `Default` before the computation so that
  *                  partial results are never exposed on error.
@@ -3332,27 +3735,60 @@ void anofox_free_prediction_intervals(struct PredictionIntervalsFFI *result);
  * # Safety
  *
  * `values` and `out_result` must be non-null. `validity` may be null (meaning all valid).
- * `length` must equal the number of valid `f64` elements at `values`.
+ * `length` must equal the number of valid `f64` elements at `values`. `regression`
+ * must be either null or a valid NUL-terminated C string.
  */
 bool anofox_ts_adf(const double *values,
                    const uint64_t *validity,
                    size_t length,
                    int max_lags,
+                   const char *regression,
                    struct AnofoxStationarityResult *out_result,
                    struct AnofoxError *out_error);
+
+/**
+ * Phase 12 D-03/D-04 single-series missing-data gate: trims leading/trailing
+ * missing values and rejects any remaining interior missing value, naming its
+ * 1-based position in the ORIGINAL list. `validity` may be null (all valid);
+ * NaN is treated as missing (Phase 10 D-12 convention) — see
+ * `anofox_fcst_core::missing::trim_edges_reject_interior`.
+ *
+ * - `length == 0` -> success, `*out_start = 0`, `*out_length = 0` (`values`
+ *   may be null in that case only).
+ * - Nothing present after trimming -> success, `*out_start = 0`,
+ *   `*out_length = 0` (D-04: caller emits SQL NULL).
+ * - Otherwise -> success, `*out_start`/`*out_length` describe the trimmed,
+ *   fully-present interior `[start, start+length)` of the ORIGINAL array.
+ * - An interior missing value -> failure, `ErrorCode::InvalidInput`, message
+ *   contains "interior NULL at position k" (1-based).
+ *
+ * # Safety
+ *
+ * `out_start`, `out_length` and `out_error` must be non-null. `values` must
+ * be non-null when `length > 0`. `validity` may be null. `length` must equal
+ * the number of `f64` elements at `values`.
+ */
+bool anofox_ts_series_gate(const double *values,
+                           const uint64_t *validity,
+                           size_t length,
+                           size_t *out_start,
+                           size_t *out_length,
+                           struct AnofoxError *out_error);
 
 /**
  * Run the KPSS stationarity test on a single series (STAT-02).
  *
  * # Safety
  *
- * `values` and `out_result` must be non-null. `validity` may be null (all valid).
- * `length` must equal the number of `f64` elements at `values`.
+ * `values` and `out_result` must be non-null. `validity` may be null (all
+ * valid). `length` must equal the number of `f64` elements at `values`.
+ * `regression` must be either null or a valid NUL-terminated C string.
  */
 bool anofox_ts_kpss(const double *values,
                     const uint64_t *validity,
                     size_t length,
                     int lags,
+                    const char *regression,
                     struct AnofoxStationarityResult *out_result,
                     struct AnofoxError *out_error);
 
@@ -3361,17 +3797,25 @@ bool anofox_ts_kpss(const double *values,
  *
  * # Safety
  *
- * `values` and `out_result` must be non-null. `validity` may be null (all valid).
- * `length` must equal the number of `f64` elements at `values`.
+ * `values` and `out_result` must be non-null. `validity` may be null (all
+ * valid). `length` must equal the number of `f64` elements at `values`.
+ * `regression` must be either null or a valid NUL-terminated C string.
  */
 bool anofox_ts_stationarity(const double *values,
                             const uint64_t *validity,
                             size_t length,
+                            const char *regression,
                             struct AnofoxCombinedStationarityResult *out_result,
                             struct AnofoxError *out_error);
 
 /**
- * Ljung-Box white-noise test on residuals (RESID-01).
+ * Ljung-Box white-noise test on residuals, model-aware (RESID-01, D-06/DIAG-04).
+ *
+ * `fitted_params` — number of estimated model parameters (e.g. `p + q` for
+ * an ARMA(p, q) residual series); `df = lags - fitted_params`. A negative
+ * value is `ErrorCode::InvalidInput`. `df <= 0` at the effective (resolved,
+ * clamped) lag count is `ErrorCode::InvalidInput` naming `fitted_params`,
+ * the lags and "degrees of freedom" (see `ffi_error_code`).
  *
  * # Safety
  * `values` and `out_result` must be non-null. `validity` may be null (all valid).
@@ -3380,6 +3824,7 @@ bool anofox_ts_ljung_box(const double *values,
                          const uint64_t *validity,
                          size_t length,
                          int lags,
+                         int fitted_params,
                          struct AnofoxLjungBoxResult *out_result,
                          struct AnofoxError *out_error);
 
@@ -3514,8 +3959,16 @@ void anofox_free_var_forecast_result(struct VARForecastResult *result);
  *
  * Mirrors `anofox_ts_forecast` but dispatches to
  * `anofox_fcst_core::forecast_explicit_ensemble` rather than the single-model
- * `forecast()` path.  Point forecasts only in Phase 5; `lower_bounds` and
- * `upper_bounds` are always `null` (prediction intervals deferred to EPI-01).
+ * `forecast()` path. `lower_bounds`/`upper_bounds` are the crate `Ensemble`'s
+ * own `predict_with_intervals` bounds (pooled across members) at
+ * `confidence_level` (D-01, plan 10-03) — `null` only when the crate itself
+ * returns no bounds, matching every other forecast entry point's convention.
+ *
+ * # Safety
+ * All pointer arguments must be valid for the stated lengths: `values`/`validity`
+ * for `length` elements, `members_buf` for `members_buf_len` bytes, and
+ * `out_result`/`out_error` must be valid, writable pointers. `members_buf` and
+ * `combination_method` must be non-null (the latter may be an empty C string).
  */
 bool anofox_ts_forecast_ensemble(const double *values,
                                  const uint64_t *validity,
@@ -3526,6 +3979,7 @@ bool anofox_ts_forecast_ensemble(const double *values,
                                  const char *combination_method,
                                  int seasonal_period,
                                  int horizon,
+                                 double confidence_level,
                                  struct ForecastResult *out_result,
                                  struct AnofoxError *out_error);
 

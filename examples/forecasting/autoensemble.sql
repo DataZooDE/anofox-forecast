@@ -15,8 +15,9 @@
 --                               (plus common aliases for each).
 --   seasonal_period    (int)    Seasonal period shared with other models. 0 = non-seasonal.
 --
--- Prediction intervals: yhat_lower and yhat_upper are NULL in Phase 4.
--- Ensemble prediction intervals are deferred to Phase 6 (EPI-01).
+-- Prediction intervals: yhat_lower and yhat_upper are the crate AutoEnsemble's own
+-- predict_with_intervals bounds at confidence_level (default 0.90) -- not NULL
+-- (fixed in Phase 10; see docs/api/07-forecasting.md's Prediction intervals section).
 --
 -- Mean internal-consistency cross-check (DoD, COMB-01):
 --   With combination_method='mean' and top_k=3, AutoEnsemble's point forecast

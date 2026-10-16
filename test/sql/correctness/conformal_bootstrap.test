@@ -1,0 +1,330 @@
+# name: test/sql/correctness/conformal_bootstrap.test
+# description: Correctness-suite value pins for conformal prediction and bootstrap
+#   interval functions fixed this milestone (CONF-01..05, RUST-04) -- Phase 18, 18-02,
+#   TEST-03. Not json-gated (D-02): runs on every native build. Reused, with citation,
+#   from test/sql/ts_conformal_reference.test (Phase 16 16-01..16-03); this file must
+#   also stay free of any json-extension directive (the conformal macros read `params`
+#   json-free via `params::MAP(VARCHAR, VARCHAR)`).
+# group: [sql]
+
+require anofox_forecast
+
+# =============================================================================
+# ts_conformal_by (CONF-01, split/symmetric): 2 groups x 20 calibration rows x
+# 3 future rows. Cited verbatim from ts_conformal_reference.test 16-01.
+# =============================================================================
+
+statement ok
+CREATE TABLE cbt(g VARCHAR, ds DATE, actual DOUBLE, forecast DOUBLE, point DOUBLE);
+
+statement ok
+INSERT INTO cbt VALUES
+  ('A', DATE '2024-01-01', 100.1, 100.0, NULL),
+  ('A', DATE '2024-01-02', 99.8, 100.0, NULL),
+  ('A', DATE '2024-01-03', 100.3, 100.0, NULL),
+  ('A', DATE '2024-01-04', 99.6, 100.0, NULL),
+  ('A', DATE '2024-01-05', 100.5, 100.0, NULL),
+  ('A', DATE '2024-01-06', 99.4, 100.0, NULL),
+  ('A', DATE '2024-01-07', 100.7, 100.0, NULL),
+  ('A', DATE '2024-01-08', 99.2, 100.0, NULL),
+  ('A', DATE '2024-01-09', 100.9, 100.0, NULL),
+  ('A', DATE '2024-01-10', 99.0, 100.0, NULL),
+  ('A', DATE '2024-01-11', 101.1, 100.0, NULL),
+  ('A', DATE '2024-01-12', 98.8, 100.0, NULL),
+  ('A', DATE '2024-01-13', 101.3, 100.0, NULL),
+  ('A', DATE '2024-01-14', 98.6, 100.0, NULL),
+  ('A', DATE '2024-01-15', 101.5, 100.0, NULL),
+  ('A', DATE '2024-01-16', 98.4, 100.0, NULL),
+  ('A', DATE '2024-01-17', 101.7, 100.0, NULL),
+  ('A', DATE '2024-01-18', 98.2, 100.0, NULL),
+  ('A', DATE '2024-01-19', 101.9, 100.0, NULL),
+  ('A', DATE '2024-01-20', 98.0, 100.0, NULL),
+  ('B', DATE '2024-01-01', 101.0, 100.0, NULL),
+  ('B', DATE '2024-01-02', 98.0, 100.0, NULL),
+  ('B', DATE '2024-01-03', 103.0, 100.0, NULL),
+  ('B', DATE '2024-01-04', 96.0, 100.0, NULL),
+  ('B', DATE '2024-01-05', 105.0, 100.0, NULL),
+  ('B', DATE '2024-01-06', 94.0, 100.0, NULL),
+  ('B', DATE '2024-01-07', 107.0, 100.0, NULL),
+  ('B', DATE '2024-01-08', 92.0, 100.0, NULL),
+  ('B', DATE '2024-01-09', 109.0, 100.0, NULL),
+  ('B', DATE '2024-01-10', 90.0, 100.0, NULL),
+  ('B', DATE '2024-01-11', 111.0, 100.0, NULL),
+  ('B', DATE '2024-01-12', 88.0, 100.0, NULL),
+  ('B', DATE '2024-01-13', 113.0, 100.0, NULL),
+  ('B', DATE '2024-01-14', 86.0, 100.0, NULL),
+  ('B', DATE '2024-01-15', 115.0, 100.0, NULL),
+  ('B', DATE '2024-01-16', 84.0, 100.0, NULL),
+  ('B', DATE '2024-01-17', 117.0, 100.0, NULL),
+  ('B', DATE '2024-01-18', 82.0, 100.0, NULL),
+  ('B', DATE '2024-01-19', 119.0, 100.0, NULL),
+  ('B', DATE '2024-01-20', 80.0, 100.0, NULL),
+  ('A', DATE '2024-02-01', NULL, NULL, 30.0),
+  ('A', DATE '2024-02-02', NULL, NULL, 10.0),
+  ('A', DATE '2024-02-03', NULL, NULL, 20.0),
+  ('B', DATE '2024-02-01', NULL, NULL, 5.0),
+  ('B', DATE '2024-02-02', NULL, NULL, 50.0),
+  ('B', DATE '2024-02-03', NULL, NULL, 25.0);
+
+query I
+SELECT ABS(point - 30.0) < 1e-9 AND ABS(lower - 28.094999999999995) < 1e-9 AND ABS(upper - 31.905000000000005) < 1e-9
+FROM ts_conformal_by('cbt', g, ds, actual, forecast, point) WHERE group_col = 'A' AND date_col = DATE '2024-02-01';
+----
+true
+
+query I
+SELECT ABS(conformity_score - 1.9050000000000056) < 1e-9 AND n_calibration = 20 AND method = 'symmetric'
+FROM ts_conformal_by('cbt', g, ds, actual, forecast, point) WHERE group_col = 'A' LIMIT 1;
+----
+true
+
+query I
+SELECT COUNT(*) = 6 AND bool_and(ABS(coverage - 0.95) < 1e-12) AND bool_and(ABS(nominal_level - 0.9) < 1e-12)
+FROM ts_conformal_by('cbt', g, ds, actual, forecast, point);
+----
+true
+
+statement error
+SELECT * FROM ts_conformal_by('cbt', g, ds, actual, forecast, point, params := {'method': 'bogus'});
+----
+symmetric (alias split
+
+# =============================================================================
+# ts_conformal_calibrate: per-group and pooled, same cbt table.
+# =============================================================================
+
+query I
+SELECT COUNT(*) = 2 AND bool_and(
+    (group_col = 'A' AND ABS(conformity_score - 1.9050000000000056) < 1e-9) OR
+    (group_col = 'B' AND ABS(conformity_score - 19.05) < 1e-9)
+)
+FROM ts_conformal_calibrate('cbt', g, actual, forecast);
+----
+true
+
+query I
+SELECT ABS((SELECT conformity_score FROM ts_conformal_calibrate('cbt', g, actual, forecast, params := {'pooled': true})) - 17.075000000000003) < 1e-9
+   AND (SELECT COUNT(*) FROM ts_conformal_calibrate('cbt', g, actual, forecast, params := {'pooled': true})) = 1;
+----
+true
+
+# =============================================================================
+# ts_conformal_apply_by: separate future table against a cached calibration
+# table; a group absent from calibration keeps its rows with NULL bounds.
+# =============================================================================
+
+statement ok
+CREATE TABLE cfut AS SELECT g, ds, point AS fc FROM cbt WHERE point IS NOT NULL;
+
+statement ok
+CREATE TABLE cal_by_group AS SELECT * FROM ts_conformal_calibrate('cbt', g, actual, forecast);
+
+query I
+SELECT COUNT(*) FROM ts_conformal_apply_by('cfut', g, ds, fc, 'cal_by_group');
+----
+6
+
+query I
+SELECT ABS(lower - 28.094999999999995) < 1e-9 AND ABS(upper - 31.905000000000005) < 1e-9
+FROM ts_conformal_apply_by('cfut', g, ds, fc, 'cal_by_group')
+WHERE group_col = 'A' AND date_col = DATE '2024-02-01';
+----
+true
+
+statement ok
+CREATE TABLE cfut_extra AS SELECT * FROM cfut UNION ALL SELECT 'C', DATE '2024-02-01', 7.0;
+
+query I
+SELECT point IS NOT NULL AND lower IS NULL AND upper IS NULL
+FROM ts_conformal_apply_by('cfut_extra', g, ds, fc, 'cal_by_group')
+WHERE group_col = 'C';
+----
+true
+
+statement ok
+DROP TABLE cbt;
+
+statement ok
+DROP TABLE cfut;
+
+statement ok
+DROP TABLE cfut_extra;
+
+statement ok
+DROP TABLE cal_by_group;
+
+# =============================================================================
+# ts_conformal_quantile: empirical quantile with a small-sample NULL policy
+# (n < 10 -> NULL, matching the split-conformal "calibration insufficient"
+# convention), monotone at q=0/1, invariant under +Infinity in the tail.
+# =============================================================================
+
+query I
+SELECT ts_conformal_quantile([1.0, 2.0, 3.0, 4.0, 5.0]::DOUBLE[], 0.1) IS NULL;
+----
+true
+
+query I
+SELECT ts_conformal_quantile([2.5]::DOUBLE[], 0.5);
+----
+2.5
+
+# alpha outside (0, 1) is an SQL error naming the value (cited from 16-02).
+statement error
+SELECT ts_conformal_quantile([1.0, 2.0, 3.0]::DOUBLE[], 0.0);
+----
+alpha must be in (0, 1), got
+
+statement error
+SELECT ts_conformal_quantile([1.0, 2.0, 3.0]::DOUBLE[], 1.0);
+----
+alpha must be in (0, 1), got
+
+# =============================================================================
+# ts_conformal_predict / ts_conformal_learn / ts_conformal_evaluate /
+# ts_conformal_predict_per_step: alpha=0 is a uniform SQL error across every
+# conformal entry point (D-07 consistency, cited from 16-02 Task 1 tracer).
+# =============================================================================
+
+statement error
+SELECT ts_conformal_predict([1.0, 2.0, 3.0]::DOUBLE[], [10.0]::DOUBLE[], 0.0);
+----
+got 0
+
+statement error
+SELECT ts_conformal_learn([1.0, 2.0, 3.0]::DOUBLE[], [0.0]::DOUBLE[], 'symmetric', 'split');
+----
+got 0
+
+statement error
+SELECT ts_conformal_evaluate([1.0]::DOUBLE[], [0.0]::DOUBLE[], [2.0]::DOUBLE[], 0.0);
+----
+got 0
+
+statement error
+SELECT ts_conformal_predict_per_step([1.0, 2.0]::DOUBLE[], [1.0, 2.0]::DOUBLE[], [1.0]::DOUBLE[], 0.0, 1);
+----
+got 0
+
+# Functional (non-error) per-step insufficiency: 3 calibration residuals,
+# alpha 0.1 -> ceil(3*0.9)=3 > 3 calibration points at every step
+# (insufficient, all three half_widths NULL); alpha 0.4 -> ceil(3*0.6)=2 <= 3
+# (sufficient, none NULL). Cited from 16-02 Task 2.
+query I
+SELECT (r).half_widths[1] IS NULL AND (r).half_widths[2] IS NULL AND (r).half_widths[3] IS NULL
+FROM (
+    SELECT ts_conformal_predict_per_step(
+        [100.0, 105.0, 110.0, 100.0, 105.0, 110.0]::DOUBLE[],
+        [101.0, 108.0, 109.0, 103.0, 106.0, 107.0]::DOUBLE[],
+        [100.0, 105.0, 110.0]::DOUBLE[],
+        0.1, 3
+    ) AS r
+);
+----
+true
+
+query I
+SELECT (r).half_widths[1] IS NOT NULL AND (r).half_widths[2] IS NOT NULL AND (r).half_widths[3] IS NOT NULL
+FROM (
+    SELECT ts_conformal_predict_per_step(
+        [100.0, 105.0, 110.0, 100.0, 105.0, 110.0]::DOUBLE[],
+        [101.0, 108.0, 109.0, 103.0, 106.0, 107.0]::DOUBLE[],
+        [100.0, 105.0, 110.0]::DOUBLE[],
+        0.4, 3
+    ) AS r
+);
+----
+true
+
+# =============================================================================
+# ts_conformal_intervals (CONF-02): an empty, non-NULL forecasts list returns
+# an empty STRUCT(lower: [], upper: []), not SQL NULL (WR-01 review fix,
+# every sibling conformal entry point's "non-null, zero-length" convention).
+# =============================================================================
+
+query I
+SELECT (r).lower = []::DOUBLE[] AND (r).upper = []::DOUBLE[]
+FROM (SELECT ts_conformal_intervals([]::DOUBLE[], 1.0, 'symmetric', NULL::DOUBLE[]) AS r);
+----
+true
+
+# =============================================================================
+# ts_bootstrap_intervals / ts_bootstrap_quantiles (CONF-03, RUST-04 mirror
+# anchor): 9 zero residuals + one 10.0 (P(drawn 10)=0.1) -- the long tail must
+# land on the UPPER side (lower stays 100.0, upper 110.0), never mirrored to
+# 90.0 (cited from 16-03 Task 1).
+# =============================================================================
+
+query I
+SELECT (r).lower[1] = 100.0 AND (r).upper[1] = 110.0
+FROM (SELECT ts_bootstrap_intervals([0,0,0,0,0,0,0,0,0,10]::DOUBLE[], [100.0]::DOUBLE[], 2000, 0.9, 42) AS r);
+----
+true
+
+# ts_bootstrap_quantiles on the identical mirror-anchor series: q0.05/q0.95
+# agree with ts_bootstrap_intervals' lower/upper (same deterministic seed 42).
+query I
+SELECT ts_bootstrap_quantiles([0,0,0,0,0,0,0,0,0,10]::DOUBLE[], [100.0]::DOUBLE[], 2000, [0.05, 0.95]::DOUBLE[], 42);
+----
+{'point': [100.0], 'quantiles': [0.05, 0.95], 'values': [100.0, 110.0]}
+
+# Every removed jackknife+ alias errors with "was removed" (D-09/G15, CONF-05).
+statement error
+SELECT ts_conformal_learn([1.0, -2.0, 3.0, -1.5, 2.5]::DOUBLE[], [0.2]::DOUBLE[], 'symmetric', 'jackknife+');
+----
+was removed
+
+# =============================================================================
+# ts_conformal_coverage (empirical coverage): actual in [lower, upper] for
+# every row -> 1.0 (closed form, same probe convention as ts_coverage).
+# =============================================================================
+
+query I
+SELECT ts_conformal_coverage([1.0,2.0,3.0]::DOUBLE[], [0.0,1.0,2.0]::DOUBLE[], [2.0,3.0,4.0]::DOUBLE[]);
+----
+1.0
+
+# =============================================================================
+# ts_conformal_apply (scalar, stored-profile form): a profile whose strategy
+# string is a removed alias errors, not a silent default to 'split' (cited
+# from 16-03 Task 2).
+# =============================================================================
+
+statement error
+SELECT ts_conformal_apply(
+    [10.0]::DOUBLE[],
+    {
+        'method': 'symmetric',
+        'strategy': 'jackknife_plus',
+        'alphas': [0.2]::DOUBLE[],
+        'state_vector': [1.0, 1.0]::DOUBLE[],
+        'scores_lower': [1.0]::DOUBLE[],
+        'scores_upper': [1.0]::DOUBLE[],
+        'n_residuals': 5::BIGINT
+    }
+);
+----
+was removed
+
+# =============================================================================
+# ts_conformal_predict_asymmetric (Phase 16 CONF-03 fix; Phase 18 18-04 close-out).
+# Residuals are the asym_n20 fixture case
+# (validation/reference/fixtures/conformal/asymmetric_cases.json#asym_n20):
+# [-1.0,-0.8,-0.6,-0.4,-0.2] ++ [0.25*k for k=1..15]. At alpha 0.2 the margins are the
+# alpha/2 and 1-alpha/2 quantiles of the FULL signed residual array: lower 0.81,
+# upper 3.5125 (same literals as test/sql/ts_conformal_reference.test, asym_n20 section),
+# so forecast 100 -> [99.19, 103.5125]. The pre-fix residual-subset construction gave
+# lower 1.0 / upper 3.75.
+# =============================================================================
+
+query I
+SELECT ABS((r).lower[1] - 99.19) < 1e-9 AND ABS((r).upper[1] - 103.5125) < 1e-9
+FROM (
+    SELECT ts_conformal_predict_asymmetric(
+        [-1.0, -0.8, -0.6, -0.4, -0.2, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0, 3.25, 3.5, 3.75]::DOUBLE[],
+        [100.0]::DOUBLE[],
+        0.2
+    ) AS r
+);
+----
+true

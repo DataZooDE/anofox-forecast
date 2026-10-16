@@ -1,0 +1,300 @@
+# name: test/sql/correctness/forecast_parity.test
+# description: Correctness-suite value pins for forecasting functions fixed this
+#   milestone (FCST-01..09): crate-native intervals, real ARIMA, panel/VAR/exog/
+#   ensemble surfaces, two-step CV. Phase 18, 18-02, TEST-03. Reused, with citation,
+#   from test/sql/ts_forecast_reference.test (Phase 17 17-03), ts_forecast_crate_
+#   delegation.test, ts_forecast_calendar_surfaces.test, ts_cv_folds.test/ts_cv_
+#   forecast.test, and ts_forecast_exog.test.
+# group: [sql]
+#
+# Literals are copied from validation/reference/fixtures/r_forecast/*.json via the
+# python3 one-liners documented in ts_forecast_reference.test's own header. `require json`
+# is needed only because ts_forecast_exog_by expands to json functions (the documented,
+# pre-existing gap also hit by ts_detect_peaks_by/ts_mstl_decomposition_by); json is
+# statically linked, so it never skips on native builds.
+
+require anofox_forecast
+
+# json is statically linked (Phase 18, 18-01, D-01) but not auto-loaded by the
+# native unittest harness without an explicit LOAD (ts_forecast_exog and
+# ts_forecast_exog_by both expand to json_extract/to_json calls for their
+# dynamic xreg_cols handling -- a pre-existing, documented gap also hit by
+# ts_detect_peaks_by/ts_mstl_decomposition_by). It uses `require json`,
+# which in the unittest harness activates the statically linked json (a plain
+# `LOAD json;` only worked where json was also installed in ~/.duckdb and failed
+# on clean CI runners). json is always linked into native builds since 18-01,
+# so this never skips natively.
+require json
+
+statement ok
+CREATE TABLE air AS
+SELECT 'A' AS id, ('1949-01-01'::DATE + (i || ' months')::INTERVAL)::DATE AS ds, y::DOUBLE AS y
+FROM (
+    SELECT unnest(range(144)) AS i,
+           unnest([112, 118, 132, 129, 121, 135, 148, 148, 136, 119, 104, 118,
+                   115, 126, 141, 135, 125, 149, 170, 170, 158, 133, 114, 140,
+                   145, 150, 178, 163, 172, 178, 199, 199, 184, 162, 146, 166,
+                   171, 180, 193, 181, 183, 218, 230, 242, 209, 191, 172, 194,
+                   196, 196, 236, 235, 229, 243, 264, 272, 237, 211, 180, 201,
+                   204, 188, 235, 227, 234, 264, 302, 293, 259, 229, 203, 229,
+                   242, 233, 267, 269, 270, 315, 364, 347, 312, 274, 237, 278,
+                   284, 277, 317, 313, 318, 374, 413, 405, 355, 306, 271, 306,
+                   315, 301, 356, 348, 355, 422, 465, 467, 404, 347, 305, 336,
+                   340, 318, 362, 348, 363, 435, 491, 505, 404, 359, 310, 337,
+                   360, 342, 406, 396, 420, 472, 548, 559, 463, 407, 362, 405,
+                   417, 391, 419, 461, 472, 535, 622, 606, 508, 461, 390, 432]) AS y
+) t;
+
+# =============================================================================
+# _ts_forecast / ts_forecast_by (FCST-01..04, UPST-01/06): crate-native point
+# forecasts. SeasonalNaive is closed-form exact (repeats the last seasonal
+# cycle); the point forecast within 1e-8 absolute (cited from 17-03 Task 3).
+# =============================================================================
+
+query I
+SELECT max(abs(c - r)) <= 1e-8
+FROM (
+    SELECT unnest(yhat) AS c, unnest([417, 391, 419, 461, 472, 535, 622, 606, 508, 461, 390, 432]::DOUBLE[]) AS r
+    FROM (SELECT list(yhat ORDER BY forecast_step) AS yhat FROM ts_forecast_by('air', id, ds, y, 'SeasonalNaive', 12, '1mo', MAP{'seasonal_period': '12', 'confidence_level': '0.95'}))
+);
+----
+true
+
+# ts_forecast_by's SeasonalNaive point forecast equals _ts_forecast's (both
+# delegate to the same crate model).
+query I
+SELECT (SELECT yhat FROM ts_forecast_by('air', id, ds, y, 'SeasonalNaive', 12, '1mo', MAP{'seasonal_period': '12'}) ORDER BY forecast_step LIMIT 1)
+     = (SELECT (_ts_forecast(LIST(y ORDER BY ds), 12, 'SeasonalNaive')).point[1] FROM air);
+----
+true
+
+# ts_forecast_agg (aggregate form) point forecast equals ts_forecast_by's
+# (same macro/native backend).
+query I
+SELECT abs((SELECT yhat FROM ts_forecast_by('air', id, ds, y, 'SeasonalNaive', 12, '1mo', MAP{'seasonal_period': '12'}) ORDER BY forecast_step LIMIT 1)
+     - (SELECT (ts_forecast_agg(ds::TIMESTAMP, y, 'SeasonalNaive', 12, MAP{'seasonal_period': '12'})).point_forecast[1] FROM air)) < 1e-9;
+----
+true
+
+# 'ARIMA' without arima_order is a hard error naming AutoARIMA (D-15, Phase 10).
+statement error
+SELECT * FROM ts_forecast_by('air', id, ds, y, 'ARIMA', 12, '1mo', MAP{});
+----
+AutoARIMA
+
+# =============================================================================
+# ts_forecast_ensemble_by (FCST-07): a two-member ['ETS', 'ETS'] Mean ensemble
+# reproduces standalone 'ETS' exactly (cited from ts_forecast_crate_
+# delegation.test FCST-07). Intervals bracket the point at every step.
+# =============================================================================
+
+query I
+SELECT count(*) FROM (
+    SELECT e.forecast_step, e.yhat AS e_yhat, s.yhat AS s_yhat
+    FROM ts_forecast_ensemble_by(
+        'air', id, ds, y, ['ETS', 'ETS'], 12, '1mo',
+        combination_method := 'mean', seasonal_period := 12
+    ) AS e
+    JOIN ts_forecast_by(
+        'air', id, ds, y, 'ETS', 12, '1mo', MAP{'seasonal_period': '12'}
+    ) AS s USING (forecast_step)
+)
+WHERE abs(e_yhat - s_yhat) > 1e-9;
+----
+0
+
+query I
+SELECT count(*) FROM ts_forecast_ensemble_by(
+    'air', id, ds, y, ['ETS', 'ETS'], 12, '1mo',
+    combination_method := 'mean', seasonal_period := 12
+)
+WHERE yhat_lower IS NULL OR yhat_upper IS NULL OR NOT (yhat_lower < yhat AND yhat < yhat_upper);
+----
+0
+
+# =============================================================================
+# ts_forecast_panel_by (FCST-05, global/panel): a 3-series panel is the
+# minimum for cross-series global learning; a misconfigured croston_variant
+# errors naming the parameter (D-07, cited from ts_forecast_crate_delegation).
+# =============================================================================
+
+statement ok
+CREATE TABLE panel3 AS
+SELECT s.sid AS id, m.ds, (s.sid * 10 + m.i)::DOUBLE AS y
+FROM (VALUES (1), (2), (3)) AS s(sid)
+CROSS JOIN (
+    SELECT i, ('2020-01-01'::DATE + (i || ' months')::INTERVAL)::DATE AS ds
+    FROM range(12) AS t(i)
+) AS m;
+
+query II
+SELECT COUNT(DISTINCT id), COUNT(*) FROM ts_forecast_panel_by('panel3', id, ds, y, 'GlobalCroston', 4, '1mo', MAP{});
+----
+3	12
+
+statement error
+SELECT * FROM ts_forecast_panel_by('panel3', id, ds, y, 'GlobalCroston', 4, '1mo', MAP{'croston_variant': 'sab'});
+----
+croston_variant
+
+statement ok
+DROP TABLE panel3;
+
+# =============================================================================
+# ts_forecast_var_by (FCST-05, multivariate): 2 value columns on the same
+# month-end date grid produce the expected calendar-aware forecast dates
+# (D-12, cited from ts_forecast_calendar_surfaces.test).
+# =============================================================================
+
+statement ok
+CREATE TABLE var_me3 AS
+SELECT last_day(DATE '2023-01-01' + INTERVAL (i) MONTH) AS ds,
+       (100 + i)::DOUBLE AS y1, (200 + i * 2)::DOUBLE AS y2
+FROM range(11) t(i);
+
+query I
+SELECT list(ds ORDER BY forecast_step) = [DATE '2023-12-31', DATE '2024-01-31', DATE '2024-02-29']
+FROM ts_forecast_var_by('var_me3', 'ds', ['y1', 'y2'], 3, '1mo')
+WHERE variable = 'y1';
+----
+true
+
+statement ok
+DROP TABLE var_me3;
+
+# =============================================================================
+# _ts_forecast_exog / ts_forecast_exog (FCST-05, crate exog fits): a
+# regressor that is constant 0 in history and 1 in the future leaves every
+# point forecast identical (and finite) to the regressor-free run -- a
+# constant-in-history regressor has zero predictive signal by construction
+# (cited from ts_forecast_crate_delegation.test, formula-generated series).
+# =============================================================================
+
+query I
+SELECT max(abs(a - b)) < 1e-9
+FROM (
+    WITH gen AS (
+        SELECT i, 50.0 + 3.0 * sin(i * 0.37) + (i % 5)::DOUBLE AS y, sin(i * 0.37) AS x1
+        FROM range(120) AS t(i)
+    ), fut AS (
+        SELECT sin((120 + i) * 0.37) AS x1 FROM range(6) AS t(i)
+    )
+    SELECT
+        unnest((SELECT _ts_forecast_exog(
+            (SELECT list(y ORDER BY i) FROM gen),
+            [(SELECT list(x1 ORDER BY i) FROM gen)],
+            [(SELECT list(x1) FROM fut)],
+            6, 'OptimizedTheta'
+        )).point) AS a,
+        unnest((SELECT _ts_forecast_exog(
+            (SELECT list(y ORDER BY i) FROM gen),
+            [(SELECT list(x1 ORDER BY i) FROM gen), (SELECT list(0.0::DOUBLE) FROM range(120))],
+            [(SELECT list(x1) FROM fut), (SELECT list(1.0::DOUBLE) FROM range(6))],
+            6, 'OptimizedTheta'
+        )).point) AS b
+);
+----
+true
+
+# ts_forecast_exog (the macro form) agrees with _ts_forecast_exog on the same
+# history/future tables and regressor.
+statement ok
+CREATE TABLE exog_hist AS
+SELECT (DATE '2024-01-01' + INTERVAL (i) DAY) AS ds,
+       (50.0 + 3.0 * sin(i * 0.37) + (i % 5)::DOUBLE) AS y, sin(i * 0.37) AS x1
+FROM range(120) t(i);
+
+statement ok
+CREATE TABLE exog_fut AS
+SELECT (DATE '2024-01-01' + INTERVAL (120 + i) DAY) AS ds, sin((120 + i) * 0.37) AS x1
+FROM range(6) t(i);
+
+query I
+SELECT abs(
+    (SELECT point_forecasts[1] FROM ts_forecast_exog('exog_hist', ds, y, ['x1'], 'exog_fut', ds, ['x1'], method := 'OptimizedTheta', horizon := 6))
+    - (SELECT (_ts_forecast_exog(
+        (SELECT list(y ORDER BY ds) FROM exog_hist),
+        [(SELECT list(x1 ORDER BY ds) FROM exog_hist)],
+        [(SELECT list(x1 ORDER BY ds) FROM exog_fut)],
+        6, 'OptimizedTheta'
+    )).point[1])
+) < 1e-6;
+----
+true
+
+statement ok
+DROP TABLE exog_hist;
+
+statement ok
+DROP TABLE exog_fut;
+
+# =============================================================================
+# ts_forecast_exog_by (grouped exog, cited from test/sql/ts_forecast_exog.test).
+# =============================================================================
+
+statement ok
+CREATE TABLE exog_by_history AS
+SELECT CASE WHEN i <= 20 THEN 'A' ELSE 'B' END AS group_id,
+       '2023-01-01'::TIMESTAMP + INTERVAL ((i - 1) % 20) DAY AS date,
+       (10.0 + (i % 20) * 2.0 + ((i % 20) % 7))::DOUBLE AS target,
+       ((i % 20) + 5.0)::DOUBLE AS xreg1
+FROM range(1, 41) t(i);
+
+statement ok
+CREATE TABLE exog_by_future AS
+SELECT group_id, '2023-01-21'::TIMESTAMP + INTERVAL (i - 1) DAY AS date, (25.0 + i)::DOUBLE AS xreg1
+FROM (VALUES ('A'), ('B')) AS groups(group_id), range(1, 8) t(i);
+
+query II
+SELECT COUNT(DISTINCT id), COUNT(*) FROM ts_forecast_exog_by(
+    'exog_by_history', group_id, date, target, ['xreg1'],
+    'exog_by_future', date, ['xreg1'], '1d', 'AutoARIMA', 7, MAP{}
+);
+----
+2	14
+
+statement ok
+DROP TABLE exog_by_history;
+
+statement ok
+DROP TABLE exog_by_future;
+
+# =============================================================================
+# ts_cv_folds_by / ts_cv_forecast_by (FCST backtest infra): deterministic
+# train/test fold sizes and a Naive CV forecast producing exactly one row per
+# test-split point per fold (cited from ts_cv_folds.test/ts_cv_forecast.test).
+# =============================================================================
+
+statement ok
+CREATE TABLE cv_data_24 AS
+SELECT 'A' AS series_id, CAST(i AS INTEGER) AS ds, CAST(10.0 + i AS DOUBLE) AS y
+FROM generate_series(1, 24) AS t(i);
+
+statement ok
+CREATE TABLE cv_folds AS
+SELECT * FROM ts_cv_folds_by('cv_data_24', series_id, ds, y, 3, 4, MAP{});
+
+query III
+SELECT fold_id, split, COUNT(*) AS cnt FROM cv_folds GROUP BY fold_id, split ORDER BY fold_id, split;
+----
+1	test	4
+1	train	12
+2	test	4
+2	train	16
+3	test	4
+3	train	20
+
+query III
+SELECT fold_id, split, COUNT(*)
+FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', MAP{})
+GROUP BY fold_id, split ORDER BY fold_id, split;
+----
+1	test	4
+2	test	4
+3	test	4
+
+statement ok
+DROP TABLE cv_data_24;
+
+statement ok
+DROP TABLE cv_folds;

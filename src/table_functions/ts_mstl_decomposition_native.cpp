@@ -4,6 +4,7 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
 #include <algorithm>
+#include <cctype>
 #include <map>
 #include <cstring>
 #include <mutex>
@@ -32,7 +33,8 @@ namespace duckdb {
 
 struct TsMstlDecompositionNativeBindData : public TableFunctionData {
     // Parameters
-    int insufficient_data_mode = 0;  // 0=fail, 1=skip, 2=pad
+    int insufficient_data_mode = 0;  // 0=fail, 1=trend, 2=none (matches InsufficientDataMode::from_int)
+    vector<int32_t> periods;         // Seasonal periods (empty = none/auto, D-09)
 
     // Type preservation
     LogicalType group_logical_type = LogicalType(LogicalTypeId::VARCHAR);
@@ -70,10 +72,19 @@ struct TsMstlDecompositionNativeLocalState : public LocalTableFunctionState {
 // Helper Functions
 // ============================================================================
 
+// CR-04: this must match the scalar _ts_mstl_decomposition's
+// ParseInsufficientDataMode (src/table_functions/ts_decomposition.cpp) and
+// InsufficientDataMode::from_int (crates/anofox-fcst-core/src/decomposition.rs),
+// which both map "trend" -> 1 and "none" -> 2. The previous "skip"/"pad"
+// strings here never matched the macro's documented 'trend'/'none' values
+// (src/macros/ts_macros.cpp's ts_mstl_decomposition_by), so every call that
+// requested insufficient_data = 'trend' or 'none' silently fell through to
+// the default (0 = fail) instead.
 static int ParseInsufficientDataMode(const string &mode) {
-    if (mode == "fail") return 0;
-    if (mode == "skip") return 1;
-    if (mode == "pad") return 2;
+    string lower = mode;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    if (lower == "trend") return 1;
+    if (lower == "none") return 2;
     return 0;  // default: fail
 }
 
@@ -93,6 +104,15 @@ static unique_ptr<FunctionData> TsMstlDecompositionNativeBind(
     if (input.inputs.size() >= 2 && !input.inputs[1].IsNull()) {
         string mode = input.inputs[1].GetValue<string>();
         bind_data->insufficient_data_mode = ParseInsufficientDataMode(mode);
+    }
+
+    // Parse seasonal periods (parameter index 2, D-09). NULL -> empty (none/auto).
+    if (input.inputs.size() >= 3 && !input.inputs[2].IsNull()) {
+        for (auto &child : ListValue::GetChildren(input.inputs[2])) {
+            if (!child.IsNull()) {
+                bind_data->periods.push_back(child.GetValue<int32_t>());
+            }
+        }
     }
 
     // Detect column types from input
@@ -293,12 +313,17 @@ static OperatorFinalizeResultType TsMstlDecompositionNativeFinalize(
             bool success = anofox_ts_mstl_decomposition(
                 sorted_values.data(),
                 sorted_values.size(),
-                nullptr,  // periods - auto detect
-                0,
+                bind_data.periods.empty() ? nullptr : bind_data.periods.data(),
+                bind_data.periods.size(),
                 bind_data.insufficient_data_mode,
                 &mstl_result,
                 &error
             );
+
+            if (!success && error.code == INVALID_INPUT) {
+                throw InvalidInputException("_ts_mstl_decomposition_native: %s",
+                    error.message ? error.message : "invalid input");
+            }
 
             DecompositionOutputRow row;
             row.group_value = grp.group_value;
@@ -340,12 +365,22 @@ static OperatorFinalizeResultType TsMstlDecompositionNativeFinalize(
 
                 // Free Rust-allocated memory
                 anofox_free_mstl_result(&mstl_result);
-            } else if (bind_data.insufficient_data_mode == 1) {
-                // skip mode - output empty arrays
-                // (row already has empty vectors)
+            } else if (success && !mstl_result.decomposition_applied) {
+                // CR-04: insufficient_data_mode == 'none' (2) -- mirrors the
+                // scalar _ts_mstl_decomposition's CR-01 shape for the identical
+                // condition (empty trend/seasonal/remainder/periods), so the
+                // table and scalar surfaces agree. (row already has empty
+                // vectors from the DecompositionOutputRow default construction.)
             } else {
-                // fail mode or pad mode with failure - skip this group
-                continue;
+                // CR-04: !success here means insufficient_data_mode == 'fail'
+                // (0, the documented default) hit an insufficient-data (or
+                // other) failure. Never silently drop the group -- raise a SQL
+                // error naming the group and the condition, instead of
+                // `continue`-ing past it.
+                throw InvalidInputException(
+                    "ts_mstl_decomposition_by: group '%s': %s",
+                    row.group_value.ToString(),
+                    error.message ? error.message : "insufficient data for MSTL decomposition");
             }
 
             gstate.results.push_back(row);
@@ -421,11 +456,11 @@ static OperatorFinalizeResultType TsMstlDecompositionNativeFinalize(
 // ============================================================================
 
 void RegisterTsMstlDecompositionNativeFunction(ExtensionLoader &loader) {
-    // Internal table-in-out function: (TABLE, insufficient_data_mode)
+    // Internal table-in-out function: (TABLE, insufficient_data_mode, seasonal_periods)
     // Input table must have 3 columns: group_col, date_col, value_col
     // Note: This is an internal function (prefixed with _) called by ts_mstl_decomposition_by macro
     TableFunction func("_ts_mstl_decomposition_native",
-        {LogicalType::TABLE, LogicalType::VARCHAR},
+        {LogicalType::TABLE, LogicalType::VARCHAR, LogicalType::LIST(LogicalType::INTEGER)},
         nullptr,  // No execute function - use in_out_function
         TsMstlDecompositionNativeBind,
         TsMstlDecompositionNativeInitGlobal,

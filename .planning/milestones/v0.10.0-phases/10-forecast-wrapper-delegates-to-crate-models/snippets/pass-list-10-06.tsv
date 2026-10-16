@@ -1,0 +1,29 @@
+docs/api/07-forecasting.md	0	PASS	CREATE OR REPLACE TABLE sales_data AS	
+docs/api/07-forecasting.md	1	PASS	SELECT *, 'Naive' AS model FROM ts_forecast_by('sales_data', product_id, date, revenue, 'Naive', 7, 	
+docs/api/07-forecasting.md	2	PASS	CREATE OR REPLACE TABLE daily_sales AS	
+docs/api/07-forecasting.md	3	PASS	SELECT * FROM ts_forecast_by(	
+docs/api/07-forecasting.md	4	PASS	WITH detected AS (	
+docs/api/07-forecasting.md	5	PASS	SELECT product_id, length, n_nulls	
+docs/api/07-forecasting.md	6	EXPECTED-ERROR	SELECT * FROM ts_forecast_by('sales_data', product_id, date, revenue, 'ARIMA', 7, '1d', MAP{});	Invalid Input Error: Invalid input: ARIMA requires arima_order=[p,d,q] (e.g. [1,1,1]); use 'AutoARIMA' for automatic order selection
+docs/api/07-forecasting.md	7	PASS	CREATE OR REPLACE TABLE air AS	
+docs/api/07-forecasting.md	8	PASS	CREATE OR REPLACE TABLE fitted_demo AS	
+docs/api/07-forecasting.md	9	PASS	CREATE OR REPLACE TABLE trailing_null_demo AS	
+docs/api/07-forecasting.md	10	SYNOPSIS	ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, frequency, params?) → T	Parser Error: syntax error at or near "ts_forecast_by"
+docs/api/07-forecasting.md	11	PASS	SELECT * FROM ts_forecast_by('sales', product_id, date, amount, 'HoltWinters', 12, '1d',	
+docs/api/07-forecasting.md	12	SYNOPSIS	ts_forecast_exog_by(table_name, group_col, date_col, target_col, x_cols, future_table, future_date_c	Parser Error: syntax error at or near "ts_forecast_exog_by"
+docs/api/07-forecasting.md	13	PASS	CREATE OR REPLACE TABLE sales_history AS	
+docs/api/07-forecasting.md	14	SYNOPSIS	ts_forecast_panel_by(	Parser Error: syntax error at or near "ts_forecast_panel_by"
+docs/api/07-forecasting.md	15	PASS	CREATE OR REPLACE TABLE seasonal_panel AS	
+docs/api/07-forecasting.md	16	PASS	CREATE OR REPLACE TABLE returns AS	
+docs/api/07-forecasting.md	17	PASS	CREATE OR REPLACE TABLE sales AS	
+docs/api/07-forecasting.md	18	PASS	CREATE OR REPLACE TABLE sales AS	
+docs/api/07-forecasting.md	19	SYNOPSIS	ts_forecast_ensemble_by(	Parser Error: syntax error at or near "ts_forecast_ensemble_by"
+docs/api/07-forecasting.md	20	PASS	CREATE OR REPLACE TABLE ae_test AS	
+docs/api/07-forecasting.md	21	SYNOPSIS	ts_ensemble_inspect_by(	Parser Error: syntax error at or near "ts_ensemble_inspect_by"
+docs/api/07-forecasting.md	22	PASS	CREATE OR REPLACE TABLE ae_test AS	
+docs/api/07-forecasting.md	23	SYNOPSIS	ts_auto_ensemble_inspect_by(	Parser Error: syntax error at or near "ts_auto_ensemble_inspect_by"
+docs/api/07-forecasting.md	24	PASS	SELECT * FROM ts_auto_ensemble_inspect_by(	
+docs/api/07-forecasting.md	25	SYNOPSIS	ts_forecast_var_by(	Parser Error: syntax error at or near "ts_forecast_var_by"
+docs/api/07-forecasting.md	26	PASS	CREATE OR REPLACE TABLE var_src AS	
+docs/api/07-forecasting.md	27	PASS	SELECT product_id,	
+docs/api/07-forecasting.md	28	PASS	SELECT product_id,	

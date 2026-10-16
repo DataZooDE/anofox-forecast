@@ -1,0 +1,1154 @@
+{
+  "family": "tsfresh_features",
+  "generator": "validation/reference/python/gen_tsfresh_features.py",
+  "tool_versions": {
+    "tsfresh": "0.21.2",
+    "statsmodels": "0.15.0",
+    "numpy": "2.5.3",
+    "scipy": "1.18.1",
+    "pandas": "3.0.6"
+  },
+  "tolerance": {
+    "abs": 1e-09,
+    "rel": 1e-09,
+    "notes": "D-10 default abs <= 1e-9 + 1e-9*|ref|; per-feature overrides live in features[].tolerance with a reason"
+  },
+  "notes": "Hand-maintained 117-row tsfresh/numpy parity contract (D-01/D-02, Phase 14). Each row names the exact tsfresh.feature_extraction.feature_calculators function + params (reference: 'tsfresh'), or a hand-written numpy/scipy formula (reference: 'numpy/scipy') for names with no tsfresh counterpart. validation/reference/python/gen_tsfresh_features.py reads this file and calls the named calculator DIRECTLY (never tsfresh.extract_features()'s settings-driven convenience API, which silently uses the wrong parameter grid for several of this project's exact choices -- see 14-RESEARCH.md Pitfall 2). status is 'match' once the Rust extract_features() output matches the computed reference value on every fixture series, or 'pending:<owner-plan>' while a later Phase 14 plan (14-02/14-03/14-04) still owns the fix. crates/anofox-fcst-core/tests/tsfresh_features_reference.rs enforces that every pending row still mismatches somewhere (the ratchet) and that every match row matches everywhere, honouring any documented 'deviation' entries. This plan (14-01) adds only the five partial_autocorrelation_lag{1..5} rows (FEAT-01); the remaining 112 names are added by plan 14-02 task 1.",
+  "features": [
+    {
+      "name": "length",
+      "reference": "tsfresh",
+      "calculator": "length",
+      "params": {},
+      "status": "match",
+      "definition": "Number of observations (tsfresh length)."
+    },
+    {
+      "name": "sum",
+      "reference": "tsfresh",
+      "calculator": "sum_values",
+      "params": {},
+      "status": "match",
+      "definition": "Sum of all values (tsfresh sum_values)."
+    },
+    {
+      "name": "mean",
+      "reference": "tsfresh",
+      "calculator": "mean",
+      "params": {},
+      "status": "match",
+      "definition": "Arithmetic mean (tsfresh mean)."
+    },
+    {
+      "name": "minimum",
+      "reference": "tsfresh",
+      "calculator": "minimum",
+      "params": {},
+      "status": "match",
+      "definition": "Minimum value (tsfresh minimum)."
+    },
+    {
+      "name": "maximum",
+      "reference": "tsfresh",
+      "calculator": "maximum",
+      "params": {},
+      "status": "match",
+      "definition": "Maximum value (tsfresh maximum)."
+    },
+    {
+      "name": "range",
+      "reference": "numpy/scipy",
+      "formula": "np.max(x) - np.min(x)",
+      "status": "match",
+      "definition": "Range (max - min); no tsfresh counterpart (D-02)."
+    },
+    {
+      "name": "variance",
+      "reference": "tsfresh",
+      "calculator": "variance",
+      "params": {},
+      "status": "match",
+      "definition": "Population variance, ddof=0 (tsfresh variance)."
+    },
+    {
+      "name": "standard_deviation",
+      "reference": "tsfresh",
+      "calculator": "standard_deviation",
+      "params": {},
+      "status": "match",
+      "definition": "Population standard deviation, ddof=0 (tsfresh standard_deviation)."
+    },
+    {
+      "name": "variation_coefficient",
+      "reference": "tsfresh",
+      "calculator": "variation_coefficient",
+      "params": {},
+      "status": "match",
+      "definition": "std(x) / mean(x), signed (tsfresh variation_coefficient)."
+    },
+    {
+      "name": "large_standard_deviation",
+      "reference": "tsfresh",
+      "calculator": "large_standard_deviation",
+      "params": {
+        "r": 0.25
+      },
+      "status": "match",
+      "definition": "1.0 if std(x) > r * (max-min) else 0.0, r=0.25 (tsfresh large_standard_deviation)."
+    },
+    {
+      "name": "median",
+      "reference": "tsfresh",
+      "calculator": "median",
+      "params": {},
+      "status": "match",
+      "definition": "Median value (tsfresh median)."
+    },
+    {
+      "name": "quantile_0.1",
+      "reference": "tsfresh",
+      "calculator": "quantile",
+      "params": {
+        "q": 0.1
+      },
+      "status": "match",
+      "definition": "Quantile q=0.1 (tsfresh quantile)."
+    },
+    {
+      "name": "quantile_0.25",
+      "reference": "tsfresh",
+      "calculator": "quantile",
+      "params": {
+        "q": 0.25
+      },
+      "status": "match",
+      "definition": "Quantile q=0.25 (tsfresh quantile)."
+    },
+    {
+      "name": "quantile_0.75",
+      "reference": "tsfresh",
+      "calculator": "quantile",
+      "params": {
+        "q": 0.75
+      },
+      "status": "match",
+      "definition": "Quantile q=0.75 (tsfresh quantile)."
+    },
+    {
+      "name": "quantile_0.9",
+      "reference": "tsfresh",
+      "calculator": "quantile",
+      "params": {
+        "q": 0.9
+      },
+      "status": "match",
+      "definition": "Quantile q=0.9 (tsfresh quantile)."
+    },
+    {
+      "name": "skewness",
+      "reference": "tsfresh",
+      "calculator": "skewness",
+      "params": {},
+      "input": "series",
+      "status": "match",
+      "definition": "pandas Series.skew (bias-corrected G1), shared with ts_stats (D-05).",
+      "deviation": {
+        "series": [
+          "constant_n30",
+          "all_zero_n50"
+        ],
+        "expected_ours": "NaN",
+        "reason": "zero-variance sample: G1/G2 are 0/0; scipy skew/kurtosis(bias=False) and ts_stats return NaN (D-05); pandas/tsfresh return 0 by convention, which is arguably wrong for an undefined moment (D-03)."
+      }
+    },
+    {
+      "name": "kurtosis",
+      "reference": "tsfresh",
+      "calculator": "kurtosis",
+      "params": {},
+      "input": "series",
+      "status": "match",
+      "definition": "pandas Series.kurtosis (bias-corrected excess G2), shared with ts_stats (D-05).",
+      "deviation": {
+        "series": [
+          "constant_n30",
+          "all_zero_n50"
+        ],
+        "expected_ours": "NaN",
+        "reason": "zero-variance sample: G1/G2 are 0/0; scipy skew/kurtosis(bias=False) and ts_stats return NaN (D-05); pandas/tsfresh return 0 by convention, which is arguably wrong for an undefined moment (D-03)."
+      }
+    },
+    {
+      "name": "count_above_mean",
+      "reference": "tsfresh",
+      "calculator": "count_above_mean",
+      "params": {},
+      "status": "match",
+      "definition": "Count of values strictly above the mean (tsfresh count_above_mean)."
+    },
+    {
+      "name": "count_below_mean",
+      "reference": "tsfresh",
+      "calculator": "count_below_mean",
+      "params": {},
+      "status": "match",
+      "definition": "Count of values strictly below the mean (tsfresh count_below_mean)."
+    },
+    {
+      "name": "percentage_above_mean",
+      "reference": "numpy/scipy",
+      "formula": "np.sum(x > np.mean(x)) / n",
+      "status": "match",
+      "definition": "Fraction of values strictly above the mean; no tsfresh counterpart (D-02)."
+    },
+    {
+      "name": "zero_crossing_rate",
+      "reference": "numpy/scipy",
+      "formula": "count of i in 0..n-2 with x[i]!=0, x[i+1]!=0 and sign(x[i])!=sign(x[i+1]), divided by max(n-1,1)",
+      "status": "match",
+      "definition": "Zero-crossing rate; tsfresh's closest calculator (number_crossing_m) has no rate/exact-zero-exclusion semantics, so this stays a documented numpy reference (D-02, Open Question 1)."
+    },
+    {
+      "name": "mean_change",
+      "reference": "tsfresh",
+      "calculator": "mean_change",
+      "params": {},
+      "status": "match",
+      "definition": "Mean of first differences (tsfresh mean_change)."
+    },
+    {
+      "name": "mean_abs_change",
+      "reference": "tsfresh",
+      "calculator": "mean_abs_change",
+      "params": {},
+      "status": "match",
+      "definition": "Mean of |first differences| (tsfresh mean_abs_change)."
+    },
+    {
+      "name": "first_value",
+      "reference": "numpy/scipy",
+      "formula": "x[0]",
+      "status": "match",
+      "definition": "First value; no tsfresh counterpart (D-02)."
+    },
+    {
+      "name": "last_value",
+      "reference": "numpy/scipy",
+      "formula": "x[-1]",
+      "status": "match",
+      "definition": "Last value; no tsfresh counterpart (D-02)."
+    },
+    {
+      "name": "first_location_of_maximum",
+      "reference": "tsfresh",
+      "calculator": "first_location_of_maximum",
+      "params": {},
+      "status": "match",
+      "definition": "argmax(x)/n, 0-based (tsfresh first_location_of_maximum)."
+    },
+    {
+      "name": "last_location_of_maximum",
+      "reference": "tsfresh",
+      "calculator": "last_location_of_maximum",
+      "params": {},
+      "status": "match",
+      "definition": "1 - argmax(x[::-1])/n == (last_idx+1)/n, 0-based last_idx (tsfresh last_location_of_maximum)."
+    },
+    {
+      "name": "first_location_of_minimum",
+      "reference": "tsfresh",
+      "calculator": "first_location_of_minimum",
+      "params": {},
+      "status": "match",
+      "definition": "argmin(x)/n, 0-based (tsfresh first_location_of_minimum)."
+    },
+    {
+      "name": "last_location_of_minimum",
+      "reference": "tsfresh",
+      "calculator": "last_location_of_minimum",
+      "params": {},
+      "status": "match",
+      "definition": "1 - argmin(x[::-1])/n == (last_idx+1)/n, 0-based last_idx (tsfresh last_location_of_minimum)."
+    },
+    {
+      "name": "abs_energy",
+      "reference": "tsfresh",
+      "calculator": "abs_energy",
+      "params": {},
+      "status": "match",
+      "definition": "Sum of squared values (tsfresh abs_energy)."
+    },
+    {
+      "name": "root_mean_square",
+      "reference": "tsfresh",
+      "calculator": "root_mean_square",
+      "params": {},
+      "status": "match",
+      "definition": "sqrt(mean(x^2)) (tsfresh root_mean_square)."
+    },
+    {
+      "name": "mean_second_derivative_central",
+      "reference": "tsfresh",
+      "calculator": "mean_second_derivative_central",
+      "params": {},
+      "status": "match",
+      "definition": "(x[-1]-x[-2]-x[1]+x[0]) / (2*(n-2)) (tsfresh mean_second_derivative_central)."
+    },
+    {
+      "name": "cid_ce",
+      "reference": "tsfresh",
+      "calculator": "cid_ce",
+      "params": {
+        "normalize": false
+      },
+      "status": "match",
+      "definition": "Complexity-invariant distance of the (unnormalized) series to itself (tsfresh cid_ce, normalize=false)."
+    },
+    {
+      "name": "absolute_sum_of_changes",
+      "reference": "tsfresh",
+      "calculator": "absolute_sum_of_changes",
+      "params": {},
+      "status": "match",
+      "definition": "Sum of |first differences| (tsfresh absolute_sum_of_changes)."
+    },
+    {
+      "name": "lempel_ziv_complexity",
+      "reference": "tsfresh",
+      "calculator": "lempel_ziv_complexity",
+      "params": {
+        "bins": 2
+      },
+      "status": "match",
+      "definition": "tsfresh's bins=2 range-midpoint (linspace) quantization + sub-word dictionary-growth loop, result = dictionary size / n."
+    },
+    {
+      "name": "longest_strike_above_mean",
+      "reference": "tsfresh",
+      "calculator": "longest_strike_above_mean",
+      "params": {},
+      "status": "match",
+      "definition": "Longest run of consecutive values above the mean (tsfresh longest_strike_above_mean)."
+    },
+    {
+      "name": "longest_strike_below_mean",
+      "reference": "tsfresh",
+      "calculator": "longest_strike_below_mean",
+      "params": {},
+      "status": "match",
+      "definition": "Longest run of consecutive values below the mean (tsfresh longest_strike_below_mean)."
+    },
+    {
+      "name": "number_peaks",
+      "reference": "tsfresh",
+      "calculator": "number_peaks",
+      "params": {
+        "n": 1
+      },
+      "status": "match",
+      "definition": "Count of points exceeding all neighbours within +/-n (n=1 support; tsfresh number_peaks)."
+    },
+    {
+      "name": "number_peaks_threshold_1",
+      "reference": "numpy/scipy",
+      "formula": "count of interior i with x[i]>x[i-1], x[i]>x[i+1] and |x[i]-mean(x)| > 1*std(x)",
+      "status": "match",
+      "definition": "Sigma-scaled amplitude-thresholded peak count, k=1; no tsfresh counterpart (D-02)."
+    },
+    {
+      "name": "number_peaks_threshold_2",
+      "reference": "numpy/scipy",
+      "formula": "count of interior i with x[i]>x[i-1], x[i]>x[i+1] and |x[i]-mean(x)| > 2*std(x)",
+      "status": "match",
+      "definition": "Sigma-scaled amplitude-thresholded peak count, k=2; no tsfresh counterpart (D-02)."
+    },
+    {
+      "name": "benford_correlation",
+      "reference": "tsfresh",
+      "calculator": "benford_correlation",
+      "params": {},
+      "status": "match",
+      "definition": "Correlation of the first-significant-digit distribution (via shortest scientific notation, incl. |v|<1) to Benford's law log10(1+1/d), denominator n (zeros/NaN count toward n as digit 0)."
+    },
+    {
+      "name": "linear_trend_slope",
+      "reference": "tsfresh",
+      "calculator": "linear_trend",
+      "params": {
+        "attr": "slope"
+      },
+      "status": "match",
+      "definition": "OLS slope of x against index (tsfresh linear_trend, attr=slope)."
+    },
+    {
+      "name": "linear_trend_intercept",
+      "reference": "tsfresh",
+      "calculator": "linear_trend",
+      "params": {
+        "attr": "intercept"
+      },
+      "status": "match",
+      "definition": "OLS intercept of x against index (tsfresh linear_trend, attr=intercept)."
+    },
+    {
+      "name": "linear_trend_r_squared",
+      "reference": "numpy/scipy",
+      "formula": "scipy.stats.linregress(np.arange(n), x).rvalue ** 2",
+      "status": "match",
+      "definition": "scipy.stats.linregress(np.arange(n), x).rvalue ** 2; NaN for a constant series (scipy degenerate rvalue is NaN)."
+    },
+    {
+      "name": "binned_entropy",
+      "reference": "tsfresh",
+      "calculator": "binned_entropy",
+      "params": {
+        "max_bins": 10
+      },
+      "status": "match",
+      "definition": "Shannon entropy over np.histogram(x, bins=10)'s floor-based bins (edge corrections, min==max widened by 0.5); empty bins contribute 0; NaN on NaN input."
+    },
+    {
+      "name": "sample_entropy",
+      "reference": "tsfresh",
+      "calculator": "sample_entropy",
+      "params": {},
+      "status": "match",
+      "definition": "tsfresh sample_entropy: m=2, r=0.2*population std(x), Chebyshev distance, full symmetric match-count matrix minus self-matches (B/A), -ln(A/B) on the raw sums -- shares the stats.rs template_match_counts band search with ts_stats' approximate_entropy."
+    },
+    {
+      "name": "approximate_entropy",
+      "reference": "tsfresh",
+      "calculator": "approximate_entropy",
+      "params": {
+        "m": 2,
+        "r": 0.2
+      },
+      "status": "match",
+      "definition": "tsfresh approximate_entropy: m=2, r=0.2*population std(x) (Pincus Phi_m - Phi_{m+1}), 0.0 when n<=m+1 (tsfresh's own degenerate branch, not NaN) -- shares the stats.rs template_match_counts band search."
+    },
+    {
+      "name": "permutation_entropy",
+      "reference": "tsfresh",
+      "calculator": "permutation_entropy",
+      "params": {
+        "tau": 1,
+        "dimension": 3
+      },
+      "status": "match",
+      "definition": "-sum(p*ln(p)) over rank-encoded windows (dimension=3, tau=1), NOT normalized by ln(dimension!) -- the stable single-argsort pattern key gives identical equivalence classes to tsfresh's literal double-argsort."
+    },
+    {
+      "name": "count_unique",
+      "reference": "numpy/scipy",
+      "formula": "np.unique(x).size",
+      "status": "match",
+      "definition": "Count of distinct values; no tsfresh counterpart (D-02)."
+    },
+    {
+      "name": "ratio_value_number_to_length",
+      "reference": "tsfresh",
+      "calculator": "ratio_value_number_to_time_series_length",
+      "params": {},
+      "status": "match",
+      "definition": "len(unique(x)) / n (tsfresh ratio_value_number_to_time_series_length)."
+    },
+    {
+      "name": "has_duplicate",
+      "reference": "tsfresh",
+      "calculator": "has_duplicate",
+      "params": {},
+      "status": "match",
+      "definition": "1.0 if any value repeats else 0.0 (tsfresh has_duplicate)."
+    },
+    {
+      "name": "has_duplicate_max",
+      "reference": "tsfresh",
+      "calculator": "has_duplicate_max",
+      "params": {},
+      "status": "match",
+      "definition": "1.0 if the maximum value occurs more than once else 0.0 (tsfresh has_duplicate_max)."
+    },
+    {
+      "name": "has_duplicate_min",
+      "reference": "tsfresh",
+      "calculator": "has_duplicate_min",
+      "params": {},
+      "status": "match",
+      "definition": "1.0 if the minimum value occurs more than once else 0.0 (tsfresh has_duplicate_min)."
+    },
+    {
+      "name": "percentage_of_reoccurring_datapoints_to_all_datapoints",
+      "reference": "tsfresh",
+      "calculator": "percentage_of_reoccurring_datapoints_to_all_datapoints",
+      "params": {},
+      "status": "match",
+      "definition": "Fraction of datapoints that belong to a value occurring more than once, counted with multiplicity (tsfresh)."
+    },
+    {
+      "name": "percentage_of_reoccurring_values_to_all_values",
+      "reference": "tsfresh",
+      "calculator": "percentage_of_reoccurring_values_to_all_values",
+      "params": {},
+      "status": "match",
+      "definition": "Fraction of distinct values that occur more than once (tsfresh)."
+    },
+    {
+      "name": "sum_of_reoccurring_values",
+      "reference": "tsfresh",
+      "calculator": "sum_of_reoccurring_values",
+      "params": {},
+      "status": "match",
+      "definition": "Sum of distinct values that occur more than once, each counted once (tsfresh sum_of_reoccurring_values)."
+    },
+    {
+      "name": "sum_of_reoccurring_datapoints",
+      "reference": "tsfresh",
+      "calculator": "sum_of_reoccurring_data_points",
+      "params": {},
+      "status": "match",
+      "definition": "Sum of values that occur more than once, counted with multiplicity (tsfresh sum_of_reoccurring_data_points)."
+    },
+    {
+      "name": "spectral_centroid",
+      "reference": "tsfresh",
+      "calculator": "fft_aggregated",
+      "params": {
+        "aggtype": "centroid"
+      },
+      "status": "match",
+      "definition": "First raw moment of the one-sided |rfft(x)| spectrum (tsfresh fft_aggregated, aggtype=centroid), computed via rustfft's O(n log n) forward FFT."
+    },
+    {
+      "name": "spectral_variance",
+      "reference": "tsfresh",
+      "calculator": "fft_aggregated",
+      "params": {
+        "aggtype": "variance"
+      },
+      "status": "match",
+      "definition": "Second central moment of the one-sided |rfft(x)| spectrum (tsfresh fft_aggregated, aggtype=variance), computed via rustfft's O(n log n) forward FFT."
+    },
+    {
+      "name": "agg_linear_trend_slope",
+      "reference": "tsfresh",
+      "calculator": "agg_linear_trend",
+      "params": {
+        "attr": "slope",
+        "chunk_len": "n_div_10_min_2",
+        "f_agg": "mean"
+      },
+      "input": "series",
+      "status": "match",
+      "definition": "OLS slope of the mean-aggregated-chunk fit, chunk_len=max(n//10,2), f_agg=mean (tsfresh agg_linear_trend)."
+    },
+    {
+      "name": "agg_linear_trend_intercept",
+      "reference": "tsfresh",
+      "calculator": "agg_linear_trend",
+      "params": {
+        "attr": "intercept",
+        "chunk_len": "n_div_10_min_2",
+        "f_agg": "mean"
+      },
+      "input": "series",
+      "status": "match",
+      "definition": "OLS intercept of the mean-aggregated-chunk fit, chunk_len=max(n//10,2), f_agg=mean (tsfresh agg_linear_trend)."
+    },
+    {
+      "name": "agg_linear_trend_rvalue",
+      "reference": "tsfresh",
+      "calculator": "agg_linear_trend",
+      "params": {
+        "attr": "rvalue",
+        "chunk_len": "n_div_10_min_2",
+        "f_agg": "mean"
+      },
+      "input": "series",
+      "status": "match",
+      "definition": "Signed Pearson r of the OLS fit over mean-aggregated chunks of length max(n//10,2) (tsfresh agg_linear_trend, f_agg=mean)."
+    },
+    {
+      "name": "agg_linear_trend_stderr",
+      "reference": "tsfresh",
+      "calculator": "agg_linear_trend",
+      "params": {
+        "attr": "stderr",
+        "chunk_len": "n_div_10_min_2",
+        "f_agg": "mean"
+      },
+      "input": "series",
+      "status": "match",
+      "definition": "OLS stderr of the mean-aggregated-chunk fit, chunk_len=max(n//10,2), f_agg=mean (tsfresh agg_linear_trend). NaN on a degenerate (zero-variance) chunk-mean series or when there are exactly 2 chunks (df=0)."
+    },
+    {
+      "name": "autocorrelation_lag1",
+      "reference": "tsfresh",
+      "calculator": "autocorrelation",
+      "params": {
+        "lag": 1
+      },
+      "status": "match",
+      "definition": "Autocorrelation at lag 1: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation)."
+    },
+    {
+      "name": "autocorrelation_lag2",
+      "reference": "tsfresh",
+      "calculator": "autocorrelation",
+      "params": {
+        "lag": 2
+      },
+      "status": "match",
+      "definition": "Autocorrelation at lag 2: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation)."
+    },
+    {
+      "name": "autocorrelation_lag3",
+      "reference": "tsfresh",
+      "calculator": "autocorrelation",
+      "params": {
+        "lag": 3
+      },
+      "status": "match",
+      "definition": "Autocorrelation at lag 3: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation)."
+    },
+    {
+      "name": "autocorrelation_lag4",
+      "reference": "tsfresh",
+      "calculator": "autocorrelation",
+      "params": {
+        "lag": 4
+      },
+      "status": "match",
+      "definition": "Autocorrelation at lag 4: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation)."
+    },
+    {
+      "name": "autocorrelation_lag5",
+      "reference": "tsfresh",
+      "calculator": "autocorrelation",
+      "params": {
+        "lag": 5
+      },
+      "status": "match",
+      "definition": "Autocorrelation at lag 5: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation)."
+    },
+    {
+      "name": "autocorrelation_lag6",
+      "reference": "tsfresh",
+      "calculator": "autocorrelation",
+      "params": {
+        "lag": 6
+      },
+      "status": "match",
+      "definition": "Autocorrelation at lag 6: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation)."
+    },
+    {
+      "name": "autocorrelation_lag7",
+      "reference": "tsfresh",
+      "calculator": "autocorrelation",
+      "params": {
+        "lag": 7
+      },
+      "status": "match",
+      "definition": "Autocorrelation at lag 7: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation)."
+    },
+    {
+      "name": "autocorrelation_lag8",
+      "reference": "tsfresh",
+      "calculator": "autocorrelation",
+      "params": {
+        "lag": 8
+      },
+      "status": "match",
+      "definition": "Autocorrelation at lag 8: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation)."
+    },
+    {
+      "name": "autocorrelation_lag9",
+      "reference": "tsfresh",
+      "calculator": "autocorrelation",
+      "params": {
+        "lag": 9
+      },
+      "status": "match",
+      "definition": "Autocorrelation at lag 9: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation)."
+    },
+    {
+      "name": "autocorrelation_lag10",
+      "reference": "tsfresh",
+      "calculator": "autocorrelation",
+      "params": {
+        "lag": 10
+      },
+      "status": "match",
+      "definition": "Autocorrelation at lag 10: numerator over the first n-lag pairs around the whole-series mean, denominator (n-lag)*population variance (tsfresh autocorrelation)."
+    },
+    {
+      "name": "partial_autocorrelation_lag1",
+      "reference": "tsfresh",
+      "calculator": "partial_autocorrelation",
+      "params": {
+        "lag": 1
+      },
+      "status": "match",
+      "definition": "Partial autocorrelation at lag 1, Durbin-Levinson recursion on the adjusted (n-k denominator) autocovariance (statsmodels pacf(method='ld'))."
+    },
+    {
+      "name": "partial_autocorrelation_lag2",
+      "reference": "tsfresh",
+      "calculator": "partial_autocorrelation",
+      "params": {
+        "lag": 2
+      },
+      "status": "match",
+      "definition": "Partial autocorrelation at lag 2, Durbin-Levinson recursion on the adjusted (n-k denominator) autocovariance (statsmodels pacf(method='ld'))."
+    },
+    {
+      "name": "partial_autocorrelation_lag3",
+      "reference": "tsfresh",
+      "calculator": "partial_autocorrelation",
+      "params": {
+        "lag": 3
+      },
+      "status": "match",
+      "definition": "Partial autocorrelation at lag 3, Durbin-Levinson recursion on the adjusted (n-k denominator) autocovariance (statsmodels pacf(method='ld'))."
+    },
+    {
+      "name": "partial_autocorrelation_lag4",
+      "reference": "tsfresh",
+      "calculator": "partial_autocorrelation",
+      "params": {
+        "lag": 4
+      },
+      "status": "match",
+      "definition": "Partial autocorrelation at lag 4, Durbin-Levinson recursion on the adjusted (n-k denominator) autocovariance (statsmodels pacf(method='ld'))."
+    },
+    {
+      "name": "partial_autocorrelation_lag5",
+      "reference": "tsfresh",
+      "calculator": "partial_autocorrelation",
+      "params": {
+        "lag": 5
+      },
+      "status": "match",
+      "definition": "Partial autocorrelation at lag 5, Durbin-Levinson recursion on the adjusted (n-k denominator) autocovariance (statsmodels pacf(method='ld'))."
+    },
+    {
+      "name": "ratio_beyond_r_sigma_1",
+      "reference": "tsfresh",
+      "calculator": "ratio_beyond_r_sigma",
+      "params": {
+        "r": 1
+      },
+      "status": "match",
+      "definition": "Fraction of values more than 1 standard deviations from the mean (tsfresh ratio_beyond_r_sigma, r=1)."
+    },
+    {
+      "name": "ratio_beyond_r_sigma_2",
+      "reference": "tsfresh",
+      "calculator": "ratio_beyond_r_sigma",
+      "params": {
+        "r": 2
+      },
+      "status": "match",
+      "definition": "Fraction of values more than 2 standard deviations from the mean (tsfresh ratio_beyond_r_sigma, r=2)."
+    },
+    {
+      "name": "ratio_beyond_r_sigma_3",
+      "reference": "tsfresh",
+      "calculator": "ratio_beyond_r_sigma",
+      "params": {
+        "r": 3
+      },
+      "status": "match",
+      "definition": "Fraction of values more than 3 standard deviations from the mean (tsfresh ratio_beyond_r_sigma, r=3)."
+    },
+    {
+      "name": "time_reversal_asymmetry_stat_1",
+      "reference": "tsfresh",
+      "calculator": "time_reversal_asymmetry_statistic",
+      "params": {
+        "lag": 1
+      },
+      "status": "match",
+      "definition": "mean(x[i+2lag]^2*x[i+lag] - x[i+lag]*x[i]^2), lag=1 (tsfresh time_reversal_asymmetry_statistic)."
+    },
+    {
+      "name": "time_reversal_asymmetry_stat_2",
+      "reference": "tsfresh",
+      "calculator": "time_reversal_asymmetry_statistic",
+      "params": {
+        "lag": 2
+      },
+      "status": "match",
+      "definition": "mean(x[i+2lag]^2*x[i+lag] - x[i+lag]*x[i]^2), lag=2 (tsfresh time_reversal_asymmetry_statistic)."
+    },
+    {
+      "name": "time_reversal_asymmetry_stat_3",
+      "reference": "tsfresh",
+      "calculator": "time_reversal_asymmetry_statistic",
+      "params": {
+        "lag": 3
+      },
+      "status": "match",
+      "definition": "mean(x[i+2lag]^2*x[i+lag] - x[i+lag]*x[i]^2), lag=3 (tsfresh time_reversal_asymmetry_statistic)."
+    },
+    {
+      "name": "c3_lag1",
+      "reference": "tsfresh",
+      "calculator": "c3",
+      "params": {
+        "lag": 1
+      },
+      "status": "match",
+      "definition": "mean(x_lead2*x_lead*x), lag=1 (tsfresh c3)."
+    },
+    {
+      "name": "c3_lag2",
+      "reference": "tsfresh",
+      "calculator": "c3",
+      "params": {
+        "lag": 2
+      },
+      "status": "match",
+      "definition": "mean(x_lead2*x_lead*x), lag=2 (tsfresh c3)."
+    },
+    {
+      "name": "c3_lag3",
+      "reference": "tsfresh",
+      "calculator": "c3",
+      "params": {
+        "lag": 3
+      },
+      "status": "match",
+      "definition": "mean(x_lead2*x_lead*x), lag=3 (tsfresh c3)."
+    },
+    {
+      "name": "fft_coefficient_0_real",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 0,
+        "attr": "real"
+      },
+      "status": "match",
+      "definition": "Coefficient 0's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_0_imag",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 0,
+        "attr": "imag"
+      },
+      "status": "match",
+      "definition": "Coefficient 0's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; always exactly 0.0 for a real-valued input."
+    },
+    {
+      "name": "fft_coefficient_0_abs",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 0,
+        "attr": "abs"
+      },
+      "status": "match",
+      "definition": "Coefficient 0's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_1_real",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 1,
+        "attr": "real"
+      },
+      "status": "match",
+      "definition": "Coefficient 1's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_1_imag",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 1,
+        "attr": "imag"
+      },
+      "status": "match",
+      "definition": "Coefficient 1's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_1_abs",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 1,
+        "attr": "abs"
+      },
+      "status": "match",
+      "definition": "Coefficient 1's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_2_real",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 2,
+        "attr": "real"
+      },
+      "status": "match",
+      "definition": "Coefficient 2's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_2_imag",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 2,
+        "attr": "imag"
+      },
+      "status": "match",
+      "definition": "Coefficient 2's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_2_abs",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 2,
+        "attr": "abs"
+      },
+      "status": "match",
+      "definition": "Coefficient 2's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_3_real",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 3,
+        "attr": "real"
+      },
+      "status": "match",
+      "definition": "Coefficient 3's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_3_imag",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 3,
+        "attr": "imag"
+      },
+      "status": "match",
+      "definition": "Coefficient 3's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_3_abs",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 3,
+        "attr": "abs"
+      },
+      "status": "match",
+      "definition": "Coefficient 3's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_4_real",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 4,
+        "attr": "real"
+      },
+      "status": "match",
+      "definition": "Coefficient 4's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_4_imag",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 4,
+        "attr": "imag"
+      },
+      "status": "match",
+      "definition": "Coefficient 4's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_4_abs",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 4,
+        "attr": "abs"
+      },
+      "status": "match",
+      "definition": "Coefficient 4's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_5_real",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 5,
+        "attr": "real"
+      },
+      "status": "match",
+      "definition": "Coefficient 5's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_5_imag",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 5,
+        "attr": "imag"
+      },
+      "status": "match",
+      "definition": "Coefficient 5's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_5_abs",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 5,
+        "attr": "abs"
+      },
+      "status": "match",
+      "definition": "Coefficient 5's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_6_real",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 6,
+        "attr": "real"
+      },
+      "status": "match",
+      "definition": "Coefficient 6's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_6_imag",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 6,
+        "attr": "imag"
+      },
+      "status": "match",
+      "definition": "Coefficient 6's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_6_abs",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 6,
+        "attr": "abs"
+      },
+      "status": "match",
+      "definition": "Coefficient 6's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_7_real",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 7,
+        "attr": "real"
+      },
+      "status": "match",
+      "definition": "Coefficient 7's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_7_imag",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 7,
+        "attr": "imag"
+      },
+      "status": "match",
+      "definition": "Coefficient 7's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_7_abs",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 7,
+        "attr": "abs"
+      },
+      "status": "match",
+      "definition": "Coefficient 7's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_8_real",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 8,
+        "attr": "real"
+      },
+      "status": "match",
+      "definition": "Coefficient 8's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_8_imag",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 8,
+        "attr": "imag"
+      },
+      "status": "match",
+      "definition": "Coefficient 8's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_8_abs",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 8,
+        "attr": "abs"
+      },
+      "status": "match",
+      "definition": "Coefficient 8's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_9_real",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 9,
+        "attr": "real"
+      },
+      "status": "match",
+      "definition": "Coefficient 9's real part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_9_imag",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 9,
+        "attr": "imag"
+      },
+      "status": "match",
+      "definition": "Coefficient 9's imag part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    },
+    {
+      "name": "fft_coefficient_9_abs",
+      "reference": "tsfresh",
+      "calculator": "fft_coefficient",
+      "params": {
+        "coeff": 9,
+        "attr": "abs"
+      },
+      "status": "match",
+      "definition": "Coefficient 9's abs part of the unnormalized one-sided np.fft.rfft(x) spectrum (tsfresh fft_coefficient), computed via rustfft's O(n log n) forward FFT truncated to n/2+1 bins; NaN when the coefficient index is >= n/2+1."
+    }
+  ]
+}

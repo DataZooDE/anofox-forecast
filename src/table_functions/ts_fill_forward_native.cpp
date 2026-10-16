@@ -8,6 +8,8 @@
 #include <map>
 #include <atomic>
 #include <thread>
+#include <regex>
+#include <stdexcept>
 
 namespace duckdb {
 
@@ -118,13 +120,30 @@ static unique_ptr<FunctionData> TsFillForwardNativeBind(
     if (input.inputs.size() >= 2 && !input.inputs[1].IsNull()) {
         auto &target_val = input.inputs[1];
         if (target_val.type().id() == LogicalTypeId::VARCHAR) {
-            // For VARCHAR, try to parse as integer first
+            // For VARCHAR, only treat as a raw integer day-offset when the ENTIRE string
+            // is digits (optionally signed) -- std::stoll silently parses a numeric PREFIX
+            // and returns success (e.g. stoll("2023-01-07") == 2023) instead of throwing,
+            // so a plain prefix-parse attempt misclassifies every date-like string that
+            // happens to start with digits as a raw offset (Phase 18, 18-01, Rule 1 fix,
+            // surfaced by test/sql/ts_integer_frequency.test under the json gate). Mirror
+            // the full-string regex check ts_fill_gaps_native.cpp already uses for frequency.
             string target_str = target_val.GetValue<string>();
-            try {
-                bind_data->target_date_micros = std::stoll(target_str);
+            static const std::regex int_regex("^-?[0-9]+$");
+            if (std::regex_match(target_str, int_regex)) {
+                try {
+                    bind_data->target_date_micros = std::stoll(target_str);
+                } catch (const std::out_of_range &) {
+                    throw InvalidInputException(
+                        "target_date value '%s' is out of range for a raw integer day-offset",
+                        target_str);
+                } catch (const std::invalid_argument &) {
+                    throw InvalidInputException(
+                        "target_date value '%s' could not be parsed as a raw integer day-offset",
+                        target_str);
+                }
                 bind_data->target_is_raw = true;
-            } catch (...) {
-                // If not an integer, cast to timestamp
+            } else {
+                // Not a raw integer - cast to timestamp
                 Value casted = target_val.DefaultCastAs(LogicalType(LogicalTypeId::TIMESTAMP));
                 bind_data->target_date_micros = casted.GetValue<timestamp_t>().value;
                 bind_data->target_is_raw = false;
@@ -404,6 +423,11 @@ static OperatorFinalizeResultType TsFillForwardNativeFinalize(
                 GapFillResult ffi_result = {};
                 AnofoxError error = {};
 
+                // CR-01 fix (13-03 deferred item): bind_data.frequency_seconds is
+                // already the declared calendar multiplier for Monthly/Quarterly/
+                // Yearly types (e.g. 2 for '2mo') -- pass it through as
+                // period_count so Rust honors it instead of defaulting to a
+                // single-unit step. Ignored by Rust for FIXED.
                 bool success = anofox_ts_fill_forward_dates(
                     grp.dates.data(),
                     grp.values.data(),
@@ -412,6 +436,7 @@ static OperatorFinalizeResultType TsFillForwardNativeFinalize(
                     target_for_rust,
                     freq_for_rust,
                     bind_data.frequency_type,
+                    static_cast<size_t>(bind_data.frequency_seconds),
                     &ffi_result,
                     &error
                 );

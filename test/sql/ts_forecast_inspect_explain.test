@@ -8,10 +8,14 @@ require json
 
 # Setup: monthly-seasonal panel with 60 obs per group — enough for AutoETS /
 # AutoARIMA / Laplace / MSTL to fit and expose non-trivial state.
+# Class B fix (Phase 18, 18-01): `(...)` with commas is a ROW/STRUCT literal in
+# DuckDB, not a LIST -- struct field access requires a CONSTANT index ("Key index for
+# struct_extract needs to be a constant value"), so the dynamic `(i // 60) + 1` index
+# never bound. `[...]` is the LIST literal with runtime-indexable subscript semantics.
 statement ok
 CREATE TABLE explain_panel AS
 SELECT
-    ('A', 'B', 'C')[(i // 60) + 1] AS product_id,
+    ['A', 'B', 'C'][(i // 60) + 1] AS product_id,
     (DATE '2024-01-01' + ((i % 60) || ' month')::INTERVAL)::DATE AS ds,
     10.0 + 3.0 * sin(2 * pi() * ((i % 60) % 12) / 12.0) + 0.05 * (i % 60) AS y
 FROM generate_series(0, 179) AS t(i);

@@ -62,14 +62,20 @@ SELECT * FROM ts_bias_by('backtest_results', product_id, actual, predicted);
 ### Interval Metrics
 
 ```sql
--- Coverage (% of actuals within prediction interval)
-SELECT * FROM ts_coverage_by('forecast_intervals', product_id, actual, lower_90, upper_90);
+-- Coverage (% of actuals within prediction interval) -- ts_coverage_by's own macro body
+-- passes `source` straight into a TABLE-typed native parameter without a query_table()
+-- wrap (pre-existing bug, unrelated to Phase 16, out of this plan's scope; tracked
+-- separately). Use ts_conformal_coverage/ts_conformal_evaluate on array data instead:
+SELECT ts_conformal_coverage(
+    LIST(actual ORDER BY date), LIST(lower_90 ORDER BY date), LIST(upper_90 ORDER BY date)
+) FROM forecast_intervals;
 
--- Mean interval width
-SELECT * FROM ts_interval_width_by('forecast_intervals', product_id, lower_90, upper_90);
+-- Mean interval width (Phase 16: a required date_col pairs lower_90/upper_90 by date,
+-- never two independently-sorted lists)
+SELECT * FROM ts_interval_width_by('forecast_intervals', product_id, date, lower_90, upper_90);
 
--- Quantile loss
-SELECT * FROM ts_quantile_loss_by('forecasts', product_id, actual, predicted, 0.9);
+-- Quantile loss: ts_quantile_loss_by('forecasts', product_id, actual, predicted, 0.9) --
+-- shares ts_coverage_by's pre-existing macro-body bug above (unrelated to Phase 16)
 ```
 
 ### Combining Metrics
@@ -99,8 +105,9 @@ JOIN bias ON mae.id = bias.id;
 | MAE | `mean(\|y - ŷ\|)` | [0, ∞) |
 | MSE | `mean((y - ŷ)²)` | [0, ∞) |
 | RMSE | `sqrt(mean((y - ŷ)²))` | [0, ∞) |
-| MAPE | `mean(\|y - ŷ\| / \|y\|) × 100` | [0, ∞) |
+| MAPE | `mean(\|y - ŷ\| / \|y\|) × 100` — `NULL` if any `y` is exactly 0 | [0, ∞) |
 | SMAPE | `mean(\|y - ŷ\| / (\|y\| + \|ŷ\|)) × 200` | [0, 200] |
+| MASE | `MAE(y, ŷ) / mean(\|insample_t - insample_{t-m}\|)` (Hyndman-Koehler, lag `m = seasonal_period`) | [0, ∞) |
 | Bias | `mean(y - ŷ)` | (-∞, ∞) |
 
 ### Interval Metrics
@@ -142,7 +149,7 @@ JOIN bias ON mae.id = bias.id;
 |--------|------|-------|
 | Bounded | No | Yes [0, 200] |
 | Symmetric | No | Yes |
-| Zero actuals | Undefined | Defined |
+| Zero actuals | `NULL` (undefined) | Defined |
 
 ### Bias Interpretation
 

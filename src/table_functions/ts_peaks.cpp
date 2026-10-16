@@ -1,5 +1,6 @@
 #include "anofox_forecast_extension.hpp"
 #include "anofox_fcst_ffi.h"
+#include "ts_list_marshal.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/scalar_function.hpp"
@@ -7,26 +8,6 @@
 #include "duckdb/common/types/vector.hpp"
 
 namespace duckdb {
-
-// Helper to extract list as double values
-static void ExtractListAsDouble(Vector &list_vec, idx_t row_idx, vector<double> &out_values) {
-    auto list_data = ListVector::GetData(list_vec);
-    auto &list_entry = list_data[row_idx];
-
-    auto &child_vec = ListVector::GetEntry(list_vec);
-    auto child_data = FlatVector::GetData<double>(child_vec);
-    auto &child_validity = FlatVector::Validity(child_vec);
-
-    out_values.clear();
-    out_values.reserve(list_entry.length);
-
-    for (idx_t i = 0; i < list_entry.length; i++) {
-        idx_t child_idx = list_entry.offset + i;
-        if (child_validity.RowIsValid(child_idx)) {
-            out_values.push_back(child_data[child_idx]);
-        }
-    }
-}
 
 // ============================================================================
 // ts_detect_peaks - Detect peaks in time series
@@ -55,31 +36,34 @@ static void TsDetectPeaksFunction(DataChunk &args, ExpressionState &state, Vecto
     auto &values_vec = args.data[0];
     idx_t count = args.size();
 
-    // Optional parameters
-    double min_distance = 0.0;
-    double min_prominence = 0.0;
-    bool smooth_first = false;
-
-    if (args.ColumnCount() > 1 && !FlatVector::IsNull(args.data[1], 0)) {
-        min_distance = FlatVector::GetData<double>(args.data[1])[0];
+    ListDoubleReader values_reader(values_vec, count);
+    bool has_min_distance = args.ColumnCount() > 1;
+    bool has_min_prominence = args.ColumnCount() > 2;
+    bool has_smooth_first = args.ColumnCount() > 3;
+    unique_ptr<ScalarArgReader<double>> min_distance_reader, min_prominence_reader;
+    unique_ptr<ScalarArgReader<bool>> smooth_first_reader;
+    if (has_min_distance) {
+        min_distance_reader = make_uniq<ScalarArgReader<double>>(args.data[1], count);
     }
-    if (args.ColumnCount() > 2 && !FlatVector::IsNull(args.data[2], 0)) {
-        min_prominence = FlatVector::GetData<double>(args.data[2])[0];
+    if (has_min_prominence) {
+        min_prominence_reader = make_uniq<ScalarArgReader<double>>(args.data[2], count);
     }
-    if (args.ColumnCount() > 3 && !FlatVector::IsNull(args.data[3], 0)) {
-        smooth_first = FlatVector::GetData<bool>(args.data[3])[0];
+    if (has_smooth_first) {
+        smooth_first_reader = make_uniq<ScalarArgReader<bool>>(args.data[3], count);
     }
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx)) {
+        vector<double> values;
+        if (!values_reader.ReadSingleSeries(row_idx, values, "ts_detect_peaks")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> values;
-        ExtractListAsDouble(values_vec, row_idx, values);
+        double min_distance = (has_min_distance && !min_distance_reader->IsNull(row_idx)) ? min_distance_reader->Get(row_idx) : 0.0;
+        double min_prominence = (has_min_prominence && !min_prominence_reader->IsNull(row_idx)) ? min_prominence_reader->Get(row_idx) : 0.0;
+        bool smooth_first = (has_smooth_first && !smooth_first_reader->IsNull(row_idx)) ? smooth_first_reader->Get(row_idx) : false;
 
         PeakDetectionResultFFI peak_result;
         memset(&peak_result, 0, sizeof(peak_result));
@@ -219,17 +203,23 @@ static void TsAnalyzePeakTimingFunction(DataChunk &args, ExpressionState &state,
     auto &period_vec = args.data[1];
     idx_t count = args.size();
 
+    ListDoubleReader values_reader(values_vec, count);
+    ScalarArgReader<double> period_reader(period_vec, count);
+
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx) || FlatVector::IsNull(period_vec, row_idx)) {
+        if (period_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         vector<double> values;
-        ExtractListAsDouble(values_vec, row_idx, values);
-        double period = FlatVector::GetData<double>(period_vec)[row_idx];
+        if (!values_reader.ReadSingleSeries(row_idx, values, "ts_analyze_peak_timing")) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+        double period = period_reader.Get(row_idx);
 
         PeakTimingResultFFI timing_result;
         memset(&timing_result, 0, sizeof(timing_result));
@@ -244,6 +234,10 @@ static void TsAnalyzePeakTimingFunction(DataChunk &args, ExpressionState &state,
         );
 
         if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_analyze_peak_timing: %s",
+                    error.message ? error.message : "invalid input");
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }

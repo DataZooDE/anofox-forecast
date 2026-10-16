@@ -101,25 +101,27 @@ FROM ens_result e
 JOIN m_manual m USING (id, forecast_step)
 WHERE abs(e.yhat - m.manual_mean) >= 1e-6;
 
--- Assert NULL intervals (point-only in Phase 5; EPI-01 deferred to Phase 6)
+-- Assert real (non-NULL) intervals: ts_forecast_ensemble_by returns the crate
+-- Ensemble's own predict_with_intervals bounds at confidence_level (fixed in
+-- Phase 10 — Phase 5 shipped point-only, Phase 10 added real bounds end to end).
 .print ''
-.print 'Assertion — NULL intervals (must be 0):'
-SELECT count(*) AS non_null_intervals
+.print 'Assertion — missing intervals (must be 0):'
+SELECT count(*) AS missing_intervals
 FROM ens_result
-WHERE yhat_lower IS NOT NULL OR yhat_upper IS NOT NULL;
+WHERE yhat_lower IS NULL OR yhat_upper IS NULL;
 
 -- ============================================================================
 -- SECTION 2: Six-Method Smoke Test (ENS-02 / COMB-01..04)
 -- ============================================================================
 -- Verifies all six combination_method strings produce finite non-NULL yhat
--- for every forecast step. Phase 5 delivers point forecasts only — yhat_lower
--- and yhat_upper remain NULL (Phase 6 EPI-01 defers ensemble intervals).
+-- for every forecast step, and non-NULL intervals (the crate Ensemble's own
+-- predict_with_intervals bounds, fixed in Phase 10 -- see Section 1 above).
 -- ============================================================================
 
 .print ''
 .print '>>> SECTION 2: Six-Method Smoke Test (all six combination_method strings)'
 .print '------------------------------------------------------------------------'
-.print 'All six methods must produce finite non-NULL yhat and NULL intervals.'
+.print 'All six methods must produce finite non-NULL yhat and non-NULL intervals.'
 
 CREATE OR REPLACE TABLE smoke AS
 -- mean (default) — unweighted arithmetic mean of member forecasts
@@ -172,12 +174,12 @@ SELECT method, forecast_step, yhat
 FROM smoke
 WHERE yhat IS NULL OR NOT isfinite(yhat);
 
--- Assertion: all intervals NULL (point forecasts only in Phase 5)
+-- Assertion: every row has real (non-NULL) intervals
 .print ''
-.print 'Assertion — non-NULL intervals (must be 0):'
-SELECT count(*) AS non_null_intervals
+.print 'Assertion — missing intervals (must be 0):'
+SELECT count(*) AS missing_intervals
 FROM smoke
-WHERE yhat_lower IS NOT NULL OR yhat_upper IS NOT NULL;
+WHERE yhat_lower IS NULL OR yhat_upper IS NULL;
 
 -- ============================================================================
 -- SECTION 3: Member-Allowlist Sample (26-member set, per-tier coverage)

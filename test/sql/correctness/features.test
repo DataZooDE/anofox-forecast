@@ -1,0 +1,114 @@
+# name: test/sql/correctness/features.test
+# description: Correctness-suite value pins for ts_features / ts_features_by /
+#   ts_features_agg / ts_features_table / _ts_features_native (FEAT-01..05) -- Phase
+#   18, 18-02, TEST-03. Not json-gated (D-02): runs on every native build. Reused from
+#   test/sql/ts_features_reference.test (Phase 14 14-01), cited inline.
+# group: [sql]
+#
+# Literals below are copied from
+# validation/reference/fixtures/tsfresh_features/short_n20.json via:
+#   python3 -c "import json; d=json.load(open('validation/reference/fixtures/tsfresh_features/short_n20.json')); print(d['expected'])"
+
+require anofox_forecast
+
+statement ok
+CREATE TABLE x20 AS
+SELECT 'x20' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, v
+FROM (SELECT unnest(range(20)) AS i, unnest([
+    3.337, 2.674, 2.292, 3.491, 2.217, 4.765, 3.613, 3.258, 0.928, 0.481,
+    1.015, 3.755, 3.21, 0.738, 3.727, 1.651, 1.653, 6.178, 3.053, 3.501
+]) AS v);
+
+# =============================================================================
+# partial_autocorrelation_lag1..5 (FEAT-01, Durbin-Levinson) on all three
+# surfaces: ts_features_by, ts_features (scalar), ts_features_agg.
+# =============================================================================
+
+query I
+SELECT abs(partial_autocorrelation_lag1 - 0.026752824669788355) <= 1e-9 + 1e-9 * abs(0.026752824669788355)
+  AND abs(partial_autocorrelation_lag5 - 0.1107535522386214) <= 1e-9 + 1e-9 * abs(0.1107535522386214)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).partial_autocorrelation_lag1 - 0.026752824669788355) <= 1e-9 + 1e-9 * abs(0.026752824669788355)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).partial_autocorrelation_lag1 - 0.026752824669788355) <= 1e-9 + 1e-9 * abs(0.026752824669788355)
+  AND abs((ts_features_agg(ds, v)).partial_autocorrelation_lag4 - (-0.39110953857042163)) <= 1e-9 + 1e-9 * abs(-0.39110953857042163)
+FROM x20;
+----
+true
+
+# =============================================================================
+# autocorrelation_lag1/2/10, mean, abs_energy (FEAT-02/03).
+# =============================================================================
+
+query I
+SELECT abs((ts_features_agg(ds, v)).autocorrelation_lag1 - 0.02675282466978834) <= 1e-9 + 1e-9 * abs(0.02675282466978834)
+  AND abs((ts_features_agg(ds, v)).autocorrelation_lag10 - (-0.35932858466315537)) <= 1e-9 + 1e-9 * abs(-0.35932858466315537)
+  AND abs((ts_features_agg(ds, v)).mean - 2.7768499999999996) <= 1e-9 + 1e-9 * abs(2.7768499999999996)
+  AND abs((ts_features_agg(ds, v)).abs_energy - 193.18060899999998) <= 1e-9 + 1e-9 * abs(193.18060899999998)
+FROM x20;
+----
+true
+
+# =============================================================================
+# last_location_of_maximum/minimum, mean_second_derivative_central (FEAT-04).
+# =============================================================================
+
+query I
+SELECT abs((ts_features_agg(ds, v)).last_location_of_maximum - 0.9) <= 1e-9
+  AND abs((ts_features_agg(ds, v)).last_location_of_minimum - 0.5) <= 1e-9
+  AND abs((ts_features_agg(ds, v)).mean_second_derivative_central - 0.030861111111111117) <= 1e-9 + 1e-9 * abs(0.030861111111111117)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).mean_second_derivative_central - 0.030861111111111117) <= 1e-9 + 1e-9 * abs(0.030861111111111117)
+FROM x20;
+----
+true
+
+# =============================================================================
+# 117-feature schema (D-13, FEAT-05): ts_features_by returns id + 117 feature
+# columns (118 total); ts_features_agg/ts_features return 117 struct keys;
+# ts_features_table returns 117 columns.
+# =============================================================================
+
+query I
+SELECT count(*) FROM (DESCRIBE SELECT * FROM ts_features_by('x20', id, ds, v));
+----
+118
+
+query I
+SELECT count(*) FROM (DESCRIBE SELECT unnest(ts_features_agg(ds, v)) FROM x20);
+----
+117
+
+query I
+SELECT count(*) FROM (DESCRIBE SELECT unnest(ts_features(ds, v)) FROM x20);
+----
+117
+
+query I
+SELECT count(*) FROM (DESCRIBE SELECT * FROM ts_features_table('x20', ds, v));
+----
+117
+
+# _ts_features_native (the table-function backing ts_features_by) agrees with
+# ts_features_by on the same group (parity).
+query I
+SELECT (SELECT partial_autocorrelation_lag1 FROM ts_features_by('x20', id, ds, v))
+     IS NOT DISTINCT FROM
+       (SELECT partial_autocorrelation_lag1 FROM _ts_features_native((SELECT id, ds, v FROM x20 ORDER BY ds)));
+----
+true
+
+statement ok
+DROP TABLE x20;

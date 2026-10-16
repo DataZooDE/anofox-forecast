@@ -11,7 +11,7 @@ Thank you for your interest in contributing to Anofox Forecast! This document pr
    cd anofox-forecast
    ```
 3. Install prerequisites:
-   - Rust toolchain (via rustup)
+   - Rust toolchain >= 1.89 (via rustup; `rustup toolchain install 1.89.0` to test the MSRV)
    - CMake and Ninja
    - DuckDB source (symlinked or configured)
 
@@ -19,6 +19,19 @@ Thank you for your interest in contributing to Anofox Forecast! This document pr
    ```bash
    make release
    ```
+
+### Toolchain / MSRV
+
+MSRV is 1.89, declared as `rust-version` in the workspace `Cargo.toml` and
+enforced by cargo. The floor comes from `trueno` (transitive via
+`anofox-forecast`), whose AVX-512 code needs Rust 1.89. The "Rust MSRV
+(1.89.0)" CI job builds the workspace on exactly that toolchain. The
+upstream `extension-ci-tools` WASM job pins `dtolnay/rust-toolchain@1.86.0`
+and is safe because `trueno`'s AVX-512 backend is
+`cfg(target_arch = "x86_64")`-only and never compiles for `wasm32` (verified
+in 09-RESEARCH.md Pitfall 2). Re-run
+`cargo +1.86.0 check --target wasm32-unknown-emscripten` whenever
+`anofox-forecast` or `trueno` is bumped.
 
 ## Development Workflow
 

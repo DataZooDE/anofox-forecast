@@ -1,0 +1,2 @@
+docs/api/05b-peak-detection.md	0	PASS	SELECT ts_detect_peaks([0, 1, 1, 1, 0, 2, 2, 0, 3, 3, 3, 3, 1, 0]::DOUBLE[]);	
+plugins/anofox-forecast/skills/anofox-forecast-detection/SKILL.md	16	PASS	CREATE OR REPLACE TABLE detected AS	

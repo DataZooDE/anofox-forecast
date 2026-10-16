@@ -1,5 +1,6 @@
 #include "anofox_forecast_extension.hpp"
 #include "anofox_fcst_ffi.h"
+#include "ts_list_marshal.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/scalar_function.hpp"
@@ -19,25 +20,6 @@ static LogicalType GetMstlResultType() {
     return LogicalType::STRUCT(std::move(children));
 }
 
-static void ExtractListAsDouble(Vector &list_vec, idx_t row_idx, vector<double> &out_values) {
-    auto list_data = ListVector::GetData(list_vec);
-    auto &list_entry = list_data[row_idx];
-
-    auto &child_vec = ListVector::GetEntry(list_vec);
-    auto child_data = FlatVector::GetData<double>(child_vec);
-    auto &child_validity = FlatVector::Validity(child_vec);
-
-    out_values.clear();
-    out_values.reserve(list_entry.length);
-
-    for (idx_t i = 0; i < list_entry.length; i++) {
-        idx_t child_idx = list_entry.offset + i;
-        if (child_validity.RowIsValid(child_idx)) {
-            out_values.push_back(child_data[child_idx]);
-        }
-    }
-}
-
 // Helper to convert insufficient_data mode string to int
 static int ParseInsufficientDataMode(const string &mode) {
     string lower = mode;
@@ -47,30 +29,86 @@ static int ParseInsufficientDataMode(const string &mode) {
     return 0;  // default: fail
 }
 
+// Reads a LIST(INTEGER) argument for every row of a chunk (Phase 15 plan
+// 15-04, DET-04). Mirrors ListDoubleReader's unified-format discipline but
+// for an INTEGER periods list rather than series data: a NULL top-level
+// list reads as "no periods requested"; a NULL element is simply skipped
+// (the ts_mstl_decomposition_by macro's CAST to INTEGER[] already turns an
+// unparsable entry into an SQL error before this function ever runs).
+class ListIntReader {
+public:
+    ListIntReader(Vector &list_vec, idx_t count) : list_vec(list_vec) {
+        list_vec.ToUnifiedFormat(count, list_data);
+        auto &child_vec_ref = ListVector::GetEntry(list_vec);
+        child_vec_ref.ToUnifiedFormat(ListVector::GetListSize(list_vec), child_data);
+    }
+
+    bool IsNull(idx_t row_idx) const {
+        auto list_idx = list_data.sel->get_index(row_idx);
+        return !list_data.validity.RowIsValid(list_idx);
+    }
+
+    void Read(idx_t row_idx, vector<int32_t> &values) const {
+        auto list_entries = UnifiedVectorFormat::GetData<list_entry_t>(list_data);
+        auto list_idx = list_data.sel->get_index(row_idx);
+        auto &list_entry = list_entries[list_idx];
+        auto child_values = UnifiedVectorFormat::GetData<int32_t>(child_data);
+
+        idx_t n = list_entry.length;
+        idx_t list_offset = list_entry.offset;
+        values.clear();
+        values.reserve(n);
+        for (idx_t i = 0; i < n; i++) {
+            idx_t child_idx = list_offset + i;
+            auto unified_child_idx = child_data.sel->get_index(child_idx);
+            if (child_data.validity.RowIsValid(unified_child_idx)) {
+                values.push_back(child_values[unified_child_idx]);
+            }
+        }
+    }
+
+private:
+    Vector &list_vec;
+    UnifiedVectorFormat list_data;
+    UnifiedVectorFormat child_data;
+};
+
 static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state, Vector &result) {
     auto &list_vec = args.data[0];
     idx_t count = args.size();
 
-    // Get insufficient_data mode from second argument if provided (default: fail = 0)
-    int insufficient_data_mode = 0;
-    if (args.ColumnCount() > 1) {
-        auto &mode_vec = args.data[1];
-        if (!FlatVector::IsNull(mode_vec, 0)) {
-            auto mode_str = FlatVector::GetData<string_t>(mode_vec)[0].GetString();
-            insufficient_data_mode = ParseInsufficientDataMode(mode_str);
-        }
+    ListDoubleReader values_reader(list_vec, count);
+    bool has_mode = args.ColumnCount() > 1;
+    unique_ptr<ScalarArgReader<string_t>> mode_reader;
+    if (has_mode) {
+        mode_reader = make_uniq<ScalarArgReader<string_t>>(args.data[1], count);
+    }
+    bool has_periods = args.ColumnCount() > 2;
+    unique_ptr<ListIntReader> periods_reader;
+    if (has_periods) {
+        periods_reader = make_uniq<ListIntReader>(args.data[2], count);
     }
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(list_vec, row_idx)) {
+        vector<double> values;
+        if (!values_reader.ReadSingleSeries(row_idx, values, "_ts_mstl_decomposition")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> values;
-        ExtractListAsDouble(list_vec, row_idx, values);
+        // Get insufficient_data mode from second argument if provided (default: fail = 0)
+        int insufficient_data_mode = 0;
+        if (has_mode && !mode_reader->IsNull(row_idx)) {
+            insufficient_data_mode = ParseInsufficientDataMode(mode_reader->Get(row_idx).GetString());
+        }
+
+        // Get seasonal periods from third argument if provided (default: none, D-09 auto)
+        vector<int32_t> periods_vec;
+        if (has_periods && !periods_reader->IsNull(row_idx)) {
+            periods_reader->Read(row_idx, periods_vec);
+        }
 
         MstlResult mstl_result;
         memset(&mstl_result, 0, sizeof(mstl_result));
@@ -79,14 +117,18 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
         bool success = anofox_ts_mstl_decomposition(
             values.data(),
             values.size(),
-            nullptr,  // periods - auto detect
-            0,
+            periods_vec.empty() ? nullptr : periods_vec.data(),
+            periods_vec.size(),
             insufficient_data_mode,
             &mstl_result,
             &error
         );
 
         if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("_ts_mstl_decomposition: %s",
+                    error.message ? error.message : "invalid input");
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -100,16 +142,22 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
             auto &list_child = ListVector::GetEntry(trend_list);
             auto current_size = ListVector::GetListSize(trend_list);
 
-            list_data[row_idx].offset = current_size;
-            list_data[row_idx].length = mstl_result.n_observations;
+            // CR-01: trend is a null pointer when decomposition was not applied
+            // (insufficient_data_mode = 'none' with no usable period); n_observations
+            // still reflects the full input length in that case. Emit an empty list
+            // rather than exposing uninitialized/stale ListVector buffer memory.
+            idx_t trend_len = mstl_result.trend ? mstl_result.n_observations : 0;
 
-            ListVector::Reserve(trend_list, current_size + mstl_result.n_observations);
-            ListVector::SetListSize(trend_list, current_size + mstl_result.n_observations);
+            list_data[row_idx].offset = current_size;
+            list_data[row_idx].length = trend_len;
+
+            ListVector::Reserve(trend_list, current_size + trend_len);
+            ListVector::SetListSize(trend_list, current_size + trend_len);
 
             auto child_data = FlatVector::GetData<double>(list_child);
             if (mstl_result.trend) {
                 memcpy(child_data + current_size, mstl_result.trend,
-                       mstl_result.n_observations * sizeof(double));
+                       trend_len * sizeof(double));
             }
         }
 
@@ -152,16 +200,21 @@ static void TsMstlDecompositionFunction(DataChunk &args, ExpressionState &state,
             auto &list_child = ListVector::GetEntry(remainder_list);
             auto current_size = ListVector::GetListSize(remainder_list);
 
-            list_data[row_idx].offset = current_size;
-            list_data[row_idx].length = mstl_result.n_observations;
+            // CR-01: mirror the trend guard above -- remainder is null when
+            // decomposition was not applied, so emit an empty list instead of
+            // reading uninitialized ListVector buffer memory.
+            idx_t remainder_len = mstl_result.remainder ? mstl_result.n_observations : 0;
 
-            ListVector::Reserve(remainder_list, current_size + mstl_result.n_observations);
-            ListVector::SetListSize(remainder_list, current_size + mstl_result.n_observations);
+            list_data[row_idx].offset = current_size;
+            list_data[row_idx].length = remainder_len;
+
+            ListVector::Reserve(remainder_list, current_size + remainder_len);
+            ListVector::SetListSize(remainder_list, current_size + remainder_len);
 
             auto child_data = FlatVector::GetData<double>(list_child);
             if (mstl_result.remainder) {
                 memcpy(child_data + current_size, mstl_result.remainder,
-                       mstl_result.n_observations * sizeof(double));
+                       remainder_len * sizeof(double));
             }
         }
 
@@ -202,6 +255,13 @@ void RegisterTsMstlDecompositionFunction(ExtensionLoader &loader) {
     // 2-arg version: values + insufficient_data mode
     ts_mstl_set.AddFunction(ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::VARCHAR)},
+        GetMstlResultType(),
+        TsMstlDecompositionFunction
+    ));
+    // 3-arg version: values + insufficient_data mode + seasonal periods (D-09)
+    ts_mstl_set.AddFunction(ScalarFunction(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::VARCHAR),
+         LogicalType::LIST(LogicalType(LogicalTypeId::INTEGER))},
         GetMstlResultType(),
         TsMstlDecompositionFunction
     ));

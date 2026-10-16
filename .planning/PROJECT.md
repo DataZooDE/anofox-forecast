@@ -12,21 +12,39 @@ SQL users can produce, validate, combine, and interval-bound time-series forecas
 
 ## Current State
 
+- **Shipped v0.10.0 — Statistical Correctness (2026-10-16):** every statistic is computed in Rust and checked against R / scipy / statsmodels / tsfresh fixtures. The forecast wrapper delegates to the crate (anofox-forecast 0.16.2), with 65/65 requirements met, a `test/sql/correctness/*` suite, a `make audit` no-stats-in-C++ guard and `make check-docs`. See `.planning/milestones/v0.10.0-*`.
 - **Shipped v0.8.0 — Ensemble Forecasting (2026-08-31):** AutoEnsemble (`ts_forecast_by('AutoEnsemble')`), explicit-member ensembles (`ts_forecast_ensemble_by`), six combination methods, ensemble conformal intervals (existing path), and member/weight introspection (`ts_ensemble_inspect_by` / `ts_auto_ensemble_inspect_by`). See `.planning/milestones/v0.8.0-*`.
 - **Shipped v0.7.0 — Diagnostics + Model Coverage (2026-08-22):** stationarity + residual diagnostics, global/panel models, GARCH/Kalman/VAR.
 
-## Current Milestone: v0.9.0 WASM Runtime Verification
+## Next Milestone Goals
 
-**Goal:** Prove the built `anofox_forecast` `.wasm` actually loads and runs in DuckDB-Wasm — not just that it compiles and links — and gate it in CI so WASM regressions fail the build.
+To be defined with `/gsd-new-milestone`. Candidates carried forward:
+- v0.10.0 tech debt: integer-`frequency` casts in `ts_forecast_panel_by` / `ts_forecast_var_by` / `ts_stats_by`; `window` / `seasonal_periods` misuse checks in the shared params header; strict parsing of numeric MAP params; the examples/ metric `_by` bare-table form; the `ts_features_config_*` "features" filter; dead `ConformalIntervalFFI`.
+- Upstream crate follow-ups: TBATS optimiser admissibility check; ETS multi-start (RC-03); SESOptimized intermittent optimum (RC-04).
+- v0.9.0 is still parked: the Phase 08 live-CI negative-control push (operator action).
+- Merge `fix/statistical-correctness` to `main` and cut the v0.10.0 extension release (user action).
+
+<details>
+<summary>v0.10.0 milestone definition (shipped 2026-10-16)</summary>
+
+### v0.10.0 Statistical Correctness
+
+**Goal:** Every statistic the extension returns is correct — verified against R / scipy reference values — and is computed in the Rust crates; C++ and SQL only marshal, group, and dispatch.
 
 **Target features:**
-- Node harness under `test/wasm/` that boots DuckDB-Wasm, serves + `LOAD`s the locally-built `.wasm`, and runs the full `test/sql/**/*.test` suite via a minimal sqllogictest-subset runner
-- Gating CI job (`needs:` the wasm build) that fails on any WASM load/runtime error
-- Dedicated WASM workflow + README badge reflecting WASM status specifically
-- `@duckdb/duckdb-wasm` pinned to the engine version matching the built DuckDB version, documented
-- OpenSSL made a `!wasm32` dependency in `vcpkg.json` (unused on WASM; telemetry is off there)
+- Forecast wrapper delegates prediction intervals, fitted values and residuals to the crate models (no fabricated ±z·sd(series)·√h intervals, no SES(α=0.3) stand-in residuals); real ARIMA; silent model/parameter fallbacks become errors
+- Wrapper bug fixes: fdars size-argument order (detrend/decompose/seasonality no-ops), bootstrap residual sign, data-quality dates, MSTL windows/order, `ts_diff_by`, exogenous NaN coefficients
+- Statistics moved out of C++/SQL into Rust: pairwise-complete NULL handling via validity, `ToUnifiedFormat` list marshalling, native conformal/diff/fill functions, backtest metrics, hierarchy NULL semantics
+- Core statistics/features corrected: moments, STL trend/seasonal strength, tsfresh-exact features, Hyndman-Koehler MASE, MAPE zero policy
+- Detection/conformal corrected: scipy-semantics peaks, correct BOCPD, scale-free PELT, STL-based MSTL, asymmetric/adaptive/jackknife+ conformal, period-detection robustness
+- Upstream anofox-forecast fixes (branch + PR, user releases): augmented ADF + MacKinnon p-values, bounded KPSS p-values, AutoARIMA order selection (KPSS/OCSB, AICc), ETS likelihood + analytic intervals, Theta
+- Dependency bumps: anofox-regression 0.5.15, anofox-forecast ≥0.15.10, fdars-core 0.47 (drop `linalg`)
+- Reference-fixture test suite (checked-in R/Python generators) + docs/skills synced to corrected behaviour
 
-This is a CI/infrastructure hardening milestone — no new SQL surface, no crate bump. Reference implementation to port: anofox-statistics PR #131 (`test/wasm/run.mjs`, `sqllogic.mjs`, `WasmTest.yml`). Tracks GH issue #255.
+Input: `.planning/research/STAT-AUDIT-2026-10-08.md` (audit findings A–I). Branch: `fix/statistical-correctness`.
+v0.9.0 (WASM Runtime Verification) is parked with only the operator live-CI negative-control check (Phase 08) outstanding.
+
+</details>
 
 ## Requirements
 
@@ -53,18 +71,28 @@ This is a CI/infrastructure hardening milestone — no new SQL surface, no crate
 - ✓ Ensemble prediction intervals via the existing conformal path (`ts_cv_folds_by` + `ts_conformal_calibrate`/apply; per-fold loop for the scalar ensemble surfaces) — v0.8.0 (EPI-01)
 - ✓ Ensemble introspection: `ts_ensemble_inspect_by` (members + weights) / `ts_auto_ensemble_inspect_by` (selected members + MSE score + rank) — v0.8.0 (INSP-01)
 
+- ✓ Reference-fixture harness (`validation/reference/`: R + uv-pinned Python generators → versioned JSON fixtures → Rust loader with value assertions) — v0.10.0 Phase 9 (TEST-01)
+- ✓ Forecast wrapper delegates intervals/fitted/residuals/model identity to the crate (no fabricated ±z·sd(series)·√h bands, no SES stand-in residuals); real ARIMA/SARIMA via arima_order/seasonal_order; crate exog fits; silent fallbacks → SQL errors on every surface incl. ts_forecast_agg — v0.10.0 Phase 10 (FCST-01..08)
+- ✓ anofox-regression =0.5.15 + anofox-forecast 0.15.10 (multi-scale exog OLS matches numpy lstsq; MFLES #219 + panel NaN guards); MSRV corrected to 1.89 — v0.10.0 Phase 9 (DEP-01/02/04)
+- ✓ anofox-forecast 0.16.1 consumed with no [patch]/git/path override; ADF/KPSS `regression := 'c'|'ct'` (statsmodels/R-tseries exact, local trend KPSS), standard four-way `ts_stationarity` verdict with explicit `constant`/NULL; model-aware Ljung-Box `fitted_params` (R `Box.test(fitdf)` exact); 36-check R `forecast` parity suite + Monte Carlo interval coverage (±3pp) — v0.10.0 Phase 17 (UPST-06, UPST-01, DIAG-03..05, FCST-09)
+- ✓ anofox-forecast 0.16.2 (R KalmanForecast ARIMA/SARIMA intervals) published and consumed — AutoARIMA AirPassengers interval at R parity, zero AutoARIMA R-parity exceptions — v0.10.0 Phase 18 gap plan 18-05
+- ✓ Regression-proofing: json statically linked (50 gated tests run), `test/sql/correctness/*` pins every fixed function (inventory gate), length-only Rust-test sweep, `make audit` no-stats-in-C++/SQL guard + CI workflow, permanent `make check-docs` snippet checker, v0.10.0 breaking-changes CHANGELOG + release notes — v0.10.0 Phase 18 (TEST-02, TEST-03, RUST-10, DOCS-01, DOCS-02)
+
+- ✓ All wrapper-level statistical bugs from the 2026-10-08 audit fixed with value-asserting tests — Phases 10-18 — v0.10.0
+- ✓ No statistical computation remains in C++ or SQL macros — enforced by `make audit` (Phase 18) — v0.10.0
+- ✓ Core statistics, features, detection and conformal outputs match R/scipy/tsfresh references — Phases 13-16, pinned in Phase 18 — v0.10.0
+- ✓ Upstream anofox-forecast diagnostics/model-selection fixes merged and consumed — anofox-forecast 0.16.1, Phase 17 — v0.10.0
+- ✓ Dependencies bumped — anofox-regression 0.5.15 (Phase 9), fdars-core 0.47 (Phase 15), anofox-forecast 0.16.2 (Phase 18) — v0.10.0
+
 ### Active
 
-<!-- v0.9.0 WASM Runtime Verification — see REQUIREMENTS.md for REQ-IDs. -->
+<!-- v0.10.0 shipped 2026-10-16; REQ-IDs archived in milestones/v0.10.0-REQUIREMENTS.md. Next milestone's requirements come from /gsd-new-milestone. -->
 
-- [ ] Node harness loads the built `.wasm` in DuckDB-Wasm and runs the full `test/sql` suite
-- [ ] Gating CI job fails the build on any WASM load/runtime error
-- [ ] WASM status badge in README, backed by a dedicated WASM workflow
-- [ ] `@duckdb/duckdb-wasm` pinned to the engine version matching the built DuckDB version, documented
-- [ ] `openssl` made a `!wasm32` dependency in `vcpkg.json`
+
+Parked from v0.9.0: Phase 08 live-CI negative-control push (operator action).
 
 Deferred from v0.8.0 (candidates for a future milestone):
-- **CV ensemble params + AutoEnsemble CV segfault:** `ts_cv_forecast_by('AutoEnsemble')` segfaults (CV native `ts_cv_forecast_native.cpp:380-388` never parses `ensemble_top_k`/`ensemble_method`). Wire ensemble-param parsing into the CV native so AutoEnsemble backtests natively (and honor top_k/combination_method instead of defaulting to top_k=3/Mean).
+- **CV ensemble params:** `ts_cv_forecast_native.cpp` never parses `ensemble_top_k`/`ensemble_method`, so CV backtests use top_k=3/Mean. The former `ts_cv_forecast_by('AutoEnsemble')` segfault is gone on anofox-forecast ≥0.16.1 (re-checked 2026-10-16 at v0.10.0: 2 folds × 7 forecasts, all non-NULL).
 - **AutoEnsemble inner combination weights (upstream):** crate 0.15.3 exposes no accessor for the inner ensemble's non-Mean weights; `ts_auto_ensemble_inspect_by` returns NULL weight for WeightedMSE/InverseAIC/Stacking/HorizonAdaptive. Upstream crate enhancement.
 - **ENS-F1** custom hand-supplied combination weights; **ENS-F2** panel/global + multivariate (VAR) ensembling; per-member ensemble parameters — all explicitly deferred at v0.8.0 start.
 - `build_forecaster` SeasonalWindowAverage `n_seasons=2` hardcoded (TODO ENS-03) — Forecaster trait has no pre-fit series-length hook.
@@ -95,13 +123,14 @@ Deferred from v0.7.0 (candidates for a future milestone):
 - **Shipped v0.7.0** (2026-08-22): +17.9k LOC across 57 commits / 111 files. Extension now surfaces 36 forecasting models (incl. GARCH, Kalman, panel Global*, multivariate VAR via `ts_forecast_var_by`) plus 7 statistical-diagnostic functions. `arch` added to `benchmark/.venv` (comparison group) for GARCH parity. New non-globbed C++ sources (`diagnostics.cpp`, `ts_forecast_panel_native.cpp`, `ts_forecast_var_native.cpp`) are explicitly listed in CMakeLists.
 - **Panel/table-in macro convention (v0.7.0 lesson):** table-in macros must wrap `query_table(...)` in a subselect `(SELECT ... FROM query_table(...))`; a bare TABLE arg silently fails to register.
 - **Shipped v0.8.0** (2026-08-31): +13.9k LOC across 57 files / 3 phases / 6 plans. Extension now surfaces AutoEnsemble (`ts_forecast_by('AutoEnsemble')`) + explicit-member ensembles (`ts_forecast_ensemble_by`) with six combination methods, ensemble conformal intervals (existing path), and member/weight introspection (`ts_ensemble_inspect_by` / `ts_auto_ensemble_inspect_by`). Two new non-globbed C++ sources (`ts_forecast_ensemble_native.cpp`, `ts_ensemble_inspect_native.cpp`) explicitly listed in CMakeLists. No external reference library for ensembles — verification is internal-consistency cross-checks (combined == manual weighted combination of members).
-- **`ts_cv_forecast_by('AutoEnsemble')` segfaults** (crate/CV-native bug: `ts_cv_forecast_native.cpp:380-388` never parses the ensemble params) — ensemble conformal CV uses a manual per-fold `_ts_forecast_scalar` loop instead. Known tech debt.
+- **`ts_cv_forecast_by('AutoEnsemble')`** no longer segfaults (anofox-forecast ≥0.16.1; re-checked at v0.10.0 close), but the CV native still ignores the ensemble params. The per-fold `_ts_forecast_scalar` workaround can be retired.
 
 ## Constraints
 
-- **Tech stack**: DuckDB v1.4.3+ extension; Rust 1.86+ core via FFI; C++17. No new languages.
+- **Tech stack**: DuckDB v1.4.3+ extension; Rust 1.89+ core via FFI; C++17. No new languages.
 - **Architecture**: Parallelism stays at the DuckDB GROUP BY / scalar-function layer — no custom threading or table-in/table-out (established project rule).
-- **Dependencies**: Stay on `anofox-forecast` 0.15.3 unless a required capability is missing; global-model steady-state ARIMA optimization tracked separately (awaiting 0.5.4-class improvements).
+- **Dependencies**: anofox-forecast 0.16.2, anofox-regression =0.5.15, fdars-core 0.47 (as of v0.10.0). Upstream fixes ship as crate releases consumed from crates.io; no local `[patch]` for anofox-forecast.
+- **Correctness**: Statistics are computed in Rust only; every statistical output is checked against a reference implementation (R / scipy / statsmodels / tsfresh) via checked-in fixtures — length-only tests do not count.
 - **Compatibility**: Must build and load across Linux/macOS/Windows and WASM; OpenSSL stays statically linked; verify clean-machine load (not just green CI).
 - **Verification**: Every new SQL function must be exercised by a runnable example against the built extension before it counts as done.
 
@@ -122,6 +151,12 @@ Deferred from v0.7.0 (candidates for a future milestone):
 | EPI-01 reuses the existing conformal path (no new interval machinery) (v0.8.0) | Conformal is model-agnostic on residual columns; DoD says reuse, don't rebuild | ✓ Good — bounds produced for both surfaces; surfaced a pre-existing `ts_cv_forecast_by('AutoEnsemble')` segfault (worked around + documented as tech debt) |
 | INSP-01 scoped to what crate 0.15.3 exposes: full weights for explicit-member, NULL weights for AutoEnsemble non-Mean (v0.8.0) | Crate has no accessor for AutoEnsemble's inner combination weights; re-implementing selection would be fragile/drift-prone | ✓ Good — honest surface; limitation documented; upstream enhancement filed as tech debt |
 | Verify executor/agent reports against git+disk, re-run every example against the built extension (v0.8.0) | Two executors fabricated commit hashes/SUMMARY files; three long-running agents died on transient API errors mid-run | ✓ Good — caught + reconciled all fabrications; per-task commits protected work across agent deaths |
+| Reference-fixture harness before any statistical fix (v0.10.0) | Length-only tests let every audited bug ship; fixes need checked-in R/scipy/numpy reference values | ✓ Good — Phase 9 fixtures regenerate byte-identically; 125-entry pre-bump snapshot proved only MFLES/Laplace moved |
+| MSRV 1.89 (v0.10.0) | trueno (via anofox-forecast) needs AVX-512 intrinsics stabilised in 1.89; 1.86 claim was false | ✓ Good — `cargo +1.88.0` refused, `+1.89.0` builds/tests; CI rust-msrv job |
+| Pass crate-native intervals through even where known-miscalibrated (v0.10.0 P10) | No fabrication; calibration fixed at the source (Phase 11 upstream) rather than masked in the wrapper | ✓ Good — 0.16.1 intervals reach R parity except one documented AutoARIMA AirPassengers interval gap (RC-05, crate SARIMA variance; upstream issue drafted) |
+| SQL `'Holt'` = ETS(A,A,N), R `holt()`'s definition (v0.10.0 P17, D-13) | `HoltLinearTrend::auto()` diverged from R by 3–13x on parity fixtures | ✓ Good — R-parity point deviation cut 6.86x (AirPassengers), 13.41x (rw), 3.01x (trend) |
+| Upstream fixes ship as crate releases, never local [patch] (v0.10.0 P18, user 2026-10-16) | Extension must consume what crates.io serves; a local patch hides release drift | ✓ Good — v0.16.2 merged + published upstream, then consumed from crates.io |
+| Every R-parity known gap must cite an evidenced root cause, never a loosened tolerance (v0.10.0 P17, D-12) | Prevents tolerance-widening from masking real bugs | ✓ Good — RC-01..RC-05 table; extension-side cause fixed, 3 crate-side causes drafted as upstream issues with repros |
 
 ## Evolution
 
@@ -141,4 +176,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-01 — started v0.9.0 WASM Runtime Verification milestone*
+*Last updated: 2026-10-16 after v0.10.0 milestone*

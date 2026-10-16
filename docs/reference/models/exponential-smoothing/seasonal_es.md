@@ -21,12 +21,12 @@ Seasonal Exponential Smoothing. Combines SES with a seasonal component but witho
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
-| `seasonal_period` | INTEGER | **Yes** | — | Seasonal period (e.g., 7 for weekly, 12 for monthly) |
-| `alpha` | DOUBLE | No | 0.3 | Level smoothing coefficient (0-1) |
-| `gamma` | DOUBLE | No | 0.1 | Seasonal smoothing coefficient (0-1) |
-| `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
-| `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
-| `include_residuals` | BOOLEAN | No | false | Return residuals |
+| `seasonal_period` | INTEGER | No (auto-detected; error if no period is detected) | — | Seasonal period (e.g., 7 for weekly, 12 for monthly); auto-detected from the series when omitted. There is no default period — the old silent default of 12/2 is gone (see [07-forecasting.md's "Former silent fallbacks" list](../../../api/07-forecasting.md#former-silent-fallbacks--now-hard-errors)) |
+| `confidence_level` | DOUBLE | No | 0.90 | Confidence for prediction intervals |
+
+SeasonalES does not take smoothing-parameter keys (`alpha`, `gamma`) from SQL — those are
+rejected by the parameter validator (`ValidateParamKeys`). The crate's internal smoothing is
+not configurable from the SQL surface today.
 
 ## Returns
 
@@ -37,6 +37,15 @@ Seasonal Exponential Smoothing. Combines SES with a seasonal component but witho
 | `yhat` | DOUBLE | Point forecast |
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
+
+`yhat_lower` / `yhat_upper` are the model's own prediction interval (crate
+`predict_with_intervals`) at `confidence_level` (default 0.90). See
+[Prediction intervals, fitted values and input handling](../../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling);
+for calibrated coverage use the conformal functions. Since anofox-forecast 0.16.0, SeasonalES
+uses a per-slot `ETS(A,N,N)` variance for its interval width (not individually R-parity-tested
+— see [07-forecasting.md's prediction-intervals section](../../../api/07-forecasting.md#prediction-intervals)
+for the models that ARE R-parity-tested). SeasonalES does not accept regressors in
+`ts_forecast_exog_by` (errors).
 
 ## SQL Example
 
@@ -53,7 +62,7 @@ SELECT * FROM ts_forecast_by(
     MAP{'seasonal_period': '7'}
 );
 
--- With custom smoothing
+-- With an explicit confidence level (no alpha/gamma keys accepted)
 SELECT * FROM ts_forecast_by(
     'weekly_patterns',
     location_id,
@@ -62,7 +71,7 @@ SELECT * FROM ts_forecast_by(
     'SeasonalES',
     21,
     '1d',
-    MAP{'seasonal_period': '7', 'alpha': '0.4', 'gamma': '0.2'}
+    MAP{'seasonal_period': '7', 'confidence_level': '0.80'}
 );
 ```
 

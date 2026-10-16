@@ -1,0 +1,210 @@
+# name: test/sql/ts_series_transforms_rust.test
+# description: Non-json-gated value assertions for ts_diff_by / ts_fill_nulls_mean_by /
+#              ts_drop_constant_by now that their math lives in Rust (Phase 12
+#              RUST-03/RUST-05/D-05/D-06/D-09, plan 12-07).
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# Setup Test Data
+#######################################
+
+statement ok
+CREATE TABLE dd AS
+SELECT 'A' AS id, ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::DATE AS ds, ((i+1)*(i+1))::DOUBLE AS y
+FROM generate_series(0, 4) AS t(i)
+UNION ALL
+SELECT 'B' AS id, ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::DATE AS ds,
+       CASE i WHEN 1 THEN NULL ELSE ((i+1)*(i+1))::DOUBLE END AS y
+FROM generate_series(0, 4) AS t(i);
+
+statement ok
+CREATE TABLE fm AS
+SELECT 'A' AS id, ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::DATE AS ds, v AS y, 'tag_a' AS extra_col
+FROM (VALUES (0, 1.0), (1, NULL), (2, 3.0), (3, NULL), (4, 5.0)) AS t(i, v)
+UNION ALL
+SELECT 'N' AS id, ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::DATE AS ds, v AS y, 'tag_n' AS extra_col
+FROM (VALUES (0, NULL), (1, NULL)) AS t(i, v)
+UNION ALL
+SELECT 'X' AS id, ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::DATE AS ds, v AS y, 'tag_x' AS extra_col
+FROM (VALUES (0, 1.0), (1, 'NaN'::DOUBLE), (2, 3.0)) AS t(i, v);
+
+statement ok
+CREATE TABLE dc AS
+SELECT 'c' AS id, v AS y FROM (VALUES (5.0), (5.0), (5.0)) AS t(v)
+UNION ALL
+SELECT 'v' AS id, v AS y FROM (VALUES (1.0), (2.0), (3.0)) AS t(v)
+UNION ALL
+SELECT 'eps' AS id, v AS y FROM (VALUES (1e-20), (2e-20), (1e-20)) AS t(v)
+UNION ALL
+SELECT 'nul' AS id, v AS y FROM (VALUES (NULL::DOUBLE), (NULL::DOUBLE)) AS t(v);
+
+#######################################
+# ts_diff_by - d-th order differencing (D-05/D-06)
+#######################################
+
+# Group A is quadratic [1,4,9,16,25]; second order (diff_order=2) difference is
+# the constant second derivative 2.0 for every row once two rows are available.
+query R
+SELECT diff_value FROM ts_diff_by('dd', id, ds, y, 2) WHERE id = 'A' ORDER BY ds;
+----
+NULL
+NULL
+2.0
+2.0
+2.0
+
+# First order (diff_order=1, default seasonal_lag=1): y[t]-y[t-1].
+query R
+SELECT diff_value FROM ts_diff_by('dd', id, ds, y, 1) WHERE id = 'A' ORDER BY ds;
+----
+NULL
+3.0
+5.0
+7.0
+9.0
+
+# seasonal_lag := 2 recovers the old lag-k semantics: y[t]-y[t-2].
+query R
+SELECT diff_value FROM ts_diff_by('dd', id, ds, y, 1, seasonal_lag := 2) WHERE id = 'A' ORDER BY ds;
+----
+NULL
+NULL
+8.0
+12.0
+16.0
+
+# seasonal_lag and diff_order compose (R's diff(x, lag=k, differences=d)).
+query R
+SELECT diff_value FROM ts_diff_by('dd', id, ds, y, 2, seasonal_lag := 2) WHERE id = 'A' ORDER BY ds;
+----
+NULL
+NULL
+NULL
+NULL
+8.0
+
+# Group B has an interior NULL at day 2 (index 1); any difference touching it
+# is NULL (SQL row-wise policy — not the single-series interior-NULL error).
+query R
+SELECT diff_value FROM ts_diff_by('dd', id, ds, y, 1) WHERE id = 'B' ORDER BY ds;
+----
+NULL
+NULL
+NULL
+7.0
+9.0
+
+query R
+SELECT diff_value FROM ts_diff_by('dd', id, ds, y, 2) WHERE id = 'B' ORDER BY ds;
+----
+NULL
+NULL
+NULL
+NULL
+2.0
+
+# Row count equals input rows (D-06: one output row per input row, no dropped
+# rows even though the first diff_order*seasonal_lag rows per group are NULL).
+query I
+SELECT COUNT(*) FROM ts_diff_by('dd', id, ds, y, 2);
+----
+10
+
+query I
+SELECT typeof(ds) FROM ts_diff_by('dd', id, ds, y, 1) LIMIT 1;
+----
+DATE
+
+query I
+SELECT COUNT(*) FROM (DESCRIBE SELECT * FROM ts_diff_by('dd', id, ds, y, 1)) WHERE column_name IN ('id', 'ds', 'diff_value');
+----
+3
+
+statement error
+SELECT * FROM ts_diff_by('dd', id, ds, y, 1, seasonal_lag := 0);
+----
+seasonal_lag must be >= 1
+
+#######################################
+# ts_fill_nulls_mean_by - Rust fill_nulls_mean (RUST-05, D-09)
+#######################################
+
+# Group A: mean of [1,3,5] = 3; NULLs filled with 3.
+query R
+SELECT filled_value FROM ts_fill_nulls_mean_by('fm', id, ds, y) WHERE id = 'A' ORDER BY ds;
+----
+1.0
+3.0
+3.0
+3.0
+5.0
+
+# Group N: all-NULL stays NULL (nothing to average).
+query R
+SELECT filled_value FROM ts_fill_nulls_mean_by('fm', id, ds, y) WHERE id = 'N' ORDER BY ds;
+----
+NULL
+NULL
+
+# Group X: NaN counts as missing (Phase 10 NaN = NULL convention); mean of
+# [1,3] = 2 fills the NaN position.
+query R
+SELECT filled_value FROM ts_fill_nulls_mean_by('fm', id, ds, y) WHERE id = 'X' ORDER BY ds;
+----
+1.0
+2.0
+3.0
+
+# All source columns preserved.
+query I
+SELECT COUNT(*) FROM ts_fill_nulls_mean_by('fm', id, ds, y) WHERE extra_col IS NOT NULL;
+----
+10
+
+# ts_fill_nulls_mean_by's macro-computed values equal a direct _ts_fill_nulls_mean call.
+query I
+SELECT (SELECT list(filled_value ORDER BY ds) FROM ts_fill_nulls_mean_by('fm', id, ds, y) WHERE id = 'A')
+     = _ts_fill_nulls_mean([1.0, NULL, 3.0, NULL, 5.0]::DOUBLE[]);
+----
+true
+
+#######################################
+# ts_drop_constant_by - Rust is_constant (D-09)
+#######################################
+
+# c is exactly constant; v varies; eps is near-constant within f64::EPSILON
+# (dropped); nul is all-NULL (dropped — breaking change vs. the old
+# MIN/MAX SQL rule, which kept all-NULL groups).
+query I
+SELECT DISTINCT id FROM ts_drop_constant_by('dc', id, y) ORDER BY id;
+----
+v
+
+query I
+SELECT _ts_is_constant([1e-20, 2e-20, 1e-20]::DOUBLE[]);
+----
+true
+
+# WR-01: an empty-but-non-NULL list classifies as constant (fewer than two
+# non-missing values), matching the function's own documented contract.
+# Not reachable via ts_drop_constant_by (every GROUP BY partition has at
+# least one row), but _ts_is_constant is directly callable.
+query I
+SELECT _ts_is_constant([]::DOUBLE[]);
+----
+true
+
+#######################################
+# Cleanup
+#######################################
+
+statement ok
+DROP TABLE dd;
+
+statement ok
+DROP TABLE fm;
+
+statement ok
+DROP TABLE dc;

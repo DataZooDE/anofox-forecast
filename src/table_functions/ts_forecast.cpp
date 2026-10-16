@@ -5,6 +5,9 @@
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include "duckdb/common/types/vector.hpp"
+#include <cmath>
+#include <cstring>
+#include <unordered_set>
 
 namespace duckdb {
 
@@ -62,14 +65,29 @@ static void ExtractListValues(Vector &list_vec, idx_t count, idx_t row_idx,
     }
 }
 
+// Set the row_idx'th element of a LIST(DOUBLE) struct field from a raw
+// double* + length (T-10-13). A null `data` pointer (a model with no
+// native interval/fitted/residual support, e.g. GARCH's lower/upper, or a
+// length-mismatch guard upstream) makes the FIELD itself SQL NULL for this
+// row — regardless of `length` — never a length>0 list backed by
+// unreserved/uninitialised memory, which the old `if (data && length > 0)`
+// guard allowed by still recording `length` in the list entry while
+// skipping the memcpy.
 static void SetListFromArray(Vector &result, idx_t field_idx, idx_t row_idx,
                              double *data, size_t length) {
     auto &children = StructVector::GetEntries(result);
     auto &list_vec = *children[field_idx];
-
     auto list_data = FlatVector::GetData<list_entry_t>(list_vec);
-    auto &list_child = ListVector::GetEntry(list_vec);
     auto current_size = ListVector::GetListSize(list_vec);
+
+    if (!data) {
+        FlatVector::SetNull(list_vec, row_idx, true);
+        list_data[row_idx].offset = current_size;
+        list_data[row_idx].length = 0;
+        return;
+    }
+
+    auto &list_child = ListVector::GetEntry(list_vec);
 
     list_data[row_idx].offset = current_size;
     list_data[row_idx].length = length;
@@ -78,8 +96,48 @@ static void SetListFromArray(Vector &result, idx_t field_idx, idx_t row_idx,
     ListVector::SetListSize(list_vec, current_size + length);
 
     auto child_data = FlatVector::GetData<double>(list_child);
-    if (data && length > 0) {
+    if (length > 0) {
         memcpy(child_data + current_size, data, length * sizeof(double));
+    }
+}
+
+// Same null-pointer-to-SQL-NULL-field policy as `SetListFromArray`, but ALSO
+// marks each individual NaN element as an invalid (SQL NULL) entry in the
+// list child's validity mask instead of writing through the NaN bit
+// pattern — used for `fitted`/`residuals`, which carry per-position NaN at
+// interpolated/trimmed positions (D-11/D-12) that must surface as SQL NULL
+// elements inside an otherwise non-NULL list, not as the floating-point NaN
+// value itself.
+static void SetListFromArrayNanSafe(Vector &result, idx_t field_idx, idx_t row_idx,
+                                    double *data, size_t length) {
+    auto &children = StructVector::GetEntries(result);
+    auto &list_vec = *children[field_idx];
+    auto list_data = FlatVector::GetData<list_entry_t>(list_vec);
+    auto current_size = ListVector::GetListSize(list_vec);
+
+    if (!data) {
+        FlatVector::SetNull(list_vec, row_idx, true);
+        list_data[row_idx].offset = current_size;
+        list_data[row_idx].length = 0;
+        return;
+    }
+
+    auto &list_child = ListVector::GetEntry(list_vec);
+
+    list_data[row_idx].offset = current_size;
+    list_data[row_idx].length = length;
+
+    ListVector::Reserve(list_vec, current_size + length);
+    ListVector::SetListSize(list_vec, current_size + length);
+
+    auto child_data = FlatVector::GetData<double>(list_child);
+    for (size_t i = 0; i < length; i++) {
+        if (std::isnan(data[i])) {
+            FlatVector::SetNull(list_child, current_size + i, true);
+            child_data[current_size + i] = 0.0;
+        } else {
+            child_data[current_size + i] = data[i];
+        }
     }
 }
 
@@ -160,8 +218,8 @@ static void TsForecastFunction(DataChunk &args, ExpressionState &state, Vector &
         SetListFromArray(result, 0, row_idx, fcst_result.point_forecasts, fcst_result.n_forecasts);
         SetListFromArray(result, 1, row_idx, fcst_result.lower_bounds, fcst_result.n_forecasts);
         SetListFromArray(result, 2, row_idx, fcst_result.upper_bounds, fcst_result.n_forecasts);
-        SetListFromArray(result, 3, row_idx, fcst_result.fitted_values, fcst_result.n_fitted);
-        SetListFromArray(result, 4, row_idx, fcst_result.residuals, fcst_result.n_fitted);
+        SetListFromArrayNanSafe(result, 3, row_idx, fcst_result.fitted_values, fcst_result.n_fitted);
+        SetListFromArrayNanSafe(result, 4, row_idx, fcst_result.residuals, fcst_result.n_residuals);
 
         // Set scalar fields
         SetStringField(result, 5, row_idx, fcst_result.model_name);
@@ -175,9 +233,17 @@ static void TsForecastFunction(DataChunk &args, ExpressionState &state, Vector &
 }
 
 // Helper to extract nested list (LIST<LIST<DOUBLE>>) into vector of vectors
+// Extracts a LIST<LIST<DOUBLE>> cell into `out_regressors` (one Vec per
+// regressor) AND a matching per-regressor validity bitmask in
+// `out_validity` (bit set = valid; D-12/FCST-08). A NULL element keeps its
+// slot at the documented placeholder `0.0` in `out_regressors`, but its bit
+// is cleared in `out_validity` — the FFI/Rust boundary (not this 0.0) is
+// what decides the value is missing, so no 0-fill semantics reach Rust.
 static void ExtractNestedListValues(Vector &list_vec, idx_t count, idx_t row_idx,
-                                    vector<vector<double>> &out_regressors) {
+                                    vector<vector<double>> &out_regressors,
+                                    vector<vector<uint64_t>> &out_validity) {
     out_regressors.clear();
+    out_validity.clear();
 
     UnifiedVectorFormat list_data;
     list_vec.ToUnifiedFormat(count, list_data);
@@ -210,25 +276,127 @@ static void ExtractNestedListValues(Vector &list_vec, idx_t count, idx_t row_idx
         auto values = UnifiedVectorFormat::GetData<double>(values_data);
 
         vector<double> regressor;
+        regressor.reserve(inner_entry.length);
+        size_t validity_words = (inner_entry.length + 63) / 64;
+        vector<uint64_t> validity(validity_words, 0);
+
         for (idx_t j = 0; j < inner_entry.length; j++) {
             idx_t val_idx = inner_entry.offset + j;
             auto val_unified_idx = values_data.sel->get_index(val_idx);
             if (values_data.validity.RowIsValid(val_unified_idx)) {
                 regressor.push_back(values[val_unified_idx]);
+                validity[j / 64] |= (1ULL << (j % 64));
             } else {
-                regressor.push_back(0.0);  // Fill NULL with 0 for regressors
+                regressor.push_back(0.0);  // placeholder only; bit cleared below
             }
         }
         out_regressors.push_back(std::move(regressor));
+        out_validity.push_back(std::move(validity));
     }
 }
 
+// ============================================================================
+// _ts_forecast_exog parameter parsing (mirrors ts_forecast_scalar.cpp's
+// ParseStringParam/ParseInt64Param/ParseDoubleParam/ValidateParams — kept as
+// a separate local copy per this file's established pattern rather than a
+// shared header, matching ts_forecast_native.cpp's own local copy).
+// ============================================================================
+
+static string ExogParseStringParam(const Value &params_value, const string &key, const string &default_val) {
+    if (params_value.IsNull()) return default_val;
+    if (params_value.type().id() == LogicalTypeId::MAP) {
+        auto &map_children = MapValue::GetChildren(params_value);
+        for (auto &child : map_children) {
+            auto &k = StructValue::GetChildren(child)[0];
+            auto &v = StructValue::GetChildren(child)[1];
+            if (k.ToString() == key && !v.IsNull()) return v.ToString();
+        }
+    } else if (params_value.type().id() == LogicalTypeId::STRUCT) {
+        auto &struct_children = StructValue::GetChildren(params_value);
+        auto &child_types = StructType::GetChildTypes(params_value.type());
+        for (idx_t i = 0; i < child_types.size(); i++) {
+            if (child_types[i].first == key && !struct_children[i].IsNull()) {
+                return struct_children[i].ToString();
+            }
+        }
+    }
+    return default_val;
+}
+
+static int64_t ExogParseInt64Param(const Value &params_value, const string &key, int64_t default_val) {
+    string str = ExogParseStringParam(params_value, key, "");
+    if (str.empty()) return default_val;
+    try { return std::stoll(str); } catch (...) { return default_val; }
+}
+
+static double ExogParseDoubleParam(const Value &params_value, const string &key, double default_val) {
+    string str = ExogParseStringParam(params_value, key, "");
+    if (str.empty()) return default_val;
+    try { return std::stod(str); } catch (...) { return default_val; }
+}
+
+static void ExogValidateParamKeys(const Value &params_value) {
+    static const unordered_set<string> valid_keys = {
+        "model", "seasonal_period", "seasonal_periods", "confidence_level", "window", "model_pool",
+        "laplace_variant", "laplace_seasonal_batch_init",
+        "garch_p", "garch_q", "kalman_model",
+        "top_k", "combination_method",
+        "arima_order", "seasonal_order"
+    };
+
+    if (params_value.IsNull()) return;
+
+    vector<string> unknown_keys;
+    if (params_value.type().id() == LogicalTypeId::MAP) {
+        auto &map_children = MapValue::GetChildren(params_value);
+        for (auto &child : map_children) {
+            auto &key = StructValue::GetChildren(child)[0];
+            string key_str = key.ToString();
+            if (valid_keys.find(key_str) == valid_keys.end()) {
+                unknown_keys.push_back(key_str);
+            }
+        }
+    } else if (params_value.type().id() == LogicalTypeId::STRUCT) {
+        auto &child_types = StructType::GetChildTypes(params_value.type());
+        for (idx_t i = 0; i < child_types.size(); i++) {
+            if (valid_keys.find(child_types[i].first) == valid_keys.end()) {
+                unknown_keys.push_back(child_types[i].first);
+            }
+        }
+    }
+
+    if (!unknown_keys.empty()) {
+        string unknown_list;
+        for (size_t i = 0; i < unknown_keys.size(); i++) {
+            if (i > 0) unknown_list += ", ";
+            unknown_list += "'" + unknown_keys[i] + "'";
+        }
+        throw InvalidInputException(
+            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init, garch_p, garch_q, kalman_model, top_k, combination_method, arima_order, seasonal_order",
+            unknown_list);
+    }
+}
+
+// strncpy-size-1 + terminator into a fixed C buffer (the pattern every
+// ForecastOptions*-filling call site in this codebase uses for FFI string
+// fields).
+template <size_t N>
+static void SetCField(char (&dst)[N], const string &s) {
+    if (s.empty()) return;
+    strncpy(dst, s.c_str(), N - 1);
+    dst[N - 1] = '\0';
+}
+
+// `_ts_forecast_exog` — both the 5-argument (no params) and 6-argument
+// (params ANY) overloads share this one callback; `args.ColumnCount()`
+// tells us which overload bound (D-02/D-10/D-11/D-12 at the SQL layer).
 static void TsForecastExogFunction(DataChunk &args, ExpressionState &state, Vector &result) {
     auto &list_vec = args.data[0];       // y values
     auto &xreg_vec = args.data[1];       // historical X regressors
     auto &future_xreg_vec = args.data[2]; // future X regressors
     auto &horizon_vec = args.data[3];
     auto &model_vec = args.data[4];
+    bool has_params = args.ColumnCount() >= 6;
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
@@ -242,6 +410,11 @@ static void TsForecastExogFunction(DataChunk &args, ExpressionState &state, Vect
     UnifiedVectorFormat model_data;
     model_vec.ToUnifiedFormat(count, model_data);
 
+    UnifiedVectorFormat params_data;
+    if (has_params) {
+        args.data[5].ToUnifiedFormat(count, params_data);
+    }
+
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         auto list_idx = list_format.sel->get_index(row_idx);
         if (!list_format.validity.RowIsValid(list_idx)) {
@@ -254,13 +427,25 @@ static void TsForecastExogFunction(DataChunk &args, ExpressionState &state, Vect
         vector<uint64_t> validity;
         ExtractListValues(list_vec, count, row_idx, values, validity);
 
-        // Extract historical X regressors
+        // Extract historical/future X regressors + their per-element
+        // validity bitmasks (D-12/FCST-08).
         vector<vector<double>> xreg;
-        ExtractNestedListValues(xreg_vec, count, row_idx, xreg);
+        vector<vector<uint64_t>> xreg_validity;
+        ExtractNestedListValues(xreg_vec, count, row_idx, xreg, xreg_validity);
 
-        // Extract future X regressors
         vector<vector<double>> future_xreg;
-        ExtractNestedListValues(future_xreg_vec, count, row_idx, future_xreg);
+        vector<vector<uint64_t>> future_xreg_validity;
+        ExtractNestedListValues(future_xreg_vec, count, row_idx, future_xreg, future_xreg_validity);
+
+        // Historical/future regressor COUNT mismatch is now a hard error
+        // (T-10-14) — the old `for (...; i < xreg.size() && i < future_xreg.size(); ...)`
+        // loop silently truncated to the shorter list instead.
+        if (xreg.size() != future_xreg.size()) {
+            throw InvalidInputException(
+                "_ts_forecast_exog: %lld historical regressor column(s) but %lld future "
+                "regressor column(s) — these must match",
+                (int64_t)xreg.size(), (int64_t)future_xreg.size());
+        }
 
         // Get horizon
         auto horizon_idx = horizon_data.sel->get_index(row_idx);
@@ -276,15 +461,76 @@ static void TsForecastExogFunction(DataChunk &args, ExpressionState &state, Vect
             model_name = UnifiedVectorFormat::GetData<string_t>(model_data)[model_idx].GetString();
         }
 
-        // Build exogenous data structure
-        vector<ExogenousRegressor> regressors;
-        for (size_t i = 0; i < xreg.size() && i < future_xreg.size(); i++) {
-            ExogenousRegressor reg;
-            reg.values = xreg[i].data();
-            reg.n_values = xreg[i].size();
-            reg.future_values = future_xreg[i].data();
-            reg.n_future = future_xreg[i].size();
-            regressors.push_back(reg);
+        // Defaults — confidence_level 0.90 now matches ts_forecast_by
+        // (was a hard-coded 0.95; CHANGELOG item, 10-06).
+        string model_spec;
+        int64_t seasonal_period = 0;
+        double confidence_level = 0.90;
+        int64_t window_param = 0;
+        string seasonal_periods_str;
+        string model_pool;
+        string laplace_variant;
+        bool laplace_seasonal_batch_init = false;
+        int64_t garch_p = 0;
+        int64_t garch_q = 0;
+        string kalman_model;
+        int64_t ensemble_top_k = 0;
+        string ensemble_method;
+        string arima_order;
+        string seasonal_order;
+
+        if (has_params) {
+            auto p_idx = params_data.sel->get_index(row_idx);
+            if (params_data.validity.RowIsValid(p_idx)) {
+                Value params_val = args.data[5].GetValue(row_idx);
+                ExogValidateParamKeys(params_val);
+                model_spec = ExogParseStringParam(params_val, "model", "");
+                seasonal_period = ExogParseInt64Param(params_val, "seasonal_period", 0);
+                confidence_level = ExogParseDoubleParam(params_val, "confidence_level", 0.90);
+                window_param = ExogParseInt64Param(params_val, "window", 0);
+                seasonal_periods_str = ExogParseStringParam(params_val, "seasonal_periods", "");
+                model_pool = ExogParseStringParam(params_val, "model_pool", "");
+                laplace_variant = ExogParseStringParam(params_val, "laplace_variant", "");
+                laplace_seasonal_batch_init =
+                    ExogParseInt64Param(params_val, "laplace_seasonal_batch_init", 0) != 0;
+                garch_p = ExogParseInt64Param(params_val, "garch_p", 0);
+                garch_q = ExogParseInt64Param(params_val, "garch_q", 0);
+                kalman_model = ExogParseStringParam(params_val, "kalman_model", "");
+                ensemble_top_k = ExogParseInt64Param(params_val, "top_k", 0);
+                ensemble_method = ExogParseStringParam(params_val, "combination_method", "");
+                arima_order = ExogParseStringParam(params_val, "arima_order", "");
+                seasonal_order = ExogParseStringParam(params_val, "seasonal_order", "");
+            }
+        }
+
+        // WR-03: reject arima_order/seasonal_order strings that would
+        // silently truncate when SetCField copies them into the fixed
+        // 32-byte ForecastOptionsExog::arima_order_str/seasonal_order_str
+        // buffers below.
+        if (arima_order.size() > sizeof(ForecastOptionsExog::arima_order_str) - 1) {
+            throw InvalidInputException(
+                "arima_order value is too long (max %d characters): '%s'",
+                (int)(sizeof(ForecastOptionsExog::arima_order_str) - 1), arima_order);
+        }
+        if (seasonal_order.size() > sizeof(ForecastOptionsExog::seasonal_order_str) - 1) {
+            throw InvalidInputException(
+                "seasonal_order value is too long (max %d characters): '%s'",
+                (int)(sizeof(ForecastOptionsExog::seasonal_order_str) - 1), seasonal_order);
+        }
+
+        // Build exogenous data structure — validity/future_validity
+        // pointers (T-10-12) stay alive through the FFI call: they point
+        // into `xreg_validity`/`future_xreg_validity`, which outlive this
+        // scope's `anofox_ts_forecast_exog` call (same scope).
+        vector<ExogenousRegressor> regressors(xreg.size());
+        for (size_t i = 0; i < xreg.size(); i++) {
+            memset(&regressors[i], 0, sizeof(ExogenousRegressor));
+            regressors[i].values = xreg[i].data();
+            regressors[i].n_values = xreg[i].size();
+            regressors[i].future_values = future_xreg[i].data();
+            regressors[i].n_future = future_xreg[i].size();
+            regressors[i].validity = xreg_validity[i].data();
+            regressors[i].future_validity = future_xreg_validity[i].data();
         }
 
         ExogenousData exog_data;
@@ -294,16 +540,27 @@ static void TsForecastExogFunction(DataChunk &args, ExpressionState &state, Vect
         // Build options
         ForecastOptionsExog opts;
         memset(&opts, 0, sizeof(opts));
-        size_t model_len = std::min(model_name.size(), (size_t)31);
-        memcpy(opts.model, model_name.c_str(), model_len);
-        opts.model[model_len] = '\0';
+        SetCField(opts.model, model_name);
+        SetCField(opts.ets_model, model_spec);
         opts.horizon = horizon;
-        opts.confidence_level = 0.95;
-        opts.seasonal_period = 0;
-        opts.auto_detect_seasonality = false;
+        opts.confidence_level = confidence_level;
+        opts.seasonal_period = static_cast<int>(seasonal_period);
+        opts.auto_detect_seasonality = (seasonal_period == 0 && seasonal_periods_str.empty());
         opts.include_fitted = true;
         opts.include_residuals = true;
         opts.exog = regressors.empty() ? nullptr : &exog_data;
+        opts.window = static_cast<int>(window_param);
+        SetCField(opts.seasonal_periods_str, seasonal_periods_str);
+        SetCField(opts.model_pool, model_pool);
+        SetCField(opts.laplace_variant, laplace_variant);
+        opts.laplace_seasonal_batch_init = laplace_seasonal_batch_init;
+        opts.garch_p = static_cast<int>(garch_p);
+        opts.garch_q = static_cast<int>(garch_q);
+        SetCField(opts.kalman_model, kalman_model);
+        opts.ensemble_top_k = static_cast<int>(ensemble_top_k);
+        SetCField(opts.ensemble_method, ensemble_method);
+        SetCField(opts.arima_order_str, arima_order);
+        SetCField(opts.seasonal_order_str, seasonal_order);
 
         ForecastResult fcst_result;
         memset(&fcst_result, 0, sizeof(fcst_result));
@@ -319,6 +576,15 @@ static void TsForecastExogFunction(DataChunk &args, ExpressionState &state, Vect
         );
 
         if (!success) {
+            // Invalid input / invalid model — a parameter or regressor
+            // problem the caller must fix — is a hard SQL error, not a
+            // per-row NULL (mirrors ts_forecast_scalar.cpp/
+            // ts_forecast_native.cpp's existing policy). Other error codes
+            // (e.g. a genuinely insufficient series) keep per-row NULL
+            // isolation.
+            if (error.code == INVALID_INPUT || error.code == INVALID_MODEL) {
+                throw InvalidInputException(string(error.message));
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
@@ -326,8 +592,8 @@ static void TsForecastExogFunction(DataChunk &args, ExpressionState &state, Vect
         SetListFromArray(result, 0, row_idx, fcst_result.point_forecasts, fcst_result.n_forecasts);
         SetListFromArray(result, 1, row_idx, fcst_result.lower_bounds, fcst_result.n_forecasts);
         SetListFromArray(result, 2, row_idx, fcst_result.upper_bounds, fcst_result.n_forecasts);
-        SetListFromArray(result, 3, row_idx, fcst_result.fitted_values, fcst_result.n_fitted);
-        SetListFromArray(result, 4, row_idx, fcst_result.residuals, fcst_result.n_fitted);
+        SetListFromArrayNanSafe(result, 3, row_idx, fcst_result.fitted_values, fcst_result.n_fitted);
+        SetListFromArrayNanSafe(result, 4, row_idx, fcst_result.residuals, fcst_result.n_residuals);
         SetStringField(result, 5, row_idx, fcst_result.model_name);
         SetStructField<double>(result, 6, row_idx, fcst_result.aic);
         SetStructField<double>(result, 7, row_idx, fcst_result.bic);
@@ -435,8 +701,8 @@ static void TsForecastWithModelFunction(DataChunk &args, ExpressionState &state,
         SetListFromArray(result, 0, row_idx, fcst_result.point_forecasts, fcst_result.n_forecasts);
         SetListFromArray(result, 1, row_idx, fcst_result.lower_bounds, fcst_result.n_forecasts);
         SetListFromArray(result, 2, row_idx, fcst_result.upper_bounds, fcst_result.n_forecasts);
-        SetListFromArray(result, 3, row_idx, fcst_result.fitted_values, fcst_result.n_fitted);
-        SetListFromArray(result, 4, row_idx, fcst_result.residuals, fcst_result.n_fitted);
+        SetListFromArrayNanSafe(result, 3, row_idx, fcst_result.fitted_values, fcst_result.n_fitted);
+        SetListFromArrayNanSafe(result, 4, row_idx, fcst_result.residuals, fcst_result.n_residuals);
         SetStringField(result, 5, row_idx, fcst_result.model_name);
         SetStructField<double>(result, 6, row_idx, fcst_result.aic);
         SetStructField<double>(result, 7, row_idx, fcst_result.bic);
@@ -476,15 +742,21 @@ void RegisterTsForecastFunction(ExtensionLoader &loader) {
     forecast_info.internal = true;
     loader.RegisterFunction(forecast_info);
 
-    // Internal scalar function for forecasting with exogenous variables
-    // _ts_forecast_exog(values, xreg, future_xreg, horizon, model)
+    // Internal scalar function set for forecasting with exogenous variables.
     // - values: LIST<DOUBLE> - target variable y
     // - xreg: LIST<LIST<DOUBLE>> - historical X regressors [n_regressors][n_obs]
     // - future_xreg: LIST<LIST<DOUBLE>> - future X regressors [n_regressors][horizon]
     // - horizon: INTEGER - forecast horizon
-    // - model: VARCHAR - model name (AutoARIMA, ARIMAX, ThetaX, MFLESX, etc.)
-    ScalarFunction ts_forecast_exog_func(
-        "_ts_forecast_exog",
+    // - model: VARCHAR - model name (AutoARIMA, OptimizedTheta, ETS, MFLES, MSTL, ...)
+    // - params (6-arg overload only): MAP/STRUCT — same key set as
+    //   ts_forecast_by's params (model/ets_spec, seasonal_period,
+    //   seasonal_periods, confidence_level, window, model_pool,
+    //   laplace_variant, laplace_seasonal_batch_init, garch_p, garch_q,
+    //   kalman_model, top_k, combination_method, arima_order,
+    //   seasonal_order).
+    ScalarFunctionSet ts_forecast_exog_set("_ts_forecast_exog");
+
+    ScalarFunction ts_forecast_exog_5arg(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),           // values
          LogicalType::LIST(LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))),  // xreg
          LogicalType::LIST(LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))),  // future_xreg
@@ -493,10 +765,24 @@ void RegisterTsForecastFunction(ExtensionLoader &loader) {
         GetForecastResultType(),
         TsForecastExogFunction
     );
-    ts_forecast_exog_func.stability = FunctionStability::VOLATILE;
+    ts_forecast_exog_5arg.stability = FunctionStability::VOLATILE;
+    ts_forecast_exog_set.AddFunction(ts_forecast_exog_5arg);
+
+    ScalarFunction ts_forecast_exog_6arg(
+        {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),           // values
+         LogicalType::LIST(LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))),  // xreg
+         LogicalType::LIST(LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))),  // future_xreg
+         LogicalType(LogicalTypeId::INTEGER),                             // horizon
+         LogicalType(LogicalTypeId::VARCHAR),                             // model
+         LogicalType::ANY},                                               // params (MAP/STRUCT)
+        GetForecastResultType(),
+        TsForecastExogFunction
+    );
+    ts_forecast_exog_6arg.stability = FunctionStability::VOLATILE;
+    ts_forecast_exog_set.AddFunction(ts_forecast_exog_6arg);
 
     // Mark as internal
-    CreateScalarFunctionInfo exog_info(ts_forecast_exog_func);
+    CreateScalarFunctionInfo exog_info(ts_forecast_exog_set);
     exog_info.internal = true;
     loader.RegisterFunction(exog_info);
 }

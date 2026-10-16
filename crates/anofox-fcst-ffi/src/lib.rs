@@ -18,6 +18,10 @@
 #![allow(clippy::doc_overindented_list_items)]
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::manual_div_ceil)]
+// unknown_lints: clippy::manual_is_multiple_of doesn't exist yet on this
+// workspace's pinned 1.89 toolchain (added in a later clippy); keeps
+// `cargo clippy -D warnings` green on both.
+#![allow(unknown_lints)]
 #![allow(clippy::manual_is_multiple_of)]
 
 pub mod allocation;
@@ -129,7 +133,6 @@ unsafe fn build_series(
 }
 
 /// Build a Vec<f64> from raw pointers, treating NULLs as NaN.
-#[allow(dead_code)]
 unsafe fn build_values(data: *const c_double, validity: *const u64, length: size_t) -> Vec<f64> {
     let data_slice = std::slice::from_raw_parts(data, length);
 
@@ -182,6 +185,7 @@ pub unsafe extern "C" fn anofox_ts_stats(
     values: *const c_double,
     validity: *const u64,
     length: size_t,
+    seasonal_period: size_t,
     out_result: *mut TsStatsResult,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -202,60 +206,7 @@ pub unsafe extern "C" fn anofox_ts_stats(
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let series = build_series(values, validity, length);
-        anofox_fcst_core::compute_ts_stats(&series)
-    }));
-
-    match result {
-        Ok(Ok(stats)) => {
-            *out_result = stats.into();
-            true
-        }
-        Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
-            false
-        }
-        Err(_) => {
-            set_error(out_error, ErrorCode::PanicCaught, "Panic in Rust code");
-            false
-        }
-    }
-}
-
-/// Compute time series statistics with date information for gap detection.
-///
-/// # Safety
-/// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
-/// The dates array must have the same length as the values array.
-#[no_mangle]
-pub unsafe extern "C" fn anofox_ts_stats_with_dates(
-    values: *const c_double,
-    validity: *const u64,
-    dates: *const i64,
-    length: size_t,
-    frequency_micros: i64,
-    out_result: *mut TsStatsResult,
-    out_error: *mut AnofoxError,
-) -> bool {
-    init_error(out_error);
-
-    let ptrs = &[
-        values as *const core::ffi::c_void,
-        dates as *const core::ffi::c_void,
-        out_result as *const core::ffi::c_void,
-    ];
-    if check_null_pointers(out_error, ptrs) {
-        return false;
-    }
-
-    if length == 0 {
-        *out_result = TsStatsResult::default();
-        return true;
-    }
-
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        let series = build_series(values, validity, length);
-        let dates_slice = std::slice::from_raw_parts(dates, length);
-        anofox_fcst_core::compute_ts_stats_with_dates(&series, dates_slice, frequency_micros)
+        anofox_fcst_core::compute_ts_stats(&series, seasonal_period)
     }));
 
     match result {
@@ -279,6 +230,10 @@ pub unsafe extern "C" fn anofox_ts_stats_with_dates(
 /// This version properly handles calendar frequencies (monthly, quarterly, yearly) which
 /// have variable durations that cannot be accurately represented in microseconds.
 ///
+/// `period_count` is the user-declared calendar multiplier for Monthly/Quarterly/Yearly
+/// frequencies (e.g. `2` for `'2mo'`, `3` for `'3q'`, `5` for `'5y'`; `1` for the
+/// single-unit strings); ignored for `Fixed` (CR-01 fix, 13-03 deferred item).
+///
 /// # Safety
 /// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
 /// The dates array must have the same length as the values array.
@@ -290,6 +245,8 @@ pub unsafe extern "C" fn anofox_ts_stats_with_dates_and_type(
     length: size_t,
     frequency_micros: i64,
     frequency_type: FrequencyType,
+    seasonal_period: size_t,
+    period_count: size_t,
     out_result: *mut TsStatsResult,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -309,6 +266,8 @@ pub unsafe extern "C" fn anofox_ts_stats_with_dates_and_type(
         return true;
     }
 
+    let period_count_u32 = u32::try_from(period_count).unwrap_or(u32::MAX);
+
     let result = catch_unwind(AssertUnwindSafe(|| {
         let series = build_series(values, validity, length);
         let dates_slice = std::slice::from_raw_parts(dates, length);
@@ -318,6 +277,8 @@ pub unsafe extern "C" fn anofox_ts_stats_with_dates_and_type(
             dates_slice,
             frequency_micros,
             freq_type,
+            seasonal_period,
+            period_count_u32,
         )
     }));
 
@@ -341,11 +302,16 @@ pub unsafe extern "C" fn anofox_ts_stats_with_dates_and_type(
 // Metric Functions
 // ============================================================================
 
-// Helper for 2-argument metric functions
+// Helper for 2-argument metric functions. `actual_validity`/`forecast_validity` may each
+// be null (all valid). Pairs are dropped via `anofox_fcst_core::complete_cases` (D-02)
+// before the core metric is computed; an empty filtered result flows into the core
+// metric's own InsufficientData error, which we remap to ErrorCode::InsufficientData.
 unsafe fn impl_metric_2arg<F>(
     actual: *const c_double,
+    actual_validity: *const u64,
     actual_len: size_t,
     forecast: *const c_double,
+    forecast_validity: *const u64,
     forecast_len: size_t,
     out_result: *mut c_double,
     out_error: *mut AnofoxError,
@@ -367,9 +333,17 @@ where
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let actual_vec = std::slice::from_raw_parts(actual, actual_len).to_vec();
-        let forecast_vec = std::slice::from_raw_parts(forecast, forecast_len).to_vec();
-        core_fn(&actual_vec, &forecast_vec)
+        let actual_series = build_series(actual, actual_validity, actual_len);
+        let forecast_series = build_series(forecast, forecast_validity, forecast_len);
+        if actual_series.len() != forecast_series.len() {
+            return Err(anofox_fcst_core::ForecastError::InvalidInput(format!(
+                "arrays must have the same length: {} vs {}",
+                actual_series.len(),
+                forecast_series.len()
+            )));
+        }
+        let filtered = anofox_fcst_core::complete_cases(&[&actual_series, &forecast_series])?;
+        core_fn(&filtered[0], &filtered[1])
     }));
 
     match result {
@@ -378,7 +352,12 @@ where
             true
         }
         Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            let code = if matches!(e, anofox_fcst_core::ForecastError::InsufficientData { .. }) {
+                ErrorCode::InsufficientData
+            } else {
+                ErrorCode::ComputationError
+            };
+            set_error(out_error, code, &e.to_string());
             false
         }
         Err(_) => {
@@ -391,20 +370,26 @@ where
 /// Mean Absolute Error
 ///
 /// # Safety
-/// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+/// All pointer arguments must be valid and non-null (except the two `*_validity`
+/// pointers, which may be null to mean "all valid"). Arrays must have the specified
+/// lengths.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_mae(
     actual: *const c_double,
+    actual_validity: *const u64,
     actual_len: size_t,
     forecast: *const c_double,
+    forecast_validity: *const u64,
     forecast_len: size_t,
     out_result: *mut c_double,
     out_error: *mut AnofoxError,
 ) -> bool {
     impl_metric_2arg(
         actual,
+        actual_validity,
         actual_len,
         forecast,
+        forecast_validity,
         forecast_len,
         out_result,
         out_error,
@@ -419,16 +404,20 @@ pub unsafe extern "C" fn anofox_ts_mae(
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_mse(
     actual: *const c_double,
+    actual_validity: *const u64,
     actual_len: size_t,
     forecast: *const c_double,
+    forecast_validity: *const u64,
     forecast_len: size_t,
     out_result: *mut c_double,
     out_error: *mut AnofoxError,
 ) -> bool {
     impl_metric_2arg(
         actual,
+        actual_validity,
         actual_len,
         forecast,
+        forecast_validity,
         forecast_len,
         out_result,
         out_error,
@@ -443,16 +432,20 @@ pub unsafe extern "C" fn anofox_ts_mse(
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_rmse(
     actual: *const c_double,
+    actual_validity: *const u64,
     actual_len: size_t,
     forecast: *const c_double,
+    forecast_validity: *const u64,
     forecast_len: size_t,
     out_result: *mut c_double,
     out_error: *mut AnofoxError,
 ) -> bool {
     impl_metric_2arg(
         actual,
+        actual_validity,
         actual_len,
         forecast,
+        forecast_validity,
         forecast_len,
         out_result,
         out_error,
@@ -460,28 +453,76 @@ pub unsafe extern "C" fn anofox_ts_rmse(
     )
 }
 
-/// Mean Absolute Percentage Error
+/// Mean Absolute Percentage Error. `*out_is_null` is set `true` (call still
+/// returns `true` for "no error") when any pairwise-complete actual is
+/// exactly zero -- MAPE is undefined there (D-07); callers must check
+/// `*out_is_null` before trusting `*out_result`.
 ///
 /// # Safety
-/// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+/// All pointer arguments must be valid and non-null (except the `*_validity`
+/// pointers). Arrays must have the specified lengths.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_mape(
     actual: *const c_double,
+    actual_validity: *const u64,
     actual_len: size_t,
     forecast: *const c_double,
+    forecast_validity: *const u64,
     forecast_len: size_t,
     out_result: *mut c_double,
+    out_is_null: *mut bool,
     out_error: *mut AnofoxError,
 ) -> bool {
-    impl_metric_2arg(
-        actual,
-        actual_len,
-        forecast,
-        forecast_len,
-        out_result,
-        out_error,
-        anofox_fcst_core::mape,
-    )
+    init_error(out_error);
+
+    let ptrs = &[
+        actual as *const core::ffi::c_void,
+        forecast as *const core::ffi::c_void,
+        out_result as *const core::ffi::c_void,
+        out_is_null as *const core::ffi::c_void,
+    ];
+    if check_null_pointers(out_error, ptrs) {
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let actual_series = build_series(actual, actual_validity, actual_len);
+        let forecast_series = build_series(forecast, forecast_validity, forecast_len);
+        if actual_series.len() != forecast_series.len() {
+            return Err(anofox_fcst_core::ForecastError::InvalidInput(format!(
+                "arrays must have the same length: {} vs {}",
+                actual_series.len(),
+                forecast_series.len()
+            )));
+        }
+        let filtered = anofox_fcst_core::complete_cases(&[&actual_series, &forecast_series])?;
+        anofox_fcst_core::mape(&filtered[0], &filtered[1])
+    }));
+
+    match result {
+        Ok(Ok(Some(value))) => {
+            *out_result = value;
+            *out_is_null = false;
+            true
+        }
+        Ok(Ok(None)) => {
+            *out_is_null = true;
+            true
+        }
+        Ok(Err(e)) => {
+            let code = if matches!(e, anofox_fcst_core::ForecastError::InsufficientData { .. }) {
+                ErrorCode::InsufficientData
+            } else {
+                ErrorCode::ComputationError
+            };
+            set_error(out_error, code, &e.to_string());
+            false
+        }
+        Err(_) => {
+            set_error(out_error, ErrorCode::PanicCaught, "Panic in Rust code");
+            false
+        }
+    }
 }
 
 /// Symmetric Mean Absolute Percentage Error
@@ -491,16 +532,20 @@ pub unsafe extern "C" fn anofox_ts_mape(
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_smape(
     actual: *const c_double,
+    actual_validity: *const u64,
     actual_len: size_t,
     forecast: *const c_double,
+    forecast_validity: *const u64,
     forecast_len: size_t,
     out_result: *mut c_double,
     out_error: *mut AnofoxError,
 ) -> bool {
     impl_metric_2arg(
         actual,
+        actual_validity,
         actual_len,
         forecast,
+        forecast_validity,
         forecast_len,
         out_result,
         out_error,
@@ -515,16 +560,20 @@ pub unsafe extern "C" fn anofox_ts_smape(
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_r2(
     actual: *const c_double,
+    actual_validity: *const u64,
     actual_len: size_t,
     forecast: *const c_double,
+    forecast_validity: *const u64,
     forecast_len: size_t,
     out_result: *mut c_double,
     out_error: *mut AnofoxError,
 ) -> bool {
     impl_metric_2arg(
         actual,
+        actual_validity,
         actual_len,
         forecast,
+        forecast_validity,
         forecast_len,
         out_result,
         out_error,
@@ -539,16 +588,20 @@ pub unsafe extern "C" fn anofox_ts_r2(
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_bias(
     actual: *const c_double,
+    actual_validity: *const u64,
     actual_len: size_t,
     forecast: *const c_double,
+    forecast_validity: *const u64,
     forecast_len: size_t,
     out_result: *mut c_double,
     out_error: *mut AnofoxError,
 ) -> bool {
     impl_metric_2arg(
         actual,
+        actual_validity,
         actual_len,
         forecast,
+        forecast_validity,
         forecast_len,
         out_result,
         out_error,
@@ -556,37 +609,60 @@ pub unsafe extern "C" fn anofox_ts_bias(
     )
 }
 
-/// Relative MAE comparing two models.
+/// Maps a ForecastError to the FFI error code, picking InsufficientData for the
+/// "nothing left after complete_cases" case (D-04) instead of ComputationError.
+fn metric_error_code(e: &anofox_fcst_core::ForecastError) -> ErrorCode {
+    if matches!(e, anofox_fcst_core::ForecastError::InsufficientData { .. }) {
+        ErrorCode::InsufficientData
+    } else {
+        ErrorCode::ComputationError
+    }
+}
+
+/// Relative MAE comparing two models. `*_validity` pointers may each be null
+/// (all valid); rows missing in ANY of actual/pred1/pred2 are dropped (D-02).
 ///
 /// # Safety
-/// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+/// All pointer arguments must be valid and non-null (except the `*_validity`
+/// pointers). Arrays must have the specified lengths.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_rmae(
     actual: *const c_double,
+    actual_validity: *const u64,
     actual_len: size_t,
     pred1: *const c_double,
+    pred1_validity: *const u64,
     pred1_len: size_t,
     pred2: *const c_double,
+    pred2_validity: *const u64,
     pred2_len: size_t,
     out_result: *mut c_double,
     out_error: *mut AnofoxError,
 ) -> bool {
-    if !out_error.is_null() {
-        *out_error = AnofoxError::success();
-    }
+    init_error(out_error);
 
-    if actual.is_null() || pred1.is_null() || pred2.is_null() || out_result.is_null() {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
-        }
+    let ptrs = &[
+        actual as *const core::ffi::c_void,
+        pred1 as *const core::ffi::c_void,
+        pred2 as *const core::ffi::c_void,
+        out_result as *const core::ffi::c_void,
+    ];
+    if check_null_pointers(out_error, ptrs) {
         return false;
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let actual_vec = std::slice::from_raw_parts(actual, actual_len).to_vec();
-        let pred1_vec = std::slice::from_raw_parts(pred1, pred1_len).to_vec();
-        let pred2_vec = std::slice::from_raw_parts(pred2, pred2_len).to_vec();
-        anofox_fcst_core::rmae(&actual_vec, &pred1_vec, &pred2_vec)
+        let actual_series = build_series(actual, actual_validity, actual_len);
+        let pred1_series = build_series(pred1, pred1_validity, pred1_len);
+        let pred2_series = build_series(pred2, pred2_validity, pred2_len);
+        if actual_series.len() != pred1_series.len() || actual_series.len() != pred2_series.len() {
+            return Err(anofox_fcst_core::ForecastError::InvalidInput(
+                "actual, pred1 and pred2 arrays must have the same length".to_string(),
+            ));
+        }
+        let filtered =
+            anofox_fcst_core::complete_cases(&[&actual_series, &pred1_series, &pred2_series])?;
+        anofox_fcst_core::rmae(&filtered[0], &filtered[1], &filtered[2])
     }));
 
     match result {
@@ -595,102 +671,154 @@ pub unsafe extern "C" fn anofox_ts_rmae(
             true
         }
         Ok(Err(e)) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
-            }
+            set_error(out_error, metric_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
-            }
+            set_error(out_error, ErrorCode::PanicCaught, "Panic in Rust code");
             false
         }
     }
 }
 
-/// Mean Absolute Scaled Error.
+/// Mean Absolute Scaled Error (Hyndman & Koehler 2006, D-08). `actual_validity`/
+/// `forecast_validity` may each be null (all valid); rows missing in EITHER
+/// actual or forecast are dropped before computing the evaluation MAE (D-02,
+/// same `complete_cases` policy as every other metric). `insample_validity`
+/// may also be null (all valid); unlike `actual`/`forecast`, missing in-sample
+/// positions are NOT dropped/complete-cased -- they are preserved exactly so
+/// the lag-`seasonal_period` scale only skips the specific pairs touching a
+/// missing value (never splices across one).
+///
+/// `*out_is_null` is set `true` (with the call still returning `true` for
+/// "no error") when the in-sample scale is numerically zero -- MASE is
+/// undefined there (R's `forecast::accuracy()` returns `Inf`; this product
+/// returns SQL NULL instead). Always write to `*out_is_null` on a `true`
+/// return; callers must check it before trusting `*out_result`.
 ///
 /// # Safety
-/// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+/// All pointer arguments must be valid and non-null (except the `*_validity`
+/// pointers). Arrays must have the specified lengths.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_mase(
     actual: *const c_double,
+    actual_validity: *const u64,
     actual_len: size_t,
     forecast: *const c_double,
+    forecast_validity: *const u64,
     forecast_len: size_t,
-    baseline: *const c_double,
-    baseline_len: size_t,
+    insample: *const c_double,
+    insample_validity: *const u64,
+    insample_len: size_t,
+    seasonal_period: i64,
     out_result: *mut c_double,
+    out_is_null: *mut bool,
     out_error: *mut AnofoxError,
 ) -> bool {
-    if !out_error.is_null() {
-        *out_error = AnofoxError::success();
+    init_error(out_error);
+
+    let ptrs = &[
+        actual as *const core::ffi::c_void,
+        forecast as *const core::ffi::c_void,
+        insample as *const core::ffi::c_void,
+        out_result as *const core::ffi::c_void,
+        out_is_null as *const core::ffi::c_void,
+    ];
+    if check_null_pointers(out_error, ptrs) {
+        return false;
     }
 
-    if actual.is_null() || forecast.is_null() || baseline.is_null() || out_result.is_null() {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
-        }
+    if seasonal_period < 1 {
+        set_error(
+            out_error,
+            ErrorCode::InvalidInput,
+            &format!("seasonal_period must be >= 1, got {seasonal_period}"),
+        );
         return false;
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let actual_vec = std::slice::from_raw_parts(actual, actual_len).to_vec();
-        let forecast_vec = std::slice::from_raw_parts(forecast, forecast_len).to_vec();
-        let baseline_vec = std::slice::from_raw_parts(baseline, baseline_len).to_vec();
-        anofox_fcst_core::mase(&actual_vec, &forecast_vec, &baseline_vec)
+        let actual_series = build_series(actual, actual_validity, actual_len);
+        let forecast_series = build_series(forecast, forecast_validity, forecast_len);
+        if actual_series.len() != forecast_series.len() {
+            return Err(anofox_fcst_core::ForecastError::InvalidInput(format!(
+                "actual and forecast arrays must have the same length: {} vs {}",
+                actual_series.len(),
+                forecast_series.len()
+            )));
+        }
+        let filtered = anofox_fcst_core::complete_cases(&[&actual_series, &forecast_series])?;
+        let insample_series = build_series(insample, insample_validity, insample_len);
+        anofox_fcst_core::mase(
+            &filtered[0],
+            &filtered[1],
+            &insample_series,
+            seasonal_period as usize,
+        )
     }));
 
     match result {
-        Ok(Ok(value)) => {
+        Ok(Ok(Some(value))) => {
             *out_result = value;
+            *out_is_null = false;
+            true
+        }
+        Ok(Ok(None)) => {
+            *out_is_null = true;
             true
         }
         Ok(Err(e)) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
-            }
+            set_error(out_error, metric_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
-            }
+            set_error(out_error, ErrorCode::PanicCaught, "Panic in Rust code");
             false
         }
     }
 }
 
-/// Quantile loss function.
+/// Quantile loss function. `*_validity` pointers may each be null (all valid);
+/// pairs missing in either actual or forecast are dropped (D-02).
 ///
 /// # Safety
-/// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+/// All pointer arguments must be valid and non-null (except the `*_validity`
+/// pointers). Arrays must have the specified lengths.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_quantile_loss(
     actual: *const c_double,
+    actual_validity: *const u64,
     actual_len: size_t,
     forecast: *const c_double,
+    forecast_validity: *const u64,
     forecast_len: size_t,
     quantile: c_double,
     out_result: *mut c_double,
     out_error: *mut AnofoxError,
 ) -> bool {
-    if !out_error.is_null() {
-        *out_error = AnofoxError::success();
-    }
+    init_error(out_error);
 
-    if actual.is_null() || forecast.is_null() || out_result.is_null() {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
-        }
+    let ptrs = &[
+        actual as *const core::ffi::c_void,
+        forecast as *const core::ffi::c_void,
+        out_result as *const core::ffi::c_void,
+    ];
+    if check_null_pointers(out_error, ptrs) {
         return false;
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let actual_vec = std::slice::from_raw_parts(actual, actual_len).to_vec();
-        let forecast_vec = std::slice::from_raw_parts(forecast, forecast_len).to_vec();
-        anofox_fcst_core::quantile_loss(&actual_vec, &forecast_vec, quantile)
+        let actual_series = build_series(actual, actual_validity, actual_len);
+        let forecast_series = build_series(forecast, forecast_validity, forecast_len);
+        if actual_series.len() != forecast_series.len() {
+            return Err(anofox_fcst_core::ForecastError::InvalidInput(format!(
+                "arrays must have the same length: {} vs {}",
+                actual_series.len(),
+                forecast_series.len()
+            )));
+        }
+        let filtered = anofox_fcst_core::complete_cases(&[&actual_series, &forecast_series])?;
+        anofox_fcst_core::quantile_loss(&filtered[0], &filtered[1], quantile)
     }));
 
     match result {
@@ -699,62 +827,71 @@ pub unsafe extern "C" fn anofox_ts_quantile_loss(
             true
         }
         Ok(Err(e)) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
-            }
+            set_error(out_error, metric_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
-            }
+            set_error(out_error, ErrorCode::PanicCaught, "Panic in Rust code");
             false
         }
     }
 }
 
-/// Multi-quantile loss function.
+/// Multi-quantile loss function. `quantiles is a 2D array: n_levels arrays,
+/// each of length actual_len. `quantiles_validity` is a nullable array of
+/// `n_levels` nullable per-level bitmasks (a null entry means "all valid" for
+/// that level); `actual_validity` may be null (all valid). `levels` itself is
+/// a PARAMETER list — NULL levels are rejected before the FFI call
+/// (`ListDoubleReader::ReadNoNulls` on the C++ side), so there is no
+/// `levels_validity` parameter. Each quantile level independently drops rows
+/// missing in either `actual` or that level's forecast (D-02).
 ///
 /// # Safety
-/// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
-/// quantiles is a 2D array: n_levels arrays, each of length actual_len.
+/// All pointer arguments must be valid and non-null (except `actual_validity`
+/// and `quantiles_validity`, and each per-level pointer inside
+/// `quantiles_validity`). Arrays must have the specified lengths.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_mqloss(
     actual: *const c_double,
+    actual_validity: *const u64,
     actual_len: size_t,
     quantiles: *const *const c_double, // Array of pointers to quantile forecast arrays
+    quantiles_validity: *const *const u64, // nullable array of nullable per-level bitmasks
     n_levels: size_t,
     levels: *const c_double,
     out_result: *mut c_double,
     out_error: *mut AnofoxError,
 ) -> bool {
-    if !out_error.is_null() {
-        *out_error = AnofoxError::success();
-    }
+    init_error(out_error);
 
-    if actual.is_null() || quantiles.is_null() || levels.is_null() || out_result.is_null() {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
-        }
+    let ptrs = &[
+        actual as *const core::ffi::c_void,
+        quantiles as *const core::ffi::c_void,
+        levels as *const core::ffi::c_void,
+        out_result as *const core::ffi::c_void,
+    ];
+    if check_null_pointers(out_error, ptrs) {
         return false;
     }
 
     if n_levels == 0 {
-        if !out_error.is_null() {
-            (*out_error).set_error(
-                ErrorCode::InvalidInput,
-                "Must have at least one quantile level",
-            );
-        }
+        set_error(
+            out_error,
+            ErrorCode::InvalidInput,
+            "Must have at least one quantile level",
+        );
         return false;
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let actual_vec = std::slice::from_raw_parts(actual, actual_len).to_vec();
+        let actual_series = build_series(actual, actual_validity, actual_len);
         let levels_vec = std::slice::from_raw_parts(levels, n_levels).to_vec();
 
-        // Build Vec<Vec<f64>> from the 2D array
-        let mut forecasts_vec: Vec<Vec<f64>> = Vec::with_capacity(n_levels);
+        let mut total_loss = 0.0;
+        // `i` indexes raw pointer arithmetic (`quantiles.add(i)`,
+        // `quantiles_validity.add(i)`) alongside `levels_vec[i]`; an iterator
+        // can't express the pointer-offset access, so a range loop is correct here.
+        #[allow(clippy::needless_range_loop)]
         for i in 0..n_levels {
             let quantile_ptr = *quantiles.add(i);
             if quantile_ptr.is_null() {
@@ -763,11 +900,25 @@ pub unsafe extern "C" fn anofox_ts_mqloss(
                     i
                 )));
             }
-            let quantile_vec = std::slice::from_raw_parts(quantile_ptr, actual_len).to_vec();
-            forecasts_vec.push(quantile_vec);
+            let level_validity = if quantiles_validity.is_null() {
+                std::ptr::null()
+            } else {
+                *quantiles_validity.add(i)
+            };
+            let forecast_series = build_series(quantile_ptr, level_validity, actual_len);
+            if actual_series.len() != forecast_series.len() {
+                return Err(anofox_fcst_core::ForecastError::InvalidInput(format!(
+                    "arrays must have the same length: {} vs {}",
+                    actual_series.len(),
+                    forecast_series.len()
+                )));
+            }
+            let filtered = anofox_fcst_core::complete_cases(&[&actual_series, &forecast_series])?;
+            total_loss +=
+                anofox_fcst_core::quantile_loss(&filtered[0], &filtered[1], levels_vec[i])?;
         }
 
-        anofox_fcst_core::mqloss(&actual_vec, &forecasts_vec, &levels_vec)
+        Ok(total_loss / n_levels as f64)
     }));
 
     match result {
@@ -776,49 +927,53 @@ pub unsafe extern "C" fn anofox_ts_mqloss(
             true
         }
         Ok(Err(e)) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
-            }
+            set_error(out_error, metric_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
-            }
+            set_error(out_error, ErrorCode::PanicCaught, "Panic in Rust code");
             false
         }
     }
 }
 
-/// Coverage of prediction intervals.
+/// Coverage of prediction intervals. `*_validity` pointers may each be null
+/// (all valid); rows missing in ANY of actual/lower/upper are dropped (D-02).
 ///
 /// # Safety
-/// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+/// All pointer arguments must be valid and non-null (except the `*_validity`
+/// pointers). Arrays must have the specified lengths.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_coverage(
     actual: *const c_double,
-    actual_len: size_t,
+    actual_validity: *const u64,
     lower: *const c_double,
+    lower_validity: *const u64,
     upper: *const c_double,
+    upper_validity: *const u64,
+    length: size_t,
     out_result: *mut c_double,
     out_error: *mut AnofoxError,
 ) -> bool {
-    if !out_error.is_null() {
-        *out_error = AnofoxError::success();
-    }
+    init_error(out_error);
 
-    if actual.is_null() || lower.is_null() || upper.is_null() || out_result.is_null() {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
-        }
+    let ptrs = &[
+        actual as *const core::ffi::c_void,
+        lower as *const core::ffi::c_void,
+        upper as *const core::ffi::c_void,
+        out_result as *const core::ffi::c_void,
+    ];
+    if check_null_pointers(out_error, ptrs) {
         return false;
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let actual_vec = std::slice::from_raw_parts(actual, actual_len).to_vec();
-        let lower_vec = std::slice::from_raw_parts(lower, actual_len).to_vec();
-        let upper_vec = std::slice::from_raw_parts(upper, actual_len).to_vec();
-        anofox_fcst_core::coverage(&actual_vec, &lower_vec, &upper_vec)
+        let actual_series = build_series(actual, actual_validity, length);
+        let lower_series = build_series(lower, lower_validity, length);
+        let upper_series = build_series(upper, upper_validity, length);
+        let filtered =
+            anofox_fcst_core::complete_cases(&[&actual_series, &lower_series, &upper_series])?;
+        anofox_fcst_core::coverage(&filtered[0], &filtered[1], &filtered[2])
     }));
 
     match result {
@@ -827,15 +982,11 @@ pub unsafe extern "C" fn anofox_ts_coverage(
             true
         }
         Ok(Err(e)) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
-            }
+            set_error(out_error, metric_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
-            }
+            set_error(out_error, ErrorCode::PanicCaught, "Panic in Rust code");
             false
         }
     }
@@ -1703,7 +1854,7 @@ pub unsafe extern "C" fn anofox_ts_lomb_scargle(
         }
         Ok(Err(e)) => {
             if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+                (*out_error).set_error(ffi_error_code(&e), &e.to_string());
             }
             false
         }
@@ -2163,13 +2314,14 @@ pub unsafe extern "C" fn anofox_ts_analyze_peak_timing(
         return false;
     }
 
-    if period <= 0.0 {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::InvalidInput, "Period must be positive");
-        }
-        return false;
-    }
-
+    // WR-03: the stale duplicate `period <= 0.0` pre-check that used to live
+    // here was removed. It never rejected NaN (`nan <= 0.0` is false) and
+    // rejected -Infinity with the old "Period must be positive" wording
+    // instead of the core-level check's "Period must be a positive finite
+    // number" -- a second source of truth that could desync from the
+    // core-level `!period.is_finite() || period <= 0.0` check (CR-03) this
+    // call falls through to below. The core-level check is strictly a
+    // superset, so there is now exactly one source of truth.
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
         anofox_fcst_core::analyze_peak_timing(&values_vec, period, None)
@@ -2199,8 +2351,16 @@ pub unsafe extern "C" fn anofox_ts_analyze_peak_timing(
             true
         }
         Ok(Err(e)) => {
+            // CR-05: this used to hardcode ErrorCode::ComputationError
+            // regardless of the underlying error, so the C++ wrapper's
+            // `error.code == INVALID_INPUT` check (added to fix CR-05) could
+            // never see INVALID_INPUT here and always fell through to a
+            // silent NULL instead of raising the CR-03 InvalidParameter
+            // error (e.g. a NaN/non-finite/non-positive period) as a SQL
+            // error. Use the same ffi_error_code mapping every other
+            // period-validating function in this file already uses.
             if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+                (*out_error).set_error(ffi_error_code(&e), &e.to_string());
             }
             false
         }
@@ -2216,6 +2376,46 @@ pub unsafe extern "C" fn anofox_ts_analyze_peak_timing(
 // ============================================================================
 // Detrending Functions (fdars-core integration)
 // ============================================================================
+
+/// Map a core `ForecastError` to the FFI `ErrorCode` a caller should see.
+///
+/// `InvalidParameter` (D-02: strict method-name parsing) and `InvalidInput`
+/// are caller mistakes -- the C++ layer re-throws these as a DuckDB
+/// `InvalidInputException` (precedent: `ts_data_quality.cpp`). Every other
+/// `ForecastError` variant is an internal computation failure. Phase 15
+/// plans reuse this helper for `anofox_ts_decompose` and future strict
+/// parameter validation.
+fn ffi_error_code(e: &anofox_fcst_core::ForecastError) -> ErrorCode {
+    match e {
+        anofox_fcst_core::ForecastError::InvalidParameter { .. }
+        | anofox_fcst_core::ForecastError::InvalidInput(_) => ErrorCode::InvalidInput,
+        _ => ErrorCode::ComputationError,
+    }
+}
+
+/// Parse an optional `regression` C string into a `StationarityRegression`
+/// (D-05): `anofox_ts_adf` / `anofox_ts_kpss` / `anofox_ts_stationarity`
+/// call this OUTSIDE their `catch_unwind` closure so an invalid value is
+/// reported as `ErrorCode::InvalidInput` (via [`ffi_error_code`]) rather
+/// than caught as a panic. A null pointer means the default (`Constant`,
+/// "c"); invalid UTF-8 is `ForecastError::InvalidInput`; any other value is
+/// delegated to `StationarityRegression::from_str`'s strict, case-insensitive
+/// parsing (`InvalidParameter`, message "expected one of: c, ct").
+///
+/// # Safety
+///
+/// `ptr` must be either null or a valid NUL-terminated C string.
+unsafe fn parse_regression(
+    ptr: *const c_char,
+) -> Result<anofox_fcst_core::StationarityRegression, anofox_fcst_core::ForecastError> {
+    if ptr.is_null() {
+        return Ok(anofox_fcst_core::StationarityRegression::Constant);
+    }
+    let s = CStr::from_ptr(ptr).to_str().map_err(|_| {
+        anofox_fcst_core::ForecastError::InvalidInput("regression is not valid UTF-8".to_string())
+    })?;
+    s.parse()
+}
 
 /// Detrend time series using specified method.
 ///
@@ -2242,13 +2442,23 @@ pub unsafe extern "C" fn anofox_ts_detrend(
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
+        // D-07/T-10-07: invalid UTF-8 is an error, never a silent "auto"
+        // fallback. D-02 (Phase 15): the method-NAME parse itself is now
+        // strict too -- an unknown method name is a caller error, not a
+        // silent fallback to "auto".
         let method_str = if method.is_null() {
             "auto"
         } else {
-            CStr::from_ptr(method).to_str().unwrap_or("auto")
+            match CStr::from_ptr(method).to_str() {
+                Ok(s) => s,
+                Err(_) => {
+                    return Err(anofox_fcst_core::ForecastError::InvalidInput(
+                        "method is not valid UTF-8".to_string(),
+                    ))
+                }
+            }
         };
-        let detrend_method: anofox_fcst_core::DetrendMethod =
-            method_str.parse().unwrap_or_default();
+        let detrend_method: anofox_fcst_core::DetrendMethod = method_str.parse()?;
         anofox_fcst_core::detrend(&values_vec, detrend_method)
     }));
 
@@ -2275,7 +2485,7 @@ pub unsafe extern "C" fn anofox_ts_detrend(
         }
         Ok(Err(e)) => {
             if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+                (*out_error).set_error(ffi_error_code(&e), &e.to_string());
             }
             false
         }
@@ -2312,22 +2522,32 @@ pub unsafe extern "C" fn anofox_ts_decompose(
         return false;
     }
 
-    if period <= 0.0 {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::InvalidInput, "Period must be positive");
-        }
-        return false;
-    }
-
+    // WR-03: the stale duplicate `period <= 0.0` pre-check that used to live
+    // here was removed. It never rejected NaN (`nan <= 0.0` is false) and
+    // rejected -Infinity with the old "Period must be positive" wording
+    // instead of the core-level check's "Period must be a positive finite
+    // number" -- a second source of truth that could desync from the
+    // core-level `!period.is_finite() || period <= 0.0` check (CR-03) this
+    // call falls through to below. The core-level check is strictly a
+    // superset, so there is now exactly one source of truth.
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
+        // D-02 (Phase 15, Task 3): strict method-name parsing, same
+        // discipline as anofox_ts_detrend -- an unknown method name is a
+        // caller error, not a silent fallback to "additive".
         let method_str = if method.is_null() {
             "additive"
         } else {
-            CStr::from_ptr(method).to_str().unwrap_or("additive")
+            match CStr::from_ptr(method).to_str() {
+                Ok(s) => s,
+                Err(_) => {
+                    return Err(anofox_fcst_core::ForecastError::InvalidInput(
+                        "method is not valid UTF-8".to_string(),
+                    ))
+                }
+            }
         };
-        let decompose_method: anofox_fcst_core::DecomposeMethod =
-            method_str.parse().unwrap_or_default();
+        let decompose_method: anofox_fcst_core::DecomposeMethod = method_str.parse()?;
         anofox_fcst_core::decompose(&values_vec, period, decompose_method)
     }));
 
@@ -2346,7 +2566,7 @@ pub unsafe extern "C" fn anofox_ts_decompose(
         }
         Ok(Err(e)) => {
             if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+                (*out_error).set_error(ffi_error_code(&e), &e.to_string());
             }
             false
         }
@@ -2387,13 +2607,14 @@ pub unsafe extern "C" fn anofox_ts_seasonal_strength(
         return false;
     }
 
-    if period <= 0.0 {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::InvalidInput, "Period must be positive");
-        }
-        return false;
-    }
-
+    // WR-03: the stale duplicate `period <= 0.0` pre-check that used to live
+    // here was removed. It never rejected NaN (`nan <= 0.0` is false) and
+    // rejected -Infinity with the old "Period must be positive" wording
+    // instead of the core-level check's "Period must be a positive finite
+    // number" -- a second source of truth that could desync from the
+    // core-level `!period.is_finite() || period <= 0.0` check (CR-03) this
+    // call falls through to below. The core-level check is strictly a
+    // superset, so there is now exactly one source of truth.
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
         let method_str = if method.is_null() {
@@ -2401,8 +2622,10 @@ pub unsafe extern "C" fn anofox_ts_seasonal_strength(
         } else {
             CStr::from_ptr(method).to_str().unwrap_or("variance")
         };
-        let strength_method: anofox_fcst_core::StrengthMethod =
-            method_str.parse().unwrap_or_default();
+        // D-12: strict parse -- an unknown method (or the removed
+        // "wavelet") now returns an error instead of silently falling
+        // back to Variance.
+        let strength_method: anofox_fcst_core::StrengthMethod = method_str.parse()?;
         anofox_fcst_core::seasonal_strength(&values_vec, period, strength_method)
     }));
 
@@ -2413,7 +2636,7 @@ pub unsafe extern "C" fn anofox_ts_seasonal_strength(
         }
         Ok(Err(e)) => {
             if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+                (*out_error).set_error(ffi_error_code(&e), &e.to_string());
             }
             false
         }
@@ -2452,13 +2675,14 @@ pub unsafe extern "C" fn anofox_ts_seasonal_strength_windowed(
         return false;
     }
 
-    if period <= 0.0 {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::InvalidInput, "Period must be positive");
-        }
-        return false;
-    }
-
+    // WR-03: the stale duplicate `period <= 0.0` pre-check that used to live
+    // here was removed. It never rejected NaN (`nan <= 0.0` is false) and
+    // rejected -Infinity with the old "Period must be positive" wording
+    // instead of the core-level check's "Period must be a positive finite
+    // number" -- a second source of truth that could desync from the
+    // core-level `!period.is_finite() || period <= 0.0` check (CR-03) this
+    // call falls through to below. The core-level check is strictly a
+    // superset, so there is now exactly one source of truth.
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
         let window_opt = if window_size > 0.0 {
@@ -2466,14 +2690,12 @@ pub unsafe extern "C" fn anofox_ts_seasonal_strength_windowed(
         } else {
             None
         };
-        let method_str = if method.is_null() {
+        let method_str: Option<anofox_fcst_core::StrengthMethod> = if method.is_null() {
             None
         } else {
             let s = CStr::from_ptr(method).to_str().unwrap_or("variance");
-            Some(
-                s.parse::<anofox_fcst_core::StrengthMethod>()
-                    .unwrap_or_default(),
-            )
+            // D-12: strict parse -- see anofox_ts_seasonal_strength above.
+            Some(s.parse::<anofox_fcst_core::StrengthMethod>()?)
         };
         anofox_fcst_core::seasonal_strength_windowed(&values_vec, period, window_opt, method_str)
     }));
@@ -2490,7 +2712,7 @@ pub unsafe extern "C" fn anofox_ts_seasonal_strength_windowed(
         }
         Ok(Err(e)) => {
             if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+                (*out_error).set_error(ffi_error_code(&e), &e.to_string());
             }
             false
         }
@@ -2528,13 +2750,14 @@ pub unsafe extern "C" fn anofox_ts_classify_seasonality(
         return false;
     }
 
-    if period <= 0.0 {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::InvalidInput, "Period must be positive");
-        }
-        return false;
-    }
-
+    // WR-03: the stale duplicate `period <= 0.0` pre-check that used to live
+    // here was removed. It never rejected NaN (`nan <= 0.0` is false) and
+    // rejected -Infinity with the old "Period must be positive" wording
+    // instead of the core-level check's "Period must be a positive finite
+    // number" -- a second source of truth that could desync from the
+    // core-level `!period.is_finite() || period <= 0.0` check (CR-03) this
+    // call falls through to below. The core-level check is strictly a
+    // superset, so there is now exactly one source of truth.
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
         let strength_opt = if strength_threshold > 0.0 {
@@ -2587,7 +2810,7 @@ pub unsafe extern "C" fn anofox_ts_classify_seasonality(
         }
         Ok(Err(e)) => {
             if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+                (*out_error).set_error(ffi_error_code(&e), &e.to_string());
             }
             false
         }
@@ -2626,13 +2849,14 @@ pub unsafe extern "C" fn anofox_ts_detect_seasonality_changes(
         return false;
     }
 
-    if period <= 0.0 {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::InvalidInput, "Period must be positive");
-        }
-        return false;
-    }
-
+    // WR-03: the stale duplicate `period <= 0.0` pre-check that used to live
+    // here was removed. It never rejected NaN (`nan <= 0.0` is false) and
+    // rejected -Infinity with the old "Period must be positive" wording
+    // instead of the core-level check's "Period must be a positive finite
+    // number" -- a second source of truth that could desync from the
+    // core-level `!period.is_finite() || period <= 0.0` check (CR-03) this
+    // call falls through to below. The core-level check is strictly a
+    // superset, so there is now exactly one source of truth.
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
         let threshold_opt = if threshold > 0.0 {
@@ -2695,8 +2919,16 @@ pub unsafe extern "C" fn anofox_ts_detect_seasonality_changes(
             true
         }
         Ok(Err(e)) => {
+            // CR-05: this used to hardcode ErrorCode::ComputationError
+            // regardless of the underlying error, so the C++ wrapper's
+            // `error.code == INVALID_INPUT` check (added to fix CR-05) could
+            // never see INVALID_INPUT here and always fell through to a
+            // silent NULL instead of raising the CR-03 InvalidParameter
+            // error (e.g. a NaN/non-finite/non-positive period) as a SQL
+            // error. Use the same ffi_error_code mapping every other
+            // period-validating function in this file already uses.
             if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+                (*out_error).set_error(ffi_error_code(&e), &e.to_string());
             }
             false
         }
@@ -2793,13 +3025,14 @@ pub unsafe extern "C" fn anofox_ts_detect_amplitude_modulation(
         return false;
     }
 
-    if period <= 0.0 {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::InvalidInput, "Period must be positive");
-        }
-        return false;
-    }
-
+    // WR-03: the stale duplicate `period <= 0.0` pre-check that used to live
+    // here was removed. It never rejected NaN (`nan <= 0.0` is false) and
+    // rejected -Infinity with the old "Period must be positive" wording
+    // instead of the core-level check's "Period must be a positive finite
+    // number" -- a second source of truth that could desync from the
+    // core-level `!period.is_finite() || period <= 0.0` check (CR-03) this
+    // call falls through to below. The core-level check is strictly a
+    // superset, so there is now exactly one source of truth.
     let result = catch_unwind(AssertUnwindSafe(|| {
         let values_vec = std::slice::from_raw_parts(values, length).to_vec();
         let mod_thresh = if modulation_threshold > 0.0 {
@@ -2841,8 +3074,16 @@ pub unsafe extern "C" fn anofox_ts_detect_amplitude_modulation(
             true
         }
         Ok(Err(e)) => {
+            // CR-05: this used to hardcode ErrorCode::ComputationError
+            // regardless of the underlying error, so the C++ wrapper's
+            // `error.code == INVALID_INPUT` check (added to fix CR-05) could
+            // never see INVALID_INPUT here and always fell through to a
+            // silent NULL instead of raising the CR-03 InvalidParameter
+            // error (e.g. a NaN/non-finite/non-positive period) as a SQL
+            // error. Use the same ffi_error_code mapping every other
+            // period-validating function in this file already uses.
             if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+                (*out_error).set_error(ffi_error_code(&e), &e.to_string());
             }
             false
         }
@@ -3005,7 +3246,7 @@ pub unsafe extern "C" fn anofox_ts_mstl_decomposition(
         }
         Ok(Err(e)) => {
             if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+                (*out_error).set_error(ffi_error_code(&e), &e.to_string());
             }
             false
         }
@@ -3366,18 +3607,31 @@ pub unsafe extern "C" fn anofox_ts_features_list(
 
 /// Generate forecasts for a time series.
 ///
-/// Parse a seasonal_periods_str like "[24, 168]" into Vec<usize>.
-fn parse_seasonal_periods_str(s: &str) -> Vec<usize> {
-    if s.is_empty() {
-        return vec![];
-    }
-    s.trim()
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .split(',')
-        .filter_map(|p| p.trim().parse::<usize>().ok())
-        .filter(|&v| v > 0)
-        .collect()
+/// Bounded, safe read of a fixed-size `[c_char; N]` FFI string field (D-07,
+/// T-10-04/T-10-07).
+///
+/// Uses `CStr::from_bytes_until_nul` over the array's own bytes — never
+/// `CStr::from_ptr`, which has no bound and would read past the end of a
+/// buffer the caller forgot to NUL-terminate. A missing terminator or
+/// invalid UTF-8 is an `InvalidInput` naming `field`, never a silent
+/// `"auto"`/empty-string fallback.
+///
+/// # Safety
+/// `buf` must be a valid, readable `[c_char; N]` array (true for every
+/// `ForecastOptions`/`ForecastOptionsExog` field it is called on — they are
+/// plain fixed-size arrays embedded in a `#[repr(C)]` struct dereferenced
+/// from a caller-supplied pointer already validated non-null).
+unsafe fn c_field_str<'a>(
+    buf: &'a [c_char],
+    field: &str,
+) -> std::result::Result<&'a str, anofox_fcst_core::ForecastError> {
+    let bytes = std::slice::from_raw_parts(buf.as_ptr() as *const u8, buf.len());
+    let cstr = CStr::from_bytes_until_nul(bytes).map_err(|_| {
+        anofox_fcst_core::ForecastError::InvalidInput(format!("{field} is not NUL-terminated"))
+    })?;
+    cstr.to_str().map_err(|_| {
+        anofox_fcst_core::ForecastError::InvalidInput(format!("{field} is not valid UTF-8"))
+    })
 }
 
 /// # Safety
@@ -3404,86 +3658,7 @@ pub unsafe extern "C" fn anofox_ts_forecast(
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let series = build_series(values, validity, length);
-        let opts = &*options;
-
-        // Parse model name
-        let model_str = CStr::from_ptr(opts.model.as_ptr())
-            .to_str()
-            .unwrap_or("auto");
-
-        let model_type: anofox_fcst_core::ModelType = match model_str.parse() {
-            Ok(m) => m,
-            Err(_) => {
-                return Err(anofox_fcst_core::ForecastError::InvalidModel(format!(
-                    "Unknown model: '{}'",
-                    model_str
-                )))
-            }
-        };
-
-        // Parse ETS model spec (e.g., "AAA", "MNM", "AAdA")
-        let ets_spec = CStr::from_ptr(opts.ets_model.as_ptr())
-            .to_str()
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(String::from);
-
-        // Parse seasonal_periods_str
-        let sp_str = CStr::from_ptr(opts.seasonal_periods_str.as_ptr())
-            .to_str()
-            .unwrap_or("");
-        let seasonal_periods = parse_seasonal_periods_str(sp_str);
-
-        // Parse model_pool
-        let model_pool = CStr::from_ptr(opts.model_pool.as_ptr())
-            .to_str()
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(String::from);
-
-        // Parse laplace_variant (empty → default Auto handled downstream)
-        let laplace_variant = CStr::from_ptr(opts.laplace_variant.as_ptr())
-            .to_str()
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(anofox_fcst_core::LaplaceVariant::parse)
-            .transpose()?;
-
-        // Parse kalman_model spec (empty → None → local_level default)
-        let kalman_model = CStr::from_ptr(opts.kalman_model.as_ptr())
-            .to_str()
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(str::to_owned);
-
-        // Parse ensemble_method (empty → None → "mean" default in core)
-        let ensemble_method = CStr::from_ptr(opts.ensemble_method.as_ptr())
-            .to_str()
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(str::to_owned);
-
-        let core_opts = anofox_fcst_core::ForecastOptions {
-            model: model_type,
-            ets_spec,
-            horizon: opts.horizon as usize,
-            confidence_level: opts.confidence_level,
-            seasonal_period: opts.seasonal_period as usize,
-            auto_detect_seasonality: opts.auto_detect_seasonality,
-            include_fitted: opts.include_fitted,
-            include_residuals: opts.include_residuals,
-            window: opts.window.max(0) as usize,
-            seasonal_periods,
-            model_pool,
-            laplace_variant,
-            laplace_seasonal_batch_init: opts.laplace_seasonal_batch_init,
-            garch_p: opts.garch_p as usize,
-            garch_q: opts.garch_q as usize,
-            kalman_model,
-            ensemble_top_k: opts.ensemble_top_k.max(0) as usize,
-            ensemble_method,
-        };
-
+        let core_opts = build_core_options(&*options)?;
         anofox_fcst_core::forecast(&series, &core_opts)
     }));
 
@@ -3552,7 +3727,11 @@ pub unsafe extern "C" fn anofox_ts_forecast(
                 (*out_result).n_fitted = 0;
             }
 
-            // Copy residuals
+            // Copy residuals. n_residuals is its OWN length field (plan 10-02
+            // fix) — it must never be aliased to n_fitted, since fitted and
+            // residuals can legitimately have different presence/length
+            // (GARCH always has fitted=None, residuals=Some; see
+            // ForecastResult::n_residuals doc comment).
             if let Some(ref resid) = forecast.residuals {
                 (*out_result).residuals =
                     match alloc_or_error(resid, out_error, "Failed to allocate residuals") {
@@ -3569,8 +3748,10 @@ pub unsafe extern "C" fn anofox_ts_forecast(
                             return false;
                         }
                     };
+                (*out_result).n_residuals = resid.len();
             } else {
                 (*out_result).residuals = ptr::null_mut();
+                (*out_result).n_residuals = 0;
             }
 
             // Copy model name
@@ -3661,27 +3842,7 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
         let series = build_series(values, validity, length);
         let opts = &*options;
 
-        // Parse model name
-        let model_str = CStr::from_ptr(opts.model.as_ptr())
-            .to_str()
-            .unwrap_or("auto");
-
-        let model_type: anofox_fcst_core::ModelType = match model_str.parse() {
-            Ok(m) => m,
-            Err(_) => {
-                return Err(anofox_fcst_core::ForecastError::InvalidModel(format!(
-                    "Unknown model: '{}'",
-                    model_str
-                )))
-            }
-        };
-
-        // Parse ETS model spec (e.g., "AAA", "MNM", "AAdA")
-        let ets_spec = CStr::from_ptr(opts.ets_model.as_ptr())
-            .to_str()
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(String::from);
+        let mut core_opts = build_core_options_exog(opts)?;
 
         // Build exogenous data if provided
         let exog_data = if !opts.exog.is_null() {
@@ -3711,13 +3872,19 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
                         ));
                     }
 
-                    // Copy historical values
-                    let hist_slice = std::slice::from_raw_parts(reg.values, reg.n_values);
-                    historical.push(hist_slice.to_vec());
+                    // Copy historical values, mapping any invalid entry (per
+                    // `reg.validity`, D-12/FCST-08) to NaN — the core's own
+                    // NaN-is-missing convention — instead of the unmarshalled
+                    // (possibly uninitialised-looking, e.g. 0-filled by the
+                    // caller) raw double. `null` validity = every entry valid.
+                    historical.push(build_values(reg.values, reg.validity, reg.n_values));
 
-                    // Copy future values
-                    let future_slice = std::slice::from_raw_parts(reg.future_values, reg.n_future);
-                    future.push(future_slice.to_vec());
+                    // Same for the future window (`reg.future_validity`).
+                    future.push(build_values(
+                        reg.future_values,
+                        reg.future_validity,
+                        reg.n_future,
+                    ));
                 }
 
                 Some(anofox_fcst_core::ExogenousData { historical, future })
@@ -3727,63 +3894,7 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
         } else {
             None
         };
-
-        // Parse seasonal_periods_str
-        let sp_str = CStr::from_ptr(opts.seasonal_periods_str.as_ptr())
-            .to_str()
-            .unwrap_or("");
-        let seasonal_periods = parse_seasonal_periods_str(sp_str);
-
-        // Parse model_pool
-        let model_pool = CStr::from_ptr(opts.model_pool.as_ptr())
-            .to_str()
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(String::from);
-
-        // Parse laplace_variant (empty → default Auto handled downstream)
-        let laplace_variant = CStr::from_ptr(opts.laplace_variant.as_ptr())
-            .to_str()
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(anofox_fcst_core::LaplaceVariant::parse)
-            .transpose()?;
-
-        // Parse kalman_model spec (empty → None → local_level default)
-        let kalman_model_exog = CStr::from_ptr(opts.kalman_model.as_ptr())
-            .to_str()
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(str::to_owned);
-
-        // Parse ensemble_method (empty → None → "mean" default in core)
-        let ensemble_method_exog = CStr::from_ptr(opts.ensemble_method.as_ptr())
-            .to_str()
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(str::to_owned);
-
-        let core_opts = anofox_fcst_core::ForecastOptionsExog {
-            model: model_type,
-            ets_spec,
-            horizon: opts.horizon as usize,
-            confidence_level: opts.confidence_level,
-            seasonal_period: opts.seasonal_period as usize,
-            auto_detect_seasonality: opts.auto_detect_seasonality,
-            include_fitted: opts.include_fitted,
-            include_residuals: opts.include_residuals,
-            exog: exog_data,
-            window: opts.window.max(0) as usize,
-            seasonal_periods,
-            model_pool,
-            laplace_variant,
-            laplace_seasonal_batch_init: opts.laplace_seasonal_batch_init,
-            garch_p: opts.garch_p as usize,
-            garch_q: opts.garch_q as usize,
-            kalman_model: kalman_model_exog,
-            ensemble_top_k: opts.ensemble_top_k.max(0) as usize,
-            ensemble_method: ensemble_method_exog,
-        };
+        core_opts.exog = exog_data;
 
         anofox_fcst_core::forecast_with_exog(&series, &core_opts)
     }));
@@ -3852,7 +3963,9 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
                 (*out_result).n_fitted = 0;
             }
 
-            // Copy residuals
+            // Copy residuals. n_residuals is its OWN length field (plan
+            // 10-02 fix) — never aliased to n_fitted; see
+            // ForecastResult::n_residuals doc comment.
             if let Some(ref resid) = forecast.residuals {
                 (*out_result).residuals =
                     match alloc_or_error(resid, out_error, "Failed to allocate residuals") {
@@ -3869,8 +3982,10 @@ pub unsafe extern "C" fn anofox_ts_forecast_exog(
                             return false;
                         }
                     };
+                (*out_result).n_residuals = resid.len();
             } else {
                 (*out_result).residuals = ptr::null_mut();
+                (*out_result).n_residuals = 0;
             }
 
             // Copy model name
@@ -4128,58 +4243,55 @@ pub unsafe extern "C" fn anofox_ts_forecast_explain(
     }
 }
 
-/// Shared FFI → core `ForecastOptions` conversion used by inspect + explain.
+/// Shared FFI → core `ForecastOptions` conversion used by `anofox_ts_forecast`,
+/// `anofox_ts_forecast_inspect`, and `anofox_ts_forecast_explain`.
 ///
-/// Extracted so both entry points parse the buffered string fields
-/// (`model`, `ets_model`, `seasonal_periods_str`, `model_pool`,
-/// `laplace_variant`) identically to `anofox_ts_forecast`.
+/// Every buffered string field (`model`, `ets_model`, `seasonal_periods_str`,
+/// `model_pool`, `laplace_variant`, `kalman_model`, `ensemble_method`,
+/// `arima_order_str`, `seasonal_order_str`) is read via [`c_field_str`] (D-07,
+/// T-10-04/T-10-07) — a missing NUL terminator or invalid UTF-8 is an
+/// `InvalidInput` error, never a silent `"auto"`/empty-string fallback.
 unsafe fn build_core_options(
     opts: &ForecastOptions,
 ) -> Result<anofox_fcst_core::ForecastOptions, anofox_fcst_core::ForecastError> {
-    let model_str = CStr::from_ptr(opts.model.as_ptr())
-        .to_str()
-        .unwrap_or("auto");
+    let model_str = c_field_str(&opts.model, "model")?;
     let model_type: anofox_fcst_core::ModelType = model_str.parse().map_err(|_| {
         anofox_fcst_core::ForecastError::InvalidModel(format!("Unknown model: '{}'", model_str))
     })?;
 
-    let ets_spec = CStr::from_ptr(opts.ets_model.as_ptr())
-        .to_str()
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(String::from);
+    let ets_spec = c_field_str(&opts.ets_model, "ets_model")?
+        .to_owned()
+        .into_non_empty();
 
-    let sp_str = CStr::from_ptr(opts.seasonal_periods_str.as_ptr())
-        .to_str()
-        .unwrap_or("");
-    let seasonal_periods = parse_seasonal_periods_str(sp_str);
+    let sp_str = c_field_str(&opts.seasonal_periods_str, "seasonal_periods")?;
+    let seasonal_periods = anofox_fcst_core::parse_seasonal_periods(sp_str)?;
 
-    let model_pool = CStr::from_ptr(opts.model_pool.as_ptr())
-        .to_str()
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(String::from);
+    let model_pool = c_field_str(&opts.model_pool, "model_pool")?
+        .to_owned()
+        .into_non_empty();
 
-    let laplace_variant = CStr::from_ptr(opts.laplace_variant.as_ptr())
-        .to_str()
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(anofox_fcst_core::LaplaceVariant::parse)
+    let laplace_variant = c_field_str(&opts.laplace_variant, "laplace_variant")?
+        .to_owned()
+        .into_non_empty()
+        .map(|s| anofox_fcst_core::LaplaceVariant::parse(&s))
         .transpose()?;
 
     // Parse kalman_model spec (empty → None → local_level default)
-    let kalman_model = CStr::from_ptr(opts.kalman_model.as_ptr())
-        .to_str()
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned);
+    let kalman_model = c_field_str(&opts.kalman_model, "kalman_model")?
+        .to_owned()
+        .into_non_empty();
 
     // Parse ensemble_method (empty → None → "mean" default in core)
-    let ensemble_method = CStr::from_ptr(opts.ensemble_method.as_ptr())
-        .to_str()
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned);
+    let ensemble_method = c_field_str(&opts.ensemble_method, "ensemble_method")?
+        .to_owned()
+        .into_non_empty();
+
+    // ARIMA order strings (D-08/D-09) — strict parse, bounds-checked in core.
+    let arima_order_str = c_field_str(&opts.arima_order_str, "arima_order")?;
+    let arima_order = anofox_fcst_core::parse_order_triplet("arima_order", arima_order_str)?;
+    let seasonal_order_str = c_field_str(&opts.seasonal_order_str, "seasonal_order")?;
+    let seasonal_order =
+        anofox_fcst_core::parse_order_triplet("seasonal_order", seasonal_order_str)?;
 
     Ok(anofox_fcst_core::ForecastOptions {
         model: model_type,
@@ -4200,63 +4312,177 @@ unsafe fn build_core_options(
         kalman_model,
         ensemble_top_k: opts.ensemble_top_k.max(0) as usize,
         ensemble_method,
+        arima_order,
+        seasonal_order,
     })
+}
+
+/// Shared FFI → core `ForecastOptionsExog` conversion used by
+/// `anofox_ts_forecast_exog`, minus the exog payload itself (the caller
+/// fills in `.exog` separately, since that requires the raw pointer/length
+/// marshalling that has nothing to do with the buffered string fields).
+unsafe fn build_core_options_exog(
+    opts: &ForecastOptionsExog,
+) -> Result<anofox_fcst_core::ForecastOptionsExog, anofox_fcst_core::ForecastError> {
+    let model_str = c_field_str(&opts.model, "model")?;
+    let model_type: anofox_fcst_core::ModelType = model_str.parse().map_err(|_| {
+        anofox_fcst_core::ForecastError::InvalidModel(format!("Unknown model: '{}'", model_str))
+    })?;
+
+    let ets_spec = c_field_str(&opts.ets_model, "ets_model")?
+        .to_owned()
+        .into_non_empty();
+
+    let sp_str = c_field_str(&opts.seasonal_periods_str, "seasonal_periods")?;
+    let seasonal_periods = anofox_fcst_core::parse_seasonal_periods(sp_str)?;
+
+    let model_pool = c_field_str(&opts.model_pool, "model_pool")?
+        .to_owned()
+        .into_non_empty();
+
+    let laplace_variant = c_field_str(&opts.laplace_variant, "laplace_variant")?
+        .to_owned()
+        .into_non_empty()
+        .map(|s| anofox_fcst_core::LaplaceVariant::parse(&s))
+        .transpose()?;
+
+    let kalman_model = c_field_str(&opts.kalman_model, "kalman_model")?
+        .to_owned()
+        .into_non_empty();
+
+    let ensemble_method = c_field_str(&opts.ensemble_method, "ensemble_method")?
+        .to_owned()
+        .into_non_empty();
+
+    let arima_order_str = c_field_str(&opts.arima_order_str, "arima_order")?;
+    let arima_order = anofox_fcst_core::parse_order_triplet("arima_order", arima_order_str)?;
+    let seasonal_order_str = c_field_str(&opts.seasonal_order_str, "seasonal_order")?;
+    let seasonal_order =
+        anofox_fcst_core::parse_order_triplet("seasonal_order", seasonal_order_str)?;
+
+    Ok(anofox_fcst_core::ForecastOptionsExog {
+        model: model_type,
+        ets_spec,
+        horizon: opts.horizon as usize,
+        confidence_level: opts.confidence_level,
+        seasonal_period: opts.seasonal_period as usize,
+        auto_detect_seasonality: opts.auto_detect_seasonality,
+        include_fitted: opts.include_fitted,
+        include_residuals: opts.include_residuals,
+        exog: None,
+        window: opts.window.max(0) as usize,
+        seasonal_periods,
+        model_pool,
+        laplace_variant,
+        laplace_seasonal_batch_init: opts.laplace_seasonal_batch_init,
+        garch_p: opts.garch_p as usize,
+        garch_q: opts.garch_q as usize,
+        kalman_model,
+        ensemble_top_k: opts.ensemble_top_k.max(0) as usize,
+        ensemble_method,
+        arima_order,
+        seasonal_order,
+    })
+}
+
+/// Tiny `""` → `None` helper so the repeated
+/// `.to_owned().filter(|s| !s.is_empty()).map(...)` chain reads as one call.
+trait IntoNonEmpty {
+    fn into_non_empty(self) -> Option<String>;
+}
+
+impl IntoNonEmpty for String {
+    fn into_non_empty(self) -> Option<String> {
+        if self.is_empty() {
+            None
+        } else {
+            Some(self)
+        }
+    }
 }
 
 // ============================================================================
 // Data Quality Functions
 // ============================================================================
 
-/// Compute data quality metrics.
+/// Compute data quality metrics (D-05, WRAP-02): dates/frequency/n_short-aware,
+/// using the shared missing-period gap counter from plan 13-01.
+///
+/// `dates` may be null, meaning "no date information" -- `n_gaps`/`n_gap_runs` are
+/// `0` and `temporal_score` is `1.0`. When non-null it must have exactly `length`
+/// entries. `frequency_type == Fixed` with `frequency_micros <= 0` auto-detects the
+/// step from `dates`. `n_short` must be `>= 1` (`InvalidInput` otherwise, surfaced as
+/// `ErrorCode::InvalidInput`). `period_count` is the user-declared calendar
+/// multiplier for Monthly/Quarterly/Yearly frequencies (e.g. `2` for `'2mo'`); ignored
+/// for `Fixed` (CR-01 fix, 13-03 deferred item).
 ///
 /// # Safety
-/// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+/// `values` and `out_result` must be valid and non-null. `validity` and `dates` may
+/// be null (meaning all-valid / no dates respectively). `values` (and `dates`, when
+/// non-null) must have at least `length` elements.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_data_quality(
     values: *const c_double,
     validity: *const u64,
+    dates: *const i64,
     length: size_t,
+    frequency_micros: i64,
+    frequency_type: FrequencyType,
+    n_short: size_t,
+    period_count: size_t,
     out_result: *mut DataQualityResult,
     out_error: *mut AnofoxError,
 ) -> bool {
-    if !out_error.is_null() {
-        *out_error = AnofoxError::success();
-    }
+    init_error(out_error);
 
-    if values.is_null() || out_result.is_null() {
-        if !out_error.is_null() {
-            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
-        }
+    let ptrs = &[
+        values as *const core::ffi::c_void,
+        out_result as *const core::ffi::c_void,
+    ];
+    if check_null_pointers(out_error, ptrs) {
         return false;
     }
 
+    if length == 0 {
+        *out_result = DataQualityResult::default();
+        return true;
+    }
+
+    let period_count_u32 = u32::try_from(period_count).unwrap_or(u32::MAX);
+
     let result = catch_unwind(AssertUnwindSafe(|| {
         let series = build_series(values, validity, length);
-        anofox_fcst_core::compute_data_quality(&series, None)
+        let dates_vec: Option<Vec<i64>> = if dates.is_null() {
+            None
+        } else {
+            Some(std::slice::from_raw_parts(dates, length).to_vec())
+        };
+        let freq_type: anofox_fcst_core::FrequencyType = frequency_type.into();
+        anofox_fcst_core::compute_data_quality(
+            &series,
+            dates_vec.as_deref(),
+            frequency_micros,
+            freq_type,
+            n_short,
+            period_count_u32,
+        )
     }));
 
     match result {
         Ok(Ok(quality)) => {
-            (*out_result).structural_score = quality.structural_score;
-            (*out_result).temporal_score = quality.temporal_score;
-            (*out_result).magnitude_score = quality.magnitude_score;
-            (*out_result).behavioral_score = quality.behavioral_score;
-            (*out_result).overall_score = quality.overall_score;
-            (*out_result).n_gaps = quality.n_gaps;
-            (*out_result).n_missing = quality.n_missing;
-            (*out_result).is_constant = quality.is_constant;
+            *out_result = quality.into();
             true
         }
         Ok(Err(e)) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
-            }
+            let code = match e {
+                anofox_fcst_core::ForecastError::InvalidInput(_) => ErrorCode::InvalidInput,
+                _ => ErrorCode::ComputationError,
+            };
+            set_error(out_error, code, &e.to_string());
             false
         }
         Err(_) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
-            }
+            set_error(out_error, ErrorCode::PanicCaught, "Panic in Rust code");
             false
         }
     }
@@ -4341,24 +4567,132 @@ pub unsafe extern "C" fn anofox_ts_fill_nulls_mean(
 // Filter Functions
 // ============================================================================
 
-/// Compute differences of a time series.
+/// Compute d-th order, lag-`seasonal_lag` differences of a time series,
+/// row-aligned: `out_values`/`out_validity` have exactly `length` entries,
+/// with the first `order * seasonal_lag` entries NULL (D-05/D-06) and any
+/// difference touching a missing (invalid) input NULL (SQL row-wise policy).
 ///
 /// # Safety
-/// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
+/// `values`, `out_values`, `out_validity` and `out_error` must be valid and
+/// non-null. `values` must have `length` elements; `validity` must have
+/// `length.div_ceil(64)` words or be null (meaning all-valid). `out_values`
+/// must have room for `length` doubles; `out_validity` must have room for
+/// `length.div_ceil(64)` words — every word is overwritten by this call.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_diff(
     values: *const c_double,
+    validity: *const u64,
     length: size_t,
     order: c_int,
-    out_values: *mut *mut c_double,
-    out_length: *mut size_t,
+    seasonal_lag: c_int,
+    out_values: *mut c_double,
+    out_validity: *mut u64,
     out_error: *mut AnofoxError,
 ) -> bool {
     if !out_error.is_null() {
         *out_error = AnofoxError::success();
     }
 
-    if values.is_null() || out_values.is_null() || out_length.is_null() {
+    if values.is_null() || out_values.is_null() || out_validity.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
+        }
+        return false;
+    }
+
+    if order < 0 {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::InvalidInput, "diff_order must be >= 0");
+        }
+        return false;
+    }
+
+    if seasonal_lag < 1 {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::InvalidInput, "seasonal_lag must be >= 1");
+        }
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let series = build_series(values, validity, length);
+        anofox_fcst_core::diff_aligned(&series, order as usize, seasonal_lag as usize)
+    }));
+
+    match result {
+        Ok(Ok(diffed)) => {
+            let out_values_slice = std::slice::from_raw_parts_mut(out_values, length);
+            let n_words = length.div_ceil(64);
+            let out_validity_slice = std::slice::from_raw_parts_mut(out_validity, n_words);
+            for word in out_validity_slice.iter_mut() {
+                *word = 0;
+            }
+            for (i, v) in diffed.into_iter().enumerate() {
+                match v {
+                    Some(x) => {
+                        out_values_slice[i] = x;
+                        out_validity_slice[i / 64] |= 1u64 << (i % 64);
+                    }
+                    None => {
+                        out_values_slice[i] = 0.0;
+                    }
+                }
+            }
+            true
+        }
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+            }
+            false
+        }
+        Err(_) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
+            }
+            false
+        }
+    }
+}
+
+/// Checks whether a series is constant (Phase 12 D-09 single source of truth
+/// for `ts_drop_constant_by`): groups with fewer than two non-missing values
+/// (including an all-missing group) classify as constant.
+///
+/// # Safety
+/// `values` and `out_result` must be valid and non-null. `validity` may be
+/// null (meaning all-valid). `length` must equal the number of `f64`
+/// elements at `values`.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_is_constant(
+    values: *const c_double,
+    validity: *const u64,
+    length: size_t,
+    out_result: *mut bool,
+    out_error: *mut AnofoxError,
+) -> bool {
+    if !out_error.is_null() {
+        *out_error = AnofoxError::success();
+    }
+
+    if out_result.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
+        }
+        return false;
+    }
+
+    // An empty (but non-NULL-pointer) list classifies as constant per this
+    // function's own documented contract ("fewer than two non-missing values
+    // ... classifies as constant"). Mirror `anofox_ts_series_gate`: check
+    // `length == 0` before the `values` null check, since the caller may
+    // legitimately pass `nullptr` for `values` precisely when `length == 0`.
+    if length == 0 {
+        *out_result = true;
+        return true;
+    }
+
+    if values.is_null() {
         if !out_error.is_null() {
             (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
         }
@@ -4366,26 +4700,14 @@ pub unsafe extern "C" fn anofox_ts_diff(
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let values_vec = std::slice::from_raw_parts(values, length).to_vec();
-        anofox_fcst_core::diff(&values_vec, order.max(0) as usize)
+        let series = build_series(values, validity, length);
+        anofox_fcst_core::is_constant(&series)
     }));
 
     match result {
-        Ok(Ok(diffed)) => {
-            *out_length = diffed.len();
-            match alloc_or_error(&diffed, out_error, "Failed to allocate diff result") {
-                Ok(ptr) => {
-                    *out_values = ptr;
-                    true
-                }
-                Err(()) => false,
-            }
-        }
-        Ok(Err(e)) => {
-            if !out_error.is_null() {
-                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
-            }
-            false
+        Ok(is_const) => {
+            *out_result = is_const;
+            true
         }
         Err(_) => {
             if !out_error.is_null() {
@@ -4447,6 +4769,9 @@ unsafe fn alloc_i64_array(n: size_t) -> *mut i64 {
 /// * `length` - Number of elements
 /// * `frequency_micros` - Frequency in microseconds (used for Fixed type)
 /// * `frequency_type` - Type of frequency (0=Fixed, 1=Monthly, 2=Quarterly, 3=Yearly)
+/// * `period_count` - User-declared calendar multiplier for Monthly/Quarterly/Yearly
+///   frequencies (e.g. `2` for `'2mo'`, `3` for `'3q'`, `5` for `'5y'`; `1` for the
+///   single-unit strings); ignored for Fixed (CR-01 fix, 13-03 deferred item)
 /// * `out_result` - Output result structure
 /// * `out_error` - Output error structure
 #[no_mangle]
@@ -4457,6 +4782,7 @@ pub unsafe extern "C" fn anofox_ts_fill_gaps(
     length: size_t,
     frequency_micros: i64,
     frequency_type: FrequencyType,
+    period_count: size_t,
     out_result: *mut GapFillResult,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -4484,11 +4810,18 @@ pub unsafe extern "C" fn anofox_ts_fill_gaps(
     }
 
     let freq_type_core: anofox_fcst_core::FrequencyType = frequency_type.into();
+    let period_count_u32 = u32::try_from(period_count).unwrap_or(u32::MAX);
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let dates_vec: Vec<i64> = std::slice::from_raw_parts(dates, length).to_vec();
         let series = build_series(values, validity, length);
-        anofox_fcst_core::fill_gaps(&dates_vec, &series, frequency_micros, freq_type_core)
+        anofox_fcst_core::fill_gaps(
+            &dates_vec,
+            &series,
+            frequency_micros,
+            freq_type_core,
+            period_count_u32,
+        )
     }));
 
     match result {
@@ -4555,6 +4888,9 @@ pub unsafe extern "C" fn anofox_ts_fill_gaps(
 /// * `target_date` - Target date to extend to (microseconds since epoch)
 /// * `frequency_micros` - Frequency in microseconds (used for Fixed type)
 /// * `frequency_type` - Type of frequency (0=Fixed, 1=Monthly, 2=Quarterly, 3=Yearly)
+/// * `period_count` - User-declared calendar multiplier for Monthly/Quarterly/Yearly
+///   frequencies (e.g. `2` for `'2mo'`, `3` for `'3q'`, `5` for `'5y'`; `1` for the
+///   single-unit strings); ignored for Fixed (CR-01 fix, 13-03 deferred item)
 /// * `out_result` - Output result structure
 /// * `out_error` - Output error structure
 #[no_mangle]
@@ -4566,6 +4902,7 @@ pub unsafe extern "C" fn anofox_ts_fill_forward_dates(
     target_date: i64,
     frequency_micros: i64,
     frequency_type: FrequencyType,
+    period_count: size_t,
     out_result: *mut GapFillResult,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -4593,6 +4930,7 @@ pub unsafe extern "C" fn anofox_ts_fill_forward_dates(
     }
 
     let freq_type_core: anofox_fcst_core::FrequencyType = frequency_type.into();
+    let period_count_u32 = u32::try_from(period_count).unwrap_or(u32::MAX);
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let dates_vec: Vec<i64> = std::slice::from_raw_parts(dates, length).to_vec();
@@ -4603,6 +4941,7 @@ pub unsafe extern "C" fn anofox_ts_fill_forward_dates(
             target_date,
             frequency_micros,
             freq_type_core,
+            period_count_u32,
         )
     }));
 
@@ -4659,6 +4998,11 @@ pub unsafe extern "C" fn anofox_ts_fill_forward_dates(
 
 /// Detect the frequency of a time series.
 ///
+/// `out_frequency` is written in MICROSECONDS (the same unit every `dates` array in
+/// this FFI boundary uses) -- previously undocumented at this boundary (Phase 12
+/// deferred item (e), G23/WRAP-03). See `anofox_fcst_core::detect_frequency`'s doc
+/// comment for the tie-break rule.
+///
 /// # Safety
 /// All pointer arguments must be valid and non-null. Arrays must have the specified lengths.
 #[no_mangle]
@@ -4687,6 +5031,106 @@ pub unsafe extern "C" fn anofox_ts_detect_frequency(
     match result {
         Ok(Ok(freq)) => {
             *out_frequency = freq;
+            true
+        }
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::ComputationError, &e.to_string());
+            }
+            false
+        }
+        Err(_) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
+            }
+            false
+        }
+    }
+}
+
+/// Compute `horizon` future dates (microseconds) from an observed date
+/// series, using the D-12 calendar rule (plan 12-05).
+///
+/// `step_months == 0 && step_micros == 0` -> auto-detect via
+/// `anofox_fcst_core::detect_step`. `step_months > 0 && step_micros == 0` ->
+/// explicit `Months(step_months)`. `step_months == 0 && step_micros > 0` ->
+/// explicit `Fixed(step_micros)`. Any negative value, or both non-zero, is
+/// `INVALID_INPUT`. `horizon == 0` returns `true` immediately (`out_dates`
+/// may be null in that case). `length == 0` is `INVALID_INPUT`.
+///
+/// `out_dates` is CALLER-allocated with exactly `horizon` entries; this
+/// function writes exactly `horizon` values into it (T-12-17 — never more,
+/// never fewer).
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null (except `out_dates` when
+/// `horizon == 0`). `dates` must have at least `length` entries; `out_dates`
+/// must have at least `horizon` entries.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_future_dates(
+    dates: *const i64,
+    length: size_t,
+    horizon: size_t,
+    step_months: i64,
+    step_micros: i64,
+    out_dates: *mut i64,
+    out_error: *mut AnofoxError,
+) -> bool {
+    if !out_error.is_null() {
+        *out_error = AnofoxError::success();
+    }
+
+    if dates.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument: dates");
+        }
+        return false;
+    }
+
+    if horizon == 0 {
+        return true;
+    }
+
+    if out_dates.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument: out_dates");
+        }
+        return false;
+    }
+
+    if length == 0 {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::InvalidInput, "dates must not be empty");
+        }
+        return false;
+    }
+
+    if step_months < 0 || step_micros < 0 || (step_months > 0 && step_micros > 0) {
+        if !out_error.is_null() {
+            (*out_error).set_error(
+                ErrorCode::InvalidInput,
+                "step_months and step_micros must be non-negative, and at most one may be non-zero",
+            );
+        }
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let dates_vec: Vec<i64> = std::slice::from_raw_parts(dates, length).to_vec();
+        let step = if step_months > 0 {
+            anofox_fcst_core::CalendarStep::Months(step_months as u32)
+        } else if step_micros > 0 {
+            anofox_fcst_core::CalendarStep::Fixed(step_micros)
+        } else {
+            anofox_fcst_core::detect_step(&dates_vec)?
+        };
+        anofox_fcst_core::future_dates(&dates_vec, horizon, step)
+    }));
+
+    match result {
+        Ok(Ok(future)) => {
+            let out_slice = std::slice::from_raw_parts_mut(out_dates, horizon);
+            out_slice.copy_from_slice(&future);
             true
         }
         Ok(Err(e)) => {
@@ -4875,17 +5319,20 @@ pub unsafe extern "C" fn anofox_ts_conformal_quantile(
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let series = build_series(residuals, validity, length);
-        let values: Vec<f64> = series.iter().filter_map(|v| *v).collect();
+        let values = anofox_fcst_core::drop_missing(&series);
         anofox_fcst_core::conformal_quantile(&values, alpha)
     }));
 
     match result {
         Ok(Ok(quantile)) => {
-            *out_result = quantile;
+            // Phase 16 D-05: an insufficient calibration set reports an
+            // infinite quantile from the core; the FFI boundary writes it
+            // as NaN so the C++ caller can turn it into SQL NULL.
+            *out_result = nan_if_non_finite(quantile);
             true
         }
         Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
@@ -4908,6 +5355,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_quantile(
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_conformal_intervals(
     forecasts: *const c_double,
+    forecasts_validity: *const u64,
     length: size_t,
     conformity_score: c_double,
     out_lower: *mut *mut c_double,
@@ -4916,14 +5364,30 @@ pub unsafe extern "C" fn anofox_ts_conformal_intervals(
 ) -> bool {
     init_error(out_error);
 
-    if forecasts.is_null() || out_lower.is_null() || out_upper.is_null() {
+    if out_lower.is_null() || out_upper.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+    if length != 0 && forecasts.is_null() {
         set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
         return false;
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let forecast_slice = std::slice::from_raw_parts(forecasts, length);
-        anofox_fcst_core::conformal_intervals(forecast_slice, conformity_score)
+        // Phase 16 WR-01 fix: a non-null, zero-length forecasts list must
+        // produce an empty result, matching every sibling conformal FFI
+        // entry point's "non-null, zero-length means empty" convention.
+        let forecast_series = if length == 0 {
+            Vec::new()
+        } else {
+            build_series(forecasts, forecasts_validity, length)
+        };
+        let filled = anofox_fcst_core::fill_missing(&forecast_series, 0.0);
+        let (mut lower, mut upper) =
+            anofox_fcst_core::conformal_intervals(&filled, conformity_score);
+        anofox_fcst_core::propagate_missing(&mut lower, &forecast_series);
+        anofox_fcst_core::propagate_missing(&mut upper, &forecast_series);
+        (lower, upper)
     }));
 
     match result {
@@ -4972,6 +5436,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict(
     residuals_validity: *const u64,
     residuals_length: size_t,
     forecasts: *const c_double,
+    forecasts_validity: *const u64,
     forecasts_length: size_t,
     alpha: c_double,
     out_result: *mut ConformalResultFFI,
@@ -4986,9 +5451,15 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict(
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let residual_series = build_series(residuals, residuals_validity, residuals_length);
-        let residual_values: Vec<f64> = residual_series.iter().filter_map(|v| *v).collect();
-        let forecast_slice = std::slice::from_raw_parts(forecasts, forecasts_length);
-        anofox_fcst_core::conformal_predict(&residual_values, forecast_slice, alpha)
+        let residual_values = anofox_fcst_core::drop_missing(&residual_series);
+        let forecast_series = build_series(forecasts, forecasts_validity, forecasts_length);
+        let filled_forecasts = anofox_fcst_core::fill_missing(&forecast_series, 0.0);
+        let mut conf_result =
+            anofox_fcst_core::conformal_predict(&residual_values, &filled_forecasts, alpha)?;
+        anofox_fcst_core::propagate_missing(&mut conf_result.point, &forecast_series);
+        anofox_fcst_core::propagate_missing(&mut conf_result.lower, &forecast_series);
+        anofox_fcst_core::propagate_missing(&mut conf_result.upper, &forecast_series);
+        Ok::<_, anofox_fcst_core::ForecastError>(conf_result)
     }));
 
     match result {
@@ -4997,7 +5468,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict(
             true
         }
         Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
@@ -5005,6 +5476,226 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict(
                 out_error,
                 ErrorCode::PanicCaught,
                 "Panic in conformal_predict",
+            );
+            false
+        }
+    }
+}
+
+/// Compute conformal prediction intervals directly from per-row calibration
+/// (actual, forecast) pairs and a list of point forecasts (Phase 16 D-01/D-02).
+///
+/// A null method pointer means "symmetric"; otherwise the method name is
+/// parsed strictly via `ConformalMethod::from_str` (an unknown name is an
+/// `InvalidInput` error, not a silent fallback).
+///
+/// # Safety
+/// All non-null pointer arguments must be valid. A data pointer may be null
+/// only when its paired length is 0 (never calls `from_raw_parts` on a null
+/// pointer with a nonzero length).
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_conformal_from_pairs(
+    cal_actuals: *const c_double,
+    cal_actuals_validity: *const u64,
+    cal_actuals_len: size_t,
+    cal_forecasts: *const c_double,
+    cal_forecasts_validity: *const u64,
+    cal_forecasts_len: size_t,
+    cal_difficulty: *const c_double,
+    cal_difficulty_validity: *const u64,
+    cal_difficulty_len: size_t,
+    point_forecasts: *const c_double,
+    point_validity: *const u64,
+    point_len: size_t,
+    point_difficulty: *const c_double,
+    point_difficulty_validity: *const u64,
+    point_difficulty_len: size_t,
+    alpha: c_double,
+    method: *const c_char,
+    out_result: *mut ConformalResultFFI,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+
+    if out_result.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let actuals_series = if cal_actuals_len == 0 {
+            Vec::new()
+        } else {
+            build_series(cal_actuals, cal_actuals_validity, cal_actuals_len)
+        };
+        let forecasts_series = if cal_forecasts_len == 0 {
+            Vec::new()
+        } else {
+            build_series(cal_forecasts, cal_forecasts_validity, cal_forecasts_len)
+        };
+        // Phase 16 D-08: null pointer or zero length = "no difficulty_col at
+        // all" (never calls from_raw_parts on a null pointer with nonzero
+        // length).
+        let cal_difficulty_series = if cal_difficulty.is_null() || cal_difficulty_len == 0 {
+            None
+        } else {
+            Some(build_series(
+                cal_difficulty,
+                cal_difficulty_validity,
+                cal_difficulty_len,
+            ))
+        };
+        let point_series = if point_len == 0 {
+            Vec::new()
+        } else {
+            build_series(point_forecasts, point_validity, point_len)
+        };
+        let point_difficulty_series = if point_difficulty.is_null() || point_difficulty_len == 0 {
+            None
+        } else {
+            Some(build_series(
+                point_difficulty,
+                point_difficulty_validity,
+                point_difficulty_len,
+            ))
+        };
+
+        let method_str = if method.is_null() {
+            "symmetric"
+        } else {
+            match CStr::from_ptr(method).to_str() {
+                Ok(s) => s,
+                Err(_) => {
+                    return Err(anofox_fcst_core::ForecastError::InvalidInput(
+                        "method is not valid UTF-8".to_string(),
+                    ))
+                }
+            }
+        };
+        let parsed_method: anofox_fcst_core::ConformalMethod = method_str.parse()?;
+
+        anofox_fcst_core::conformal_from_pairs(
+            &actuals_series,
+            &forecasts_series,
+            cal_difficulty_series.as_deref(),
+            &point_series,
+            point_difficulty_series.as_deref(),
+            alpha,
+            parsed_method,
+        )
+    }));
+
+    match result {
+        Ok(Ok(conf_result)) => {
+            fill_conformal_result(out_result, &conf_result);
+            true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
+            false
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in conformal_from_pairs",
+            );
+            false
+        }
+    }
+}
+
+/// Calibrate a conformal predictor from per-row `(actual, forecast)` pairs,
+/// without applying it to any point forecasts yet (Phase 16 D-03).
+///
+/// A null method pointer means "symmetric"; otherwise the method name is
+/// parsed strictly via `ConformalMethod::from_str`.
+///
+/// # Safety
+/// All non-null pointer arguments must be valid. A data pointer may be null
+/// only when its paired length is 0.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_conformal_calibrate(
+    actuals: *const c_double,
+    actuals_validity: *const u64,
+    actuals_len: size_t,
+    forecasts: *const c_double,
+    forecasts_validity: *const u64,
+    forecasts_len: size_t,
+    difficulty: *const c_double,
+    difficulty_validity: *const u64,
+    difficulty_len: size_t,
+    alpha: c_double,
+    method: *const c_char,
+    out_result: *mut ConformalCalibrationFFI,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+
+    if out_result.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let actuals_series = if actuals_len == 0 {
+            Vec::new()
+        } else {
+            build_series(actuals, actuals_validity, actuals_len)
+        };
+        let forecasts_series = if forecasts_len == 0 {
+            Vec::new()
+        } else {
+            build_series(forecasts, forecasts_validity, forecasts_len)
+        };
+        // Phase 16 D-08: null pointer or zero length = "no difficulty_col".
+        let difficulty_series = if difficulty.is_null() || difficulty_len == 0 {
+            None
+        } else {
+            Some(build_series(
+                difficulty,
+                difficulty_validity,
+                difficulty_len,
+            ))
+        };
+
+        let method_str = if method.is_null() {
+            "symmetric"
+        } else {
+            match CStr::from_ptr(method).to_str() {
+                Ok(s) => s,
+                Err(_) => {
+                    return Err(anofox_fcst_core::ForecastError::InvalidInput(
+                        "method is not valid UTF-8".to_string(),
+                    ))
+                }
+            }
+        };
+        let parsed_method: anofox_fcst_core::ConformalMethod = method_str.parse()?;
+
+        anofox_fcst_core::conformal_calibrate(
+            &actuals_series,
+            &forecasts_series,
+            difficulty_series.as_deref(),
+            alpha,
+            parsed_method,
+        )
+    }));
+
+    match result {
+        Ok(Ok(cal_result)) => {
+            fill_conformal_calibration(out_result, &cal_result);
+            true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
+            false
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in conformal_calibrate",
             );
             false
         }
@@ -5050,7 +5741,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict_multi(
             true
         }
         Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
@@ -5058,64 +5749,6 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict_multi(
                 out_error,
                 ErrorCode::PanicCaught,
                 "Panic in conformal_predict_multi",
-            );
-            false
-        }
-    }
-}
-
-/// Perform locally-adaptive conformal prediction.
-///
-/// Scales intervals based on local difficulty estimates.
-///
-/// # Safety
-/// All pointer arguments must be valid and non-null.
-#[no_mangle]
-pub unsafe extern "C" fn anofox_ts_conformal_predict_adaptive(
-    residuals: *const c_double,
-    residuals_validity: *const u64,
-    residuals_length: size_t,
-    forecasts: *const c_double,
-    difficulty: *const c_double,
-    forecasts_length: size_t,
-    alpha: c_double,
-    out_result: *mut ConformalResultFFI,
-    out_error: *mut AnofoxError,
-) -> bool {
-    init_error(out_error);
-
-    if residuals.is_null() || forecasts.is_null() || difficulty.is_null() || out_result.is_null() {
-        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
-        return false;
-    }
-
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        let residual_series = build_series(residuals, residuals_validity, residuals_length);
-        let residual_values: Vec<f64> = residual_series.iter().filter_map(|v| *v).collect();
-        let forecast_slice = std::slice::from_raw_parts(forecasts, forecasts_length);
-        let difficulty_slice = std::slice::from_raw_parts(difficulty, forecasts_length);
-        anofox_fcst_core::conformal_predict_adaptive(
-            &residual_values,
-            forecast_slice,
-            difficulty_slice,
-            alpha,
-        )
-    }));
-
-    match result {
-        Ok(Ok(conf_result)) => {
-            fill_conformal_result(out_result, &conf_result);
-            true
-        }
-        Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
-            false
-        }
-        Err(_) => {
-            set_error(
-                out_error,
-                ErrorCode::PanicCaught,
-                "Panic in conformal_predict_adaptive",
             );
             false
         }
@@ -5134,6 +5767,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict_asymmetric(
     residuals_validity: *const u64,
     residuals_length: size_t,
     forecasts: *const c_double,
+    forecasts_validity: *const u64,
     forecasts_length: size_t,
     alpha: c_double,
     out_result: *mut ConformalResultFFI,
@@ -5148,9 +5782,18 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict_asymmetric(
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let residual_series = build_series(residuals, residuals_validity, residuals_length);
-        let residual_values: Vec<f64> = residual_series.iter().filter_map(|v| *v).collect();
-        let forecast_slice = std::slice::from_raw_parts(forecasts, forecasts_length);
-        anofox_fcst_core::conformal_predict_asymmetric(&residual_values, forecast_slice, alpha)
+        let residual_values = anofox_fcst_core::drop_missing(&residual_series);
+        let forecast_series = build_series(forecasts, forecasts_validity, forecasts_length);
+        let filled_forecasts = anofox_fcst_core::fill_missing(&forecast_series, 0.0);
+        let mut conf_result = anofox_fcst_core::conformal_predict_asymmetric(
+            &residual_values,
+            &filled_forecasts,
+            alpha,
+        )?;
+        anofox_fcst_core::propagate_missing(&mut conf_result.point, &forecast_series);
+        anofox_fcst_core::propagate_missing(&mut conf_result.lower, &forecast_series);
+        anofox_fcst_core::propagate_missing(&mut conf_result.upper, &forecast_series);
+        Ok::<_, anofox_fcst_core::ForecastError>(conf_result)
     }));
 
     match result {
@@ -5159,7 +5802,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict_asymmetric(
             true
         }
         Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
@@ -5217,7 +5860,9 @@ pub unsafe extern "C" fn anofox_ts_interval_width(
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_mean_interval_width(
     lower: *const c_double,
+    lower_validity: *const u64,
     upper: *const c_double,
+    upper_validity: *const u64,
     length: size_t,
     out_result: *mut c_double,
     out_error: *mut AnofoxError,
@@ -5230,15 +5875,23 @@ pub unsafe extern "C" fn anofox_ts_mean_interval_width(
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let lower_slice = std::slice::from_raw_parts(lower, length);
-        let upper_slice = std::slice::from_raw_parts(upper, length);
-        anofox_fcst_core::mean_interval_width(lower_slice, upper_slice)
+        let lower_series = build_series(lower, lower_validity, length);
+        let upper_series = build_series(upper, upper_validity, length);
+        let filtered = anofox_fcst_core::complete_cases(&[&lower_series, &upper_series])?;
+        Ok::<_, anofox_fcst_core::ForecastError>(anofox_fcst_core::mean_interval_width(
+            &filtered[0],
+            &filtered[1],
+        ))
     }));
 
     match result {
-        Ok(mean_width) => {
+        Ok(Ok(mean_width)) => {
             *out_result = mean_width;
             true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
+            false
         }
         Err(_) => {
             set_error(
@@ -5269,6 +5922,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_learn(
     method: types::ConformalMethodFFI,
     strategy: types::ConformalStrategyFFI,
     difficulty: *const c_double, // Optional, can be null for non-adaptive
+    difficulty_validity: *const u64,
     out_profile: *mut types::CalibrationProfileFFI,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -5281,13 +5935,21 @@ pub unsafe extern "C" fn anofox_ts_conformal_learn(
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let residual_series = build_series(residuals, residuals_validity, residuals_length);
-        let residual_values: Vec<f64> = residual_series.iter().filter_map(|v| *v).collect();
         let alpha_slice = std::slice::from_raw_parts(alphas, n_alphas);
 
-        let difficulty_opt = if difficulty.is_null() {
-            None
+        // Phase 16 D-08: (residual, difficulty) kept aligned by complete-case
+        // filtering BEFORE any residual is dropped -- dropping residuals
+        // first (the pre-16-02 behaviour) would silently misalign the two
+        // arrays as soon as any residual is missing.
+        let (residual_values, difficulty_opt): (Vec<f64>, Option<Vec<f64>>) = if difficulty
+            .is_null()
+        {
+            (anofox_fcst_core::drop_missing(&residual_series), None)
         } else {
-            Some(std::slice::from_raw_parts(difficulty, residuals_length))
+            let difficulty_series = build_series(difficulty, difficulty_validity, residuals_length);
+            let complete =
+                anofox_fcst_core::complete_cases(&[&residual_series, &difficulty_series])?;
+            (complete[0].clone(), Some(complete[1].clone()))
         };
 
         anofox_fcst_core::conformal_learn(
@@ -5295,7 +5957,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_learn(
             alpha_slice,
             method.into(),
             strategy.into(),
-            difficulty_opt,
+            difficulty_opt.as_deref(),
         )
     }));
 
@@ -5305,7 +5967,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_learn(
             true
         }
         Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
@@ -5326,9 +5988,11 @@ pub unsafe extern "C" fn anofox_ts_conformal_learn(
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_conformal_apply(
     forecasts: *const c_double,
+    forecasts_validity: *const u64,
     n_forecasts: size_t,
     profile: *const types::CalibrationProfileFFI,
     difficulty: *const c_double, // Optional, can be null for non-adaptive
+    difficulty_validity: *const u64,
     out_intervals: *mut types::PredictionIntervalsFFI,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -5340,7 +6004,9 @@ pub unsafe extern "C" fn anofox_ts_conformal_apply(
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let forecast_slice = std::slice::from_raw_parts(forecasts, n_forecasts);
+        let forecast_series = build_series(forecasts, forecasts_validity, n_forecasts);
+        let filled_forecasts = anofox_fcst_core::fill_missing(&forecast_series, 0.0);
+        let forecast_slice = filled_forecasts.as_slice();
 
         // Reconstruct CalibrationProfile from FFI
         let profile_ref = &*profile;
@@ -5367,13 +6033,28 @@ pub unsafe extern "C" fn anofox_ts_conformal_apply(
             n_residuals: profile_ref.n_residuals,
         };
 
-        let difficulty_opt = if difficulty.is_null() {
+        // Phase 16 D-08: NaN-for-NULL (not drop) -- a missing prediction
+        // difficulty must give NaN bounds at that position only, never
+        // shift or drop other forecasts.
+        let difficulty_opt: Option<Vec<f64>> = if difficulty.is_null() {
             None
         } else {
-            Some(std::slice::from_raw_parts(difficulty, n_forecasts))
+            Some(build_values(difficulty, difficulty_validity, n_forecasts))
         };
 
-        anofox_fcst_core::conformal_apply(forecast_slice, &core_profile, difficulty_opt)
+        let mut intervals = anofox_fcst_core::conformal_apply(
+            forecast_slice,
+            &core_profile,
+            difficulty_opt.as_deref(),
+        )?;
+        anofox_fcst_core::propagate_missing(&mut intervals.point, &forecast_series);
+        for level_lower in intervals.lower.iter_mut() {
+            anofox_fcst_core::propagate_missing(level_lower, &forecast_series);
+        }
+        for level_upper in intervals.upper.iter_mut() {
+            anofox_fcst_core::propagate_missing(level_upper, &forecast_series);
+        }
+        Ok::<_, anofox_fcst_core::ForecastError>(intervals)
     }));
 
     match result {
@@ -5382,7 +6063,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_apply(
             true
         }
         Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
@@ -5396,6 +6077,226 @@ pub unsafe extern "C" fn anofox_ts_conformal_apply(
     }
 }
 
+/// Applies a single pre-computed conformity `score` to `forecasts`,
+/// optionally scaled by a per-row `difficulty` (Phase 16 D-08, CONF-04).
+/// Backs the SQL `ts_conformal_intervals(forecasts, conformity_score,
+/// method, difficulty)` 4-arg overload.
+///
+/// A null `method` pointer means "symmetric". A null `difficulty` pointer
+/// or zero `difficulty_len` means "no difficulty_col at all" (never calls
+/// `from_raw_parts` on a null pointer with nonzero length).
+///
+/// # Safety
+/// All non-null pointer arguments must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_conformal_apply_score(
+    forecasts: *const c_double,
+    forecasts_validity: *const u64,
+    n_forecasts: size_t,
+    score: c_double,
+    method: *const c_char,
+    difficulty: *const c_double,
+    difficulty_validity: *const u64,
+    difficulty_len: size_t,
+    out_lower: *mut *mut c_double,
+    out_upper: *mut *mut c_double,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+
+    if out_lower.is_null() || out_upper.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+    if n_forecasts != 0 && forecasts.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        // Phase 16 WR-01: a non-null, zero-length forecasts list must
+        // produce an empty result, matching every sibling conformal FFI
+        // entry point (`anofox_ts_conformal_from_pairs`,
+        // `anofox_ts_conformal_calibrate`, `anofox_ts_conformal_apply`).
+        let forecast_series = if n_forecasts == 0 {
+            Vec::new()
+        } else {
+            build_series(forecasts, forecasts_validity, n_forecasts)
+        };
+        let difficulty_series: Vec<Option<f64>> = if difficulty.is_null() || difficulty_len == 0 {
+            Vec::new()
+        } else {
+            build_series(difficulty, difficulty_validity, difficulty_len)
+        };
+
+        let method_str = if method.is_null() {
+            "symmetric"
+        } else {
+            match CStr::from_ptr(method).to_str() {
+                Ok(s) => s,
+                Err(_) => {
+                    return Err(anofox_fcst_core::ForecastError::InvalidInput(
+                        "method is not valid UTF-8".to_string(),
+                    ))
+                }
+            }
+        };
+        let parsed_method: anofox_fcst_core::ConformalMethod = method_str.parse()?;
+
+        anofox_fcst_core::conformal_apply_score(
+            &forecast_series,
+            score,
+            parsed_method,
+            &difficulty_series,
+        )
+    }));
+
+    match result {
+        Ok(Ok((lower, upper))) => {
+            // Non-finite (NaN missing marker, or +/-inf unbounded) bounds
+            // are written as NaN for C++ to turn into SQL NULL.
+            let lower_nan: Vec<f64> = lower.iter().copied().map(nan_if_non_finite).collect();
+            let upper_nan: Vec<f64> = upper.iter().copied().map(nan_if_non_finite).collect();
+
+            let lower_ptr =
+                match alloc_or_error(&lower_nan, out_error, "Failed to allocate lower bounds") {
+                    Ok(ptr) => ptr,
+                    Err(()) => return false,
+                };
+            match alloc_or_error(&upper_nan, out_error, "Failed to allocate upper bounds") {
+                Ok(upper_ptr) => {
+                    *out_lower = lower_ptr;
+                    *out_upper = upper_ptr;
+                    true
+                }
+                Err(()) => {
+                    free_ptr(lower_ptr as *mut core::ffi::c_void);
+                    false
+                }
+            }
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
+            false
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in conformal_apply_score",
+            );
+            false
+        }
+    }
+}
+
+/// Parse a conformal strategy name, matching
+/// `anofox_fcst_core::ConformalStrategy::from_str` exactly -- including the
+/// D-09/G15 explanatory error for every removed `jackknife+` alias and the
+/// "unknown conformal strategy" error for anything else. C++'s
+/// `ParseConformalStrategy` wraps this instead of re-implementing the
+/// parse/default logic, so there is exactly one place that recognizes a
+/// strategy name.
+///
+/// # Safety
+/// `name` and `out_strategy` must be valid, non-null pointers; `name` must
+/// point to a NUL-terminated C string.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_conformal_parse_strategy(
+    name: *const c_char,
+    out_strategy: *mut types::ConformalStrategyFFI,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+    if name.is_null() || out_strategy.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let name_str = match CStr::from_ptr(name).to_str() {
+            Ok(s) => s,
+            Err(_) => {
+                return Err(anofox_fcst_core::ForecastError::InvalidInput(
+                    "strategy name is not valid UTF-8".to_string(),
+                ))
+            }
+        };
+        name_str.parse::<anofox_fcst_core::ConformalStrategy>()
+    }));
+
+    match result {
+        Ok(Ok(strategy)) => {
+            *out_strategy = strategy.into();
+            true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
+            false
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in conformal_parse_strategy",
+            );
+            false
+        }
+    }
+}
+
+/// Parse a conformal method name, matching
+/// `anofox_fcst_core::ConformalMethod::from_str` exactly. C++'s
+/// `ParseConformalMethod` wraps this instead of re-implementing the
+/// parse/default logic.
+///
+/// # Safety
+/// `name` and `out_method` must be valid, non-null pointers; `name` must
+/// point to a NUL-terminated C string.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_conformal_parse_method(
+    name: *const c_char,
+    out_method: *mut types::ConformalMethodFFI,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+    if name.is_null() || out_method.is_null() {
+        set_error(out_error, ErrorCode::NullPointer, "Null pointer argument");
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let name_str = match CStr::from_ptr(name).to_str() {
+            Ok(s) => s,
+            Err(_) => {
+                return Err(anofox_fcst_core::ForecastError::InvalidInput(
+                    "method name is not valid UTF-8".to_string(),
+                ))
+            }
+        };
+        name_str.parse::<anofox_fcst_core::ConformalMethod>()
+    }));
+
+    match result {
+        Ok(Ok(method)) => {
+            *out_method = method.into();
+            true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
+            false
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in conformal_parse_method",
+            );
+            false
+        }
+    }
+}
+
 /// Compute empirical coverage of prediction intervals.
 ///
 /// # Safety
@@ -5403,8 +6304,11 @@ pub unsafe extern "C" fn anofox_ts_conformal_apply(
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_conformal_coverage(
     actuals: *const c_double,
+    actuals_validity: *const u64,
     lower: *const c_double,
+    lower_validity: *const u64,
     upper: *const c_double,
+    upper_validity: *const u64,
     length: size_t,
     out_coverage: *mut c_double,
     out_error: *mut AnofoxError,
@@ -5417,10 +6321,12 @@ pub unsafe extern "C" fn anofox_ts_conformal_coverage(
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let actuals_slice = std::slice::from_raw_parts(actuals, length);
-        let lower_slice = std::slice::from_raw_parts(lower, length);
-        let upper_slice = std::slice::from_raw_parts(upper, length);
-        anofox_fcst_core::conformal_coverage(actuals_slice, lower_slice, upper_slice)
+        let actuals_series = build_series(actuals, actuals_validity, length);
+        let lower_series = build_series(lower, lower_validity, length);
+        let upper_series = build_series(upper, upper_validity, length);
+        let filtered =
+            anofox_fcst_core::complete_cases(&[&actuals_series, &lower_series, &upper_series])?;
+        anofox_fcst_core::conformal_coverage(&filtered[0], &filtered[1], &filtered[2])
     }));
 
     match result {
@@ -5429,7 +6335,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_coverage(
             true
         }
         Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
@@ -5450,8 +6356,11 @@ pub unsafe extern "C" fn anofox_ts_conformal_coverage(
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_conformal_evaluate(
     actuals: *const c_double,
+    actuals_validity: *const u64,
     lower: *const c_double,
+    lower_validity: *const u64,
     upper: *const c_double,
+    upper_validity: *const u64,
     length: size_t,
     alpha: c_double,
     out_eval: *mut types::ConformalEvaluationFFI,
@@ -5465,10 +6374,12 @@ pub unsafe extern "C" fn anofox_ts_conformal_evaluate(
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let actuals_slice = std::slice::from_raw_parts(actuals, length);
-        let lower_slice = std::slice::from_raw_parts(lower, length);
-        let upper_slice = std::slice::from_raw_parts(upper, length);
-        anofox_fcst_core::conformal_evaluate(actuals_slice, lower_slice, upper_slice, alpha)
+        let actuals_series = build_series(actuals, actuals_validity, length);
+        let lower_series = build_series(lower, lower_validity, length);
+        let upper_series = build_series(upper, upper_validity, length);
+        let filtered =
+            anofox_fcst_core::complete_cases(&[&actuals_series, &lower_series, &upper_series])?;
+        anofox_fcst_core::conformal_evaluate(&filtered[0], &filtered[1], &filtered[2], alpha)
     }));
 
     match result {
@@ -5481,7 +6392,7 @@ pub unsafe extern "C" fn anofox_ts_conformal_evaluate(
             true
         }
         Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &e.to_string());
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
@@ -5506,8 +6417,10 @@ pub unsafe extern "C" fn anofox_ts_conformal_evaluate(
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_bootstrap_intervals(
     residuals: *const c_double,
+    residuals_validity: *const u64,
     residuals_len: size_t,
     forecasts: *const c_double,
+    forecasts_validity: *const u64,
     forecasts_len: size_t,
     n_paths: c_int,
     coverage: c_double,
@@ -5528,17 +6441,31 @@ pub unsafe extern "C" fn anofox_ts_bootstrap_intervals(
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let res_slice = std::slice::from_raw_parts(residuals, residuals_len);
-        let fcst_slice = std::slice::from_raw_parts(forecasts, forecasts_len);
+        let residual_series = build_series(residuals, residuals_validity, residuals_len);
+        let res_values = anofox_fcst_core::drop_missing(&residual_series);
+        let forecast_series = build_series(forecasts, forecasts_validity, forecasts_len);
+        let filled_forecasts = anofox_fcst_core::fill_missing(&forecast_series, 0.0);
         let seed_opt = if seed >= 0 { Some(seed as u64) } else { None };
 
-        anofox_fcst_core::bootstrap_intervals(
-            res_slice,
-            fcst_slice,
-            n_paths.max(1) as usize,
+        // Phase 16 T-16-17: n_paths < 1 is a caller error, never silently
+        // clamped up to 1 -- `bootstrap_intervals` itself rejects < 10, but
+        // a negative/zero c_int must not reach `as usize` wraparound first.
+        if n_paths < 1 {
+            return Err(anofox_fcst_core::ForecastError::InvalidInput(format!(
+                "n_paths must be >= 10, got {n_paths}"
+            )));
+        }
+        let mut intervals = anofox_fcst_core::bootstrap_intervals(
+            &res_values,
+            &filled_forecasts,
+            n_paths as usize,
             coverage,
             seed_opt,
-        )
+        )?;
+        anofox_fcst_core::propagate_missing(&mut intervals.point, &forecast_series);
+        anofox_fcst_core::propagate_missing(&mut intervals.lower, &forecast_series);
+        anofox_fcst_core::propagate_missing(&mut intervals.upper, &forecast_series);
+        Ok::<_, anofox_fcst_core::ForecastError>(intervals)
     }));
 
     match result {
@@ -5564,7 +6491,7 @@ pub unsafe extern "C" fn anofox_ts_bootstrap_intervals(
             true
         }
         Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &format!("{}", e));
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
@@ -5585,8 +6512,10 @@ pub unsafe extern "C" fn anofox_ts_bootstrap_intervals(
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_bootstrap_quantiles(
     residuals: *const c_double,
+    residuals_validity: *const u64,
     residuals_len: size_t,
     forecasts: *const c_double,
+    forecasts_validity: *const u64,
     forecasts_len: size_t,
     n_paths: c_int,
     quantile_levels: *const c_double,
@@ -5609,18 +6538,30 @@ pub unsafe extern "C" fn anofox_ts_bootstrap_quantiles(
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let res_slice = std::slice::from_raw_parts(residuals, residuals_len);
-        let fcst_slice = std::slice::from_raw_parts(forecasts, forecasts_len);
+        let residual_series = build_series(residuals, residuals_validity, residuals_len);
+        let res_values = anofox_fcst_core::drop_missing(&residual_series);
+        let forecast_series = build_series(forecasts, forecasts_validity, forecasts_len);
+        let filled_forecasts = anofox_fcst_core::fill_missing(&forecast_series, 0.0);
         let q_slice = std::slice::from_raw_parts(quantile_levels, n_quantiles);
         let seed_opt = if seed >= 0 { Some(seed as u64) } else { None };
 
-        anofox_fcst_core::bootstrap_quantiles(
-            res_slice,
-            fcst_slice,
-            n_paths.max(1) as usize,
+        if n_paths < 1 {
+            return Err(anofox_fcst_core::ForecastError::InvalidInput(format!(
+                "n_paths must be >= 10, got {n_paths}"
+            )));
+        }
+        let mut qr = anofox_fcst_core::bootstrap_quantiles(
+            &res_values,
+            &filled_forecasts,
+            n_paths as usize,
             q_slice,
             seed_opt,
-        )
+        )?;
+        anofox_fcst_core::propagate_missing(&mut qr.point, &forecast_series);
+        for row in qr.values.iter_mut() {
+            anofox_fcst_core::propagate_missing(row, &forecast_series);
+        }
+        Ok::<_, anofox_fcst_core::ForecastError>(qr)
     }));
 
     match result {
@@ -5653,7 +6594,7 @@ pub unsafe extern "C" fn anofox_ts_bootstrap_quantiles(
             true
         }
         Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &format!("{}", e));
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
             false
         }
         Err(_) => {
@@ -5709,18 +6650,28 @@ pub unsafe extern "C" fn anofox_free_bootstrap_quantile_result(
 
 /// Compute per-step conformal prediction intervals.
 ///
-/// Each horizon step gets its own interval width. Requires fold-organized data.
+/// Each horizon step gets its own interval width. Requires fold-organized,
+/// FLAT data: `fold_forecasts`/`fold_actuals` are `fold_forecasts_len`
+/// elements long (fold-major), validated against `horizon` in Rust (D-10 —
+/// `fold_forecasts_len` must be an exact multiple of `horizon`; the caller
+/// never computes `n_folds` itself). Validity bitmasks make the per-step
+/// quantile computation pairwise-complete (D-02); a missing `point_forecasts`
+/// entry is position-preserving in the output (NaN at that position only).
 ///
 /// # Safety
-/// All pointers must be valid. fold_forecasts and fold_actuals are flat arrays
-/// of n_folds * horizon doubles. Output struct must be zeroed before calling.
+/// All pointers must be valid (validity pointers may be null = all valid).
+/// Output struct must be zeroed before calling.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_conformal_predict_per_step(
     fold_forecasts: *const c_double,
+    fold_forecasts_validity: *const u64,
+    fold_forecasts_len: size_t,
     fold_actuals: *const c_double,
-    n_folds: size_t,
+    fold_actuals_validity: *const u64,
+    fold_actuals_len: size_t,
     horizon: size_t,
     point_forecasts: *const c_double,
+    point_validity: *const u64,
     n_point_forecasts: size_t,
     alpha: c_double,
     out_result: *mut types::ConformalPerStepResultFFI,
@@ -5740,24 +6691,17 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict_per_step(
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        // Reshape flat arrays into Vec<Vec<f64>>
-        let fcst_flat = std::slice::from_raw_parts(fold_forecasts, n_folds * horizon);
-        let act_flat = std::slice::from_raw_parts(fold_actuals, n_folds * horizon);
-        let point = std::slice::from_raw_parts(point_forecasts, n_point_forecasts);
+        let fold_forecasts_series =
+            build_series(fold_forecasts, fold_forecasts_validity, fold_forecasts_len);
+        let fold_actuals_series =
+            build_series(fold_actuals, fold_actuals_validity, fold_actuals_len);
+        let point_series = build_series(point_forecasts, point_validity, n_point_forecasts);
 
-        let mut fold_fcsts: Vec<Vec<f64>> = Vec::with_capacity(n_folds);
-        let mut fold_acts: Vec<Vec<f64>> = Vec::with_capacity(n_folds);
-        for i in 0..n_folds {
-            let start = i * horizon;
-            let end = start + horizon;
-            fold_fcsts.push(fcst_flat[start..end].to_vec());
-            fold_acts.push(act_flat[start..end].to_vec());
-        }
-
-        anofox_fcst_core::conformal::conformal_predict_per_step(
-            &fold_fcsts,
-            &fold_acts,
-            point,
+        anofox_fcst_core::conformal::conformal_predict_per_step_validated(
+            &fold_forecasts_series,
+            &fold_actuals_series,
+            horizon,
+            &point_series,
             alpha,
         )
     }));
@@ -5767,23 +6711,36 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict_per_step(
             (*out_result).n_forecasts = ps.point.len();
             (*out_result).coverage = ps.coverage;
 
+            // Phase 16 D-05/G16: an insufficient step's half-width (and the
+            // bounds derived from it) is infinite -- written as NaN so C++
+            // can turn it into SQL NULL; a NaN half-width is the only marker
+            // of an insufficient step (no new per-step field).
+            let lower_nan: Vec<f64> = ps.lower.iter().copied().map(nan_if_non_finite).collect();
+            let upper_nan: Vec<f64> = ps.upper.iter().copied().map(nan_if_non_finite).collect();
+            let half_widths_nan: Vec<f64> = ps
+                .half_widths
+                .iter()
+                .copied()
+                .map(nan_if_non_finite)
+                .collect();
+
             (*out_result).point =
                 match alloc_or_error(&ps.point, out_error, "Failed to allocate point") {
                     Ok(ptr) => ptr,
                     Err(()) => return false,
                 };
             (*out_result).lower =
-                match alloc_or_error(&ps.lower, out_error, "Failed to allocate lower") {
+                match alloc_or_error(&lower_nan, out_error, "Failed to allocate lower") {
                     Ok(ptr) => ptr,
                     Err(()) => return false,
                 };
             (*out_result).upper =
-                match alloc_or_error(&ps.upper, out_error, "Failed to allocate upper") {
+                match alloc_or_error(&upper_nan, out_error, "Failed to allocate upper") {
                     Ok(ptr) => ptr,
                     Err(()) => return false,
                 };
             (*out_result).half_widths = match alloc_or_error(
-                &ps.half_widths,
+                &half_widths_nan,
                 out_error,
                 "Failed to allocate half_widths",
             ) {
@@ -5793,7 +6750,14 @@ pub unsafe extern "C" fn anofox_ts_conformal_predict_per_step(
             true
         }
         Ok(Err(e)) => {
-            set_error(out_error, ErrorCode::ComputationError, &format!("{}", e));
+            let code = match e {
+                anofox_fcst_core::ForecastError::InvalidInput(_) => ErrorCode::InvalidInput,
+                anofox_fcst_core::ForecastError::InsufficientData { .. } => {
+                    ErrorCode::InsufficientData
+                }
+                _ => ErrorCode::ComputationError,
+            };
+            set_error(out_error, code, &format!("{}", e));
             false
         }
         Err(_) => {
@@ -5829,17 +6793,40 @@ pub unsafe extern "C" fn anofox_free_conformal_per_step_result(
 }
 
 /// Helper function to fill a CalibrationProfileFFI from a core CalibrationProfile.
+///
+/// Phase 16 D-05: a per-alpha score can be `f64::INFINITY` when that level's
+/// calibration is insufficient; written here as NaN so C++ can turn it into
+/// SQL NULL.
 unsafe fn fill_calibration_profile(
     out: *mut types::CalibrationProfileFFI,
     profile: &anofox_fcst_core::CalibrationProfile,
 ) {
+    let state_vector_nan: Vec<f64> = profile
+        .state_vector
+        .iter()
+        .copied()
+        .map(nan_if_non_finite)
+        .collect();
+    let scores_lower_nan: Vec<f64> = profile
+        .scores_lower
+        .iter()
+        .copied()
+        .map(nan_if_non_finite)
+        .collect();
+    let scores_upper_nan: Vec<f64> = profile
+        .scores_upper
+        .iter()
+        .copied()
+        .map(nan_if_non_finite)
+        .collect();
+
     (*out).method = profile.method.into();
     (*out).strategy = profile.strategy.into();
     (*out).alphas = vec_to_c_double_array(&profile.alphas);
-    (*out).state_vector = vec_to_c_double_array(&profile.state_vector);
+    (*out).state_vector = vec_to_c_double_array(&state_vector_nan);
     (*out).state_vector_len = profile.state_vector.len();
-    (*out).scores_lower = vec_to_c_double_array(&profile.scores_lower);
-    (*out).scores_upper = vec_to_c_double_array(&profile.scores_upper);
+    (*out).scores_lower = vec_to_c_double_array(&scores_lower_nan);
+    (*out).scores_upper = vec_to_c_double_array(&scores_upper_nan);
     (*out).n_levels = profile.alphas.len();
     (*out).n_residuals = profile.n_residuals;
 }
@@ -5866,8 +6853,10 @@ unsafe fn fill_prediction_intervals(
     for level_idx in 0..n_levels {
         for fcst_idx in 0..n_forecasts {
             let flat_idx = level_idx * n_forecasts + fcst_idx;
-            *lower_ptr.add(flat_idx) = intervals.lower[level_idx][fcst_idx];
-            *upper_ptr.add(flat_idx) = intervals.upper[level_idx][fcst_idx];
+            // Phase 16 D-05: an insufficient level's score is infinite, so
+            // its bounds are +/-inf -- written as NaN for C++ to NULL.
+            *lower_ptr.add(flat_idx) = nan_if_non_finite(intervals.lower[level_idx][fcst_idx]);
+            *upper_ptr.add(flat_idx) = nan_if_non_finite(intervals.upper[level_idx][fcst_idx]);
         }
     }
 
@@ -5876,19 +6865,68 @@ unsafe fn fill_prediction_intervals(
 }
 
 /// Helper function to fill a ConformalResultFFI from a core ConformalResult.
+/// Maps a non-finite value to NaN, leaving a finite value untouched (Phase
+/// 16: the core represents "unbounded" with +/-inf; the FFI boundary writes
+/// non-finite score/coverage/bounds as NaN so C++ can turn them into SQL
+/// NULL via its existing NaN-as-NULL writers).
+#[inline]
+fn nan_if_non_finite(v: f64) -> f64 {
+    if v.is_finite() {
+        v
+    } else {
+        f64::NAN
+    }
+}
+
 unsafe fn fill_conformal_result(
     out: *mut ConformalResultFFI,
     result: &anofox_fcst_core::ConformalResult,
 ) {
+    let lower_nan: Vec<f64> = result
+        .lower
+        .iter()
+        .copied()
+        .map(nan_if_non_finite)
+        .collect();
+    let upper_nan: Vec<f64> = result
+        .upper
+        .iter()
+        .copied()
+        .map(nan_if_non_finite)
+        .collect();
+
     (*out).point = vec_to_c_double_array(&result.point);
-    (*out).lower = vec_to_c_double_array(&result.lower);
-    (*out).upper = vec_to_c_double_array(&result.upper);
+    (*out).lower = vec_to_c_double_array(&lower_nan);
+    (*out).upper = vec_to_c_double_array(&upper_nan);
     (*out).n_forecasts = result.point.len();
-    (*out).coverage = result.coverage;
-    (*out).conformity_score = result.conformity_score;
+    (*out).coverage = result.coverage; // already NaN when insufficient
+    (*out).nominal_level = result.nominal_level;
+    (*out).conformity_score = nan_if_non_finite(result.conformity_score);
+    (*out).n_calibration = result.n_calibration;
+    (*out).calibration_insufficient = result.calibration_insufficient;
 
     // Copy method name
     let method_bytes = result.method.as_bytes();
+    let len = method_bytes.len().min(31);
+    for (i, &b) in method_bytes[..len].iter().enumerate() {
+        (*out).method[i] = b as c_char;
+    }
+    (*out).method[len] = 0; // Null terminator
+}
+
+/// Helper function to fill a ConformalCalibrationFFI from a core ConformalCalibration.
+unsafe fn fill_conformal_calibration(
+    out: *mut ConformalCalibrationFFI,
+    result: &anofox_fcst_core::ConformalCalibration,
+) {
+    (*out).coverage = result.coverage; // already NaN when insufficient
+    (*out).nominal_level = result.nominal_level;
+    (*out).conformity_score = nan_if_non_finite(result.conformity_score);
+    (*out).n_calibration = result.n_calibration;
+    (*out).calibration_insufficient = result.calibration_insufficient;
+
+    let method_str = result.method.to_string();
+    let method_bytes = method_str.as_bytes();
     let len = method_bytes.len().min(31);
     for (i, &b) in method_bytes[..len].iter().enumerate() {
         (*out).method[i] = b as c_char;
@@ -6569,7 +7607,12 @@ pub unsafe extern "C" fn anofox_free_prediction_intervals(
 ///                  NULL entries become `NaN` in the series passed to the crate.
 /// * `length`     — Number of elements in `values`.
 /// * `max_lags`   — Maximum lag count for AIC selection. Pass `-1` for automatic
-///                  selection (`floor((n-1)^(1/3))`). Clamped to `[0, n/2-1]` by the crate.
+///                  selection (`floor((n-1)^(1/3))`). Clamped the way statsmodels
+///                  does by the crate.
+/// * `regression` — Optional NUL-terminated C string, `"c"` or `"ct"`
+///                  (case-insensitive). `null` means `"c"` (D-05). Any other
+///                  value is `ErrorCode::InvalidInput` with message
+///                  "expected one of: c, ct".
 /// * `out_result` — Pointer to caller-allocated `AnofoxStationarityResult`.
 ///                  Initialised to `Default` before the computation so that
 ///                  partial results are never exposed on error.
@@ -6580,13 +7623,15 @@ pub unsafe extern "C" fn anofox_free_prediction_intervals(
 /// # Safety
 ///
 /// `values` and `out_result` must be non-null. `validity` may be null (meaning all valid).
-/// `length` must equal the number of valid `f64` elements at `values`.
+/// `length` must equal the number of valid `f64` elements at `values`. `regression`
+/// must be either null or a valid NUL-terminated C string.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_adf(
     values: *const c_double,
     validity: *const u64,
     length: size_t,
     max_lags: c_int,
+    regression: *const c_char,
     out_result: *mut AnofoxStationarityResult,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -6609,6 +7654,16 @@ pub unsafe extern "C" fn anofox_ts_adf(
         return true;
     }
 
+    // D-05/T-17-03: parse `regression` OUTSIDE catch_unwind so an invalid
+    // value is reported as InvalidInput, not caught as a panic.
+    let regression = match parse_regression(regression) {
+        Ok(r) => r,
+        Err(e) => {
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
+            return false;
+        }
+    };
+
     // Threat T-01-04: clamp max_lags; negative → auto (None)
     let max_lags_opt: Option<usize> = if max_lags < 0 {
         None
@@ -6620,7 +7675,7 @@ pub unsafe extern "C" fn anofox_ts_adf(
     let result = catch_unwind(AssertUnwindSafe(|| {
         // Use build_values: NULLs become NaN (consistent with crate NaN-propagation behaviour)
         let series = build_values(values, validity, length);
-        anofox_fcst_core::adf(&series, max_lags_opt)
+        anofox_fcst_core::adf(&series, max_lags_opt, regression)
     }));
 
     match result {
@@ -6635,18 +7690,102 @@ pub unsafe extern "C" fn anofox_ts_adf(
     }
 }
 
+/// Phase 12 D-03/D-04 single-series missing-data gate: trims leading/trailing
+/// missing values and rejects any remaining interior missing value, naming its
+/// 1-based position in the ORIGINAL list. `validity` may be null (all valid);
+/// NaN is treated as missing (Phase 10 D-12 convention) — see
+/// `anofox_fcst_core::missing::trim_edges_reject_interior`.
+///
+/// - `length == 0` -> success, `*out_start = 0`, `*out_length = 0` (`values`
+///   may be null in that case only).
+/// - Nothing present after trimming -> success, `*out_start = 0`,
+///   `*out_length = 0` (D-04: caller emits SQL NULL).
+/// - Otherwise -> success, `*out_start`/`*out_length` describe the trimmed,
+///   fully-present interior `[start, start+length)` of the ORIGINAL array.
+/// - An interior missing value -> failure, `ErrorCode::InvalidInput`, message
+///   contains "interior NULL at position k" (1-based).
+///
+/// # Safety
+///
+/// `out_start`, `out_length` and `out_error` must be non-null. `values` must
+/// be non-null when `length > 0`. `validity` may be null. `length` must equal
+/// the number of `f64` elements at `values`.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_series_gate(
+    values: *const c_double,
+    validity: *const u64,
+    length: size_t,
+    out_start: *mut size_t,
+    out_length: *mut size_t,
+    out_error: *mut AnofoxError,
+) -> bool {
+    init_error(out_error);
+
+    if check_null_pointers(
+        out_error,
+        &[
+            out_start as *const core::ffi::c_void,
+            out_length as *const core::ffi::c_void,
+        ],
+    ) {
+        return false;
+    }
+
+    if length == 0 {
+        *out_start = 0;
+        *out_length = 0;
+        return true;
+    }
+
+    if check_null_pointers(out_error, &[values as *const core::ffi::c_void]) {
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let series = build_series(values, validity, length);
+        anofox_fcst_core::trim_edges_reject_interior(&series)
+    }));
+
+    match result {
+        Ok(Ok(None)) => {
+            *out_start = 0;
+            *out_length = 0;
+            true
+        }
+        Ok(Ok(Some(range))) => {
+            *out_start = range.start;
+            *out_length = range.len();
+            true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ErrorCode::InvalidInput, &e.to_string());
+            false
+        }
+        Err(_) => {
+            set_error(
+                out_error,
+                ErrorCode::PanicCaught,
+                "Panic in anofox_ts_series_gate",
+            );
+            false
+        }
+    }
+}
+
 /// Run the KPSS stationarity test on a single series (STAT-02).
 ///
 /// # Safety
 ///
-/// `values` and `out_result` must be non-null. `validity` may be null (all valid).
-/// `length` must equal the number of `f64` elements at `values`.
+/// `values` and `out_result` must be non-null. `validity` may be null (all
+/// valid). `length` must equal the number of `f64` elements at `values`.
+/// `regression` must be either null or a valid NUL-terminated C string.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_kpss(
     values: *const c_double,
     validity: *const u64,
     length: size_t,
     lags: c_int,
+    regression: *const c_char,
     out_result: *mut AnofoxStationarityResult,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -6666,11 +7805,20 @@ pub unsafe extern "C" fn anofox_ts_kpss(
         return true;
     }
 
+    // D-05a: parse `regression` OUTSIDE catch_unwind (see anofox_ts_adf).
+    let regression = match parse_regression(regression) {
+        Ok(r) => r,
+        Err(e) => {
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
+            return false;
+        }
+    };
+
     let lags_opt: Option<usize> = if lags < 0 { None } else { Some(lags as usize) };
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         let series = build_values(values, validity, length);
-        anofox_fcst_core::kpss(&series, lags_opt)
+        anofox_fcst_core::kpss(&series, lags_opt, regression)
     }));
 
     match result {
@@ -6689,13 +7837,15 @@ pub unsafe extern "C" fn anofox_ts_kpss(
 ///
 /// # Safety
 ///
-/// `values` and `out_result` must be non-null. `validity` may be null (all valid).
-/// `length` must equal the number of `f64` elements at `values`.
+/// `values` and `out_result` must be non-null. `validity` may be null (all
+/// valid). `length` must equal the number of `f64` elements at `values`.
+/// `regression` must be either null or a valid NUL-terminated C string.
 #[no_mangle]
 pub unsafe extern "C" fn anofox_ts_stationarity(
     values: *const c_double,
     validity: *const u64,
     length: size_t,
+    regression: *const c_char,
     out_result: *mut AnofoxCombinedStationarityResult,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -6715,9 +7865,18 @@ pub unsafe extern "C" fn anofox_ts_stationarity(
         return true;
     }
 
+    // D-04/D-05: parse `regression` OUTSIDE catch_unwind (see anofox_ts_adf).
+    let regression = match parse_regression(regression) {
+        Ok(r) => r,
+        Err(e) => {
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
+            return false;
+        }
+    };
+
     let result = catch_unwind(AssertUnwindSafe(|| {
         let series = build_values(values, validity, length);
-        anofox_fcst_core::stationarity(&series)
+        anofox_fcst_core::stationarity(&series, regression)
     }));
 
     match result {
@@ -6728,7 +7887,9 @@ pub unsafe extern "C" fn anofox_ts_stationarity(
             (*out_result).kpss_p_value = r.kpss_p_value;
             (*out_result).adf_is_stationary = r.adf_is_stationary;
             (*out_result).kpss_is_stationary = r.kpss_is_stationary;
-            copy_string_to_buffer(r.verdict, &mut (*out_result).verdict);
+            // D-04: None (NULL verdict) copies an empty string; the C++
+            // caller sets the verdict child NULL when the buffer is empty.
+            copy_string_to_buffer(r.verdict.unwrap_or(""), &mut (*out_result).verdict);
             true
         }
         Err(_) => {
@@ -6742,7 +7903,13 @@ pub unsafe extern "C" fn anofox_ts_stationarity(
     }
 }
 
-/// Ljung-Box white-noise test on residuals (RESID-01).
+/// Ljung-Box white-noise test on residuals, model-aware (RESID-01, D-06/DIAG-04).
+///
+/// `fitted_params` — number of estimated model parameters (e.g. `p + q` for
+/// an ARMA(p, q) residual series); `df = lags - fitted_params`. A negative
+/// value is `ErrorCode::InvalidInput`. `df <= 0` at the effective (resolved,
+/// clamped) lag count is `ErrorCode::InvalidInput` naming `fitted_params`,
+/// the lags and "degrees of freedom" (see `ffi_error_code`).
 ///
 /// # Safety
 /// `values` and `out_result` must be non-null. `validity` may be null (all valid).
@@ -6752,6 +7919,7 @@ pub unsafe extern "C" fn anofox_ts_ljung_box(
     validity: *const u64,
     length: size_t,
     lags: c_int,
+    fitted_params: c_int,
     out_result: *mut AnofoxLjungBoxResult,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -6767,15 +7935,28 @@ pub unsafe extern "C" fn anofox_ts_ljung_box(
     if length == 0 {
         return true;
     }
+    if fitted_params < 0 {
+        set_error(
+            out_error,
+            ErrorCode::InvalidInput,
+            &format!("fitted_params must be >= 0, got {fitted_params}"),
+        );
+        return false;
+    }
     let lags_opt: Option<usize> = if lags < 0 { None } else { Some(lags as usize) };
+    let fitted_params = fitted_params as usize;
     let result = catch_unwind(AssertUnwindSafe(|| {
         let series = build_values(values, validity, length);
-        anofox_fcst_core::ljung_box(&series, lags_opt)
+        anofox_fcst_core::ljung_box(&series, lags_opt, fitted_params)
     }));
     match result {
-        Ok(r) => {
+        Ok(Ok(r)) => {
             *out_result = r.into();
             true
+        }
+        Ok(Err(e)) => {
+            set_error(out_error, ffi_error_code(&e), &e.to_string());
+            false
         }
         Err(_) => {
             set_error(
@@ -6952,6 +8133,9 @@ use anofox_forecast::models::theta::GlobalTheta;
 pub(crate) enum PanelForecastError {
     /// Model is not supported by the panel function.
     InvalidModel(String),
+    /// A parameter string (croston_variant, model_pool) failed strict
+    /// parsing — D-07: never a silent default/dropped entry.
+    InvalidParameter(String),
     /// Upstream forecast error (fit/predict failure).
     Upstream(anofox_forecast::ForecastError),
 }
@@ -6960,6 +8144,7 @@ impl std::fmt::Display for PanelForecastError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PanelForecastError::InvalidModel(msg) => write!(f, "invalid model: {}", msg),
+            PanelForecastError::InvalidParameter(msg) => write!(f, "{}", msg),
             PanelForecastError::Upstream(e) => write!(f, "{}", e),
         }
     }
@@ -6981,8 +8166,12 @@ impl From<anofox_forecast::ForecastError> for PanelForecastError {
 /// - `horizon`: forecast horizon.
 /// - `seasonal_period`: seasonal period (0 = non-seasonal Reduced pool for GlobalETS;
 ///    ignored for GlobalTheta and GlobalCroston).
-/// - `model_pool_str`: optional model pool override for GlobalETS ("Complete" or None = Reduced).
-/// - `variant_str`: optional variant override for GlobalCroston ("SBA" or None = Classic).
+/// - `model_pool_str`: GlobalETS model pool override (D-07, case-insensitive):
+///    `None`/`""`/`"reduced"` → Reduced (documented default); `"complete"` →
+///    Complete; anything else is `InvalidParameter` — never a silent default.
+/// - `variant_str`: GlobalCroston variant (D-07, case-insensitive):
+///    `None`/`""`/`"classic"` → Classic; `"sba"` → SBA; anything else is
+///    `InvalidParameter` — never a silent default.
 ///
 /// # Returns
 /// `Vec<Vec<f64>>` of shape `[n_series][horizon]`, all finite values.
@@ -7012,9 +8201,16 @@ pub(crate) fn forecast_panel_impl(
 
     match method {
         "GlobalETS" => {
-            let pool = match model_pool_str {
-                Some("Complete") => ModelPool::Complete,
-                _ => ModelPool::Reduced,
+            let pool = match model_pool_str.map(|s| s.trim().to_lowercase()) {
+                None => ModelPool::Reduced,
+                Some(ref s) if s.is_empty() || s == "reduced" => ModelPool::Reduced,
+                Some(ref s) if s == "complete" => ModelPool::Complete,
+                Some(_) => {
+                    return Err(PanelForecastError::InvalidParameter(format!(
+                        "unknown model_pool '{}'; expected 'reduced' or 'complete'",
+                        model_pool_str.unwrap_or("")
+                    )))
+                }
             };
             // period=0 means "non-seasonal"; map to 1 so the ETS update loop
             // (`t % period`) never divides by zero. With period=1, has_seasonal
@@ -7036,14 +8232,23 @@ pub(crate) fn forecast_panel_impl(
             Ok(model.predict(horizon))
         }
         "GlobalCroston" => {
-            // Select Croston variant from the params MAP key `croston_variant`.
-            // "SBA" → Syntetos-Boylan Approximation (multiplies forecast by 1 - α/2).
-            // Default (None or any other string) → Classic Croston.
-            // Use the named constructors (new/sba) rather than with_variant, since
-            // global_croston::CrostonVariant is not re-exported at the module level.
-            let mut model = match variant_str {
-                Some("SBA") => GlobalCroston::sba(),
-                _ => GlobalCroston::new(),
+            // Select Croston variant from the params MAP key `croston_variant`
+            // (D-07, case-insensitive, strict). "sba" → Syntetos-Boylan
+            // Approximation (multiplies forecast by 1 - α/2). Default (None
+            // or "classic") → Classic Croston. Use the named constructors
+            // (new/sba) rather than with_variant, since
+            // global_croston::CrostonVariant is not re-exported at the
+            // module level.
+            let mut model = match variant_str.map(|s| s.trim().to_lowercase()) {
+                None => GlobalCroston::new(),
+                Some(ref s) if s.is_empty() || s == "classic" => GlobalCroston::new(),
+                Some(ref s) if s == "sba" => GlobalCroston::sba(),
+                Some(_) => {
+                    return Err(PanelForecastError::InvalidParameter(format!(
+                        "unknown croston_variant '{}'; expected 'classic' or 'sba'",
+                        variant_str.unwrap_or("")
+                    )))
+                }
             };
             model.fit(&panel)?;
             Ok(model.predict(horizon))
@@ -7104,24 +8309,36 @@ pub unsafe extern "C" fn anofox_ts_forecast_panel(
         // Parse method string
         let method_str = CStr::from_ptr(method).to_str().unwrap_or("");
 
-        // Parse optional variant (used by GlobalCroston — "SBA" or None/empty = Classic)
+        // Parse optional croston_variant (D-07, strict): invalid UTF-8 is an
+        // error, never silently swallowed to None (forecast_panel_impl does
+        // the case-insensitive "classic"/"sba" validation).
         let variant_str: Option<&str> = if variant.is_null() {
             None
         } else {
-            CStr::from_ptr(variant)
-                .to_str()
-                .ok()
-                .filter(|s| !s.is_empty())
+            let s = CStr::from_ptr(variant).to_str().map_err(|_| {
+                PanelForecastError::InvalidParameter("croston_variant: invalid UTF-8".to_string())
+            })?;
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
         };
 
-        // Parse optional model_pool (used by GlobalETS — "Complete" or None/empty = Reduced)
+        // Parse optional model_pool (D-07, strict): invalid UTF-8 is an
+        // error, never silently swallowed to None (forecast_panel_impl does
+        // the case-insensitive "reduced"/"complete" validation).
         let model_pool_str: Option<&str> = if model_pool.is_null() {
             None
         } else {
-            CStr::from_ptr(model_pool)
-                .to_str()
-                .ok()
-                .filter(|s| !s.is_empty())
+            let s = CStr::from_ptr(model_pool).to_str().map_err(|_| {
+                PanelForecastError::InvalidParameter("model_pool: invalid UTF-8".to_string())
+            })?;
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
         };
 
         // Slice the flat matrix — Rust owns nothing, just a view
@@ -7213,6 +8430,7 @@ pub unsafe extern "C" fn anofox_ts_forecast_panel(
                 // Map PanelForecastError variant to ErrorCode
                 let code = match &e {
                     PanelForecastError::InvalidModel(_) => ErrorCode::InvalidModel,
+                    PanelForecastError::InvalidParameter(_) => ErrorCode::InvalidInput,
                     PanelForecastError::Upstream(
                         anofox_forecast::ForecastError::InsufficientData { .. },
                     ) => ErrorCode::InsufficientData,
@@ -7254,6 +8472,16 @@ pub unsafe extern "C" fn anofox_free_panel_forecast_result(result: *mut PanelFor
 // Panel FFI tests (Task 1)
 // ============================================================================
 
+// Shared std+serde_json-only fixture loader, reached via a relative
+// #[path] below from CARGO_MANIFEST_DIR (this crate's own directory) —
+// the same loader file anofox-fcst-core itself #[path]s in from its own
+// crate root, not a duplicate copy (09-03; see 09-RESEARCH.md Open
+// Question 2). repo_root() inside it resolves identically from either
+// crate, since both sit two directories below the workspace root.
+#[cfg(test)]
+#[path = "../../anofox-fcst-core/tests/common/mod.rs"]
+mod test_fixtures;
+
 #[cfg(test)]
 mod panel_ffi_tests {
     use super::*;
@@ -7282,13 +8510,30 @@ mod panel_ffi_tests {
         assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
         let preds = result.unwrap();
         assert_eq!(preds.len(), 3, "expected 3 series forecasts");
+        // WR-03 (Phase 18 review): the former (0.0..=30.0)/(0.0..=40.0)/
+        // (0.0..=25.0) bounds were 2-3x the true per-series range and would
+        // pass a systematically-too-high/low forecast. Closed form: each
+        // series is perfectly linear (s1: 1..12 step 1, s2: 3..19.5 step
+        // 1.5, s3: 2.4..11.2 step 0.8). Bound = [first_value, last_value +
+        // span] per series, where span = last-first -- the lower bound rules
+        // out a forecast that regresses below the series' own historical
+        // minimum, the upper bound allows one more "span" of growth beyond
+        // the last observed point (headroom for GlobalETS pooling shared
+        // parameters across the panel, confirmed live: observed
+        // [[12.77..14.99], [20.65..23.98], [11.82..13.59]] for s1/s2/s3).
+        let bounds = [(1.0, 23.0), (3.0, 36.0), (2.4, 20.0)];
         for (i, series_preds) in preds.iter().enumerate() {
             assert_eq!(series_preds.len(), 4, "expected horizon=4 for series {}", i);
+            let (lo, hi) = bounds[i];
             for &v in series_preds {
                 assert!(
                     v.is_finite(),
                     "expected finite forecast, got NaN/Inf for series {}",
                     i
+                );
+                assert!(
+                    (lo..=hi).contains(&v),
+                    "series {i} forecast {v} out of sane range [{lo}, {hi}]"
                 );
             }
         }
@@ -7312,10 +8557,20 @@ mod panel_ffi_tests {
         );
         let preds = result.unwrap();
         assert_eq!(preds.len(), 3);
-        for series_preds in &preds {
+        // Value check: same tightened per-series sane magnitude bounds as
+        // test_happy_path_global_ets (the s1 interior NaN gap is imputed,
+        // so the forecast should still track s1's own ~1..12 range). See
+        // WR-03 comment above for the closed-form derivation.
+        let bounds = [(1.0, 23.0), (3.0, 36.0), (2.4, 20.0)];
+        for (i, series_preds) in preds.iter().enumerate() {
             assert_eq!(series_preds.len(), 4);
+            let (lo, hi) = bounds[i];
             for &v in series_preds {
                 assert!(v.is_finite(), "expected no NaN after imputation");
+                assert!(
+                    (lo..=hi).contains(&v),
+                    "series {i} forecast {v} out of sane range [{lo}, {hi}]"
+                );
             }
         }
     }
@@ -7357,13 +8612,22 @@ mod panel_ffi_tests {
         );
         let preds = result.unwrap();
         assert_eq!(preds.len(), 3, "expected 3 series forecasts");
+        // Value check: same tightened per-series sane magnitude bounds as
+        // the GlobalETS happy-path test above. See WR-03 comment there for
+        // the closed-form derivation.
+        let bounds = [(1.0, 23.0), (3.0, 36.0), (2.4, 20.0)];
         for (i, series_preds) in preds.iter().enumerate() {
             assert_eq!(series_preds.len(), 4, "expected horizon=4 for series {}", i);
+            let (lo, hi) = bounds[i];
             for &v in series_preds {
                 assert!(
                     v.is_finite(),
                     "expected finite Theta forecast for series {}",
                     i
+                );
+                assert!(
+                    (lo..=hi).contains(&v),
+                    "series {i} forecast {v} out of sane range [{lo}, {hi}]"
                 );
             }
         }
@@ -7470,6 +8734,260 @@ mod panel_ffi_tests {
             );
         }
     }
+
+    /// D-07: croston_variant is case-insensitive and strict — "sba"/"SBA"
+    /// both select SBA, "classic"/"" select Classic, and a misspelling
+    /// ("sab") is a hard InvalidParameter — never a silent Classic default.
+    #[test]
+    fn croston_variant_case_insensitive_and_strict() {
+        let s1: Vec<f64> = vec![0.0, 3.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 4.0];
+        let s2: Vec<f64> = vec![1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 3.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        let s3: Vec<f64> = vec![0.0, 0.0, 5.0, 0.0, 0.0, 2.0, 0.0, 0.0, 4.0, 0.0, 0.0, 3.0];
+        let series: &[&[f64]] = &[&s1, &s2, &s3];
+        let flat = flat_from_series(series);
+
+        let upper = forecast_panel_impl(&flat, 3, 12, "GlobalCroston", 4, 0, None, Some("SBA"));
+        let lower = forecast_panel_impl(&flat, 3, 12, "GlobalCroston", 4, 0, None, Some("sba"));
+        assert!(upper.is_ok(), "SBA should succeed: {:?}", upper.err());
+        assert!(lower.is_ok(), "sba should succeed: {:?}", lower.err());
+        assert_eq!(
+            upper.unwrap(),
+            lower.unwrap(),
+            "case-insensitive SBA/sba must produce identical forecasts"
+        );
+
+        let classic_empty = forecast_panel_impl(&flat, 3, 12, "GlobalCroston", 4, 0, None, None);
+        let classic_named =
+            forecast_panel_impl(&flat, 3, 12, "GlobalCroston", 4, 0, None, Some("classic"));
+        assert!(classic_empty.is_ok());
+        assert!(classic_named.is_ok());
+        assert_eq!(classic_empty.unwrap(), classic_named.unwrap());
+
+        let misspelled =
+            forecast_panel_impl(&flat, 3, 12, "GlobalCroston", 4, 0, None, Some("sab"));
+        assert!(
+            misspelled.is_err(),
+            "misspelled croston_variant must be a hard error, not a silent Classic default"
+        );
+        match misspelled.unwrap_err() {
+            PanelForecastError::InvalidParameter(msg) => {
+                assert!(
+                    msg.contains("croston_variant") && msg.contains("sab"),
+                    "error should name croston_variant and the bad value, got: {msg}"
+                );
+            }
+            other => panic!("expected InvalidParameter, got: {:?}", other),
+        }
+    }
+
+    /// D-07: GlobalETS model_pool is case-insensitive and strict —
+    /// "complete"/"Complete" both accepted, and a misspelling ("compete")
+    /// is a hard InvalidParameter — never a silent Reduced default.
+    #[test]
+    fn model_pool_case_insensitive_and_strict() {
+        let s1: Vec<f64> = (1..=12).map(|x| x as f64).collect();
+        let s2: Vec<f64> = (2..=13).map(|x| x as f64 * 1.5).collect();
+        let s3: Vec<f64> = (3..=14).map(|x| x as f64 * 0.8).collect();
+        let series: &[&[f64]] = &[&s1, &s2, &s3];
+        let flat = flat_from_series(series);
+
+        let title_case =
+            forecast_panel_impl(&flat, 3, 12, "GlobalETS", 4, 0, Some("Complete"), None);
+        let lower_case =
+            forecast_panel_impl(&flat, 3, 12, "GlobalETS", 4, 0, Some("complete"), None);
+        assert!(
+            title_case.is_ok(),
+            "Complete should succeed: {:?}",
+            title_case.err()
+        );
+        assert!(
+            lower_case.is_ok(),
+            "complete should succeed: {:?}",
+            lower_case.err()
+        );
+
+        let misspelled =
+            forecast_panel_impl(&flat, 3, 12, "GlobalETS", 4, 0, Some("compete"), None);
+        assert!(
+            misspelled.is_err(),
+            "misspelled model_pool must be a hard error, not a silent Reduced default"
+        );
+        match misspelled.unwrap_err() {
+            PanelForecastError::InvalidParameter(msg) => {
+                assert!(
+                    msg.contains("model_pool") && msg.contains("compete"),
+                    "error should name model_pool and the bad value, got: {msg}"
+                );
+            }
+            other => panic!("expected InvalidParameter, got: {:?}", other),
+        }
+    }
+
+    /// D-07, FFI boundary: a misspelled croston_variant reaching the real
+    /// `anofox_ts_forecast_panel` entry point returns `false` with
+    /// `ErrorCode::InvalidInput` — proves the strict parsing is wired
+    /// through the C string marshalling, not just the testable inner fn.
+    #[test]
+    fn ffi_croston_variant_misspelled_returns_invalid_input() {
+        use std::ffi::CString;
+
+        let s1: Vec<f64> = vec![0.0, 3.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 4.0];
+        let s2: Vec<f64> = vec![1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 3.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        let s3: Vec<f64> = vec![0.0, 0.0, 5.0, 0.0, 0.0, 2.0, 0.0, 0.0, 4.0, 0.0, 0.0, 3.0];
+        let series: &[&[f64]] = &[&s1, &s2, &s3];
+        let flat = flat_from_series(series);
+
+        let method = CString::new("GlobalCroston").unwrap();
+        let variant = CString::new("sab").unwrap();
+
+        let mut out_result = PanelForecastResult::default();
+        let mut out_error = AnofoxError::success();
+
+        let ok = unsafe {
+            anofox_ts_forecast_panel(
+                flat.as_ptr(),
+                3,
+                12,
+                method.as_ptr(),
+                4,
+                0,
+                variant.as_ptr(),
+                std::ptr::null(),
+                &mut out_result as *mut PanelForecastResult,
+                &mut out_error as *mut AnofoxError,
+            )
+        };
+
+        assert!(!ok, "misspelled croston_variant must return false");
+        assert_eq!(out_error.code, ErrorCode::InvalidInput);
+        let msg = unsafe { CStr::from_ptr(out_error.message.as_ptr()) }
+            .to_str()
+            .unwrap_or("");
+        assert!(
+            msg.contains("croston_variant"),
+            "error message should name croston_variant, got: {msg}"
+        );
+    }
+
+    /// DEP-02 proof point: every (case, method) in the panel_nan_guard
+    /// fixture gets exactly its fixture outcome — "finite" => Ok with
+    /// n_series rows of horizon all-finite values, "error" => Err. An
+    /// all-missing series reaches the model as all-NaN (fill_nulls_interpolate
+    /// leaves an all-None series NaN — see imputation.rs) and +inf is never
+    /// imputed, so the anofox-forecast >=0.15.9 global-model guards must
+    /// reject both rather than silently returning a zero/NaN forecast.
+    #[test]
+    fn panel_nan_guard_fixture_outcomes() {
+        let fx = crate::test_fixtures::load_fixture("panel_nan_guard/cases.json");
+        let horizon = crate::test_fixtures::num(&fx["parameters"]["horizon"]) as usize;
+        let seasonal_period =
+            crate::test_fixtures::num(&fx["parameters"]["seasonal_period"]) as usize;
+
+        let cases = fx["cases"]
+            .as_object()
+            .expect("panel_nan_guard/cases.json: 'cases' is not an object");
+
+        let mut mismatches: Vec<String> = Vec::new();
+
+        for (case_name, case) in cases {
+            let n_series = crate::test_fixtures::num(&case["n_series"]) as usize;
+            let series_len = crate::test_fixtures::num(&case["series_len"]) as usize;
+
+            let rows = case["values"]
+                .as_array()
+                .unwrap_or_else(|| panic!("{case_name}: 'values' is not an array"));
+            let mut flat: Vec<f64> = Vec::with_capacity(n_series * series_len);
+            for row in rows {
+                let row_vals = crate::test_fixtures::f64_vec(row);
+                assert_eq!(
+                    row_vals.len(),
+                    series_len,
+                    "{case_name}: series row has length {}, want series_len={series_len}",
+                    row_vals.len()
+                );
+                flat.extend(row_vals);
+            }
+            assert_eq!(
+                flat.len(),
+                n_series * series_len,
+                "{case_name}: flattened length {} != n_series*series_len={}",
+                flat.len(),
+                n_series * series_len
+            );
+
+            let expect = case["expect"]
+                .as_object()
+                .unwrap_or_else(|| panic!("{case_name}: 'expect' is not an object"));
+
+            for (method, outcome) in expect {
+                let want_outcome = outcome.as_str().unwrap_or_else(|| {
+                    panic!("{case_name}.{method}: 'expect' value is not a string")
+                });
+
+                let result = forecast_panel_impl(
+                    &flat,
+                    n_series,
+                    series_len,
+                    method,
+                    horizon,
+                    seasonal_period,
+                    None,
+                    None,
+                );
+
+                match (want_outcome, &result) {
+                    ("finite", Ok(preds)) => {
+                        if preds.len() != n_series {
+                            mismatches.push(format!(
+                                "{case_name}.{method}: expected {n_series} series rows, got {}",
+                                preds.len()
+                            ));
+                            continue;
+                        }
+                        for (s, row) in preds.iter().enumerate() {
+                            if row.len() != horizon {
+                                mismatches.push(format!(
+                                    "{case_name}.{method}: series {s} has {} values, want horizon={horizon}",
+                                    row.len()
+                                ));
+                                continue;
+                            }
+                            if let Some((h, v)) =
+                                row.iter().enumerate().find(|(_, v)| !v.is_finite())
+                            {
+                                mismatches.push(format!(
+                                    "{case_name}.{method}: series {s} step {h} is non-finite: {v}"
+                                ));
+                            }
+                        }
+                    }
+                    ("finite", Err(e)) => {
+                        mismatches.push(format!(
+                            "{case_name}.{method}: expected finite, got Err: {e}"
+                        ));
+                    }
+                    ("error", Ok(preds)) => {
+                        mismatches.push(format!(
+                            "{case_name}.{method}: expected error, got Ok: {preds:?}"
+                        ));
+                    }
+                    ("error", Err(_)) => {}
+                    (other, _) => {
+                        mismatches.push(format!(
+                            "{case_name}.{method}: unexpected expect value {other:?}"
+                        ));
+                    }
+                }
+            }
+        }
+
+        assert!(
+            mismatches.is_empty(),
+            "panel_nan_guard_fixture_outcomes: {} mismatch(es):\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
 }
 
 // ============================================================================
@@ -7556,8 +9074,23 @@ mod kalman_garch_ffi_tests {
         );
         let point = result.unwrap();
         assert_eq!(point.len(), 5, "Kalman FFI must return 5 point forecasts");
+        // WR-03 (Phase 18 review): the former (0.0..=40.0) bound was nearly
+        // double the true 10..22 input range. Closed form: input is
+        // perfectly linear (value[i] = 10+0.5i, i=0..24), last observed =
+        // 22, span = 12. A local-level Kalman filter has no trend
+        // component, so it should persist near the trailing filtered level
+        // rather than continue the trend -- confirmed live: observed flat
+        // forecast of 20.65 across all 5 horizon steps. Bound at
+        // last_observed +/- span/2 (15.0..=25.0 comfortably contains 20.65
+        // while still catching a trend-continuation regression, which would
+        // push forecasts up toward/past 24, or a magnitude blowup/sign
+        // flip).
         for &v in &point {
             assert!(v.is_finite(), "Kalman FFI forecast must be finite");
+            assert!(
+                (15.0..=25.0).contains(&v),
+                "Kalman forecast {v} out of sane range"
+            );
         }
     }
 
@@ -7594,6 +9127,79 @@ mod kalman_garch_ffi_tests {
             ll[0], llt[0],
             "local_level and local_linear_trend must produce different forecasts"
         );
+    }
+}
+
+// ============================================================================
+// Strict FFI option-string parsing (D-07/T-10-07, plan 10-02 Task 2)
+// ============================================================================
+
+#[cfg(test)]
+mod strict_option_parsing_ffi_tests {
+    use super::*;
+
+    fn values() -> Vec<f64> {
+        (0..30).map(|i| 10.0 + i as f64 * 0.5).collect()
+    }
+
+    fn call_raw(opts: &ForecastOptions) -> (bool, ErrorCode) {
+        let data = values();
+        let n_words = data.len().div_ceil(64);
+        let validity: Vec<u64> = vec![u64::MAX; n_words];
+        let mut result = ForecastResult::default();
+        let mut error = AnofoxError::default();
+        let ok = unsafe {
+            anofox_ts_forecast(
+                data.as_ptr(),
+                validity.as_ptr(),
+                data.len(),
+                opts as *const ForecastOptions,
+                &mut result as *mut ForecastResult,
+                &mut error as *mut AnofoxError,
+            )
+        };
+        if !ok {
+            unsafe { anofox_free_forecast_result(&mut result as *mut ForecastResult) };
+        }
+        (ok, error.code)
+    }
+
+    #[test]
+    fn invalid_utf8_model_name_is_invalid_input_not_auto_fallback() {
+        let mut opts = ForecastOptions::default();
+        // A lone 0xFF byte is never valid UTF-8 continuation/lead; followed
+        // by a NUL terminator so c_field_str's bounded read still finds one.
+        opts.model[0] = 0xFFu8 as i8;
+        opts.model[1] = 0;
+        opts.horizon = 5;
+
+        let (ok, code) = call_raw(&opts);
+        assert!(
+            !ok,
+            "invalid UTF-8 model name must fail, not silently fall back to \"auto\""
+        );
+        assert_eq!(code, ErrorCode::InvalidInput);
+    }
+
+    #[test]
+    fn malformed_seasonal_periods_entry_is_invalid_input() {
+        let mut opts = ForecastOptions::default();
+        let model = b"MSTL\0";
+        for (i, &b) in model.iter().enumerate() {
+            opts.model[i] = b as i8;
+        }
+        let periods = b"[7, abc]\0";
+        for (i, &b) in periods.iter().enumerate() {
+            opts.seasonal_periods_str[i] = b as i8;
+        }
+        opts.horizon = 5;
+
+        let (ok, code) = call_raw(&opts);
+        assert!(
+            !ok,
+            "a non-numeric seasonal_periods entry must fail, not be silently dropped"
+        );
+        assert_eq!(code, ErrorCode::InvalidInput);
     }
 }
 
@@ -7962,8 +9568,10 @@ mod var_ffi_tests {
 ///
 /// Mirrors `anofox_ts_forecast` but dispatches to
 /// `anofox_fcst_core::forecast_explicit_ensemble` rather than the single-model
-/// `forecast()` path.  Point forecasts only in Phase 5; `lower_bounds` and
-/// `upper_bounds` are always `null` (prediction intervals deferred to EPI-01).
+/// `forecast()` path. `lower_bounds`/`upper_bounds` are the crate `Ensemble`'s
+/// own `predict_with_intervals` bounds (pooled across members) at
+/// `confidence_level` (D-01, plan 10-03) — `null` only when the crate itself
+/// returns no bounds, matching every other forecast entry point's convention.
 ///
 /// # Safety
 /// All pointer arguments must be valid for the stated lengths: `values`/`validity`
@@ -7981,6 +9589,7 @@ pub unsafe extern "C" fn anofox_ts_forecast_ensemble(
     combination_method: *const c_char, // C string, NULL or "" → "mean"
     seasonal_period: c_int,
     horizon: c_int,
+    confidence_level: c_double,
     out_result: *mut ForecastResult,
     out_error: *mut AnofoxError,
 ) -> bool {
@@ -8036,6 +9645,7 @@ pub unsafe extern "C" fn anofox_ts_forecast_ensemble(
             &member_names,
             method_opt.as_deref(),
             seasonal_period as usize,
+            confidence_level,
         )
     }));
 
@@ -8054,14 +9664,31 @@ pub unsafe extern "C" fn anofox_ts_forecast_ensemble(
                 Err(()) => return false,
             };
 
-            // Point-only in Phase 5 — NULL intervals (EPI-01 deferred to Phase 6)
-            (*out_result).lower_bounds = ptr::null_mut();
-            (*out_result).upper_bounds = ptr::null_mut();
+            // D-01 (plan 10-03): the crate Ensemble's own pooled prediction
+            // interval bounds — null only when the crate itself returns
+            // none (matching alloc_or_error's empty-vec convention).
+            (*out_result).lower_bounds = match alloc_or_error(
+                &forecast.lower,
+                out_error,
+                "Failed to allocate lower bounds",
+            ) {
+                Ok(ptr) => ptr,
+                Err(()) => return false,
+            };
+            (*out_result).upper_bounds = match alloc_or_error(
+                &forecast.upper,
+                out_error,
+                "Failed to allocate upper bounds",
+            ) {
+                Ok(ptr) => ptr,
+                Err(()) => return false,
+            };
 
             // No fitted values / residuals in ensemble path
             (*out_result).fitted_values = ptr::null_mut();
             (*out_result).n_fitted = 0;
             (*out_result).residuals = ptr::null_mut();
+            (*out_result).n_residuals = 0;
 
             // Copy model name ("Ensemble")
             copy_string_to_buffer(&forecast.model_name, &mut (*out_result).model_name);

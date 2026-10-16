@@ -1,5 +1,7 @@
 # name: test/sql/ts_prepare_regression_input.test
-# description: Tests for ts_prepare_regression_input - regression model data adapter
+# description: Tests for the regression model data-adapter workflow (ported from the
+#   removed ts_prepare_regression_input_by to the documented ts_cv_hydrate_by + explicit
+#   masked_target CASE expression pattern, Phase 18, 18-01, class A)
 # group: [sql]
 
 require anofox_forecast
@@ -21,29 +23,50 @@ SELECT
 FROM generate_series(0, 59) AS t(i)
 CROSS JOIN (SELECT UNNEST(['A', 'B']) AS series_id) s;
 
+# ts_cv_split_by's frequency parameter was removed in commit 3032738 ("feat: remove
+# frequency parameter from ts_cv_split_by") -- it was parsed but never used; the
+# native implementation now uses position-based indexing. Current signature:
+# ts_cv_split_by(source, group_col, date_col, target_col, training_end_times, horizon, params)
 statement ok
 CREATE TABLE cv_splits AS
 SELECT * FROM ts_cv_split_by(
     'sales_data', series_id, date, revenue,
-    ['2024-01-30'::DATE, '2024-02-15'::DATE], 7, '1d', MAP{}
+    ['2024-01-30'::DATE, '2024-02-15'::DATE], 7, MAP{}
 );
 
 #######################################
-# ts_prepare_regression_input - Basic Tests
+# ML Regression Workflow - Basic Tests
+#
+# ts_prepare_regression_input_by was removed in commit 88839f1 "refactor: simplify CV
+# feature hydration with ts_cv_hydrate_by" alongside ts_hydrate_split_by/_full_by/_strict_by
+# and ts_hydrate_features_by, replaced by a single ts_cv_hydrate_by(cv_folds, source,
+# group_col, date_col, unknown_features, params) function. ts_cv_hydrate_by masks UNKNOWN
+# FEATURE columns automatically but always passes the raw target column through -- masking
+# the TARGET itself for test rows (what ts_prepare_regression_input_by's `masked_target`
+# did) is the documented caller-side pattern in docs/api/08-cross-validation.md's "ML
+# Regression Workflow": `CASE WHEN split = 'test' THEN NULL ELSE revenue END AS target`.
+# There is no `_is_test` flag either; `split = 'test'` is the direct equivalent. Values
+# below are measured against a fresh Phase-17-complete build (Phase 18, 18-01, class A port).
 #######################################
 
 # Test returns rows for both train and test
 query I
-SELECT COUNT(*) > 0 FROM ts_prepare_regression_input_by(
-    'cv_splits', 'sales_data', series_id, date, revenue, MAP{}
+SELECT COUNT(*) > 0 FROM (
+    SELECT series_id, date, fold_id, split,
+        CASE WHEN split = 'test' THEN NULL ELSE revenue END AS masked_target,
+        temperature, is_weekend
+    FROM ts_cv_hydrate_by('cv_splits', 'sales_data', series_id, date, ['temperature', 'is_weekend'], MAP{})
 );
 ----
 true
 
 # Test that test rows have NULL masked_target
 query II
-SELECT split, COUNT(*) AS n_null_target FROM ts_prepare_regression_input_by(
-    'cv_splits', 'sales_data', series_id, date, revenue, MAP{}
+SELECT split, COUNT(*) AS n_null_target FROM (
+    SELECT series_id, date, fold_id, split,
+        CASE WHEN split = 'test' THEN NULL ELSE revenue END AS masked_target,
+        temperature, is_weekend
+    FROM ts_cv_hydrate_by('cv_splits', 'sales_data', series_id, date, ['temperature', 'is_weekend'], MAP{})
 ) WHERE masked_target IS NULL
 GROUP BY split;
 ----
@@ -52,8 +75,11 @@ test	28
 # Test that train rows have non-NULL masked_target
 query II
 SELECT split, SUM(CASE WHEN masked_target IS NOT NULL THEN 1 ELSE 0 END) > 0 AS has_targets
-FROM ts_prepare_regression_input_by(
-    'cv_splits', 'sales_data', series_id, date, revenue, MAP{}
+FROM (
+    SELECT series_id, date, fold_id, split,
+        CASE WHEN split = 'test' THEN NULL ELSE revenue END AS masked_target,
+        temperature, is_weekend
+    FROM ts_cv_hydrate_by('cv_splits', 'sales_data', series_id, date, ['temperature', 'is_weekend'], MAP{})
 )
 GROUP BY split
 ORDER BY split DESC;
@@ -61,43 +87,55 @@ ORDER BY split DESC;
 train	true
 test	false
 
-# Test _is_test flag matches split
+# Test split = 'test' matches masked_target IS NULL (replaces the old _is_test flag)
 query I
-SELECT COUNT(*) FROM ts_prepare_regression_input_by(
-    'cv_splits', 'sales_data', series_id, date, revenue, MAP{}
-) WHERE (_is_test AND split = 'test') OR (NOT _is_test AND split = 'train');
+SELECT COUNT(*) FROM (
+    SELECT series_id, date, fold_id, split,
+        CASE WHEN split = 'test' THEN NULL ELSE revenue END AS masked_target,
+        temperature, is_weekend
+    FROM ts_cv_hydrate_by('cv_splits', 'sales_data', series_id, date, ['temperature', 'is_weekend'], MAP{})
+) WHERE (split = 'test' AND masked_target IS NULL) OR (split = 'train' AND masked_target IS NOT NULL);
 ----
 180
 
 #######################################
-# ts_prepare_regression_input - Features Preserved
+# ML Regression Workflow - Features Preserved
 #######################################
 
 # Test that feature columns are preserved
 query I
-SELECT COUNT(*) FROM ts_prepare_regression_input_by(
-    'cv_splits', 'sales_data', series_id, date, revenue, MAP{}
+SELECT COUNT(*) FROM (
+    SELECT series_id, date, fold_id, split,
+        CASE WHEN split = 'test' THEN NULL ELSE revenue END AS masked_target,
+        temperature, is_weekend
+    FROM ts_cv_hydrate_by('cv_splits', 'sales_data', series_id, date, ['temperature', 'is_weekend'], MAP{})
 ) WHERE temperature IS NOT NULL AND is_weekend IS NOT NULL;
 ----
 180
 
 #######################################
-# ts_prepare_regression_input - Fold Structure
+# ML Regression Workflow - Fold Structure
 #######################################
 
 # Test all folds are represented
 query I
-SELECT COUNT(DISTINCT fold_id) FROM ts_prepare_regression_input_by(
-    'cv_splits', 'sales_data', series_id, date, revenue, MAP{}
+SELECT COUNT(DISTINCT fold_id) FROM (
+    SELECT series_id, date, fold_id, split,
+        CASE WHEN split = 'test' THEN NULL ELSE revenue END AS masked_target,
+        temperature, is_weekend
+    FROM ts_cv_hydrate_by('cv_splits', 'sales_data', series_id, date, ['temperature', 'is_weekend'], MAP{})
 );
 ----
 2
 
 # Test both series are in each fold
 query III
-SELECT fold_id, split, COUNT(DISTINCT group_col) AS n_series
-FROM ts_prepare_regression_input_by(
-    'cv_splits', 'sales_data', series_id, date, revenue, MAP{}
+SELECT fold_id, split, COUNT(DISTINCT series_id) AS n_series
+FROM (
+    SELECT series_id, date, fold_id, split,
+        CASE WHEN split = 'test' THEN NULL ELSE revenue END AS masked_target,
+        temperature, is_weekend
+    FROM ts_cv_hydrate_by('cv_splits', 'sales_data', series_id, date, ['temperature', 'is_weekend'], MAP{})
 )
 GROUP BY fold_id, split
 ORDER BY fold_id, split DESC;

@@ -1,0 +1,1099 @@
+# name: test/sql/ts_detection_reference.test
+# description: Phase 15 detection/decomposition value assertions against checked-in fixtures (plans 15-01..15-05)
+# group: [sql]
+#
+# Non-json-gated so it runs on every native build (Phase 13 lesson, D-12).
+# Literals below are copied from fixture JSON via a one-line python3 snippet,
+# e.g. for validation/reference/fixtures/numpy_detrend/polyfit_cases.json:
+#   python3 -c "import json; d=json.load(open('validation/reference/fixtures/numpy_detrend/polyfit_cases.json')); cases={c['name']: c for c in d['cases']}; print(cases['cubic40']['degrees']['3']['fitted'])"
+#
+# This file stays free of any json-extension requirement line (Phase 13
+# lesson) -- every macro used here is json-free (ts_detrend_by,
+# ts_classify_seasonality_by).
+
+require anofox_forecast
+
+#######################################
+# 15-01: ts_detrend / ts_detrend_by on numpy_detrend/polyfit_cases.json
+# cubic40 (DEP-03, WRAP-01, D-01, D-02) -- before the fdars-core 0.47 bump
+# (B1), every trend value here was 0.0 and method was 'auto(none)'.
+#######################################
+
+statement ok
+CREATE TABLE c40 AS
+SELECT 'c40' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, v
+FROM (SELECT unnest(range(40)) AS i, unnest([
+    3.3415, 3.4674, 3.4188, 3.6566, 4.3669, 4.343, 3.1133, 2.6994, 2.7134,
+    2.6692, 1.7653, 1.5972, 0.6845, 0.1635, -0.0077, -0.6544, -1.8044,
+    -1.4394, -2.6328, -3.0114, -2.8217, -3.089, -3.2557, -3.4062, -3.91,
+    -3.6834, -2.7239, -2.704, -2.0794, -0.9526, 0.2703, 0.9545, 3.247,
+    3.8274, 6.3386, 8.1952, 10.5395, 13.0925, 16.4851, 19.1749
+]) AS v);
+
+# --- method 'cubic' -> polynomial(3), n_params 4 ---
+
+query I
+SELECT max(abs(t - e)) <= 1e-8
+FROM (SELECT unnest((SELECT ts_detrend(LIST(v ORDER BY ds), 'cubic') FROM c40).trend) AS t,
+             unnest([
+    3.154511161980401, 3.533623876010552, 3.769283044848695, 3.8732775038496206,
+    3.857396088368119, 3.7334276337589816, 3.5131609753769975, 3.2083849485769584,
+    2.8308883887136544, 2.3924601311418767, 1.9048890112164134, 1.379963864292057,
+    0.829473525723599, 0.2652068308658291, -0.301047384926465, -0.8575002862984888,
+    -1.3923630378954535, -1.8938468043625667, -2.350162750345045, -2.749522040488089,
+    -3.080135839436913, -3.3302153118367217, -3.4879716223327337, -3.541615935570152,
+    -3.4793594161941828, -3.2894132288500417, -2.95998853818294, -2.4792965088380816,
+    -1.8355483054606765, -1.0169550926959312, -0.011728035189070063, 1.1919217024147128,
+    2.6057829554702048, 4.2416445593321965, 6.111295349355477, 8.226524160894819,
+    10.59911982930505, 13.24087118994094, 16.163567078157257, 19.378996329308837
+]) AS e);
+----
+true
+
+query I
+SELECT (SELECT ts_detrend(LIST(v ORDER BY ds), 'cubic') FROM c40).method;
+----
+polynomial(3)
+
+query I
+SELECT (SELECT ts_detrend(LIST(v ORDER BY ds), 'cubic') FROM c40).n_params;
+----
+4
+
+# --- method 'quadratic' -> polynomial(2), n_params 3 ---
+
+query I
+SELECT max(abs(t - e)) <= 1e-8
+FROM (SELECT unnest((SELECT ts_detrend(LIST(v ORDER BY ds), 'quadratic') FROM c40).trend) AS t,
+             unnest([
+    8.541419477351912, 7.263021940498522, 6.059264312516747, 4.930146593406589,
+    3.875668783168047, 2.895830881801122, 1.9906328893058127, 1.1600748056821182,
+    0.40415663093004106, -0.2771216349504204, -0.8837599919592662, -1.4157584400964947,
+    -1.8731169793621074, -2.2558356097561045, -2.5639143312784825, -2.7973531439292483,
+    -2.9561520477083967, -3.0403110426159294, -3.0498301286518448, -2.9847093058161445,
+    -2.8449485741088285, -2.630547933529897, -2.341507384079346, -1.9778269257571814,
+    -1.5395065585634011, -1.0265462824980052, -0.4389460975609918, 0.22329399624763724,
+    0.9601739989278872, 1.7716939104797484, 2.6578537309032253, 3.6186534601983187,
+    4.654093098365028, 5.764172645403353, 6.9488921013132945, 8.208251466094852,
+    9.542250739748026, 10.950889922272824, 12.43416901366923, 13.992088013937252
+]) AS e);
+----
+true
+
+query I
+SELECT (SELECT ts_detrend(LIST(v ORDER BY ds), 'quadratic') FROM c40).method;
+----
+polynomial(2)
+
+query I
+SELECT (SELECT ts_detrend(LIST(v ORDER BY ds), 'quadratic') FROM c40).n_params;
+----
+3
+
+# --- method 'linear' -> linear, n_params 2 ---
+
+query I
+SELECT max(abs(t - e)) <= 1e-8
+FROM (SELECT unnest((SELECT ts_detrend(LIST(v ORDER BY ds), 'linear') FROM c40).trend) AS t,
+             unnest([
+    -0.6766092682926831, -0.536848536585366, -0.397087804878049, -0.257327073170732,
+    -0.11756634146341494, 0.02219439024390213, 0.16195512195121908, 0.30171585365853615,
+    0.4414765853658532, 0.5812373170731703, 0.7209980487804873, 0.8607587804878044,
+    1.0005195121951211, 1.1402802439024384, 1.2800409756097553, 1.4198017073170726,
+    1.5595624390243894, 1.6993231707317062, 1.8390839024390235, 1.9788446341463404,
+    2.1186053658536577, 2.2583660975609745, 2.398126829268292, 2.5378875609756086,
+    2.6776482926829255, 2.8174090243902428, 2.9571697560975596, 3.096930487804877,
+    3.2366912195121937, 3.3764519512195106, 3.5162126829268283, 3.655973414634145,
+    3.795734146341462, 3.935494878048779, 4.075255609756096, 4.215016341463413,
+    4.35477707317073, 4.494537804878047, 4.634298536585364, 4.774059268292682
+]) AS e);
+----
+true
+
+query I
+SELECT (SELECT ts_detrend(LIST(v ORDER BY ds), 'linear') FROM c40).method;
+----
+linear
+
+query I
+SELECT (SELECT ts_detrend(LIST(v ORDER BY ds), 'linear') FROM c40).n_params;
+----
+2
+
+# --- ts_detrend_by parity: grouped macro matches the scalar function ---
+
+query I
+SELECT max(abs(t - e)) <= 1e-8
+FROM (
+    SELECT unnest(by_trend) AS t, unnest(scalar_trend) AS e
+    FROM (
+        SELECT
+            (SELECT trend FROM ts_detrend_by('c40', id, ds, v, 'cubic')) AS by_trend,
+            (SELECT ts_detrend(LIST(v ORDER BY ds), 'cubic') FROM c40).trend AS scalar_trend
+    )
+);
+----
+true
+
+# --- D-02 / B3: unknown method names raise an error naming every valid choice ---
+
+statement error
+SELECT ts_detrend([1.0, 2.0, 3.0, 4.0, 5.0], 'quartic');
+----
+expected one of
+
+statement error
+SELECT ts_detrend([1.0, 2.0, 3.0, 4.0, 5.0], '7');
+----
+expected one of
+
+# --- 1-argument form (no method) still defaults to auto ---
+
+query I
+SELECT starts_with((SELECT ts_detrend(LIST(v ORDER BY ds)) FROM c40).method, 'auto(');
+----
+true
+
+#######################################
+# 15-01: seasonality classification / amplitude modulation / decompose
+# (WRAP-01, D-01, D-02) -- before the fdars-core 0.47 bump (B2), the strong
+# sine below classified as 'non_seasonal' with NaN strength, and
+# ts_decompose_seasonal's trend on a constant series was not reliably 1.0.
+#######################################
+
+statement ok
+CREATE TABLE sine120 AS
+SELECT 'g1' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, (10 + 5 * sin(2 * pi() * i / 12))::DOUBLE AS v
+FROM range(120) t(i);
+
+# --- strong sine: stable_seasonal, is_seasonal, seasonal_strength >= 0.99 ---
+
+query I
+SELECT (ts_classify_seasonality(list_transform(range(120), lambda i: (10 + 5 * sin(2 * pi() * i / 12))::DOUBLE), 12.0)).is_seasonal;
+----
+true
+
+query I
+SELECT (ts_classify_seasonality(list_transform(range(120), lambda i: (10 + 5 * sin(2 * pi() * i / 12))::DOUBLE), 12.0)).timing_classification = 'stable_seasonal';
+----
+true
+
+query I
+SELECT (ts_classify_seasonality(list_transform(range(120), lambda i: (10 + 5 * sin(2 * pi() * i / 12))::DOUBLE), 12.0)).seasonal_strength >= 0.99;
+----
+true
+
+# --- same, through ts_classify_seasonality_by on a 120-row table ---
+
+query III
+SELECT is_seasonal, timing_classification, seasonal_strength >= 0.99
+FROM ts_classify_seasonality_by('sine120', id, ds, v, 12.0);
+----
+true	stable_seasonal	true
+
+# --- deterministic noise: not seasonal ---
+
+query I
+SELECT (ts_classify_seasonality(list_transform(range(120), lambda i: ((i * 7919) % 101) / 101.0 - 0.5), 12.0)).is_seasonal;
+----
+false
+
+# --- amplitude modulation: growing amplitude -> emerging, constant -> stable ---
+
+query I
+SELECT (ts_detect_amplitude_modulation(list_transform(range(240), lambda i: (1 + i / 30.0) * sin(2 * pi() * i / 12)), 12.0)).modulation_type;
+----
+emerging
+
+query I
+SELECT (ts_detect_amplitude_modulation(list_transform(range(240), lambda i: sin(2 * pi() * i / 12)), 12.0)).modulation_type;
+----
+stable
+
+# --- ts_decompose_seasonal: constant series -> trend exactly 1.0, seasonal ~0 ---
+
+query I
+SELECT max(abs(t - 1.0)) <= 1e-12
+FROM (SELECT unnest((ts_decompose_seasonal(list_transform(range(48), lambda i: 1.0), 12.0)).trend) AS t);
+----
+true
+
+# --- additive identity: trend + seasonal + remainder == input, within 1e-10 ---
+
+query I
+SELECT max(abs(tr + se + re - v)) <= 1e-10
+FROM (
+    SELECT unnest(tr_list) AS tr, unnest(se_list) AS se, unnest(re_list) AS re, unnest(v_list) AS v
+    FROM (
+        SELECT
+            (ts_decompose_seasonal(list_transform(range(120), lambda i: (10 + 0.1 * i + 3 * sin(2 * pi() * i / 12))::DOUBLE), 12.0)).trend AS tr_list,
+            (ts_decompose_seasonal(list_transform(range(120), lambda i: (10 + 0.1 * i + 3 * sin(2 * pi() * i / 12))::DOUBLE), 12.0)).seasonal AS se_list,
+            (ts_decompose_seasonal(list_transform(range(120), lambda i: (10 + 0.1 * i + 3 * sin(2 * pi() * i / 12))::DOUBLE), 12.0)).remainder AS re_list,
+            list_transform(range(120), lambda i: (10 + 0.1 * i + 3 * sin(2 * pi() * i / 12))::DOUBLE) AS v_list
+    )
+);
+----
+true
+
+# --- strict method / period validation (D-02, applied to decompose too) ---
+
+statement error
+SELECT ts_decompose_seasonal([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], 2.0, 'classicalish');
+----
+expected one of
+
+# WR-03: this used to hit a stale, now-removed FFI-level `period <= 0.0`
+# pre-check ("Period must be positive"); it now falls through to the
+# core-level check and gets the same unified message every other
+# non-finite/non-positive period path produces (CR-03/CR-05).
+statement error
+SELECT ts_decompose_seasonal([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], 0.0);
+----
+Period must be a positive finite number
+
+# CR-06 / CR-07 / WR-04 regression: ts_classify_seasonality (scalar) raised
+# for a NaN/Infinity period via its own locally-worded isfinite pre-check,
+# but silently returned NULL for an ordinary 0.0/-5.0 period (CR-06) with
+# message wording that diverged from every other period-validating
+# function (WR-04). ts_classify_seasonality_by's aggregate backend
+# (ts_classify_seasonality_agg) had an entirely separate, untouched copy of
+# the same defect class -- not even an isfinite guard, so a NaN period
+# reached a `static_cast<size_t>(2 * period)` UB cast directly (CR-07).
+# Both backends now delete their local pre-checks and delegate to the
+# single core-level check (crates/anofox-fcst-core/src/seasonality.rs ::
+# classify_seasonality), mapped to INVALID_INPUT at the FFI boundary, so
+# nan/inf/-inf/0.0/-5.0 all raise the SAME unified message on both the
+# scalar function and the _by macro -- no static_cast<size_t> of a
+# non-finite/negative double remains on either path.
+
+foreach period nan inf -inf -5.0 0.0
+
+statement error
+SELECT ts_classify_seasonality(
+    list_transform(range(120), lambda i: (10 + 5 * sin(2 * pi() * i / 12))::DOUBLE), '${period}'::DOUBLE
+);
+----
+Period must be a positive finite number
+
+statement error
+SELECT * FROM ts_classify_seasonality_by('sine120', id, ds, v, '${period}'::DOUBLE);
+----
+Period must be a positive finite number
+
+endloop
+
+# --- valid period on each: no regression from the CR-06/CR-07 fix ---
+
+query I
+SELECT (ts_classify_seasonality(list_transform(range(120), lambda i: (10 + 5 * sin(2 * pi() * i / 12))::DOUBLE), 12.0)).is_seasonal;
+----
+true
+
+query I
+SELECT is_seasonal FROM ts_classify_seasonality_by('sine120', id, ds, v, 12.0);
+----
+true
+
+#######################################
+# 15-02: ts_detect_peaks on scipy_peaks/cases.json rw150 (DET-01, D-05) -- a
+# direct port of scipy.signal.find_peaks. Before this plan, fdars-core's own
+# derivative zero-crossing detector found 25 peaks on this series (12 matching
+# scipy's 38, 5 reported local minima); plateau [0,1,1,1,0] reported index 1
+# with prominence 0.0 instead of scipy's midpoint index 2 with prominence 1.0.
+#######################################
+
+statement ok
+CREATE TABLE rw150 AS
+SELECT 'rw150' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, v
+FROM (SELECT unnest(range(150)) AS i, unnest(
+    [-1.454, -1.6625, -2.2946, -4.0556, -3.3207, -3.3441, -3.2727, -4.025, -3.5702, -4.1095, -4.2524, -5.3607, -6.5768, -5.2413, -5.7484, -5.4567, -5.4905, -5.9316, -6.4396, -5.8095, -6.1114, -6.2628, -6.2406, -5.0641, -4.3836, -4.001, -4.5645, -5.9465, -4.997, -4.0305, -4.1712, -3.6293, -2.8479, -2.0167, -1.0953, -1.551, -0.036, -1.2826, -0.4209, 0.0731, 0.9467, 2.8257, 4.3102, 3.165, 1.4763, 2.2932, 1.2782, 1.2658, 2.1055, 0.4617, -1.6483, -1.389, -1.3446, -1.5904, -1.5519, -2.4124, -3.9259, -4.0925, -5.0642, -6.7077, -6.202, -6.2634, -5.8569, -6.8462, -7.5043, -8.5033, -9.3899, -9.1945, -9.9775, -9.6214, -9.2817, -7.2565, -8.6493, -7.7614, -7.8509, -7.8649, -9.3148, -9.775, -9.0318, -9.1143, -9.0332, -9.3239, -8.1694, -8.1908, -10.3912, -11.0833, -13.0521, -16.3036, -16.8337, -15.5001, -15.453, -16.6255, -17.5662, -16.4356, -16.278, -16.23, -16.2835, -16.2451, -15.4397, -14.8871, -14.6714, -15.7143, -15.2031, -15.8874, -14.7935, -16.0646, -16.2022, -16.2096, -17.5342, -15.8122, -14.3518, -14.8154, -14.0437, -13.665, -16.2786, -16.0282, -16.0895, -16.0063, -17.0832, -17.3525, -17.5308, -16.3427, -16.0083, -16.0138, -14.4849, -15.0401, -15.4295, -17.2463, -15.6772, -14.7129, -13.796, -13.1271, -13.017, -12.8015, -13.0535, -13.2571, -13.2028, -11.6909, -11.1353, -11.1937, -11.7731, -12.4081, -10.8054, -10.2987, -10.2312, -10.5773, -11.6864, -11.7533, -10.8796, -11.2721]
+) AS v);
+
+# --- n_peaks matches scipy exactly ---
+
+query I
+SELECT (SELECT ts_detect_peaks(LIST(v ORDER BY ds)) FROM rw150).n_peaks;
+----
+38
+
+# --- peak indices match scipy exactly ---
+
+query I
+SELECT list_transform((SELECT ts_detect_peaks(LIST(v ORDER BY ds)) FROM rw150).peaks, p -> p.index)
+     = [4, 6, 8, 13, 15, 19, 25, 29, 34, 36, 42, 45, 48, 52, 54, 60, 62, 67, 71, 73, 78, 80, 82, 90, 95, 100, 102, 104, 110, 113, 115, 117, 122, 124, 133, 138, 144, 148]::BIGINT[];
+----
+true
+
+# --- prominences match scipy's peak_prominences within 1e-12 ---
+
+query I
+SELECT max(abs(got - want)) <= 1e-12
+FROM (
+    SELECT unnest(got_list) AS got, unnest(want_list) AS want
+    FROM (
+        SELECT
+            list_transform((SELECT ts_detect_peaks(LIST(v ORDER BY ds)) FROM rw150).peaks, p -> p.prominence) AS got_list,
+            [0.023400000000000087, 0.7829000000000002, 0.45480000000000054, 1.1983000000000006, 0.2917000000000005, 0.4533000000000005, 1.9455, 0.14069999999999983, 0.4557, 1.2466, 10.887, 0.8169000000000002, 0.8397000000000001, 0.3037000000000001, 0.03849999999999998, 0.0613999999999999, 0.8507999999999996, 0.19540000000000113, 2.720999999999999, 0.8879000000000001, 0.2920999999999996, 0.08109999999999928, 1.6056000000000008, 1.380700000000001, 0.05349999999999966, 2.8627999999999982, 0.5112000000000005, 1.0938999999999997, 0.46359999999999957, 3.8658, 0.0613000000000028, 0.2723000000000013, 0.005500000000001393, 2.761400000000002, 0.4555999999999987, 1.2727999999999984, 1.5221, 0.39250000000000007] AS want_list
+    )
+);
+----
+true
+
+# --- plateau midpoints: [0,1,1,1,0,2,2,0,3,3,3,3,1,0] -> peak indices [2, 5, 9] ---
+
+query I
+SELECT list_transform((ts_detect_peaks([0, 1, 1, 1, 0, 2, 2, 0, 3, 3, 3, 3, 1, 0]::DOUBLE[])).peaks, p -> p.index);
+----
+[2, 5, 9]
+
+#######################################
+# 15-02: ts_detect_peaks distance / prominence / smooth_first (DET-01, D-05)
+# sine240 from scipy_peaks/cases.json -- parameter mapping onto the scipy port.
+#######################################
+
+statement ok
+CREATE TABLE sine240_peaks AS
+SELECT 'sine240' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, v
+FROM (SELECT unnest(range(240)) AS i, unnest(
+    [2.5493, 1.3028, 2.4308, 2.7782, 5.177, 4.434, 6.4706, 4.175, 4.9883, 2.5192, 3.6899, 2.0347, -0.4522, -2.6214, -1.8198, -3.2958, -3.1333, -4.1239, -3.0472, -3.8958, -4.8218, -3.477, -2.5487, -1.2888, -1.4144, 1.1338, 2.2173, 3.0776, 3.2799, 4.7184, 4.4539, 4.8138, 3.5784, 1.9711, 3.2391, 1.0433, 0.1429, -1.171, -3.384, -2.9902, -3.0282, -4.6075, -5.0063, -4.8807, -3.3728, -4.0728, -4.0563, -2.86, 1.4552, 2.9945, 3.7906, 3.6793, 3.492, 6.1768, 5.303, 5.2719, 5.3594, 4.6188, 2.8634, 1.4794, 1.3073, -0.5247, -1.8071, -2.5793, -5.4727, -5.8569, -4.7404, -4.45, -4.1955, -3.7171, -2.186, 2.332, -1.6375, 3.6105, 4.4068, 5.255, 4.3021, 3.6349, 3.8344, 3.0199, 4.2293, 4.1631, 1.6368, 2.514, 1.7897, -1.0933, -2.5882, -2.8823, -4.6867, -4.9239, -4.9361, -3.7799, -4.7525, -0.9795, -2.8379, -1.1922, 0.5579, 0.6935, 1.9406, 2.801, 4.5823, 3.4091, 3.4919, 5.3178, 2.3162, 3.5858, 2.7631, 0.6495, -1.0108, -1.9737, -0.7532, -2.6294, -4.3066, -5.1779, -4.326, -5.9822, -5.0645, -4.1018, -3.2526, -1.305, 1.2325, 1.6167, 0.737, 3.1873, 4.1286, 4.8163, 4.7368, 5.3104, 4.2915, 4.7096, 2.6424, 2.7493, 0.9502, -2.7221, -1.0491, -3.5312, -1.6823, -5.2125, -5.0575, -5.1348, -4.6846, -3.3314, -2.6609, 0.458, 0.7649, 2.3556, 0.6317, 5.4364, 5.0984, 5.9352, 5.0899, 5.1495, 5.0436, 2.1653, 4.8397, 1.2359, 0.3679, -2.4028, -0.7132, -4.8841, -4.6025, -5.4316, -4.7408, -4.7646, -5.6186, -2.0132, -2.2516, -3.3538, -0.7118, 2.3535, 2.9545, 3.4425, 3.6696, 5.6953, 3.3534, 6.5171, 4.8534, 3.4389, 2.8037, 2.1621, 0.044, 0.014, -2.8511, -4.2366, -5.6497, -6.4797, -5.4341, -5.3191, -2.9137, -3.2788, -0.6151, -2.3038, -0.593, 1.5809, 0.8006, 2.6705, 4.6214, 4.8331, 5.6035, 5.1523, 3.4785, 4.8447, 2.6023, 1.8206, 0.5145, -2.0244, -4.6179, -4.4969, -4.2024, -4.2884, -4.9053, -4.4357, -4.204, -3.5524, -0.8272, -2.5112, -0.213, 1.0641, 2.7803, 2.5762, 3.6185, 5.717, 4.337, 4.3476, 4.6352, 3.8311, 1.3017, 1.2331, -0.8043, -0.0035, -5.2239, -2.2511, -4.8854, -5.4983, -4.17, -6.0261, -4.2451, -3.7479, -1.4536, 1.3362]
+) AS v);
+
+# --- min_distance = 8.0 matches scipy's distance=8 filter ---
+
+query I
+SELECT list_transform((SELECT ts_detect_peaks(LIST(v ORDER BY ds), 8.0) FROM sine240_peaks).peaks, p -> p.index)
+     = [6, 14, 23, 31, 39, 53, 75, 83, 93, 103, 114, 127, 136, 149, 158, 175, 190, 198, 208, 221, 229]::BIGINT[];
+----
+true
+
+# --- min_prominence = 2.0 matches scipy's prominence=2.0 filter ---
+
+query I
+SELECT list_transform((SELECT ts_detect_peaks(LIST(v ORDER BY ds), 0.0, 2.0) FROM sine240_peaks).peaks, p -> p.index)
+     = [6, 31, 53, 71, 75, 103, 127, 149, 154, 173, 175, 198, 221, 231]::BIGINT[];
+----
+true
+
+# --- NULL min_distance behaves like 0.0 (no distance filter) ---
+# A literal SQL NULL constant short-circuits to a NULL struct (DuckDB's
+# default null-propagation for scalar functions without SPECIAL_HANDLING,
+# unrelated to this plan) -- a column-sourced NULL reaches the C++ reader's
+# own per-row IsNull() check, which is what "NULL defaults to 0.0" means.
+
+statement ok
+CREATE TABLE peaks_null_check(v DOUBLE[], md DOUBLE);
+
+statement ok
+INSERT INTO peaks_null_check VALUES
+    ((SELECT LIST(v ORDER BY ds) FROM sine240_peaks), NULL),
+    ((SELECT LIST(v ORDER BY ds) FROM sine240_peaks), 0.0);
+
+query I
+SELECT (SELECT (ts_detect_peaks(v, md)).n_peaks FROM peaks_null_check WHERE md IS NULL)
+     = (SELECT (ts_detect_peaks(v, md)).n_peaks FROM peaks_null_check WHERE md = 0.0);
+----
+true
+
+# --- smooth_first = true: n_peaks > 0, strictly increasing indices ---
+
+query I
+SELECT n_peaks > 0
+FROM (SELECT (SELECT ts_detect_peaks(LIST(v ORDER BY ds), 0.0, 0.0, true) FROM sine240_peaks).n_peaks AS n_peaks);
+----
+true
+
+query I
+SELECT list_aggregate(list_transform(idx_pairs, p -> CASE WHEN p[2] > p[1] THEN 1 ELSE 0 END), 'min') = 1
+FROM (
+    SELECT list_zip(idx_list[1:len(idx_list)-1], idx_list[2:]) AS idx_pairs
+    FROM (
+        SELECT list_transform((SELECT ts_detect_peaks(LIST(v ORDER BY ds), 0.0, 0.0, true) FROM sine240_peaks).peaks, p -> p.index) AS idx_list
+    )
+);
+----
+true
+
+#######################################
+# 15-03: _ts_detect_changepoints_bocpd on changepoints/bocpd_cases.json
+# (DET-02, D-06) -- Adams & MacKay (2007) done properly: normalised
+# Student-t predictive, sample-mean Normal-Gamma update, truncation at run
+# length 500 that merges (not drops) tail mass. Before this plan,
+# _ts_detect_changepoints_bocpd(step3, 250.0, true).changepoint_indices was
+# [] (missed the 3-sigma step entirely); noise_n200 was already [] (quiet).
+#######################################
+
+statement ok
+CREATE TABLE cp_step3(v DOUBLE[]);
+
+statement ok
+INSERT INTO cp_step3 VALUES ([0.8124, 0.5121, -1.6321, -0.464, -1.5085, -0.7652, -0.8215, 0.1344, -0.4709, 0.7505, 0.154, -1.7269, 0.4008, -1.2641, -2.8944, 1.1227, 0.3614, 0.7357, 0.5137, 0.8956, 0.4817, 0.8458, -0.6263, 1.8073, -0.0799, 0.0376, 0.885, -1.0714, -0.8424, 0.0357, 1.846, -0.3138, 0.0336, -1.122, -0.7543, 1.0727, -2.205, 0.0531, 0.0635, 0.4272, 0.2369, 1.3929, -0.7024, 0.9383, 0.0546, -0.2927, 0.0838, -0.1133, -1.2452, 0.4658, 1.6324, 1.3166, -1.6216, -0.5718, 1.0288, -0.7311, 0.9142, 1.1385, -0.7531, 0.1175, 1.2762, -0.9058, -0.8084, 0.5278, -2.3272, -0.6363, 0.3165, 0.9679, -0.2493, -0.0635, 1.042, 0.7784, 0.0075, 0.3552, -0.7811, 1.1553, -0.2349, 1.0162, -1.1389, 0.3984, 0.9978, 0.2201, 1.7014, -1.0909, 0.536, 1.0299, -0.5885, 0.2106, -0.093, 1.103, 1.3378, -0.4593, 1.3286, 0.2065, -0.5327, 0.707, -0.6416, -1.2985, 0.571, -0.9699, 3.0294, 4.0121, 2.6283, 4.3128, 1.8563, 4.4043, 2.9344, 1.7757, 2.6652, 2.8403, 2.1531, 4.0227, 4.9324, 3.328, 2.5656, 2.9232, 3.189, 1.9308, 4.2624, 1.0634, 3.7564, 2.7786, 3.3132, 3.5177, 2.5827, 3.5234, 2.1713, 3.4278, 2.3518, 4.654, 2.6619, 3.4877, 2.9444, 2.3384, 3.6219, 4.0956, 4.4933, 1.6937, 2.3278, 3.2403, 2.9739, 1.9109, 3.2938, 2.2241, 3.9546, 0.7302, 2.3238, 3.6157, 3.5673, 2.8535, 3.8811, 2.1823, 3.6697, 4.1301, 2.8519, 2.4961, 2.3195, 2.6557, 1.9583, 3.3248, 1.996, 4.2028, 1.9987, 4.275, 0.4352, 3.4192, 2.6623, 3.986, 3.4, 3.8009, 2.5859, 2.2344, 4.0905, 3.8309, 4.3082, 2.0713, 2.5288, 4.0743, 2.8149, 2.4705, 1.9484, 3.6424, 2.6186, 3.1281, 3.6139, 1.6569, 3.3478, 3.6594, 0.9381, 3.5901, 3.521, 3.8752, 3.2188, 3.6145, 5.0984, 1.8587, 2.7569, 1.2983, 4.4161, 3.4032]::DOUBLE[]);
+
+statement ok
+CREATE TABLE cp_noise(v DOUBLE[]);
+
+statement ok
+INSERT INTO cp_noise VALUES ([-0.3253, -1.1078, -1.3428, -0.276, 2.1726, 0.2285, 0.1763, 0.7475, -0.4162, 1.6284, 0.3159, 1.4844, 0.1688, 0.3091, -0.8261, -0.1102, -0.2224, -0.24, -0.1603, -1.1274, -0.096, 1.7221, 0.6968, -1.4844, 1.2765, -0.1662, 0.4827, 1.0224, 1.6091, 0.6492, 0.001, -1.1587, -0.7794, 2.5641, -0.8404, -0.0624, -1.9984, 0.2567, 0.6162, 0.6059, -0.9217, -0.1514, 0.6772, -1.9925, -0.6509, 0.02, -1.1367, -0.1346, -0.3404, 1.488, -1.1019, 0.1024, 1.0103, 0.1585, 1.5269, 0.6456, 1.8528, -0.9228, 0.1105, -0.1002, -0.7583, 0.3944, 1.1198, 2.1787, -0.3612, -0.3131, 0.1738, -0.5814, -1.4417, -1.1772, 0.9897, 1.9667, -1.4107, 0.4073, 0.3553, -1.4703, -1.1298, -1.4793, -0.2448, -0.4744, 0.0275, 1.3507, -1.7841, -1.1821, 1.0669, 1.0774, 0.5123, 1.6358, -0.6766, 0.45, -0.3759, 0.17, -1.9028, 0.0535, 0.0255, -0.5281, 0.5559, -1.729, 1.3293, -0.3628, -0.3446, 2.5377, 1.4171, -1.4096, -0.4447, 1.3336, -0.6407, 1.3279, 1.6024, 0.6236, 1.8593, -0.3397, 0.4432, 0.1322, -0.0302, -0.0095, -0.5184, 1.023, -0.9364, 0.3414, 1.6452, 0.8689, 2.712, -0.1542, -0.8854, 0.2454, 0.6677, -0.9018, 0.1523, 0.1585, 0.0582, 0.5816, -0.879, 1.0801, 0.2992, 1.4025, -1.4269, 0.3179, -0.9061, 0.2135, 0.766, 0.5808, 0.385, 0.4292, 0.2629, -0.7921, 0.1247, -0.8194, -0.7075, 1.1851, -0.5527, 0.0383, 0.7053, 0.1118, 0.6125, -1.4254, -1.3381, 1.57, -0.4243, 0.4482, -0.1286, 0.1002, 0.6581, -0.7282, -0.8609, 0.4724, 0.1437, -1.4298, 1.2112, -0.5096, 1.1669, 1.4517, 2.1114, 0.5479, 1.2028, 2.3617, -0.2679, -0.0656, 0.4404, 1.4631, 0.926, -0.016, -0.949, -0.9597, -0.3549, 0.1079, 1.0066, 0.5475, -0.522, 0.9154, -1.5385, -0.5252, -0.3277, 0.8771, -2.4289, 0.4952, -1.9769, 0.829, -1.1086, 0.2414]::DOUBLE[]);
+
+statement ok
+CREATE TABLE cp_issue71(v DOUBLE[]);
+
+statement ok
+INSERT INTO cp_issue71 VALUES ([100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0]::DOUBLE[]);
+
+# --- step3 (hazard 250): changepoint_indices = [100] ---
+
+query I
+SELECT (SELECT (_ts_detect_changepoints_bocpd(v, 250.0, true)).changepoint_indices FROM cp_step3)
+     = [100]::UBIGINT[];
+----
+true
+
+# --- noise (hazard 250): changepoint_indices = [] (stays quiet) ---
+
+query I
+SELECT (SELECT (_ts_detect_changepoints_bocpd(v, 250.0, true)).changepoint_indices FROM cp_noise)
+     = []::UBIGINT[];
+----
+true
+
+# --- scale/shift invariance: step3 * 100 + 7 flags the same index (D-06) ---
+
+query I
+SELECT (SELECT (_ts_detect_changepoints_bocpd(list_transform(v, x -> x * 100 + 7), 250.0, true)).changepoint_indices FROM cp_step3)
+     = [100]::UBIGINT[];
+----
+true
+
+# --- issue-71 step ([100]*12 + [10]*12, hazard 250): flags [12], prob[13] (1-based) > 0.5 ---
+
+query I
+SELECT (SELECT (_ts_detect_changepoints_bocpd(v, 250.0, true)).changepoint_indices FROM cp_issue71)
+     = [12]::UBIGINT[];
+----
+true
+
+query I
+SELECT (SELECT (_ts_detect_changepoints_bocpd(v, 250.0, true)).changepoint_probability[13] FROM cp_issue71) > 0.5;
+----
+true
+
+# --- probability list matches the numpy reference's `prob` array within 1e-10 (step3) ---
+
+query I
+SELECT max(abs(got - want)) <= 1e-10
+FROM (
+    SELECT unnest((SELECT (_ts_detect_changepoints_bocpd(v, 250.0, true)).changepoint_probability FROM cp_step3)) AS got,
+           unnest([0.996, 0.0026783317667394093, 0.005659143440920622, 0.0017919865153640689, 0.0016187846511495593, 0.0013212741348115418, 0.0011922522355512623, 0.0019579110385591304, 0.0012112615976900502, 0.0035209801979547164, 0.0017255604523529237, 0.0015484937103743032, 0.0023034208870680627, 0.0010877286176098988, 0.004035875224455091, 0.006399416118889135, 0.002501534708117085, 0.003561184707780697, 0.0026978644141274466, 0.0038349595084134235, 0.0024105603180909255, 0.0031839664453927803, 0.0013467610008404255, 0.00978161514623609, 0.0015800266507258044, 0.0016286903652390709, 0.0031267467495731506, 0.0013695803756465913, 0.001199841557868842, 0.0015671848634526923, 0.010446992814566822, 0.0013519442956758973, 0.0015613937578991806, 0.001268282684375847, 0.0011688741005916922, 0.004092708874003754, 0.002725041850904957, 0.0016200575907568278, 0.0016082904720655542, 0.0021271819848728514, 0.0017845356026022989, 0.005995774811414448, 0.0011869291101704624, 0.0034377159920598354, 0.0015379277850553579, 0.001273447654304902, 0.001531350279977287, 0.001348377891630331, 0.0013158728630782495, 0.002072153652449923, 0.008407373232646334, 0.005122949733121124, 0.0018156954780564286, 0.0011881266836271899, 0.003726281568938264, 0.0011781524665071034, 0.003250770233957599, 0.004125594448269218, 0.0012010387711448832, 0.0015536183166446023, 0.00484561040738504, 0.0012312454849326732, 0.0011879556281510942, 0.00214325594730658, 0.0041574343098741764, 0.0011689729247815694, 0.0018405539013315539, 0.003494800106238151, 0.0012824394954494976, 0.0013882830716444932, 0.003764001208893854, 0.0027552030060494733, 0.0014358131124781722, 0.0018164243121303277, 0.0011768387678088312, 0.004237420553230501, 0.0012628550480137514, 0.003525504265773335, 0.0013340750369046884, 0.0018650114356566357, 0.00344142457063978, 0.001603784843420788, 0.008554571374353923, 0.001357490217728825, 0.00208519627129847, 0.0034720003303988925, 0.0011974667703387831, 0.0015828717720161123, 0.0013215451906392248, 0.003774952005459725, 0.004981738809144274, 0.0012198961162126342, 0.004875832557996193, 0.0015625705189471067, 0.0012110739098621238, 0.002349801494623001, 0.0012115701842538276, 0.001598803910371058, 0.0020861883869945225, 0.0012921481205348652, 0.08779689403759738, 0.0209108361844488, 0.0024541406400682975, 0.0015480894484984455, 0.004430449173269186, 0.001375518148351279, 0.0016548485702074535, 0.0046921944707467135, 0.0018346120522093475, 0.0015313816147716883, 0.002627371464647018, 0.001268516089432293, 0.0020268221234514203, 0.0011576440776682577, 0.0019339819229612111, 0.0013770216683871297, 0.0011327602592629063, 0.0038235249443507604, 0.0011774472076902032, 0.012993289446245726, 0.0010696472609727458, 0.0015188288318811586, 0.0010942703904794982, 0.0010137819482113097, 0.0017203024129125537, 0.000986403618983547, 0.0026870703090651907, 0.0009929853661548083, 0.002108195708793395, 0.0017130218198485462, 0.001563968483772808, 0.0009572513327204276, 0.001202630519273586, 0.0021653264965216593, 0.0009300641402999893, 0.001040075728444215, 0.001331523597270112, 0.005992195214804255, 0.002258250516231918, 0.0010129063584521259, 0.0011606270050935222, 0.00397208561899321, 0.0009796457986455832, 0.002465799799396094, 0.0010009362576218347, 0.03206129608768711, 0.002177580792995051, 0.0009941727521257057, 0.0009667915730861711, 0.0012705763372680991, 0.0009926321483665905, 0.0025666527525525945, 0.0009486312062337854, 0.0010930004216572304, 0.0012588922914535763, 0.001755466888340641, 0.0021432254685157578, 0.0014597043802602727, 0.0034624040139739467, 0.0009669188330805309, 0.0032311024740164116, 0.0012328364518985986, 0.0032339206918574797, 0.0012878638739159825, 0.05411753452939933, 0.0010607315062770197, 0.0014956544160666923, 0.001074384514138962, 0.0009848938355948877, 0.000982789733338679, 0.0015905968404639646, 0.002342411732412681, 0.0011101216004751828, 0.000977292391015398, 0.0012372443838919456, 0.003002547419123017, 0.0016954919797130094, 0.0010660063244036233, 0.00129656208170284, 0.0017965072992589075, 0.0035231877538600856, 0.0009457440965306832, 0.00152145131893067, 0.0010389650356804783, 0.0009293837287734723, 0.005641561875251584, 0.0009627913966083814, 0.0009351076617656091, 0.02113574755643999, 0.0009702712918477082, 0.000947104982040908, 0.0009879770897515572, 0.0009997016231979548, 0.0009271359573693843, 0.0034040584657117168, 0.00416199808151824, 0.001366882468850296, 0.010301183080092119, 0.0013694419983983832, 0.0009656250235805131]) AS want
+);
+----
+true
+
+#######################################
+# 15-04: R-faithful MSTL -- decomposition::mstl_fit shared by
+# _ts_mstl_decomposition / ts_mstl_decomposition_by and ts_stats'
+# stl_strengths (DET-04, D-09). det84/msts_7_28 are built from the exact R
+# generating formulas in gen_decomposition_reference.R (reproduced in SQL
+# to avoid 84/280-element literals), checked against
+# r_decomposition/cases.json. Before this plan, periods were always
+# ignored (nullptr/0 passed to the FFI) and the moving-average MSTL sorted
+# periods DESCENDING with a broken even-window trend (G10/G11: a constant
+# 1.0 series gave trend 1.05, not 1.0).
+#######################################
+
+statement ok
+CREATE TABLE det84_v AS
+SELECT list_transform(range(1, 85), t -> 10 + 3 * sin(2 * pi() * t / 7) + 0.1 * t + 0.5 * cos(2.1 * t)) AS v;
+
+statement ok
+CREATE TABLE msts_v AS
+SELECT list_transform(range(1, 281), t -> sin(2 * pi() * t / 7) + 0.5 * sin(2 * pi() * t / 28) + 0.3 * cos(1.7 * t)) AS v;
+
+# --- det84, periods [7]: ascending `periods`, trend/seasonal within 1e-8 of R forecast::mstl ---
+
+query I
+SELECT (_ts_mstl_decomposition(v, 'fail', [7])).periods FROM det84_v;
+----
+[7]
+
+query I
+SELECT abs((_ts_mstl_decomposition(v, 'fail', [7])).trend[1] - 10.003793193675527) <= 1e-8
+   AND abs((_ts_mstl_decomposition(v, 'fail', [7])).trend[42] - 14.198867501072765) <= 1e-8
+   AND abs((_ts_mstl_decomposition(v, 'fail', [7])).trend[84] - 18.519253671516182) <= 1e-8
+FROM det84_v;
+----
+true
+
+query I
+SELECT abs((_ts_mstl_decomposition(v, 'fail', [7])).seasonal[1][1] - 2.309707335567605) <= 1e-8
+FROM det84_v;
+----
+true
+
+# --- trend + seasonal + remainder reconstructs the input within 1e-10 ---
+
+statement ok
+CREATE TABLE det84_mstl AS
+SELECT v, r.trend AS trend, r.seasonal AS seasonal, r.remainder AS remainder, r.periods AS periods
+FROM (SELECT v, _ts_mstl_decomposition(v, 'fail', [7]) AS r FROM det84_v) t;
+
+query I
+SELECT max(abs(got - want)) <= 1e-10
+FROM (
+    SELECT unnest(list_transform(range(84), i -> trend[i + 1] + seasonal[1][i + 1] + remainder[i + 1])) AS got,
+           unnest(v) AS want
+    FROM det84_mstl
+);
+----
+true
+
+# --- msts_7_28 requested as [28, 7] -> periods come back ascending [7, 28] ---
+
+query I
+SELECT (_ts_mstl_decomposition(v, 'fail', [28, 7])).periods FROM msts_v;
+----
+[7, 28]
+
+# --- constant 1.0, n 48, requested [12]: trend exactly 1.0 (was 1.05, G11) ---
+
+query I
+SELECT max(abs(t - 1.0)) <= 1e-12
+FROM (SELECT unnest((_ts_mstl_decomposition(list_transform(range(48), i -> 1.0), 'fail', [12])).trend) AS t);
+----
+true
+
+# --- constant 1.0, n 100, no periods: non-seasonal supsmu trend exactly 1.0 ---
+
+query I
+SELECT max(abs(t - 1.0)) <= 1e-12
+FROM (SELECT unnest((_ts_mstl_decomposition(list_transform(range(100), i -> 1.0), 'fail', [])).trend) AS t);
+----
+true
+
+#######################################
+# 15-04: classical decomposition (R stats::decompose, D-10) and MSTL
+# insufficient-data modes. ts_decompose_seasonal gains the
+# classical_additive/classical/classical_multiplicative methods next to
+# the fdars additive/multiplicative methods from plan 15-01.
+#######################################
+
+# --- classical_additive on constant 1.0 (n 48, period 12): NaN edges, exact 1.0 trend, exact 0.0 seasonal ---
+
+query I
+SELECT isnan((ts_decompose_seasonal(list_transform(range(48), i -> 1.0), 12.0, 'classical_additive')).trend[1]);
+----
+true
+
+query I
+SELECT min(t) = 1.0 AND max(t) = 1.0
+FROM (SELECT unnest((ts_decompose_seasonal(list_transform(range(48), i -> 1.0), 12.0, 'classical_additive')).trend[7:42]) AS t);
+----
+true
+
+query I
+SELECT max(abs(s)) <= 1e-12
+FROM (SELECT unnest((ts_decompose_seasonal(list_transform(range(48), i -> 1.0), 12.0, 'classical_additive')).seasonal) AS s);
+----
+true
+
+# --- AirPassengers (144 values, from r_decomposition/cases.json air_p12): classical_additive trend[7], classical_multiplicative seasonal[1] within 1e-10 of R stats::decompose ---
+
+statement ok
+CREATE TABLE air_v AS SELECT [112, 118, 132, 129, 121, 135, 148, 148, 136, 119, 104, 118, 115, 126, 141, 135, 125, 149, 170, 170, 158, 133, 114, 140, 145, 150, 178, 163, 172, 178, 199, 199, 184, 162, 146, 166, 171, 180, 193, 181, 183, 218, 230, 242, 209, 191, 172, 194, 196, 196, 236, 235, 229, 243, 264, 272, 237, 211, 180, 201, 204, 188, 235, 227, 234, 264, 302, 293, 259, 229, 203, 229, 242, 233, 267, 269, 270, 315, 364, 347, 312, 274, 237, 278, 284, 277, 317, 313, 318, 374, 413, 405, 355, 306, 271, 306, 315, 301, 356, 348, 355, 422, 465, 467, 404, 347, 305, 336, 340, 318, 362, 348, 363, 435, 491, 505, 404, 359, 310, 337, 360, 342, 406, 396, 420, 472, 548, 559, 463, 407, 362, 405, 417, 391, 419, 461, 472, 535, 622, 606, 508, 461, 390, 432]::DOUBLE[] AS v;
+
+query I
+SELECT abs((ts_decompose_seasonal(v, 12.0, 'classical_additive')).trend[7] - 126.79166666666667) <= 1e-10
+FROM air_v;
+----
+true
+
+query I
+SELECT abs((ts_decompose_seasonal(v, 12.0, 'classical_multiplicative')).seasonal[1] - 0.910230367372201) <= 1e-10
+FROM air_v;
+----
+true
+
+# --- det84, 'classical' alias, period 7.0: trend[4] within 1e-10 of R stats::decompose ---
+
+query I
+SELECT abs((ts_decompose_seasonal(v, 7.0, 'classical')).trend[4] - 10.362555451945862) <= 1e-10
+FROM det84_v;
+----
+true
+
+# --- errors: non-integer period with 'classical'; a zero in a 'classical_multiplicative' series ---
+
+statement error
+SELECT ts_decompose_seasonal(list_transform(range(84), i -> i::DOUBLE), 12.5, 'classical');
+----
+classical decomposition requires an integer period >= 2
+
+statement error
+SELECT ts_decompose_seasonal(list_transform(range(48), i -> 0.0), 12.0, 'classical_multiplicative');
+----
+multiplicative decomposition requires strictly positive values
+
+# --- _ts_mstl_decomposition insufficient-data modes: n 20, period [12] (needs n > 24) ---
+
+query I
+SELECT (_ts_mstl_decomposition(list_transform(range(20), i -> i::DOUBLE), 'fail', [12])) IS NULL;
+----
+true
+
+query I
+SELECT (_ts_mstl_decomposition(list_transform(range(20), i -> i::DOUBLE), 'trend', [12])).periods = []
+   AND (_ts_mstl_decomposition(list_transform(range(20), i -> i::DOUBLE), 'trend', [12])).trend IS NOT NULL;
+----
+true
+
+# CR-01 regression: insufficient_data='none' with a requested period that is
+# never usable (needs n > 2*1000+1) must return a non-NULL struct with EMPTY
+# trend/remainder lists, never a trend/remainder list of length n backed by
+# uninitialized ListVector buffer memory (the row is a legitimate "no
+# decomposition applied" result, not a NULL row and not garbage data).
+
+query I
+SELECT (_ts_mstl_decomposition(list_transform(range(20), i -> i::DOUBLE), 'none', [1000])) IS NOT NULL;
+----
+true
+
+query I
+SELECT len((_ts_mstl_decomposition(list_transform(range(20), i -> i::DOUBLE), 'none', [1000])).trend) = 0
+   AND len((_ts_mstl_decomposition(list_transform(range(20), i -> i::DOUBLE), 'none', [1000])).remainder) = 0
+   AND (_ts_mstl_decomposition(list_transform(range(20), i -> i::DOUBLE), 'none', [1000])).periods = [];
+----
+true
+
+statement error
+SELECT _ts_mstl_decomposition(list_transform(range(48), i -> i::DOUBLE), 'fail', [0]);
+----
+period must be >= 1
+
+# ts_mstl_decomposition_by's params.seasonal_periods/periods wiring (D-09) is
+# verified in the interactive shell with `LOAD json;` (the macro expands
+# through json_extract_string/to_json, which this NON-json-gated file
+# otherwise stays free of per its own header comment) -- not asserted here.
+# See 15-04-SUMMARY.md for the exact shell transcript: MAP{'seasonal_periods':
+# '[7]'} and MAP{'periods': '[7]'} both return periods [7]; MAP{} returns [].
+
+#######################################
+# 15-05 FFT period (DET-05, D-11, G18): detrended_periodogram selects the
+# strongest bin 3 <= k <= floor(n/2) -- period is never n and always < n/2.
+# Before this plan, the undetrended fdars-core 0.47 FFT estimator reported
+# period = n = 121 for the n121 series below.
+#######################################
+
+# trend + seasonal, n 120 -> period 12.0 exactly (even n)
+
+query I
+SELECT (ts_estimate_period_fft(
+    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12))
+)).period;
+----
+12.0
+
+# trend + seasonal, n 121 (odd) -> period 12.1, confidence > 5 (FFT min-confidence default)
+
+query I
+SELECT abs((ts_estimate_period_fft(
+    list_transform(range(121), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12))
+)).period - 12.1) <= 1e-9;
+----
+true
+
+query I
+SELECT (ts_estimate_period_fft(
+    list_transform(range(121), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12))
+)).confidence > 5;
+----
+true
+
+# _ts_detect_periods(..., 'fft') agrees with the scalar function
+
+query I
+SELECT (_ts_detect_periods(
+    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12)),
+    'fft'
+)).primary_period;
+----
+12.0
+
+# a constant series -> NaN period (no candidate bin survives the
+# scale-relative is_constant check on the detrended series)
+
+query I
+SELECT isnan((ts_estimate_period_fft(list_transform(range(30), i -> 4.25))).period);
+----
+true
+
+#######################################
+# 15-05 ACF / regression / Lomb-Scargle / strength (DET-05, DET-06, D-11,
+# D-12, G17/G19/G20/G21).
+#######################################
+
+# ACF: alternating series -> period 2.0 (previously unreachable -- fdars
+# 0.47's own ACF estimator starts its peak search at lag 3)
+
+query I
+SELECT (ts_estimate_period_acf(
+    list_transform(range(40), i -> CASE WHEN i % 2 = 0 THEN 1.0 ELSE -1.0 END)
+)).period;
+----
+2.0
+
+# ACF: a constant series -> NaN period (c_0 == 0, every acf entry is NaN)
+
+query I
+SELECT isnan((ts_estimate_period_acf(list_transform(range(30), i -> 4.25))).period);
+----
+true
+
+# Regression: a noise-free period-12 sine, default integer grid -> 12.0
+# exactly (previously the 50-point linear grid could skip 12 entirely)
+
+query I
+SELECT (_ts_detect_periods(
+    list_transform(range(120), t -> sin(2 * pi() * t / 12)),
+    'regression'
+)).primary_period;
+----
+12.0
+
+# Lomb-Scargle: sine12_n60 fixture series -- period within 1e-9 of the
+# scipy.signal.lombscargle(..., normalize=True) * n/2 reference
+
+query I
+SELECT abs((ts_lomb_scargle([
+    0.1037, 0.7465, 0.9652, 0.6091, 1.1376, 0.6339, -0.1611, -0.3257, -0.7567,
+    -0.9118, -0.8575, -0.336, -0.2209, 0.4511, 0.7214, 1.1797, 0.8779, 0.4123,
+    -0.2346, -0.5772, -0.8636, -1.0827, -0.4778, -0.198, -0.8133, -0.0667,
+    0.8136, 0.8733, 0.9301, 0.5652, 0.6354, -0.8336, -0.9793, -0.3872, -0.672,
+    -0.3011, -0.1542, 0.0056, 0.9163, 1.0327, 0.4978, 0.295, -0.0216, -0.7834,
+    -0.8955, -0.9714, -0.8553, -0.6519, 0.1781, 0.7674, 0.9623, 0.7545,
+    1.0855, 0.3496, 0.2637, -0.8215, -0.5917, -1.006, -1.2407, -0.5942
+]::DOUBLE[])).period - 11.996946875636068) <= 1e-9;
+----
+true
+
+# Lomb-Scargle: n_frequencies < 2 and min_period >= max_period both error
+# (previously division by zero / an inverted frequency grid, G21)
+
+statement error
+SELECT ts_lomb_scargle(list_transform(range(60), t -> sin(2 * pi() * t / 12)), 0.0, 0.0, 1);
+----
+n_frequencies
+
+statement error
+SELECT ts_lomb_scargle(list_transform(range(60), t -> sin(2 * pi() * t / 12)), 24.0, 6.0, 0);
+----
+min_period
+
+# CR-02 regression: a negative n_frequencies must raise a catchable SQL
+# error, not wrap to a huge size_t (via the int64_t -> size_t cast) and
+# attempt a multi-exabyte Vec<f64> allocation that aborts the whole DuckDB
+# process. Also check an absurdly large positive value is rejected the
+# same way (Rust-side upper bound).
+
+statement error
+SELECT ts_lomb_scargle(list_transform(range(60), t -> sin(2 * pi() * t / 12)), 0.0, 0.0, -1);
+----
+n_frequencies
+
+statement error
+SELECT ts_lomb_scargle(list_transform(range(60), t -> sin(2 * pi() * t / 12)), 0.0, 0.0, 2000000000);
+----
+n_frequencies
+
+# Seasonal strength: linearly detrend FIRST (G19) -- a trend + seasonal
+# series previously measured ~0.003 (variance) / ~0.014 (spectral) on the
+# raw series; detrended, it is >= 0.95 / >= 0.9.
+
+query I
+SELECT ts_seasonal_strength(
+    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12)), 12.0
+) >= 0.95;
+----
+true
+
+query I
+SELECT ts_seasonal_strength(
+    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12)), 12.0, 'spectral'
+) >= 0.9;
+----
+true
+
+# Seasonal strength: 'wavelet' is removed (always 1.0 even for white noise
+# in fdars-core 0.47); any other unknown method name also errors.
+
+statement error
+SELECT ts_seasonal_strength(
+    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12)), 12.0, 'wavelet'
+);
+----
+removed
+
+statement error
+SELECT ts_seasonal_strength(
+    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12)), 12.0, 'foo'
+);
+----
+expected one of
+
+# CR-03 regression: a NaN period must be a caught InvalidParameter SQL
+# error, never a silently-wrong non-error result. Before the fix,
+# `period <= 0.0` is false for NaN (all IEEE-754 ordered comparisons with
+# NaN are false), so this previously returned 0.0 ("not seasonal at all")
+# instead of erroring.
+
+statement error
+SELECT ts_seasonal_strength(
+    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12)), 'nan'::DOUBLE
+);
+----
+Period must be a positive finite number
+
+statement error
+SELECT ts_decompose_seasonal(
+    list_transform(range(48), i -> (10 + 0.1 * i + 3 * sin(2 * pi() * i / 12))::DOUBLE), 'nan'::DOUBLE
+);
+----
+Period must be a positive finite number
+
+statement error
+SELECT ts_classify_seasonality(
+    list_transform(range(120), lambda i: (10 + 5 * sin(2 * pi() * i / 12))::DOUBLE), 'nan'::DOUBLE
+);
+----
+Period must be a positive finite number
+
+statement error
+SELECT ts_seasonal_strength_windowed(
+    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12)), 12.0, 24.0, 'wavelet'
+);
+----
+removed
+
+#######################################
+# 15-05 is_constant and edge-NULL policy (DET-07, D-13, D-14, G25, G26).
+# is_constant is scale-relative everywhere: fixed here for _ts_is_constant /
+# ts_drop_constant_by; edge-NULL interpolation behaviour is DOCUMENTED, not
+# changed -- LOCF/NOCB fill one direction only, and internal exog
+# interpolation extends the nearest observed value at the edges (no
+# extrapolation).
+#######################################
+
+# _ts_is_constant: scale-relative tolerance (previously absolute f64::EPSILON)
+
+query I
+SELECT _ts_is_constant([1e12, 1e12 + 0.001]::DOUBLE[]);
+----
+true
+
+query I
+SELECT _ts_is_constant([1.0, 1.0 + 1e-9]::DOUBLE[]);
+----
+false
+
+query I
+SELECT _ts_is_constant([5.0, NULL, 5.0, 'NaN'::DOUBLE]::DOUBLE[]);
+----
+true
+
+# ts_drop_constant_by: a two-group table where one group is "constant at
+# the 1e12 scale" (a tiny wiggle well under the scale-relative tolerance)
+# and one is a real (non-constant) series -- only the real series survives.
+
+statement ok
+CREATE TABLE const_scale_t AS
+SELECT 'const_at_scale' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds,
+       (1e12 + (i % 2) * 0.0001)::DOUBLE AS v
+FROM range(10) r(i)
+UNION ALL
+SELECT 'real_series' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, i::DOUBLE AS v
+FROM range(10) r(i);
+
+query I
+SELECT list(DISTINCT id ORDER BY id) FROM ts_drop_constant_by('const_scale_t', id, v);
+----
+[real_series]
+
+# ts_fill_nulls_forward_by (LOCF) / ts_fill_nulls_backward_by (NOCB):
+# leading/trailing NULLs are NOT filled by the opposite direction -- a
+# leading NULL stays NULL under forward fill, a trailing NULL stays NULL
+# under backward fill (D-14, revised: current behaviour documented, not
+# changed).
+
+statement ok
+CREATE TABLE edge_null_t AS
+SELECT 'a' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, v
+FROM (SELECT unnest(range(5)) AS i, unnest([NULL, 1.0, NULL, 3.0, NULL]) AS v);
+
+query I
+SELECT list(filled_value ORDER BY ds) FROM ts_fill_nulls_forward_by('edge_null_t', id, ds, v);
+----
+[NULL, 1.0, 1.0, 3.0, 3.0]
+
+query I
+SELECT list(filled_value ORDER BY ds) FROM ts_fill_nulls_backward_by('edge_null_t', id, ds, v);
+----
+[1.0, 1.0, 3.0, 3.0, NULL]
+
+# _ts_forecast_exog: a NULL edge on the historical regressor (positions 1,
+# 2, and 120 of a 1-based 120-row series) gives point forecasts within
+# 1e-9 of the run where those positions are replaced by the NEAREST
+# observed value (constant edge extension, not extrapolation) -- pinning
+# forecast.rs::prepare_exog_regressors's existing behaviour (G26).
+
+query I
+SELECT max(abs(a - b)) < 1e-9
+FROM (
+    WITH gen AS (
+        SELECT i,
+               50.0 + 3.0 * sin(i * 0.37) + (i % 5)::DOUBLE AS y,
+               CASE WHEN i IN (1, 2, 120) THEN NULL ELSE sin(i * 0.37) END AS x1_null_edges,
+               CASE WHEN i IN (1, 2) THEN sin(3 * 0.37)
+                    WHEN i = 120 THEN sin(119 * 0.37)
+                    ELSE sin(i * 0.37) END AS x1_nearest_filled
+        FROM range(1, 121) AS t(i)
+    ), fut AS (
+        SELECT sin((120 + i) * 0.37) AS x1 FROM range(6) AS t(i)
+    )
+    SELECT
+        unnest((SELECT _ts_forecast_exog(
+            (SELECT list(y ORDER BY i) FROM gen),
+            [(SELECT list(x1_null_edges ORDER BY i) FROM gen)],
+            [(SELECT list(x1) FROM fut)],
+            6, 'OptimizedTheta'
+        )).point) AS a,
+        unnest((SELECT _ts_forecast_exog(
+            (SELECT list(y ORDER BY i) FROM gen),
+            [(SELECT list(x1_nearest_filled ORDER BY i) FROM gen)],
+            [(SELECT list(x1) FROM fut)],
+            6, 'OptimizedTheta'
+        )).point) AS b
+);
+----
+true
+
+#######################################
+# Iteration 2 (re-review of the --auto fix loop): CR-04, CR-05, WR-03.
+#######################################
+
+# CR-04 regression: ts_mstl_decomposition_by must never silently drop a
+# group. 'long' (n=30) has a usable period 12 (30 > 2*12); 'short' (n=10)
+# does not (10 is not > 2*12=24) -- before the fix, ts_mstl_decomposition_
+# native.cpp's finalize loop `continue`-d past 'short' under BOTH
+# insufficient_data='fail' (the documented default) and 'none', silently
+# dropping its row with no error and no diagnostic. A second, independent
+# bug compounded this: the native function's ParseInsufficientDataMode
+# recognized "fail"/"skip"/"pad" rather than the macro's actual documented
+# values "fail"/"trend"/"none", so passing 'trend' or 'none' was silently
+# treated as 'fail' regardless.
+#
+# Exercised via the internal _ts_mstl_decomposition_native table function
+# directly rather than the public ts_mstl_decomposition_by macro: the
+# macro's expansion unconditionally calls to_json(params) (even for an
+# empty MAP{}), which requires the json extension -- unavailable in this
+# native, non-json-gated build (confirmed: json is skipped, not
+# auto-loaded, for every other "require json" file in this suite). This is
+# a pre-existing, independent gap (ts_mstl_decomposition_by has literally
+# never been exercised by a non-json-gated test -- its only other caller,
+# test/sql/ts_varchar_edge_cases.test, has its own `require json`) --
+# tracked here, not fixed, since CR-04's fix is in
+# _ts_mstl_decomposition_native's finalize loop, which this reaches
+# directly and identically to how the macro would.
+
+statement ok
+CREATE TABLE mstl_mixed_t AS
+SELECT 'long' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, (10 + i % 12)::DOUBLE AS v
+FROM range(30) r(i)
+UNION ALL
+SELECT 'short' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, (5 + i)::DOUBLE AS v
+FROM range(10) r(i);
+
+# insufficient_data = 'fail' (default): a SQL error naming the condition,
+# not a silently-dropped row.
+statement error
+SELECT * FROM _ts_mstl_decomposition_native((SELECT id, ds, v FROM mstl_mixed_t), 'fail', [12]);
+----
+Insufficient data
+
+# insufficient_data = 'trend': row count preserved (one row per input
+# group) -- 'short' gets the non-seasonal (supsmu) trend-only fallback,
+# with empty seasonal/periods, exactly as ts_mstl_decomposition_by's own
+# docs promise.
+query I
+SELECT count(*) FROM _ts_mstl_decomposition_native((SELECT id, ds, v FROM mstl_mixed_t), 'trend', [12]);
+----
+2
+
+query I
+SELECT list(id ORDER BY id) FROM _ts_mstl_decomposition_native((SELECT id, ds, v FROM mstl_mixed_t), 'trend', [12]);
+----
+[long, short]
+
+query III
+SELECT len(trend) > 0, periods, len(seasonal)
+FROM _ts_mstl_decomposition_native((SELECT id, ds, v FROM mstl_mixed_t), 'trend', [12])
+WHERE id = 'short';
+----
+true	[]	0
+
+# insufficient_data = 'none': row count still preserved -- 'short' gets
+# empty trend/seasonal/remainder/periods, the same shape the scalar
+# _ts_mstl_decomposition produces for the identical condition after CR-01
+# (table and scalar surfaces now agree), instead of vanishing from the
+# result set.
+query I
+SELECT count(*) FROM _ts_mstl_decomposition_native((SELECT id, ds, v FROM mstl_mixed_t), 'none', [12]);
+----
+2
+
+query IIII
+SELECT trend, seasonal, remainder, periods
+FROM _ts_mstl_decomposition_native((SELECT id, ds, v FROM mstl_mixed_t), 'none', [12])
+WHERE id = 'short';
+----
+[]	[]	[]	[]
+
+# The already-working 'long' group must stay unaffected by the CR-04 fix in
+# every mode -- it still decomposes normally with its one usable period.
+query I
+SELECT len(periods) FROM _ts_mstl_decomposition_native((SELECT id, ds, v FROM mstl_mixed_t), 'none', [12]) WHERE id = 'long';
+----
+1
+
+# CR-05 / WR-03 regression: ts_detect_seasonality_changes, ts_detect_
+# amplitude_modulation, and ts_analyze_peak_timing were missing the
+# `error.code == INVALID_INPUT -> throw` branch their 6 siblings already
+# had, so a NaN/non-finite/non-positive period silently returned NULL
+# instead of raising the documented SQL error. WR-03 additionally removed a
+# stale, now-redundant `period <= 0.0` FFI-level pre-check on these (and 4
+# other) functions that produced an inconsistent message for -Infinity --
+# all five non-finite/non-positive values below must now raise the SAME
+# "Period must be a positive finite number" message for all three
+# functions.
+
+foreach period nan inf -inf -5.0 0.0
+
+statement error
+SELECT ts_detect_seasonality_changes(
+    list_transform(range(120), lambda i: (10 + 5 * sin(2 * pi() * i / 12))::DOUBLE), '${period}'::DOUBLE
+);
+----
+Period must be a positive finite number
+
+statement error
+SELECT ts_detect_amplitude_modulation(
+    list_transform(range(120), lambda i: (10 + 5 * sin(2 * pi() * i / 12))::DOUBLE), '${period}'::DOUBLE
+);
+----
+Period must be a positive finite number
+
+statement error
+SELECT ts_analyze_peak_timing(
+    list_transform(range(120), lambda i: (10 + 5 * sin(2 * pi() * i / 12))::DOUBLE), '${period}'::DOUBLE
+);
+----
+Period must be a positive finite number
+
+endloop

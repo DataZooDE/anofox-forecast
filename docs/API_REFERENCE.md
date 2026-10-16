@@ -15,7 +15,7 @@ The Anofox Forecast extension brings comprehensive time series analysis and fore
 **Key Benefits:**
 - **SQL-native**: All operations are expressed as SQL functions and macros
 - **High Performance**: Core algorithms implemented in Rust for speed and safety
-- **Comprehensive**: 32 forecasting models, 117 features, seasonality detection, changepoint detection
+- **Comprehensive**: 36 forecasting models, 117 features, seasonality detection, changepoint detection
 - **Flexible API**: Three API styles to fit different workflows
 
 All computations are performed by the **anofox-fcst-core** library, implemented in Rust.
@@ -25,15 +25,18 @@ All computations are performed by the **anofox-fcst-core** library, implemented 
 ```sql
 -- Load the extension
 LOAD anofox_forecast;
+```
 
+```sql
 -- Generate forecasts for multiple products
 SELECT * FROM ts_forecast_by('sales', product_id, date, quantity, 'AutoETS', 30, '1d');
 
--- Analyze seasonality
-SELECT ts_detect_periods(LIST(quantity ORDER BY date)) FROM sales GROUP BY product_id;
+-- Analyze seasonality (internal scalar -- ts_detect_periods is a table function,
+-- not callable as a scalar; _ts_detect_periods is the scalar form)
+SELECT _ts_detect_periods(LIST(quantity ORDER BY date)) FROM sales GROUP BY product_id;
 
--- Compute time series statistics
-SELECT * FROM ts_stats('sales', product_id, date, quantity);
+-- Compute time series statistics (frequency is a required 5th positional argument)
+SELECT * FROM ts_stats('sales', product_id, date, quantity, '1d');
 ```
 
 ### API Variants
@@ -44,7 +47,9 @@ The extension provides **three API styles** to accommodate different use cases:
 Low-level functions that operate on arrays. Composable with `GROUP BY` and `LIST()`.
 
 ```sql
-SELECT product_id, ts_stats(LIST(value ORDER BY date)) AS stats
+-- ts_stats is a TABLE function, not callable as a scalar -- ts_stats_agg is the
+-- scalar-aggregate form, taking (date_col, value_col) directly, no LIST() wrapping
+SELECT product_id, ts_stats_agg(date, value) AS stats
 FROM sales GROUP BY product_id;
 ```
 
@@ -59,7 +64,7 @@ SELECT * FROM ts_forecast_by('sales', product_id, date, value, 'AutoETS', 12, '1
 Aggregate functions for use with custom `GROUP BY` patterns.
 
 ```sql
-SELECT product_id, ts_forecast_agg(ts, value, 'ETS', 12, MAP{}) AS forecast
+SELECT product_id, ts_forecast_agg(date, value, 'ETS', 12, MAP{}) AS forecast
 FROM sales GROUP BY product_id;
 ```
 
@@ -69,11 +74,11 @@ Table macros support both MAP and STRUCT syntax for parameters:
 
 ```sql
 -- STRUCT allows mixed types (recommended)
-SELECT * FROM ts_cv_folds_by('sales', id, date, value, 3, 7,
+SELECT * FROM ts_cv_folds_by('sales', product_id, date, value, 3, 7,
     {'gap': 2, 'clip_horizon': true});
 
 -- MAP requires homogeneous string values (legacy)
-SELECT * FROM ts_cv_folds_by('sales', id, date, value, 3, 7,
+SELECT * FROM ts_cv_folds_by('sales', product_id, date, value, 3, 7,
     MAP{'gap': '2', 'clip_horizon': 'true'});
 ```
 
@@ -102,10 +107,10 @@ Both forms are identical in functionality.
 | **Decomposition** | Seasonal decomposition and classification | [05a-decomposition.md](api/05a-decomposition.md) |
 | **Peak Detection** | Peak detection and timing analysis | [05b-peak-detection.md](api/05b-peak-detection.md) |
 | **Changepoint Detection** | Structural break detection | [06-changepoint-detection.md](api/06-changepoint-detection.md) |
-| **Forecasting** | 32 forecasting models | [07-forecasting.md](api/07-forecasting.md) |
+| **Forecasting** | 36 forecasting models | [07-forecasting.md](api/07-forecasting.md) |
 | **Cross-Validation** | Backtesting and CV functions | [08-cross-validation.md](api/08-cross-validation.md) |
 | **Evaluation Metrics** | Forecast accuracy metrics | [09-evaluation-metrics.md](api/09-evaluation-metrics.md) |
-| **Feature Extraction** | 117 tsfresh-compatible features | [20-feature-extraction.md](api/20-feature-extraction.md) |
+| **Feature Extraction** | 117 tsfresh-inspired features | [20-feature-extraction.md](api/20-feature-extraction.md) |
 | **Conformal Prediction** | Distribution-free prediction intervals | [11-conformal-prediction.md](api/11-conformal-prediction.md) |
 
 ---
@@ -123,36 +128,46 @@ Both forms are identical in functionality.
 | `ts_detect_periods_by` | Detect seasonality (multi-series) | `ts_detect_periods_by('tbl', id, date, val)` |
 | `ts_features` | Extract 117 features | `ts_features(date, value)` |
 
-### Forecasting Models (33 Models)
+### Forecasting Models (36 Models)
 
 | Category | Models | Reference |
 |----------|--------|-----------|
 | **Baseline** | `Naive`, `SMA`, `SeasonalNaive`, `RandomWalkDrift`, `SeasonalWindowAverage` | [baseline/](reference/models/baseline/) |
 | **Exponential Smoothing** | `SES`, `SESOptimized`, `Holt`, `HoltWinters`, `SeasonalES`, `SeasonalESOptimized` | [exponential-smoothing/](reference/models/exponential-smoothing/) |
-| **State Space** | `ETS`, `ARIMA`, `AutoETS`, `AutoARIMA` | [state-space/](reference/models/state-space/) |
+| **State Space** | `ETS`, `ARIMA`, `AutoETS`, `AutoARIMA`, `Kalman` | [state-space/](reference/models/state-space/) |
+| **Classical** | `GARCH` (conditional volatility) | [classical/garch.md](reference/models/classical/garch.md) |
 | **Theta** | `Theta`, `OptimizedTheta`, `DynamicTheta`, `DynamicOptimizedTheta`, `AutoTheta` | [theta/](reference/models/theta/) |
 | **Multi-Seasonal** | `MFLES`, `AutoMFLES`, `MSTL`, `AutoMSTL`, `TBATS`, `AutoTBATS` | [multi-seasonal/](reference/models/multi-seasonal/) |
 | **Intermittent Demand** | `CrostonClassic`, `CrostonOptimized`, `CrostonSBA`, `ADIDA`, `IMAPA`, `TSB` | [intermittent/](reference/models/intermittent/) |
 | **Distributional** | `Laplace` (variants: `auto`, `auto_aid`, `skaters`) | [distributional/laplace.md](reference/models/distributional/laplace.md) |
+| **Ensemble** | `AutoEnsemble` (auto-fit ARIMA/ETS/Theta, combine top-K) | [ensemble/autoensemble.md](reference/models/ensemble/autoensemble.md) |
 
 ### Evaluation Metrics (12 Metrics)
 
-Available as both scalar functions and `_by` table macros:
+Available as scalar functions (recommended — use with `LIST()` + `GROUP BY`, ~2400x
+faster) and as deprecated `_by` table macros. **The `_by` family's `source` MUST be a
+subquery, e.g. `(SELECT group_col, date_col, actual, forecast FROM table)` — a bare
+table name fails to bind (the native function's first parameter is `TABLE`-typed);
+`date_col`/`actual_col`/`forecast_col`/etc. are quoted column-name string literals, not
+unquoted identifiers, and there is no separate positional `group` argument — grouping
+columns simply pass through whatever the subquery selects.**
 
 | Metric | Scalar Function | Table Macro |
 |--------|-----------------|-------------|
-| MAE | `ts_mae(actual, pred)` | `ts_mae_by(source, group, date, actual, forecast)` |
-| MSE | `ts_mse(actual, pred)` | `ts_mse_by(...)` |
-| RMSE | `ts_rmse(actual, pred)` | `ts_rmse_by(...)` |
-| MAPE | `ts_mape(actual, pred)` | `ts_mape_by(...)` |
-| sMAPE | `ts_smape(actual, pred)` | `ts_smape_by(...)` |
-| R² | `ts_r2(actual, pred)` | `ts_r2_by(...)` |
-| Bias | `ts_bias(actual, pred)` | `ts_bias_by(...)` |
-| MASE | `ts_mase(actual, pred, baseline)` | `ts_mase_by(..., baseline)` |
-| rMAE | `ts_rmae(actual, pred1, pred2)` | `ts_rmae_by(..., pred1, pred2)` |
-| Coverage | `ts_coverage(actual, lower, upper)` | `ts_coverage_by(..., lower, upper)` |
-| Quantile Loss | `ts_quantile_loss(actual, pred, q)` | `ts_quantile_loss_by(..., quantile)` |
+| MAE | `ts_mae(actual, pred)` | `ts_mae_by(source, date_col, actual_col, forecast_col)` |
+| MSE | `ts_mse(actual, pred)` | `ts_mse_by(source, date_col, actual_col, forecast_col)` |
+| RMSE | `ts_rmse(actual, pred)` | `ts_rmse_by(source, date_col, actual_col, forecast_col)` |
+| MAPE | `ts_mape(actual, pred)` — NULL if any actual is 0 | `ts_mape_by(source, date_col, actual_col, forecast_col)` |
+| sMAPE | `ts_smape(actual, pred)` | `ts_smape_by(source, date_col, actual_col, forecast_col)` |
+| R² | `ts_r2(actual, pred)` | `ts_r2_by(source, date_col, actual_col, forecast_col)` |
+| Bias | `ts_bias(actual, pred)` | `ts_bias_by(source, date_col, actual_col, forecast_col)` |
+| MASE | `ts_mase(actual, pred, insample, seasonal_period)` — Hyndman-Koehler | `ts_mase_by(source, date_col, actual_col, forecast_col, seasonal_period := 1)` |
+| rMAE | `ts_rmae(actual, pred1, pred2)` | `ts_rmae_by(source, date_col, actual_col, pred1_col, pred2_col)` |
+| Coverage | `ts_coverage(actual, lower, upper)` | `ts_coverage_by(source, date_col, actual_col, lower_col, upper_col)` |
+| Quantile Loss | `ts_quantile_loss(actual, pred, q)` | `ts_quantile_loss_by(source, date_col, actual_col, forecast_col, quantile)` |
 | MQLoss | `ts_mqloss(actual, quantiles, levels)` | — |
+
+Example: `SELECT * FROM ts_mae_by((SELECT product_id, date, actual, forecast FROM results), 'date', 'actual', 'forecast')`.
 
 ---
 
@@ -163,7 +178,9 @@ Available as both scalar functions and `_by` table macros:
 All scalar functions operate on `DOUBLE[]` arrays. To convert table data to arrays:
 
 ```sql
-SELECT product_id, ts_stats(LIST(value ORDER BY date)) AS stats
+-- ts_stats is a TABLE function, not callable as a scalar -- ts_stats_agg is the
+-- scalar-aggregate form, taking (date_col, value_col) directly, no LIST() wrapping
+SELECT product_id, ts_stats_agg(date, value) AS stats
 FROM sales GROUP BY product_id;
 ```
 

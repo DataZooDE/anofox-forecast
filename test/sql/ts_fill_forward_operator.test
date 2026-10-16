@@ -6,6 +6,13 @@ require anofox_forecast
 
 require json
 
+# ts_fill_forward_by outputs the group/date/value columns under their ORIGINAL names
+# (id/ds/value here), not generic group_col/date_col/value_col aliases, since commit
+# ca7d4f6 "refactor: ts_fill_gaps_by and ts_fill_forward_by now use native streaming
+# (#113)" (Phase 18, 18-01, class A). Every group_col/date_col/value_col reference
+# below (output-side only; the function call's input args already correctly used
+# id/ds/value) was updated accordingly.
+
 #######################################
 # Setup - Create test data
 #######################################
@@ -36,14 +43,14 @@ true
 # Test original data is preserved
 query I
 SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-10', '1d')
-WHERE value_col IS NOT NULL;
+WHERE value IS NOT NULL;
 ----
 10
 
 # Test forward fill adds rows with NULL values
 query I
 SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-10', '1d')
-WHERE value_col IS NULL;
+WHERE value IS NULL;
 ----
 10
 
@@ -59,21 +66,21 @@ SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-1
 
 # Both groups should have filled rows
 query I
-SELECT COUNT(DISTINCT group_col) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-10', '1d');
+SELECT COUNT(DISTINCT id) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-10', '1d');
 ----
 2
 
 # Group A should have correct count (5 original + 5 filled)
 query I
 SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-10', '1d')
-WHERE group_col = 'A';
+WHERE id = 'A';
 ----
 10
 
 # Group B should have correct count (5 original + 5 filled)
 query I
 SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-10', '1d')
-WHERE group_col = 'B';
+WHERE id = 'B';
 ----
 10
 
@@ -84,14 +91,14 @@ WHERE group_col = 'B';
 # Filled dates should be after original last date (2024-01-05)
 query I
 SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-10', '1d')
-WHERE date_col > '2024-01-05'::TIMESTAMP AND value_col IS NULL;
+WHERE ds > '2024-01-05'::TIMESTAMP AND value IS NULL;
 ----
 10
 
 # All filled dates should be <= target date
 query I
 SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-10', '1d')
-WHERE date_col > '2024-01-10'::TIMESTAMP;
+WHERE ds > '2024-01-10'::TIMESTAMP;
 ----
 0
 
@@ -102,15 +109,15 @@ WHERE date_col > '2024-01-10'::TIMESTAMP;
 # Original values should be preserved exactly
 # A: 10+11+12+13+14 = 60, B: 100+105+110+115+120 = 550, Total = 610
 query R
-SELECT SUM(value_col) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-10', '1d')
-WHERE value_col IS NOT NULL;
+SELECT SUM(value) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-10', '1d')
+WHERE value IS NOT NULL;
 ----
 610.0
 
 # Filled values should be NULL
 query I
 SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-10', '1d')
-WHERE date_col > '2024-01-05'::TIMESTAMP AND value_col IS NOT NULL;
+WHERE ds > '2024-01-05'::TIMESTAMP AND value IS NOT NULL;
 ----
 0
 
@@ -152,8 +159,8 @@ true
 
 # Results should be ordered by group, then date
 query TT
-SELECT group_col, date_col FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-07', '1d')
-ORDER BY group_col, date_col
+SELECT id, ds FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-07', '1d')
+ORDER BY id, ds
 LIMIT 3;
 ----
 A	2024-01-01 00:00:00
@@ -179,8 +186,8 @@ SELECT COUNT(*) FROM ts_fill_forward_by('single_group', id, ds, value, '2024-01-
 
 # Verify values for single group
 query IR
-SELECT date_col, value_col FROM ts_fill_forward_by('single_group', id, ds, value, '2024-01-05', '1d')
-ORDER BY date_col;
+SELECT ds, value FROM ts_fill_forward_by('single_group', id, ds, value, '2024-01-05', '1d')
+ORDER BY ds;
 ----
 2024-01-01 00:00:00	0.0
 2024-01-02 00:00:00	10.0

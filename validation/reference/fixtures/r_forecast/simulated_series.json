@@ -1,0 +1,1314 @@
+{
+  "family": "r_forecast",
+  "generator": "validation/reference/r/gen_forecast_reference.R",
+  "tool_versions": {
+    "R": "R version 4.6.1 (2026-06-24)",
+    "forecast": "9.0.2",
+    "tseries": "0.10.63",
+    "urca": "1.3.4",
+    "jsonlite": "2.0.0",
+    "rng_kind": "Mersenne-Twister/Inversion/Rejection"
+  },
+  "tolerance": {
+    "closed_form_abs": 1e-08,
+    "model_point_rel": 0.01,
+    "interval_rel": 0.05,
+    "root_causes": [
+      {
+        "id": "RC-01",
+        "checks": [
+          "air/holt/Holt",
+          "rw/holt/Holt",
+          "trend/holt/Holt"
+        ],
+        "location": "extension",
+        "cause": "Wrapper's SQL 'Holt' dispatched to HoltLinearTrend::auto() (SSE objective, trend seeded from a single first difference) instead of ETS(A,A,N), R holt()'s actual definition; the R-faithful ETS(A,A,N) construction cuts the point deviation 6.86x on AirPassengers and 13.41x on rw, and brings trend into the parity tier (3.01x cut).",
+        "evidence": "E4 mapping check (diagnosis/harness-output.txt): air HoltLinearTrend point_dev=1.155e-1 interval_dev=2.312e-1 -> ETS(A,A,N) R-faithful point_dev=1.684e-2 interval_dev=3.334e-2 (cut 6.86x); rw HoltLinearTrend point_dev=7.517e-2 interval_dev=3.262e-1 -> ETS(A,A,N) R-faithful point_dev=5.604e-3 interval_dev=1.960e-2 (cut 13.41x); trend HoltLinearTrend point_dev=1.653e-3 interval_dev=2.483e-1 -> ETS(A,A,N) R-faithful point_dev=5.495e-4 interval_dev=6.532e-3 (cut 3.01x, parity tier).",
+        "resolution": "fixed: forecast() dispatch and build_forecaster remapped SQL 'Holt' from HoltLinearTrend::auto() to ETS::new(ETSSpec::aan(), 1), matching R's holt() definition; model_name stays 'Holt' (17-03 Task 1).",
+        "upstream": ""
+      },
+      {
+        "id": "RC-02",
+        "checks": [
+          "air/holt/ETS:AAN",
+          "rw/holt/ETS:AAN",
+          "air/hw_additive/HoltWinters",
+          "air/hw_additive/ETS:AAA",
+          "air/ets_AAA/ETS:AAA",
+          "air/ets_MAM/ETS:MAM",
+          "air/hw_multiplicative/ETS:MAM"
+        ],
+        "location": "reference",
+        "cause": "At R's own fitted parameters the crate's ETS recursion, likelihood and bounds agree with R to floating-point precision (E5); the residual gap is R's own Nelder-Mead optimiser stopping at an inferior, in-bounds local optimum relative to the crate's own optimiser on the identical objective (E6).",
+        "evidence": "E5 (diagnosis/harness-output.txt): loglik_rel_dev <= 8.3e-16, point_rel_dev <= 1.4e-15 on every check in this row (bit-identical recursion). E6: air/holt crate_loglik=-863.582556 > r_loglik=-863.647300 (gap 0.0647); rw/holt crate_loglik=-515.765392 > r_loglik=-516.366200 (gap 0.6008); air/hw_additive & air/ets_AAA crate_loglik=-718.500709 > r_loglik=-765.935848 (gap 47.44); air/ets_MAM & air/hw_multiplicative crate_loglik=-681.105288 > r_loglik=-682.403619 / -685.827096 (gap 1.30 / 4.72); in every case the crate's own parameters stay within R's documented bounds (alpha/beta/gamma in [1e-4,0.9999], beta<=alpha, gamma<=1-alpha).",
+        "resolution": "known gap: the crate reaches a better-scoring, in-bounds optimum than R on these AirPassengers / rw fits; nothing to fix extension- or crate-side (R itself is the looser optimum).",
+        "upstream": ""
+      },
+      {
+        "id": "RC-03",
+        "checks": [
+          "air/ets_auto/AutoETS"
+        ],
+        "location": "crate",
+        "cause": "AutoETS's model pool selects ETS(M,A,M) instead of R's ETS(M,Ad,M) because the crate's own optimiser, at R's selected (M,Ad,M) spec, reaches a worse log-likelihood than R under the same objective -- the crate's Nelder-Mead multi-start misses an optimum R's optimiser finds.",
+        "evidence": "E7 (diagnosis/harness-output.txt): crate_aicc=1409.4003 vs r_aicc=1400.6384 for MAdM (diff +8.76, worse), while crate_aicc=1401.0677 for MAM beats r_aicc=1403.6644 for the same spec. E6 at R's (M,Ad,M) parameters: crate_loglik=-683.964133 < r_loglik=-679.583216 (gap -4.3809, crate strictly worse under its own objective), with alpha=0.8024 beta=0.0197 gamma=0.1976 phi=0.98 all inside R's bounds. Reproduced standalone in repro_rc_03 (r_parity_diagnosis.rs).",
+        "resolution": "known gap: upstream optimiser issue, drafted.",
+        "upstream": "draft: RC-03-autoets-madm-optimum.md"
+      },
+      {
+        "id": "RC-04",
+        "checks": [
+          "inter/ses/SESOptimized"
+        ],
+        "location": "crate",
+        "cause": "SimpleExponentialSmoothing::auto() on the zero-inflated intermittent series converges to a different (alpha, l0) optimum than R's ses(): the crate's own optimiser, evaluated at R's fitted parameters, finds a strictly better log-likelihood than its own converged fit, so the crate's optimiser is missing an optimum its own objective scores higher.",
+        "evidence": "E5 at R's params (alpha=0.0001, l0=1.2417): loglik_rel_dev=0.000e0, point_rel_dev=6.437e-15 (bit-identical recursion/likelihood formula). E6: crate's own fit alpha=0.139114 l0 fixed to values[0]=4 gives crate_loglik=-380.625612, which is WORSE than r_loglik=-374.538408 at R's own parameters (gap -6.087205), so the crate's optimiser converges to a lower-likelihood point than one it can itself evaluate as better. Reproduced standalone in repro_rc_04 (r_parity_diagnosis.rs).",
+        "resolution": "known gap: upstream optimiser issue (likely the crate's fixed-l0-to-first-observation heuristic for SES on intermittent/zero-inflated series), drafted.",
+        "upstream": "draft: RC-04-ses-optimized-intermittent-optimum.md"
+      },
+      {
+        "id": "RC-05",
+        "checks": [
+          "air/auto_arima/AutoARIMA"
+        ],
+        "location": "crate",
+        "cause": "SARIMA prediction variance differs from R stats::arima KalmanForecast: at R's exact selected order (2,1,1)(0,1,0)[12], explicit ARIMA construction reproduces R's point forecast (rel dev 6.9e-3) but its 95% half-widths are systematically narrower than R's state-space prediction-error variance, especially at longer horizons.",
+        "evidence": "D-15 Miss E8 (diagnosis/harness-output.txt, autoarima_air_explicit_arima_e8_probe): explicit ARIMA(2,1,1)(0,1,0)[12] at R's order gives point_dev=6.883204e-3, interval_dev=2.489813e-1, with crate/R half-width ratio falling from 1.040 (h=1) to 0.818 (h=6) and recovering only to 0.879 (h=12) -- a systematic underestimate of multi-step SARIMA forecast variance, not a one-off numerical difference (0.16.1). E3 (autoarima_air_e3_timestamp_probe): synthetic-hourly and real-monthly timestamps give bit-identical intervals (same_bits=true), ruling out the wrapper's synthetic index as the cause. AutoARIMA's own selection path (autoarima_air_interval_e8_probe) matches the explicit-order call closely (point ratios near 1.0, interval ratios following the same h-dependent pattern), so this is an estimation/variance- formula difference, not a selection difference. Reproduced standalone in repro_rc_05 (r_parity_diagnosis.rs), which asserted the discrepancy on 0.16.1. RESOLVED on 0.16.2: re-running the same repro gives a worst crate/R half-width ratio of 0.9951 (was 0.818), and the AutoARIMA interval re-measured via autoarima_report is interval_dev=4.592775e-3 (down from 1.846662e-1) -- inside the parity tier. repro_rc_05 is inverted (asserts ratio >= 0.90, i.e. the fix holds) rather than deleted, to keep a standing regression guard against this exact defect re-appearing in a future crate bump.",
+        "resolution": "resolved: fixed in anofox-forecast 0.16.2 (upstream PR #230, shipping the SARIMA/ARIMA/AutoARIMA KalmanForecast prediction- interval fix from PR #229). D-16's one-allowed-AutoARIMA-gap exception (user decision 2026-10-15) is retired now that the AirPassengers 95% interval is at hard parity; order identity and point forecasts were already hard parity on every series and are unaffected. air/auto_arima/AutoARIMA's parity_checks row moves to status=parity (tol = 1.5x measured per the D-15 tolerance rule, rounded up to 1 significant digit).",
+        "upstream": "fixed: anofox-forecast 0.16.2 (upstream PR #230 / #229, https://github.com/sipemu/anofox-forecast/releases/tag/v0.16.2); draft RC-05-autoarima-sarima-interval-variance.md retained (marked resolved) for historical record"
+      }
+    ],
+    "auto_arima_selection": {
+      "share_abs": 0.1,
+      "exact_agreement_min": 0.9,
+      "note": "UPST-01 (D-15): share_abs bounds |crate share - R share| for the rw (0,1,0) share and the ar07 d>=1 share (the UPST-01 claim); exact_agreement_min is the stricter per-series (p,d,q) agreement check over all 60 series."
+    },
+    "notes": "closed_form_abs is exact (naive/snaive/rwf drift are closed-form); model_point_rel and interval_rel are parity targets for later phases (Phase 10 FCST-01, Phase 17 FCST-09), not asserted in Phase 9.",
+    "parity_checks": [
+      {
+        "series": "rw",
+        "r_key": "naive",
+        "surface": "Naive",
+        "ets_spec": "",
+        "seasonal_period": 0,
+        "point_tol_kind": "abs",
+        "point_tol": 1e-08,
+        "interval_tol": 0.0005,
+        "status": "parity",
+        "cause": "",
+        "reason": "Naive is closed-form; same z approximation as air/naive.",
+        "follow_up": "",
+        "measured_point": 0,
+        "measured_interval": 0.00022
+      },
+      {
+        "series": "rw",
+        "r_key": "rwf_drift",
+        "surface": "RandomWalkDrift",
+        "ets_spec": "",
+        "seasonal_period": 0,
+        "point_tol_kind": "abs",
+        "point_tol": 1e-08,
+        "interval_tol": 0.005,
+        "status": "parity",
+        "cause": "",
+        "reason": "RandomWalkDrift is closed-form; same drift-interval formula difference as air/rwf_drift.",
+        "follow_up": "",
+        "measured_point": 6.6e-14,
+        "measured_interval": 0.0023
+      },
+      {
+        "series": "rw",
+        "r_key": "ses",
+        "surface": "SESOptimized",
+        "ets_spec": "",
+        "seasonal_period": 0,
+        "point_tol_kind": "rel",
+        "point_tol": 1e-06,
+        "interval_tol": 1e-06,
+        "status": "parity",
+        "cause": "",
+        "reason": "SimpleExponentialSmoothing::auto() on rw converges to R ses()'s optimum.",
+        "follow_up": "",
+        "measured_point": 5.37e-10,
+        "measured_interval": 9.58e-08
+      },
+      {
+        "series": "rw",
+        "r_key": "ses",
+        "surface": "ETS:ANN",
+        "ets_spec": "ANN",
+        "seasonal_period": 0,
+        "point_tol_kind": "rel",
+        "point_tol": 1e-06,
+        "interval_tol": 1e-06,
+        "status": "parity",
+        "cause": "",
+        "reason": "Same ETS(A,N,N) construction as SESOptimized above.",
+        "follow_up": "",
+        "measured_point": 5.37e-10,
+        "measured_interval": 5.89e-08
+      },
+      {
+        "series": "rw",
+        "r_key": "holt",
+        "surface": "ETS:AAN",
+        "ets_spec": "AAN",
+        "seasonal_period": 0,
+        "point_tol_kind": "rel",
+        "point_tol": 0.01,
+        "interval_tol": 0.03,
+        "status": "known_gap",
+        "cause": "RC-02",
+        "reason": "RC-02: R's own optimiser stops at an inferior, in-bounds optimum (E6: crate_loglik=-515.765392 > r_loglik=-516.366200); measured point=5.60e-3 interval=1.96e-2.",
+        "follow_up": "known gap: nothing to fix, R itself is the looser optimum.",
+        "measured_point": 0.0056,
+        "measured_interval": 0.0196
+      },
+      {
+        "series": "rw",
+        "r_key": "holt",
+        "surface": "Holt",
+        "ets_spec": "",
+        "seasonal_period": 0,
+        "point_tol_kind": "rel",
+        "point_tol": 0.009,
+        "interval_tol": 0.03,
+        "status": "known_gap",
+        "cause": "RC-01,RC-02",
+        "reason": "D-12/D-13 fix (RC-01) remapped SQL 'Holt' to ETS(A,A,N), cutting the deviation 13.41x; the residual (identical to the ETS:AAN row above) is RC-02's R-optimum-is-looser cause, still outside the parity tier. tol = 1.5x post-fix measured (5.60e-3/1.96e-2), capped at the pre-fix planned tolerance (rel 0.1/0.45).",
+        "follow_up": "fixed: forecast() dispatch and build_forecaster remapped SQL 'Holt' to ETS::new(ETSSpec::aan(), 1) (17-03 Task 1); residual tracked as RC-02.",
+        "measured_point": 0.0056,
+        "measured_interval": 0.0196
+      },
+      {
+        "series": "rw",
+        "r_key": "ets_auto",
+        "surface": "AutoETS",
+        "ets_spec": "",
+        "seasonal_period": 0,
+        "point_tol_kind": "rel",
+        "point_tol": 1e-05,
+        "interval_tol": 0.0001,
+        "status": "parity",
+        "cause": "",
+        "reason": "AutoETS selects ETS(A,N,N), matching R's ets() selection on this series.",
+        "follow_up": "",
+        "measured_point": 2.92e-07,
+        "measured_interval": 3.19e-05
+      },
+      {
+        "series": "rw",
+        "r_key": "auto_arima",
+        "surface": "AutoARIMA",
+        "ets_spec": "",
+        "seasonal_period": 0,
+        "point_tol_kind": "rel",
+        "point_tol": 1e-06,
+        "interval_tol": 1e-06,
+        "status": "parity",
+        "cause": "",
+        "reason": "D-15 tolerance rule, re-measured on anofox-forecast 0.16.2 (RC-05 fix, KalmanForecast prediction-interval change): order_match=true (R (0,1,0)), point=0.000000e0, interval=8.062277e-10 (down from the 0.16.1 measurement of 3.276619e-8). tol = max(1e-6, 1.5x measured, rounded up to 1 significant digit) -- the 1e-6 floor still binds on both; tolerance unchanged, not loosened.",
+        "follow_up": "",
+        "measured_point": 0,
+        "measured_interval": 8.062277e-10
+      },
+      {
+        "series": "rw",
+        "r_key": "thetaf",
+        "surface": "Theta",
+        "ets_spec": "",
+        "seasonal_period": 0,
+        "point_tol_kind": "rel",
+        "point_tol": 1e-06,
+        "interval_tol": 1e-06,
+        "status": "parity",
+        "cause": "",
+        "reason": "Theta matches R thetaf() to numerical precision on rw.",
+        "follow_up": "",
+        "measured_point": 3.76e-10,
+        "measured_interval": 5.77e-08
+      },
+      {
+        "series": "inter",
+        "r_key": "croston",
+        "surface": "CrostonClassic",
+        "ets_spec": "",
+        "seasonal_period": 0,
+        "point_tol_kind": "abs",
+        "point_tol": 1e-08,
+        "interval_tol": "NA",
+        "status": "parity",
+        "cause": "",
+        "reason": "CrostonClassic is closed-form (alpha 0.1); R's croston() has no interval.",
+        "follow_up": "",
+        "measured_point": 2.2e-15,
+        "measured_interval": "NA"
+      },
+      {
+        "series": "inter",
+        "r_key": "naive",
+        "surface": "Naive",
+        "ets_spec": "",
+        "seasonal_period": 0,
+        "point_tol_kind": "abs",
+        "point_tol": 1e-08,
+        "interval_tol": 0.0005,
+        "status": "parity",
+        "cause": "",
+        "reason": "Naive is closed-form; same z approximation as air/naive.",
+        "follow_up": "",
+        "measured_point": 0,
+        "measured_interval": 0.00022
+      },
+      {
+        "series": "inter",
+        "r_key": "ses",
+        "surface": "SESOptimized",
+        "ets_spec": "",
+        "seasonal_period": 0,
+        "point_tol_kind": "rel",
+        "point_tol": 1,
+        "interval_tol": 0.5,
+        "status": "known_gap",
+        "cause": "RC-04",
+        "reason": "RC-04: on this zero-inflated series the crate's own optimiser converges to a different (alpha, l0) optimum than R's ses() -- evaluated at R's parameters, the crate's own objective scores R's point strictly better than its own converged fit; measured point=7.39e-1 interval=3.83e-1.",
+        "follow_up": "draft: RC-04-ses-optimized-intermittent-optimum.md (pending user filing).",
+        "measured_point": 0.739,
+        "measured_interval": 0.383
+      },
+      {
+        "series": "trend",
+        "r_key": "naive",
+        "surface": "Naive",
+        "ets_spec": "",
+        "seasonal_period": 0,
+        "point_tol_kind": "abs",
+        "point_tol": 1e-08,
+        "interval_tol": 0.0005,
+        "status": "parity",
+        "cause": "",
+        "reason": "Naive is closed-form; bounds use the crate's Abramowitz-Stegun 26.2.23 normal-quantile approximation (constant ~2.2e-4 relative half-width error on every series).",
+        "follow_up": "",
+        "measured_point": 0,
+        "measured_interval": 0.00022
+      },
+      {
+        "series": "trend",
+        "r_key": "rwf_drift",
+        "surface": "RandomWalkDrift",
+        "ets_spec": "",
+        "seasonal_period": 0,
+        "point_tol_kind": "abs",
+        "point_tol": 1e-08,
+        "interval_tol": 0.005,
+        "status": "parity",
+        "cause": "",
+        "reason": "RandomWalkDrift is closed-form; bounds combine the z approximation with the crate's drift-interval formula, which differs slightly from R's rwf().",
+        "follow_up": "",
+        "measured_point": 7.1e-14,
+        "measured_interval": 0.00314
+      },
+      {
+        "series": "trend",
+        "r_key": "ses",
+        "surface": "SESOptimized",
+        "ets_spec": "",
+        "seasonal_period": 0,
+        "point_tol_kind": "rel",
+        "point_tol": 1e-06,
+        "interval_tol": 1e-06,
+        "status": "parity",
+        "cause": "",
+        "reason": "SimpleExponentialSmoothing::auto() on a non-intermittent series converges to R ses()'s optimum (contrast inter/ses, RC-04).",
+        "follow_up": "",
+        "measured_point": 1.96e-10,
+        "measured_interval": 5.95e-08
+      },
+      {
+        "series": "trend",
+        "r_key": "ses",
+        "surface": "ETS:ANN",
+        "ets_spec": "ANN",
+        "seasonal_period": 0,
+        "point_tol_kind": "rel",
+        "point_tol": 1e-06,
+        "interval_tol": 1e-06,
+        "status": "parity",
+        "cause": "",
+        "reason": "Same ETS(A,N,N) construction as SESOptimized above.",
+        "follow_up": "",
+        "measured_point": 1.96e-10,
+        "measured_interval": 1.87e-08
+      },
+      {
+        "series": "trend",
+        "r_key": "holt",
+        "surface": "ETS:AAN",
+        "ets_spec": "AAN",
+        "seasonal_period": 0,
+        "point_tol_kind": "rel",
+        "point_tol": 0.002,
+        "interval_tol": 0.01,
+        "status": "parity",
+        "cause": "",
+        "reason": "ETS(A,A,N) direct construction, R's own holt() definition; measured by diagnosis_report's trend/holt/Holt E4 block (the 'ETS(A,A,N) R-faithful' line).",
+        "follow_up": "",
+        "measured_point": 0.0005495,
+        "measured_interval": 0.006532
+      },
+      {
+        "series": "trend",
+        "r_key": "holt",
+        "surface": "Holt",
+        "ets_spec": "",
+        "seasonal_period": 0,
+        "point_tol_kind": "rel",
+        "point_tol": 0.002,
+        "interval_tol": 0.01,
+        "status": "parity",
+        "cause": "RC-01",
+        "reason": "D-12/D-13 fix (RC-01): SQL 'Holt' now dispatches to ETS(A,A,N) (R's holt() definition) instead of HoltLinearTrend::auto(), so this check is identical to the ETS:AAN row above and is in the parity tier post-fix.",
+        "follow_up": "fixed: forecast() dispatch and build_forecaster remapped SQL 'Holt' to ETS::new(ETSSpec::aan(), 1) (17-03 Task 1).",
+        "measured_point": 0.0005495,
+        "measured_interval": 0.006532
+      },
+      {
+        "series": "trend",
+        "r_key": "ets_auto",
+        "surface": "AutoETS",
+        "ets_spec": "",
+        "seasonal_period": 0,
+        "point_tol_kind": "rel",
+        "point_tol": 0.002,
+        "interval_tol": 0.01,
+        "status": "parity",
+        "cause": "",
+        "reason": "AutoETS selects ETS(A,A,N), matching R's ets() selection on this series (contrast air/ets_auto, RC-03, where R and the crate's selection diverge).",
+        "follow_up": "",
+        "measured_point": 0.000563,
+        "measured_interval": 0.00669
+      },
+      {
+        "series": "trend",
+        "r_key": "auto_arima",
+        "surface": "AutoARIMA",
+        "ets_spec": "",
+        "seasonal_period": 0,
+        "point_tol_kind": "rel",
+        "point_tol": 1e-06,
+        "interval_tol": 1e-06,
+        "status": "parity",
+        "cause": "",
+        "reason": "D-15 tolerance rule, re-measured and re-tiered on anofox-forecast 0.16.2 (RC-05 fix, KalmanForecast prediction-interval change): order_match=true (R (0,1,0) with drift), point=2.232548e-14 (unchanged), interval=8.064310e-10 (down from the 0.16.1 measurement of 3.361326e-3). tol = max(1e-6, 1.5x measured, rounded up to 1 significant digit) -- the 1e-6 floor now binds (was 6e-3); tightened, never loosened.",
+        "follow_up": "",
+        "measured_point": 2.232548e-14,
+        "measured_interval": 8.06431e-10
+      },
+      {
+        "series": "trend",
+        "r_key": "thetaf",
+        "surface": "Theta",
+        "ets_spec": "",
+        "seasonal_period": 0,
+        "point_tol_kind": "rel",
+        "point_tol": 1e-06,
+        "interval_tol": 1e-06,
+        "status": "parity",
+        "cause": "",
+        "reason": "Theta matches R thetaf() to numerical precision on this non-seasonal series.",
+        "follow_up": "",
+        "measured_point": 2.79e-10,
+        "measured_interval": 1.86e-08
+      }
+    ]
+  },
+  "parameters": {
+    "horizon": 12,
+    "levels": [80, 95]
+  },
+  "series": {
+    "rw": {
+      "inputs": {
+        "values": [-1.22271494447571, -1.01810273965354, -2.12604702687647, -2.21006147001073, -1.93979505911234, -2.53697154261506, -1.49703857997367, -0.756037408173245, 0.0671853865124186, 1.51467256604812, 0.61407828408441, -0.0321627608902126, -0.430778898285395, 0.0601923191506727, 0.848549957807725, 0.811408784033178, 0.0653528028801007, -1.41236932208089, -2.47209541599209, -2.97388704398305, -1.63299964980328, -1.89877602615706, -2.13012182866851, -2.58949596299613, -2.66443361860707, -3.19684781907717, -3.84452715807738, -5.38970610453638, -6.18346222895225, -4.7610626575467, -4.50878200561981, -4.59721443953728, -4.37133080212652, -4.51178747801362, -5.48596773909011, -6.47348766376382, -6.72937894693464, -7.33320049666281, -8.14173930561045, -6.42286249871513, -5.21652406858462, -5.94555307154439, -6.0628303862779, -6.50698704730256, -7.58594629111111, -7.1389671329363, -8.00519933681723, -7.97492254838295, -5.65497439378311, -5.73195215182365, -7.78196493174499, -10.4005358273309, -9.78588635762178, -10.5601943863541, -10.5632864354116, -11.090182611897, -11.2927010262633, -11.7436487155855, -12.1256044813406, -12.0407765887851, -11.7679283432725, -12.1490026986683, -13.3019519337876, -13.9335054253837, -13.9421706201893, -14.9295427510066, -13.7658769830429, -14.0382132686672, -14.230417878309, -14.6810854794522, -14.1193012866049, -12.9223784344992, -14.4357379786462, -14.0518371133994, -14.0678409391764, -16.2536349628001, -18.2021281593761, -18.0471574565946, -19.4214062038198, -19.0404914262394, -20.0153575273657, -19.2072746070981, -18.8474285682283, -18.401077352487, -18.2683548121388, -18.3154477768892, -19.3299274118443, -19.5396570190268, -18.9290209028132, -19.7168836424504, -19.4799777213725, -17.6312495111508, -16.8270254270664, -17.8507719216025, -17.4752001941096, -18.6982055609171, -18.3523224218131, -19.5494259229588, -19.5395599491905, -18.8706279122614, -18.9508122638977, -19.3321844297486, -17.959849801818, -19.1626518310325, -19.7385195150506, -18.7761287007656, -17.6155515390396, -18.2732777291898, -17.1565447295399, -18.1611724834514, -18.5090119851358, -17.2351424980718, -17.6064637028925, -18.7202267939594, -19.7887563789164, -20.1818434808825, -20.0029873620157, -19.2355562947971, -18.8727971021988, -19.101949140473, -17.6534938584172, -18.6184482070227, -18.4585469336829, -16.5530222783423, -17.4130867622092, -14.966730882402, -15.605989817053, -14.4154769022545, -13.7696815065586, -13.6138701983385, -13.3316473255648, -12.3889668934342, -12.6372012374984, -13.8530783776454, -12.7310930842926, -14.3183296890934, -13.2781427669624, -12.2437381404911, -12.8216157592393, -12.319179182571, -13.1318384539903, -13.6017664597922, -16.0664548323654, -15.4089095751624, -15.2036932312118, -16.3021171974017, -16.0437980496516, -16.6813051986476, -18.0011535695094, -17.1575179953277, -17.0150518327291, -16.1337241899616, -16.6080141363668, -17.5978238844787, -18.3546122830708, -16.7520103265132, -17.4672828039184, -18.8335388114499, -18.6531076663136, -18.885377771058, -17.1303649330248, -15.1731312417637, -15.1493836933979, -15.7718600043251, -14.6352979831812, -13.8337776627125, -13.433470156157, -15.478242585622, -15.502412783291, -14.9476559840239, -14.5690297821884, -14.3802407877416, -13.855811924677, -13.2154648213176, -11.3369828867385, -12.0133096863408, -11.4808551785261, -11.3478476592671, -11.5988881437392, -11.7351779519717, -12.4039509224879, -12.731361990337, -13.3830847192565, -13.690269157546, -13.7185241895041, -12.7312046686946, -12.8124397150296, -12.8622383251826, -11.9225208916796, -13.0886074358693, -14.4509150348087, -14.8967014564484, -15.0036497196649, -14.7809396274892, -17.099809590996, -16.3946496868029, -15.834667516095, -14.7895461585961, -13.1583503374817, -13.2716285131333],
+        "frequency": 1,
+        "seed_note": "set.seed(20261008); rw = cumsum(rnorm(200)) — see common.R"
+      },
+      "models": {
+        "naive": {
+          "r_call": "naive(rw, h = 12, level = c(80, 95))",
+          "point": [-13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333],
+          "lower_80": [-14.4715946033319, -14.96863683228, -15.350030748717, -15.6715606935305, -15.954834261512, -16.2109331427624, -16.4464403695093, -16.6656451514266, -16.8715267837291, -17.0662544731279, -17.2514657954718, -17.4284329843008],
+          "upper_80": [-12.0716624229347, -11.5746201939866, -11.1932262775495, -10.8716963327361, -10.5884227647546, -10.3323238835042, -10.0968166567573, -9.87761187483992, -9.67173024253747, -9.47700255313864, -9.29179123079475, -9.11482404196576],
+          "lower_95": [-15.1068182805143, -15.8669787716919, -16.4502704317678, -16.9420080478954, -17.3752375846093, -17.7669070243938, -18.127084246234, -18.4623290302505, -18.7771978152764, -19.0750081166919, -19.3582643906358, -19.6289123504022],
+          "upper_95": [-11.4364387457522, -10.6762782545747, -10.0929865944988, -9.6012489783712, -9.16801944165725, -8.77635000187278, -8.41617278003257, -8.0809279960161, -7.76605921099016, -7.46824890957461, -7.18499263563076, -6.91434467586434]
+        },
+        "rwf_drift": {
+          "r_call": "rwf(rw, h = 12, drift = TRUE, level = c(80, 95))",
+          "point": [-13.3321758174984, -13.3927231218635, -13.4532704262286, -13.5138177305937, -13.5743650349588, -13.634912339324, -13.6954596436891, -13.7560069480542, -13.8165542524193, -13.8771015567844, -13.9376488611495, -13.9981961655146],
+          "lower_80": [-14.5356630536606, -15.0989607578588, -15.5481680439285, -15.9387773183143, -16.292221872761, -16.619463628006, -16.9269965557535, -17.219040163109, -17.49851719335, -17.767549726787, -18.0277352470151, -18.2803113133691],
+          "upper_80": [-12.1286885813362, -11.6864854858682, -11.3583728085288, -11.0888581428731, -10.8565081971567, -10.650361050642, -10.4639227316246, -10.2929737329994, -10.1345913114886, -9.98665338678181, -9.84756247528399, -9.71608101766018],
+          "lower_95": [-15.1727507129216, -16.0021884024872, -16.6571398548033, -17.222473381822, -17.7309683745711, -18.1993896441006, -18.637668863079, -19.0522592107472, -19.4476306372143, -19.8270285842502, -20.1928961921825, -20.5471261446853],
+          "upper_95": [-11.4916009220752, -10.7832578412398, -10.2494009976539, -9.80516207936544, -9.41776169534656, -9.07043503454732, -8.75325042429915, -8.45975468536116, -8.1854778676243, -7.92717452931866, -7.68240153011651, -7.44926618634397]
+        },
+        "ses": {
+          "r_call": "ses(rw, h = 12, level = c(80, 95))",
+          "point": [-13.2716171945085, -13.2716171945085, -13.2716171945085, -13.2716171945085, -13.2716171945085, -13.2716171945085, -13.2716171945085, -13.2716171945085, -13.2716171945085, -13.2716171945085, -13.2716171945085, -13.2716171945085],
+          "lower_80": [-14.474609975296, -14.9728207846066, -15.3551228170828, -15.6774221956744, -15.9613754973995, -16.2180899590707, -16.4541639383354, -16.6738966952226, -16.8802745383575, -17.0754717986767, -17.2611299309197, -17.4385241887098],
+          "upper_80": [-12.0686244137211, -11.5704136044104, -11.1881115719342, -10.8658121933426, -10.5818588916176, -10.3251444299463, -10.0890704506817, -9.86933769379448, -9.66295985065956, -9.46776259034039, -9.28210445809733, -9.10471020030728],
+          "lower_95": [-15.1114358856925, -15.8733835663093, -16.4580640700168, -16.9509784335607, -17.3852475333264, -17.7778584221223, -18.1389024171403, -18.4749546691927, -18.7905823431987, -19.0891107913644, -19.3730504020806, -19.6443515074598],
+          "upper_95": [-11.4317985033245, -10.6698508227078, -10.0851703190002, -9.5922559554563, -9.15798685569061, -8.76537596689471, -8.40433197187673, -8.06827971982431, -7.75265204581838, -7.4541235976526, -7.17018398693647, -6.89888288155727]
+        },
+        "holt": {
+          "r_call": "holt(rw, h = 12, level = c(80, 95))",
+          "point": [-13.3252190200461, -13.3792945108388, -13.4333700016314, -13.487445492424, -13.5415209832166, -13.5955964740093, -13.6496719648019, -13.7037474555945, -13.7578229463871, -13.8118984371797, -13.8659739279724, -13.920049418765],
+          "lower_80": [-14.5354910769994, -15.0797230624781, -15.5114569112221, -15.8844691291209, -16.2198205597651, -16.5283672038271, -16.8165772270395, -17.0886733055907, -17.3475926316069, -17.5954759926339, -17.8339408147933, -18.0642444808407],
+          "upper_80": [-12.1149469630928, -11.6788659591994, -11.3552830920406, -11.0904218557271, -10.8632214066681, -10.6628257441914, -10.4827667025642, -10.3188216055983, -10.1680532611673, -10.0283208817256, -9.8980070411514, -9.77585435668929],
+          "lower_95": [-15.1761704034309, -15.9798755636039, -16.6115296707752, -17.1533767934565, -17.6376267123788, -18.080882247831, -18.4930356056543, -18.8805448117835, -19.247901913935, -19.5983809641258, -19.9344556021465, -20.2580488289763],
+          "upper_95": [-11.4742676366614, -10.7787134580736, -10.2552103324875, -9.82151419139147, -9.4454152540545, -9.11031070018747, -8.80630832394947, -8.52695009940551, -8.26774397883922, -8.02541591023367, -7.79749225379821, -7.58205000855365],
+          "fit": {
+            "method": "Holt's method",
+            "par": {
+              "alpha": 0.986822709781059,
+              "beta": 0.000100000646661821,
+              "l": -2.17476385717453,
+              "b": -0.0540566589851578
+            },
+            "loglik": -516.36619999372,
+            "aic": 1042.73239998744,
+            "aicc": 1043.04167833796,
+            "bic": 1059.22398682018,
+            "sigma2": 0.891854158424874
+          }
+        },
+        "ets_auto": {
+          "r_call": "forecast(ets(rw), h = 12, level = c(80, 95))",
+          "point": [-13.2716133243795, -13.2716133243795, -13.2716133243795, -13.2716133243795, -13.2716133243795, -13.2716133243795, -13.2716133243795, -13.2716133243795, -13.2716133243795, -13.2716133243795, -13.2716133243795, -13.2716133243795],
+          "lower_80": [-14.4746062823889, -14.9727880062434, -15.3550716367556, -15.6773568228854, -15.9612982542175, -16.2180023453664, -16.4540670167663, -16.673791265843, -16.8801612299193, -17.0753511213063, -17.2610023087936, -17.4383899814801],
+          "upper_80": [-12.0686203663701, -11.5704386425156, -11.1881550120034, -10.8658698258736, -10.5819283945414, -10.3252243033925, -10.0891596319926, -9.86943538291592, -9.66306541883968, -9.46787552745261, -9.28222433996538, -9.10483666727882],
+          "lower_95": [-15.1114322866011, -15.8733354848512, -16.4579878451835, -16.9508805032302, -17.3851314487965, -17.7777264772471, -18.1387562371144, -18.4747954775935, -18.7904111016191, -19.0889282799757, -19.3728572696043, -19.6441483039369],
+          "upper_95": [-11.4317943621579, -10.6698911639078, -10.0852388035755, -9.59234614552877, -9.15809519996245, -8.76550017151185, -8.40447041164454, -8.06843117116543, -7.7528155471399, -7.45429836878323, -7.17036937915461, -6.8990783448221],
+          "fit": {
+            "method": "ETS(A,N,N)",
+            "par": {
+              "alpha": 0.999865656412658,
+              "l": -1.21797367377064
+            },
+            "loglik": -516.174918838332,
+            "aic": 1038.34983767666,
+            "aicc": 1038.47228665626,
+            "bic": 1048.24478977631,
+            "sigma2": 0.881158427500363
+          }
+        },
+        "auto_arima": {
+          "r_call": "forecast(auto.arima(rw), h = 12, level = c(80, 95))",
+          "point": [-13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333],
+          "lower_80": [-14.4715946084732, -14.9686368395508, -15.350030757622, -15.671560703813, -15.9548342730082, -16.2109331553559, -16.4464403831118, -16.6656451659683, -16.8715267991529, -17.066254489386, -17.2514658125235, -17.4284330021107],
+          "upper_80": [-12.0716624177934, -11.5746201867157, -11.1932262686446, -10.8716963224535, -10.5884227532583, -10.3323238709107, -10.0968166431548, -9.87761186029822, -9.67173022711367, -9.47700253688053, -9.29179121374309, -9.11482402415589],
+          "lower_95": [-15.1068182883772, -15.8669787828117, -16.4502704453867, -16.9420080636211, -17.3752376021913, -17.7669070436539, -18.1270842670372, -18.4623290524901, -18.7771978388651, -19.0750081415566, -19.3582644167141, -19.6289123776401],
+          "upper_95": [-11.4364387378894, -10.6762782434549, -10.0929865808799, -9.60124896264542, -9.16801942407529, -8.77634998261271, -8.41617275922932, -8.08092797377648, -7.76605918740149, -7.46824888470997, -7.18499260955251, -6.91434464862649],
+          "fit": {
+            "order": {
+              "p": 0,
+              "d": 1,
+              "q": 0
+            },
+            "coef": [],
+            "loglik": -269.278905071358,
+            "aicc": 540.578114711244,
+            "sigma2": 0.876729822799795
+          }
+        },
+        "arima_010": {
+          "r_call": "forecast(Arima(rw, order = c(0,1,0)), h = 12, level = c(80, 95))",
+          "point": [-13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333, -13.2716285131333],
+          "lower_80": [-14.4715946084732, -14.9686368395508, -15.350030757622, -15.671560703813, -15.9548342730082, -16.2109331553559, -16.4464403831118, -16.6656451659683, -16.8715267991529, -17.066254489386, -17.2514658125235, -17.4284330021107],
+          "upper_80": [-12.0716624177934, -11.5746201867157, -11.1932262686446, -10.8716963224535, -10.5884227532583, -10.3323238709107, -10.0968166431548, -9.87761186029822, -9.67173022711367, -9.47700253688053, -9.29179121374309, -9.11482402415589],
+          "lower_95": [-15.1068182883772, -15.8669787828117, -16.4502704453867, -16.9420080636211, -17.3752376021913, -17.7669070436539, -18.1270842670372, -18.4623290524901, -18.7771978388651, -19.0750081415566, -19.3582644167141, -19.6289123776401],
+          "upper_95": [-11.4364387378894, -10.6762782434549, -10.0929865808799, -9.60124896264542, -9.16801942407529, -8.77634998261271, -8.41617275922932, -8.08092797377648, -7.76605918740149, -7.46824888470997, -7.18499260955251, -6.91434464862649],
+          "fit": {
+            "order": {
+              "p": 0,
+              "d": 1,
+              "q": 0
+            },
+            "coef": [],
+            "loglik": -269.278905071358,
+            "aicc": 540.578114711244,
+            "sigma2": 0.876729822799795
+          }
+        },
+        "thetaf": {
+          "r_call": "thetaf(rw, h = 12, level = c(80, 95))",
+          "point": [-13.3052188606828, -13.3388171645723, -13.3724154684619, -13.4060137723514, -13.4396120762409, -13.4732103801304, -13.50680868402, -13.5404069879095, -13.574005291799, -13.6076035956885, -13.6412018995781, -13.6748002034676],
+          "lower_80": [-14.5082116414703, -15.0400207546705, -15.4559210910362, -15.8118187735173, -16.1293703791319, -16.4196831446927, -16.6893554278468, -16.9426864886235, -17.182662635648, -17.4114581998567, -17.6307146359892, -17.8417071976688],
+          "upper_80": [-12.1022260798954, -11.6376135744742, -11.2889098458876, -11.0002087711855, -10.74985377335, -10.5267376155682, -10.3242619401931, -10.1381274871954, -9.96534794795005, -9.8037489915204, -9.65168916316686, -9.50789320926634],
+          "lower_95": [-15.1450375518668, -15.9405835363731, -16.5588623439702, -17.0853750114036, -17.5532424150588, -17.9794516077443, -18.3740939066518, -18.7437444625937, -19.0929704404892, -19.4250971925445, -19.7426351071501, -20.0475345164188],
+          "upper_95": [-11.4654001694988, -10.7370507927716, -10.1859685929536, -9.72665253329918, -9.32598173742301, -8.96696915251663, -8.63952346138818, -8.33706951322528, -8.05504014310887, -7.79010999883261, -7.53976869200601, -7.30206589051633]
+        }
+      }
+    },
+    "inter": {
+      "inputs": {
+        "values": [4, 3, 0, 4, 0, 4, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 2, 0, 3, 0, 5, 0, 0, 3, 0, 0, 5, 4, 0, 3, 0, 0, 0, 0, 0, 0, 3, 3, 0, 0, 0, 0, 0, 5, 2, 0, 0, 0, 0, 0, 5, 0, 0, 0, 8, 0, 5, 0, 0, 0, 0, 0, 3, 0, 4, 0, 5, 0, 4, 0, 7, 3, 5, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 0, 3, 4, 7, 0],
+        "frequency": 1,
+        "seed_note": "set.seed(20261008); inter = ifelse(runif(120) < 0.3, rpois(120, 3) + 1, 0) — see common.R"
+      },
+      "models": {
+        "croston": {
+          "r_call": "croston(inter, h = 12, alpha = 0.1)",
+          "point": [1.55126868840256, 1.55126868840256, 1.55126868840256, 1.55126868840256, 1.55126868840256, 1.55126868840256, 1.55126868840256, 1.55126868840256, 1.55126868840256, 1.55126868840256, 1.55126868840256, 1.55126868840256]
+        },
+        "naive": {
+          "r_call": "naive(inter, h = 12, level = c(80, 95))",
+          "point": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          "lower_80": [-3.88926810315084, -5.500255699181, -6.73640995891429, -7.77853620630168, -8.69666786136695, -9.52672232560178, -10.290036182993, -11.000511398362, -11.6678043094525, -12.2989456369994, -12.8992430072486, -13.4728199178286],
+          "upper_80": [3.88926810315084, 5.500255699181, 6.73640995891429, 7.77853620630168, 8.69666786136695, 9.52672232560178, 10.290036182993, 11.000511398362, 11.6678043094525, 12.2989456369994, 12.8992430072486, 13.4728199178286],
+          "lower_95": [-5.94812227095732, -8.4119151862413, -10.3024499829301, -11.8962445419146, -13.300405736341, -14.5698644915301, -15.7372522967578, -16.8238303724826, -17.844366812872, -18.8096141773983, -19.7276897799221, -20.6048999658601],
+          "upper_95": [5.94812227095732, 8.4119151862413, 10.3024499829301, 11.8962445419146, 13.300405736341, 14.5698644915301, 15.7372522967578, 16.8238303724826, 17.844366812872, 18.8096141773983, 19.7276897799221, 20.6048999658601]
+        },
+        "ses": {
+          "r_call": "ses(inter, h = 12, level = c(80, 95))",
+          "point": [1.24174658168057, 1.24174658168057, 1.24174658168057, 1.24174658168057, 1.24174658168057, 1.24174658168057, 1.24174658168057, 1.24174658168057, 1.24174658168057, 1.24174658168057, 1.24174658168057, 1.24174658168057],
+          "lower_80": [-1.43307476077449, -1.43307477414882, -1.43307478752315, -1.43307480089748, -1.43307481427181, -1.43307482764614, -1.43307484102047, -1.4330748543948, -1.43307486776913, -1.43307488114346, -1.43307489451779, -1.43307490789212],
+          "upper_80": [3.91656792413562, 3.91656793750995, 3.91656795088428, 3.91656796425861, 3.91656797763294, 3.91656799100727, 3.9165680043816, 3.91656801775593, 3.91656803113026, 3.91656804450459, 3.91656805787892, 3.91656807125325],
+          "lower_95": [-2.84903964748154, -2.84903966793581, -2.84903968839008, -2.84903970884436, -2.84903972929863, -2.8490397497529, -2.84903977020717, -2.84903979066145, -2.84903981111572, -2.84903983156999, -2.84903985202426, -2.84903987247853],
+          "upper_95": [5.33253281084267, 5.33253283129694, 5.33253285175121, 5.33253287220549, 5.33253289265976, 5.33253291311403, 5.3325329335683, 5.33253295402258, 5.33253297447685, 5.33253299493112, 5.33253301538539, 5.33253303583966],
+          "fit": {
+            "method": "Simple exponential smoothing",
+            "par": {
+              "alpha": 0.000100000835353129,
+              "l": 1.24173768106333
+            },
+            "loglik": -374.538407765204,
+            "aic": 755.076815530408,
+            "aicc": 755.283712082132,
+            "bic": 763.439290758754,
+            "sigma2": 4.35629607235474
+          }
+        }
+      }
+    },
+    "ar1_l10": {
+      "inputs": {
+        "values": [11.6482273695951, 11.0016712907327, 10.5561412496489, 10.5565784915642, 10.0708582682138, 10.4456291245121, 8.72354231983145, 9.82586222559384, 11.9522100389668, 10.4974032380902, 9.5569966039541, 10.8284791089589, 10.6426277971222, 11.2136909724544, 10.3349388019909, 8.90211626442682, 8.85414271099708, 9.53919954630712, 9.71034113772891, 9.74173467294148, 9.59888873548989, 10.8987086473596, 10.1652575944036, 11.257199104306, 9.79919250250025, 10.3542793016187, 11.0289053185718, 10.6697419080768, 9.39789383841395, 9.7754164859933, 8.30204863005869, 8.60754825730822, 8.52593658179859, 7.10837562763397, 9.149564342167, 8.3212072465235, 9.34065690335105, 9.8192938036209, 9.44825258980228, 10.0499685421518, 9.88125356081441, 8.89678192963942, 9.05289358413042, 11.385710725594, 11.8703381185369, 11.7546686382842, 10.7484866354439, 9.03423653721399, 9.65029646591464, 9.63731273445676, 8.16706717368388, 10.2516088605423, 11.8308473735894, 10.8584880573246, 9.81533927289974, 10.9011086882125, 9.99913938872053, 10.8826800523787, 10.8110701359278, 9.61005841987751, 8.22148743415358, 7.9951372660812, 8.66722059304193, 9.43449912952001, 9.32779778358203, 10.1183049991627, 8.7030852609176, 7.90707331514464, 9.47128672513213, 8.49147415457446, 8.59234268639315, 8.98287412058042, 8.24031752995757, 7.80678800343047, 6.79245755127474, 9.37472462695632, 7.52552245346848, 9.91050160789722, 10.7555517954471, 11.0634766387893, 9.50654885382934, 8.31413904288873, 8.14484033920573, 8.89925917126816, 10.8081469158436, 9.80608691912398, 10.6132973341008, 9.15591372732441, 8.34338295029025, 9.45618802327322, 10.2175220735461, 10.8329160924811, 11.5545293591451, 10.7627984172814, 9.33490953861811, 10.3229011892107, 9.56187707433391, 10.6907274688838, 11.0131512018058, 10.5003191490383, 9.87622618605087, 11.5468105717948, 9.11411474717204, 10.7144284456297, 10.5009291352796, 11.8972253700314, 10.038053865653, 10.6209090844646, 9.7469748301343, 9.39802959291023, 8.14582040483641, 7.02136598641328, 6.43673940154957, 5.97986870362359, 7.71393628390507, 7.53096358333243, 6.9214853068827, 8.03235239859098, 8.80517399871142, 9.75541308695248, 11.5693860253453, 11.1738938821215, 11.9589735430085, 13.0850611482794, 11.1456644517189, 11.5472441201938, 11.9403413636656, 10.7773456654807, 9.42802128958207, 9.34244770491257, 10.7518481473881, 10.1345784081382, 9.76554880675007, 9.73124464101332, 11.2074220891658, 10.3356035742954, 10.1869315310659, 9.80183830318089, 10.7576075330757, 8.45912557419642, 8.25344650046419, 10.0572217482321, 8.43390531131227, 11.3514461043888, 10.094514754951, 10.7817598988734, 10.6926254528089, 10.2812001107105, 9.8551345098918, 10.5507305831884, 11.0322221075132, 11.2236820596465, 11.7484053737884, 12.2388383207659, 12.0133165409555, 10.4137812038562, 10.1069997419219, 7.64879426920726, 8.61233222574362, 8.41756049920268, 10.4264791392691, 10.0521856725348, 8.63698958295059, 8.32299250467516, 9.41665791500963, 10.967295472522, 10.7261961882254, 10.4074899686817, 11.5204143075104, 13.4140712414854, 11.8440001983806, 11.131043554448, 10.4343119525343, 9.46171583952654, 11.5973229537561, 9.52852992100627, 8.88617531459979, 9.5881099188959, 9.40546528325898, 8.5231981707108, 11.1969783733425, 12.7994127934111, 13.2200816564875, 10.2651864704291, 11.4145005942193, 11.5386483865473, 10.5992476943901, 10.4229412011618, 11.7104221489586, 10.2745169929289, 11.8570760212896, 11.4430256197346, 13.1131203874894, 10.2016838002813, 9.25614812166132, 9.79215914994215, 10.2111954287376, 9.25903907937711, 11.6221068498292, 10.7225489060157, 11.7545216816498, 11.5479332224647, 12.4012789427827, 11.639192075337, 11.5428236583709, 11.0994415912926, 12.363118604994, 11.9521952817421, 10.8959741121269, 10.933747495853, 10.2827212391033, 9.92014905737389, 9.49673044932384, 9.4111744895693, 9.30014144716335, 10.4288511975062, 9.95684690580651, 11.0117384097539, 10.3595661303461, 12.0087500482133, 11.5055977961215, 10.4894459209861, 12.5180042199346, 11.2381703043722, 10.0526010783048, 10.7599638787856, 11.4012277100456, 10.3965547336489, 9.4641246574216, 9.54979743916283, 9.07115746135121, 9.67526257014167, 11.3848006847418, 11.8365731946644, 13.2649200981642, 10.7217422561484, 12.0428654374579, 9.88282651245316, 9.70058416463042, 11.3155768911045, 10.7669334981361, 10.3292637935779, 10.7928123717977, 11.1996003950071, 10.3786513067865, 9.67436496748804, 11.4982442303021, 10.8375768310929, 9.07663827655478, 9.47161323372156, 10.270594299558, 9.79843452505099, 10.1915045540178, 10.95548895933, 8.95181084278671, 9.54206266914785, 10.730779542528, 10.0171512700111, 10.4153949472848, 10.686813720854, 9.8242736216629, 10.6385813062395, 8.74087730733715, 9.61364570197546, 10.3761098795002, 11.5775761768309, 10.0131783911451, 8.2780860407008, 9.43377981455475, 10.3807569093623, 9.96634397898498, 8.33722460231533, 9.12706020107654, 9.46551750046687, 10.2847742992299, 10.8352487064549, 10.5055345863735, 8.68974587010728, 8.27272647457239, 8.31543676852057, 7.00998872710403, 9.30463893449254, 9.79976944587672, 10.0407142202467, 10.8410564451747, 12.031092181122, 12.1864971259182, 10.9293375821142, 11.1956758640848, 12.8150644952406, 12.6061040745558, 11.0361480454397, 11.7152607447662, 12.1741596657849, 11.1311518705905, 10.087267835613, 8.91252142766341, 10.3076746578235, 10.1852747882688, 11.1725528315654],
+        "frequency": 1,
+        "seed_note": "10 + arima.sim(list(ar = 0.7), n = 300) from common.R reference_series()"
+      },
+      "models": {
+        "arima_100": {
+          "r_call": "forecast(Arima(ar1_l10, order = c(1,0,0)), h = 12, level = c(80, 95))",
+          "point": [10.7874855702829, 10.5501821682287, 10.4039404325929, 10.3138167973788, 10.2582767725776, 10.2240494098265, 10.2029562906734, 10.1899573436367, 10.1819465500298, 10.1770097798413, 10.1739674221062, 10.172092524099],
+          "lower_80": [9.48700611592876, 9.02258521905027, 8.79848449829211, 8.67976310906142, 8.613492435635, 8.57520805957227, 8.55257677154239, 8.53899403064919, 8.53076157654061, 8.52574063140982, 8.52266630664457, 8.52077926828685],
+          "upper_80": [12.087965024637, 12.0777791174071, 12.0093963668936, 11.9478704856963, 11.9030611095202, 11.8728907600807, 11.8533358098044, 11.8409206566243, 11.833131523519, 11.8282789282727, 11.8252685375677, 11.8234057799111],
+          "lower_95": [8.79857387784918, 8.21392424168117, 7.9486074638735, 7.81474733812849, 7.74279620245075, 7.70236417327079, 7.67891862782314, 7.66502684513008, 7.6566770510399, 7.65161154638632, 7.64852029929752, 7.64662683422642],
+          "upper_95": [12.7763972627166, 12.8864400947762, 12.8592734013122, 12.8128862566292, 12.7737573427045, 12.7457346463822, 12.7269939535236, 12.7148878421434, 12.7072160490197, 12.7024080132962, 12.6994145449148, 12.6975582139716],
+          "fit": {
+            "order": {
+              "p": 1,
+              "d": 0,
+              "q": 0
+            },
+            "coef": {
+              "ar1": 0.616264808552632,
+              "intercept": 10.1690815058572
+            },
+            "loglik": -429.315505039635,
+            "aicc": 864.712091160351,
+            "sigma2": 1.02975715865794
+          }
+        },
+        "arima_101": {
+          "r_call": "forecast(Arima(ar1_l10, order = c(1,0,1)), h = 12, level = c(80, 95))",
+          "point": [10.7421916342545, 10.566297422115, 10.4446261224053, 10.3604624367844, 10.302243892278, 10.261972379696, 10.234115367134, 10.2148458364132, 10.201516524328, 10.1922962395561, 10.1859182921624, 10.1815064747442],
+          "lower_80": [9.44333681985319, 9.07174832676163, 8.86499158474153, 8.74169649590966, 8.66508476137792, 8.61608498990809, 8.5840679207822, 8.56281154852832, 8.54853239664718, 8.53885781569307, 8.53226253610001, 8.52774673742132],
+          "upper_80": [12.0410464486558, 12.0608465174683, 12.0242606600691, 11.9792283776591, 11.9394030231782, 11.9078597694838, 11.8841628134859, 11.8668801242981, 11.8545006520087, 11.8457346634191, 11.8395740482247, 11.835266212067],
+          "lower_95": [8.75576461421399, 8.28058182644584, 8.0287835720192, 7.88477356962102, 7.79842506844354, 7.74480483581956, 7.71058556577363, 7.6882774231448, 7.67349545644848, 7.66358038562239, 7.65687005731257, 7.65229921427955],
+          "upper_95": [12.728618654295, 12.8520130177841, 12.8604686727914, 12.8361513039478, 12.8060627161126, 12.7791399235724, 12.7576451684945, 12.7414142496816, 12.7295375922074, 12.7210120934898, 12.7149665270121, 12.7107137352088],
+          "fit": {
+            "order": {
+              "p": 1,
+              "d": 0,
+              "q": 1
+            },
+            "coef": {
+              "ar1": 0.691729979228596,
+              "ma1": -0.122490088285298,
+              "intercept": 10.1716067564277
+            },
+            "loglik": -428.441983797724,
+            "aicc": 865.019560815787,
+            "sigma2": 1.02718589216425
+          }
+        }
+      }
+    },
+    "trend": {
+      "inputs": {
+        "values": [0.726322901219552, 0.726571507705632, 3.16517138598706, 3.99993205281555, 3.97548673054896, 5.6902456542776, 5.60493716139205, 5.9718721001458, 7.5064270380322, 9.21087004515633, 10.6617710249343, 10.3291755955358, 10.3780102442191, 9.56609188633736, 10.1570454921052, 12.2743422541079, 13.3542361058758, 13.2299482680294, 13.8329775383434, 15.5928176795837, 16.2931587499036, 17.0212884789089, 17.4165540769653, 17.8531766848028, 17.5481146931637, 16.6842663624324, 18.9065342664242, 17.4372656992621, 17.7604470778263, 17.2978343872433, 16.9407556697373, 16.3052245361447, 18.3352339879465, 17.967351942385, 18.1813525834601, 17.3693554292032, 16.2654032008668, 16.1509074125061, 13.8265894892424, 15.1276837502051, 15.5809088420848, 15.3031091733265, 15.6754688321441, 13.5268641895222, 12.9527441705846, 13.2912737517605, 13.6296261296183, 16.6873212519458, 18.3884438825768, 18.4435243888028, 20.3330542526839, 20.6548522318914, 21.3908498063784, 22.1465613944485, 21.907050250079, 21.1589127521861, 21.4215768631597, 21.971359970271, 21.3077053215746, 22.9954066519405, 24.8924277731211, 25.1943586526761, 25.3221242668269, 25.5120104145237, 25.1006393372152, 27.5808002525776, 26.7473947526348, 26.9075232218584, 27.0752464078661, 27.7881914746066, 27.254450470953, 28.9977273985431, 29.7314085967204, 29.4974590583385, 30.1360195811211, 28.4165830596927, 28.6982145849684, 29.5842430362437, 30.1876626452757, 30.3750886290955, 31.1006140258787, 31.0287594454552, 31.9983906934443, 31.7247849767051, 33.3959628137902, 34.5261930920619, 35.711888097366, 37.6472946220467, 37.4981701395339, 38.8712190975238, 41.109108851588, 41.458805245225, 42.2892034578865, 40.9092318906343, 41.1327612075545, 41.8799728919981, 42.9648602603332, 43.1442525140437, 44.376620833132, 43.5075938738589, 44.391786967919, 44.7338087593506, 46.4015718008599, 47.0256944925218, 49.1925012296661, 48.6115688054322, 48.7725913245933, 48.656233892442, 50.3481062367545, 50.0050016110803, 48.3497439590933, 49.2769301967255, 51.915263737377, 51.9398617998035, 51.8716661813556, 52.0316671180924, 53.452932215525, 54.9342182780062, 55.8234063979164, 57.8779759234187, 58.3875222796174, 58.687793666271, 59.8106160099909, 58.9531105566336, 58.5290859259131, 57.7840866059466, 58.512478824884, 57.3083969498347, 59.0610466522147, 57.0646858176474, 56.6322521961889, 58.9188432037285, 56.9692222322575, 59.8834862504321, 61.2283472135629, 63.7321541216592, 63.0852982827966, 64.4921095279368, 65.8594958536938, 66.212966526482, 68.2220382542372, 67.897991667779, 68.9292758972582, 68.6460530603863, 69.1897589684034, 69.1482499035087, 70.818767507554, 71.2047776347008, 70.0856561285992, 69.5664665776709],
+        "frequency": 1,
+        "seed_note": "trend <- cumsum(rnorm(150, mean = 0.3, sd = 1)), appended LAST in common.R reference_series() (D-08 Task 2) -- random walk with drift, true model rwf(drift) / ARIMA(0,1,0) with drift"
+      },
+      "models": {
+        "naive": {
+          "r_call": "naive(trend, h = 12, level = c(80, 95))",
+          "point": [69.5664665776709, 69.5664665776709, 69.5664665776709, 69.5664665776709, 69.5664665776709, 69.5664665776709, 69.5664665776709, 69.5664665776709, 69.5664665776709, 69.5664665776709, 69.5664665776709, 69.5664665776709],
+          "lower_80": [68.0584092188596, 67.4337514080033, 66.9544346114815, 66.5503518600482, 66.1943478094, 65.8724955457338, 65.5765218434352, 65.3010362383358, 65.0422945012369, 64.7975704816493, 64.5648061561593, 64.3424026452922],
+          "upper_80": [71.0745239364822, 71.6991817473384, 72.1784985438602, 72.5825812952935, 72.9385853459418, 73.2604376096079, 73.5564113119065, 73.8318969170059, 74.0906386541048, 74.3353626736924, 74.5681269991824, 74.7905305100495],
+          "lower_95": [67.260091875819, 66.3047601943977, 65.5717084127718, 64.953717173967, 64.4092559627442, 63.91702540247, 63.46437268644, 63.0430538111245, 62.6473424721151, 62.273069382027, 61.9170870656603, 61.5769502478728],
+          "upper_95": [71.8728412795228, 72.828172960944, 73.5612247425699, 74.1792159813747, 74.7236771925976, 75.2159077528717, 75.6685604689018, 76.0898793442172, 76.4855906832266, 76.8598637733147, 77.2158460896815, 77.5559829074689]
+        },
+        "rwf_drift": {
+          "r_call": "rwf(trend, h = 12, drift = TRUE, level = c(80, 95))",
+          "point": [70.0284809647611, 70.4904953518514, 70.9525097389417, 71.414524126032, 71.8765385131223, 72.3385529002125, 72.8005672873028, 73.2625816743931, 73.7245960614834, 74.1866104485736, 74.6486248356639, 75.1106392227542],
+          "lower_80": [68.6321802781717, 68.5092566931233, 68.5179763038857, 68.5941349901022, 68.7129595086032, 68.8617922288842, 69.033142062875, 69.2221465139539, 69.4254408935614, 69.6405847735335, 69.8657429505995, 70.0994952193425],
+          "upper_80": [71.4247816513506, 72.4717340105795, 73.3870431739977, 74.2349132619617, 75.0401175176413, 75.8153135715409, 76.5679925117307, 77.3030168348323, 78.0237512294053, 78.7326361236138, 79.4315067207284, 80.1217832261659],
+          "lower_95": [67.8930233437945, 67.4604523006884, 67.2292121517388, 67.1011111683089, 67.0382619444619, 67.0213063048537, 67.0387876189299, 67.0832693398442, 67.1496056205053, 67.2340641481157, 67.3338382214775, 67.4467558238393],
+          "upper_95": [72.1639385857278, 73.5205384030145, 74.6758073261446, 75.727937083755, 76.7148150817826, 77.6557994955714, 78.5623469556757, 79.441894008942, 80.2995865024614, 81.1391567490315, 81.9634114498504, 82.7745226216691]
+        },
+        "ses": {
+          "r_call": "ses(trend, h = 12, level = c(80, 95))",
+          "point": [69.5665185214605, 69.5665185214605, 69.5665185214605, 69.5665185214605, 69.5665185214605, 69.5665185214605, 69.5665185214605, 69.5665185214605, 69.5665185214605, 69.5665185214605, 69.5665185214605, 69.5665185214605],
+          "lower_80": [68.0533630726764, 67.426700585488, 66.9458311715398, 66.5404346539911, 66.1832708273235, 65.8603687205474, 65.5634287480814, 65.2870431890562, 65.0274557869764, 64.781931611966, 64.548405999662, 64.3252749029711],
+          "upper_80": [71.0796739702447, 71.7063364574331, 72.1872058713812, 72.59260238893, 72.9497662155976, 73.2726683223736, 73.5696082948397, 73.8459938538649, 74.1055812559446, 74.3511054309551, 74.5846310432591, 74.8077621399499],
+          "lower_95": [67.2523469638243, 66.2939493945236, 65.5585230894534, 64.9385226187616, 64.3922876831806, 63.8984515264246, 63.4443210276986, 63.0216257916266, 62.6246211196372, 62.2491242974317, 61.891977693355, 61.5507281290746],
+          "upper_95": [71.8806900790967, 72.8390876483975, 73.5745139534676, 74.1945144241595, 74.7407493597404, 75.2345855164964, 75.6887160152224, 76.1114112512944, 76.5084159232838, 76.8839127454893, 77.241059349566, 77.5823089138465],
+          "fit": {
+            "method": "Simple exponential smoothing",
+            "par": {
+              "alpha": 0.999899973732425,
+              "l": 0.727873022450182
+            },
+            "loglik": -399.709770609333,
+            "aic": 805.419541218667,
+            "aicc": 805.58392478031,
+            "bic": 814.451447100955,
+            "sigma2": 1.3941031905178
+          }
+        },
+        "holt": {
+          "r_call": "holt(trend, h = 12, level = c(80, 95))",
+          "point": [70.1205918275353, 70.5866112370122, 71.0526306464891, 71.518650055966, 71.9846694654429, 72.4506888749198, 72.9167082843967, 73.3827276938737, 73.8487471033506, 74.3147665128275, 74.7807859223044, 75.2468053317813],
+          "lower_80": [68.72306231403, 68.6868635064448, 68.7579947580321, 68.8876757036429, 69.0556665591922, 69.2512436345086, 69.4679111685396, 69.7013810430195, 69.9486464972523, 70.2075026660297, 70.4762757397874, 70.7536594862409],
+          "upper_80": [71.5181213410405, 72.4863589675795, 73.3472665349461, 74.1496244082891, 74.9136723716936, 75.6501341153311, 76.3655054002539, 77.0640743447278, 77.7488477094489, 78.4220303596253, 79.0852961048215, 79.7399511773218],
+          "lower_95": [67.9832548779774, 67.6811978055664, 67.5432878935913, 67.4949220114291, 67.5051460805022, 67.5575596319702, 67.642228256593, 67.7525938434148, 67.8840579487732, 68.0332485223234, 68.1976056932404, 68.3751317516373],
+          "upper_95": [72.2579287770931, 73.492024668458, 74.5619733993868, 75.5423781005029, 76.4641928503837, 77.3438181178694, 78.1911883122005, 79.0128615443326, 79.813436257928, 80.5962845033316, 81.3639661513685, 82.1184789119253],
+          "fit": {
+            "method": "Holt's method",
+            "par": {
+              "alpha": 0.92069504222765,
+              "beta": 0.000100006589082803,
+              "l": -0.34003327944044,
+              "b": 0.466007736146538
+            },
+            "loglik": -386.765677653877,
+            "aic": 783.531355307754,
+            "aicc": 783.948021974421,
+            "bic": 798.584531778236,
+            "sigma2": 1.18918604862712
+          }
+        },
+        "ets_auto": {
+          "r_call": "forecast(ets(trend), h = 12, level = c(80, 95))",
+          "point": [70.120702217144, 70.5868016831939, 71.0529011492438, 71.5190006152936, 71.9851000813435, 72.4511995473934, 72.9172990134432, 73.3833984794931, 73.849497945543, 74.3155974115928, 74.7816968776427, 75.2477963436926],
+          "lower_80": [68.7231726860633, 68.6870718610307, 68.7582949142684, 68.8880650481548, 69.0561436134458, 69.251807431713, 69.4685610189546, 69.7021164250761, 69.9494669998213, 70.2084079548049, 70.477265536299, 70.7547335540311],
+          "upper_80": [71.5182317482247, 72.4865315053571, 73.3475073842191, 74.1499361824324, 74.9140565492412, 75.6505916630738, 76.3660370079318, 77.06468053391, 77.7495288912646, 78.4227868683807, 79.0861282189864, 79.740859133354],
+          "lower_95": [67.9833652407069, 67.6814156402887, 67.5436037474326, 67.4953318875774, 67.5056477177348, 67.5581515517084, 67.6429094039701, 67.7533634207596, 67.8849153273182, 68.0341931907911, 68.1986372257481, 68.376249786554],
+          "upper_95": [72.2580391935811, 73.492187726099, 74.5621985510549, 75.5426693430098, 76.4645524449521, 77.3442475430784, 78.1916886229164, 79.0134335382266, 79.8140805637677, 80.5970016323946, 81.3647565295373, 82.1193429008311],
+          "fit": {
+            "method": "ETS(A,A,N)",
+            "par": {
+              "alpha": 0.920676084007313,
+              "beta": 0.000100021786667919,
+              "l": -0.340033449622156,
+              "b": 0.466089102405347
+            },
+            "loglik": -386.765679540286,
+            "aic": 783.531359080571,
+            "aicc": 783.948025747238,
+            "bic": 798.584535551052,
+            "sigma2": 1.18918607853767
+          }
+        },
+        "auto_arima": {
+          "r_call": "forecast(auto.arima(trend), h = 12, level = c(80, 95))",
+          "point": [70.0284809647612, 70.4904953518516, 70.952509738942, 71.4145241260324, 71.8765385131228, 72.3385529002131, 72.8005672873035, 73.2625816743939, 73.7245960614842, 74.1866104485746, 74.648624835665, 75.1106392227554],
+          "lower_80": [68.6368423967069, 68.5224212149877, 68.5421210332995, 68.6312469899237, 68.7647400748428, 68.9297485021025, 69.1186377213456, 69.326433400666, 69.5496803573212, 69.7858628937877, 70.0330818616413, 70.2898618114703],
+          "upper_80": [71.4201195328156, 72.4585694887156, 73.3628984445845, 74.1978012621411, 74.9883369514027, 75.7473572983237, 76.4824968532613, 77.1987299481217, 77.8995117656473, 78.5873580033616, 79.2641678096887, 79.9314166340404],
+          "lower_95": [67.900153438803, 67.4805856994695, 67.266138328835, 67.157869074116, 67.1174534866962, 67.1252364560954, 67.1695419451247, 67.2427623696297, 67.3396134836096, 67.4562478597155, 67.5897610010762, 67.7378964025414],
+          "upper_95": [72.1568084907195, 73.5004050042337, 74.638881149049, 75.6711791779488, 76.6356235395493, 77.5518693443309, 78.4315926294823, 79.282400979158, 80.1095786393589, 80.9169730374337, 81.7074886702538, 82.4833820429693],
+          "fit": {
+            "order": {
+              "p": 0,
+              "d": 1,
+              "q": 0
+            },
+            "coef": {
+              "drift": 0.462014387090375
+            },
+            "loglik": -223.199301801511,
+            "aicc": 450.480795383845,
+            "sigma2": 1.17918172995875
+          }
+        },
+        "thetaf": {
+          "r_call": "thetaf(trend, h = 12, level = c(80, 95))",
+          "point": [69.789338521525, 70.0121362337364, 70.2349339459479, 70.4577316581594, 70.6805293703709, 70.9033270825824, 71.1261247947939, 71.3489225070053, 71.5717202192168, 71.7945179314283, 72.0173156436398, 72.2401133558513],
+          "lower_80": [68.2761830727408, 67.8723182977639, 67.6142465960272, 67.4316477906899, 67.2972816762339, 67.1971772816693, 67.1230350214147, 67.069447174601, 67.0326574847328, 67.0099310219338, 66.9992031218413, 66.9988697373619],
+          "upper_80": [71.3024939703091, 72.151954169709, 72.8556212958686, 73.4838155256289, 74.0637770645079, 74.6094768834955, 75.129214568173, 75.6283978394097, 76.1107829537009, 76.5791048409229, 77.0354281654383, 77.4813569743407],
+          "lower_95": [67.4751669638887, 66.7395671067995, 66.2269385139408, 65.8297357554604, 65.506298532091, 65.2352600875465, 65.003927301032, 64.8040297771714, 64.6298228173935, 64.4771237073995, 64.3427748155343, 64.2243229634653],
+          "upper_95": [72.1035100791612, 73.2847053606734, 74.242929377955, 75.0857275608584, 75.8547602086508, 76.5713940776183, 77.2483222885557, 77.8938152368392, 78.5136176210402, 79.1119121554571, 79.6918564717453, 80.2559037482372]
+        }
+      }
+    }
+  },
+  "auto_arima_selection": {
+    "seed": 170015,
+    "n": 100,
+    "rw": [
+      {
+        "values": [-1.38422062519868, -0.494688106556256, 0.320110575996371, 0.81752864184475, 0.924456725400046, 1.38543427061072, 1.87651459205123, 2.77437122957291, 3.32839259814334, 3.92907278056634, 6.07923144459356, 6.48246009650148, 6.56439034026449, 3.95460856702088, 3.61344870106094, 3.04703930767646, 4.13279961809372, 3.15495764110262, 2.39720941801009, 2.33733492775421, 1.95595027493618, 1.46110208456232, 2.51322147615439, 3.55673391248195, 1.07384796122693, 0.862256045315668, -1.68449612693101, -0.188033488839801, -1.43738982551066, -1.41724006496022, -1.25402521850847, 0.168559212737325, 1.80228300250087, 0.931572638042078, 0.460993845085037, 1.21749124274215, 2.59871782830988, 5.41021224543796, 5.17410770419217, 6.11442850486854, 7.17715282756023, 6.2586239773469, 3.94739973186738, 4.04290448178324, 3.64491957849774, 3.21582102558353, 2.89856005492911, 3.33455075974411, 1.66168676479288, 0.706461785328857, 1.5888940176136, 1.05073800714026, 1.07156784760346, 0.546684271155654, -0.366760781750094, 0.137394622671767, 0.889399825052219, -0.419796383377426, -0.416833422870803, -1.47244521738107, 0.0288613625542646, -0.596776973419096, -0.698169972224535, -0.1912527447136, -0.352079840220132, 1.08945363283042, 0.00934463566184101, 0.367417223456954, 0.0980273099263348, 0.140071787568846, -2.78653992194592, -1.92920142998465, -1.36667686249535, -0.831774201396442, -1.74529342900828, -3.2678469964999, -4.35515763607212, -4.32439745994221, -5.44914981060109, -5.60050465687052, -6.34737641959433, -5.92904088735056, -4.49143773250571, -4.70183096574663, -4.52241066020484, -5.35763741053737, -5.68232742136547, -6.05710687172052, -7.14846567174168, -6.58793130490009, -5.52204278323628, -3.67186687076473, -2.94556362061248, -2.75204794581433, -2.32194592877991, -3.89324416557426, -5.65751908541168, -4.26086294392147, -5.26711149047064, -6.08997976799183],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [-0.859112618650678, -1.48293646636204, -2.01575039447574, -2.04316607896821, -1.14278662221236, 0.761459933258716, 1.97399006802406, 2.05703089092229, 1.43180522989383, 2.21486725184179, 0.723055196605347, 0.743506836874737, 2.37316765114071, -0.328364061808297, 0.312902493950683, 0.146203608353954, -1.30108494378195, -0.404710307575423, -0.467400382571938, 0.318756517699014, 0.52655337517699, 0.633355863122425, -0.684528748587956, 0.81075327133877, 1.82102357543586, 2.04927615294862, 1.11578712224085, -0.136940356350933, 1.04629144683804, 0.179561113631922, 1.02993871148116, 0.973075765837445, 1.0804223265301, 1.10945698426491, 0.893642440059342, -0.461293657169574, -0.795212447367519, -0.294802147028373, -0.499935487080343, -2.21729534572491, -0.996220692932341, -0.807150843535345, 0.231237599627892, 0.0456408989880616, -0.114081361264587, 0.40689443019274, 0.900909989673184, 0.903586365166415, 1.05633283460834, 1.31698532040658, 2.87817503696703, 2.9142863937561, 2.29565320311612, 2.21228178395377, 2.34300272729455, 1.33108222787882, 1.74740949854712, 1.82327959213928, 3.54274158676606, 3.39221837817992, 3.83674611981263, 3.89839403333406, 3.58260579461618, 4.00862250421721, 3.19873675123181, 3.80691164898788, 3.68301584217282, 3.87844073120879, 4.01806780039665, 3.81177984546856, 2.87958416553853, 3.7167032416213, 2.82773478292998, 1.55214319424873, 0.722773669157516, 1.1798628468765, 0.924957313348339, 3.22581854417357, 3.38129130348332, 3.12615789690495, 4.11466631160951, 3.36321074746843, 4.07654402536833, 3.17371655520384, 3.02538934859243, 1.14178769913171, 0.356622043967176, -0.208832900707851, -0.64066856744971, -1.05611318202123, -0.0441319417489298, -0.242987327236247, -0.830124975775229, 0.489761520934735, 2.14443065678944, 1.14577953410149, 1.50831187721399, 2.64966978644841, 1.72272072753227, 3.08351706345599],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [-0.81326175772917, -0.659446021847982, -0.865456980199407, -0.975904175891678, -0.934113498643167, -1.95308953967174, -1.72863062766575, 1.34200655722917, -0.0767345154655997, 0.772963567879807, 0.5561731543226, 1.11767410070066, -0.371893366379983, 0.912287632704114, 0.347328960864361, -0.720301293245478, -0.706653738812473, 1.57280227414585, 1.31596825451045, 2.22300981759039, 1.169162066251, -0.0343909549528157, 0.160282058893814, -0.947133660931916, -0.982474663662707, -0.726247976925499, 0.370728971963661, -0.86761607110581, -1.07084064112966, -2.89610460762008, -3.07580007372958, -3.6092261494891, -4.47821203043136, -3.71844350312032, -4.14363105837465, -2.5832292565175, -2.53133970029595, -1.23725113415656, -1.68226910389814, -0.394892984118521, 1.10695376330665, 0.527906904075041, 0.278175479245322, 0.155214097659915, 0.366006721533998, -0.880081288496025, -2.19634384696039, -1.78995293738242, -1.90979480551311, -3.27115436763111, -3.03029115251545, -3.29609695523476, -1.62255137239211, -0.913003875112206, 0.786666633427892, 1.7233078708251, 0.201897958999414, 0.794429024202158, 1.58948452557256, 1.2439507395572, 2.03095734448196, 0.708557662842712, 1.08198112222318, 1.46794125649585, 1.3624634086561, 1.25251426102209, 0.10011638356542, 1.33283672169206, 0.957117098169135, 1.54165430496059, 1.42165228343691, 0.899732581866625, 1.45474253161495, -0.22407223095568, 0.331999074862645, -0.504859153769777, -1.92495539546152, -3.17941767802033, -1.90202421995085, -0.492375456462854, -0.319078748499618, 1.00076929712586, 2.30348992510401, 2.15262566518917, 2.2923724202511, 1.24518522709037, 0.0836960080058913, 0.956314113298264, 2.42261093681084, 2.39125966944348, 2.29173616539107, 3.26961699204058, 4.53207812398713, 3.58072158996552, 2.14634341214661, 0.912660894471758, -0.650081292628896, -0.251199867301203, -0.311870686945436, -0.845883219860532],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [0.0399788879986128, 0.777017020804435, 0.168218136140225, 0.724113341563294, 1.66855730789318, 1.06854757899278, 2.79717944416069, 2.27370426412582, 1.52964193538114, 3.51586963446895, 4.47475848844363, 3.52663372506271, 4.6056056417719, 5.41055794307546, 5.03256657046203, 4.92096899204595, 5.10711890704289, 6.08020664151845, 4.51638041710228, 3.45036833437602, 0.897571796795169, 2.31697818902083, 2.23527526320985, 4.18282322118165, 2.91938210695946, 2.48192902283784, 3.48148988557958, 3.56871769407628, 3.06892005308105, 2.61779909761517, 4.04912265150883, 3.45459929192439, 3.94100006027273, 4.67330073294048, 3.48286351556121, 2.22197398031681, 2.59818758625502, 2.55910868580869, 1.59740673638551, 3.01826056952142, 4.62699926979651, 6.08529581160546, 5.61636372203153, 6.21181137039727, 5.14865498440699, 4.1946349884441, 3.41461232229573, 4.50289814311097, 4.68506068189699, 3.37587003455194, 1.63202485006281, 0.800799882421621, -1.35959311143607, -1.52575198752219, -1.70254113102434, -2.67792236181589, -1.20359725609611, -0.926619565497433, -0.721330083430803, -1.18766034811752, -4.38110240512315, -5.28262823597284, -5.26921175787063, -2.87497636692964, -3.84877936137337, -4.3404791423974, -5.3435888296286, -5.11965216707153, -4.53278723783678, -4.41156552289459, -4.29599537660575, -1.36669070936205, -0.0443295865397441, 0.642496186731034, 2.3669925984335, 2.27007080672491, 2.11198553811784, 1.86697609593396, 1.66195931787431, 2.23346689529551, 2.86670956288587, 4.7980249079048, 5.68309300427664, 5.94508171713624, 5.69370270163875, 6.49795498787079, 5.19516723462252, 4.93660602023883, 4.97176000495456, 4.15034261543723, 5.05685686612472, 3.61526634245251, 3.31989697304017, 5.38550724704255, 4.54329301306999, 3.23385336481638, 2.58779153893865, 3.32911219151243, 2.63722180496737, 2.89634757107299],
+        "order": {
+          "p": 1,
+          "d": 0,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [1.22652423946389, 3.24024665998157, 2.91072198976763, 4.82102221961064, 4.67774038469585, 5.72204612974524, 5.33424504472206, 4.50990591411153, 3.73104394681788, 4.43072316981675, 3.10584511412424, 2.89852693701145, 3.21036510280623, 3.70006558763576, 2.43916480360617, 0.837933529366249, 0.857059987832166, -0.363161901152599, -1.63766095912123, -1.77504190069591, -2.02012401574346, -0.637265834728119, 0.672019140783765, 0.62434612436719, 3.30889106255595, 2.5974009847145, 2.44200251934604, 3.38242450813539, 3.18947561139916, 3.91488121077129, 5.25775331333494, 4.91831237129138, 5.86671330488987, 6.33109407363207, 5.33757426538979, 4.61278733127978, 3.79716953977987, 4.50758762410201, 3.19623017523765, 3.96416664655741, 4.34170478010618, 3.75270802581463, 4.83872228263202, 3.56084073434392, 2.1076783357108, 1.52343296142779, 0.572520220635365, 0.189732088512743, 2.16675018241448, 1.54999147912569, 1.83451300334876, 1.87581511370105, 2.33091067766645, 2.69821072853193, 1.82863624990994, 1.18430223541053, -0.0199154299875338, -0.58057906452394, 0.216106014558086, 0.919411449064075, -0.832061322060658, -2.59289938284704, -3.121921929067, -2.62190749880107, -1.81670152226246, -0.874305110427261, -0.59220491653102, -0.0898152470714144, -0.0829497200524527, 0.945800609391487, -0.691388886303604, -0.947829367530175, -1.90073717962195, -1.58216326527183, -1.02729799281116, 0.231951901660485, 1.18639121061118, 1.48930168575757, 1.23872058756257, 1.83339515297629, 1.21968251234422, 1.59814298121521, 0.964522654267669, 0.802323916850473, 0.308310754286612, 0.140803093182425, 0.543404889897994, 0.786525236148077, 0.778853779536281, -0.0593556033334465, -0.0320143923961817, 1.33313468509885, 1.54412832717472, 0.842061498769146, 0.384065008464695, 1.54166607132519, 3.32985704769389, 5.35478865926459, 6.32337341215995, 5.48143784868091],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [1.3657256426063, 2.5437213121966, 2.218484317307, 2.42218048354014, 1.96732502733851, 0.300656023671737, -0.831189914067287, -1.81736850103306, -3.62261111150579, -0.199830765368042, -1.87048521946573, -3.28822790385054, -3.07179065224818, -2.84619652329166, -3.47861931438111, -3.67407501578595, -2.99273915718397, -3.86503689180286, -3.6114639349541, -3.03044097055422, -2.69392750852547, -2.8285550653671, -1.63389123125511, -1.61711895579412, -2.07686010258985, -2.18144396870827, -2.44444870641936, -1.2272561099979, -0.850243316638849, 0.0613644656044128, 1.11715282027982, 0.952203480947296, 2.35092962091632, 2.76520354709629, 2.83584267187277, 1.97441983437979, 2.55808647311073, 2.89499682641926, 3.12060143672038, 2.41730351222211, 0.627135482247436, -0.757461149618906, 0.852323905286408, 1.3401748730989, 1.02555077965744, 0.0387789122667598, -0.724112640303396, -1.05708754045746, -2.81397232870364, -2.68657242967687, -1.63929437559444, -0.796636081712167, -0.222620478907789, -0.665669869609362, -0.409204001256338, 0.546289329648085, 2.86925413744695, 3.37429504536293, 1.29628495039435, 2.3537875347893, 1.92996785531084, 1.53438620895189, -0.00834007915418474, -0.505494641289341, -0.157649883945501, 0.517918441837729, 0.634409631767058, 2.55397839281295, 0.958928523540048, 0.255652005362821, -0.746987451743321, -1.07089586211881, -0.75969966196095, -1.53838774254245, -4.08125544986653, -3.58512634061383, -4.04035178959314, -2.98488291588156, -1.76352912003821, -2.88054831297469, -3.43146122367442, -3.58592422408837, -4.13432179553909, -4.24374017129043, -3.86689462266781, -4.26193491711391, -3.37368135672836, -4.32682370535795, -4.15242917120502, -4.18433162920579, -3.61437874034301, -5.3209854854375, -5.08324803157567, -5.05593305750135, -5.26167742001979, -3.51646952514693, -3.29624738790068, -4.00563454527344, -3.16429263179626, -3.54161828782029],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [-0.70106982577317, -2.14552723857692, -2.42374582239368, -4.10905409197305, -3.79945515936164, -1.93034750241573, -3.26426450366451, -3.13951036143561, -3.3853092853209, -3.94161185736953, -3.96097401886652, -4.06925994344112, -3.39336933414551, -4.19820345934585, -5.33941839325299, -5.24746656033129, -5.73655376481047, -6.84857994776312, -8.6698014075334, -8.05798829814938, -7.1935053590461, -7.6562918061527, -6.95807919070756, -7.85392211961047, -10.0718401265247, -9.34354443504631, -9.63748502322021, -9.31547571949901, -10.3743033348629, -10.5838780437617, -11.2109723150266, -11.0571102379828, -9.5161984480059, -9.13001553178283, -9.27733518247021, -9.41127175978591, -9.07294428428357, -9.01561992778495, -10.2483618789023, -9.81312413386617, -8.9018658661294, -8.99812295232568, -8.05385791283851, -7.59917402520831, -7.8865180573831, -6.7226359942102, -8.21392363933664, -8.25656809737182, -9.98496976374803, -10.9065701761675, -9.18323305720619, -11.1099138087746, -10.4552579654993, -9.98927183443868, -9.57130196151927, -9.33059405981875, -10.2195917525, -9.33529738781898, -9.18715674422526, -9.10190786312049, -8.79520782726794, -9.30210137956549, -8.98286775699676, -8.87486220686933, -8.46580997622505, -6.66982356093477, -6.10838493197435, -6.48832001137037, -7.33387815707034, -7.50816745909127, -6.99519873818611, -8.89448171394616, -9.65932562968744, -9.1434751994249, -9.32350760622582, -9.54945969944244, -9.21101643030908, -10.7700205226258, -11.4240291097544, -12.2463317041336, -11.1565723715314, -11.607526566438, -13.0276757297074, -13.2990992980685, -14.9862285427385, -16.5847841743037, -17.665821512184, -15.6930071951242, -16.6975654885413, -16.4912645024933, -16.753057878847, -16.1198175373667, -15.6622609210122, -15.1247428423123, -13.9929968561653, -14.1042966271724, -15.0116668930978, -15.7608573072981, -15.4267795744335, -14.3955011896715],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 0
+        },
+        "constant": true
+      },
+      {
+        "values": [-0.432759359972581, -1.91809159686423, -1.48232947600747, -1.34156302681377, -1.19979901742795, -1.90001027158954, -2.19567961846005, -3.0957505335373, -1.31605629371025, -0.829362797376721, -0.250726955573888, 0.0302200732513312, 0.409525771692692, 0.837240765401156, 0.0264509641890105, 0.635525698150074, 0.607809080620955, 0.347356954242086, -0.322188199366133, 1.23308136824442, 1.02339615828752, 0.549427021939128, 1.33607509603035, 2.87748619596058, 5.01086759470531, 6.45083902410808, 5.8564754381232, 6.82937753164694, 7.34539798611773, 8.37467255033181, 8.22114656276623, 7.95827600794464, 9.39267703210219, 9.26994790777709, 8.81997745834292, 10.0012284364082, 11.748806654953, 10.0071789417236, 9.19153114260568, 9.64019905413022, 10.8282027221718, 10.1471934389281, 10.1447883492941, 9.50412060720529, 9.28421034899755, 9.80812004981699, 10.6327130979871, 9.72413626920132, 9.31585599566403, 8.63554603765562, 7.3470534344897, 7.76035455053808, 9.37163676931498, 9.08109667245304, 10.9749114560441, 10.8603993141963, 10.5495156196689, 9.69040146501086, 8.72357818550723, 7.94895101446055, 7.89824470319803, 6.45102145338142, 7.0662619707266, 7.13613049520177, 6.37740941920848, 4.66628893765709, 5.45523634275343, 5.92295943738241, 4.21273038493495, 5.92998890872513, 6.97171321117616, 6.17192955078144, 5.5429473479821, 4.64235244916237, 4.80839296239358, 4.99208587681237, 5.28409630031124, 5.34330025193832, 5.01194135687174, 5.163433512219, 5.3243755851389, 4.74928256974064, 3.85653009271855, 4.26896305389588, 3.98965297376022, 3.42866830902174, 2.2845750176753, 0.683010200381305, 0.633812286443256, -0.0938222314981403, -0.723678280116862, -0.54292677299069, -1.22565112110541, -1.78025150244982, -2.75285372290641, -3.40094552377786, -3.61384431648754, -4.15825407260435, -3.37139184921568, -2.7762693655386],
+        "order": {
+          "p": 0,
+          "d": 2,
+          "q": 1
+        },
+        "constant": false
+      },
+      {
+        "values": [-0.368395269459972, -1.18970032849223, -1.85568264212027, 0.256114306001799, 0.610595343420746, 2.54895844806643, 2.76321247659336, 1.5158269257919, 1.27633173704103, 0.895159987417228, 1.1325287019154, 0.632723576478727, -0.962702033214548, 0.30353569810049, -0.353345385386016, -1.15674400909211, 0.358823224973375, -1.68096616287681, -2.8753076873137, -3.3825148295135, -4.06943900187179, -3.57499194870746, -3.08129647648008, -2.68729994825197, -2.26657615368823, -1.66603453754845, -2.68488870590446, -3.17329013913289, -4.5217557141005, -5.39280064163517, -3.09467813582037, -2.64601215554546, -2.92225793508076, -1.17680168678719, -1.88335787335386, -3.19854244950108, -3.48544753562034, -3.21243110125887, -3.3140614888016, -3.02595957061158, -3.27746511072705, -4.67082975175674, -4.11676384061084, -3.6955140170316, -4.06328661453017, -3.7439600882138, -3.59536041537394, -2.32787023654626, -2.54241128069363, -4.3337545980873, -5.32143828588009, -6.07737418034711, -6.10448972893495, -5.35654675534729, -7.29652002024443, -5.08129649684632, -4.06909436769721, -5.43139128528297, -5.38700704000801, -5.58151857429608, -5.64040079887854, -5.36713305712557, -6.13532422717243, -6.90774438644725, -7.81680962191455, -6.7768619870748, -4.78015836983027, -5.03357815548845, -3.51187553451751, -4.73621145890074, -3.70842520439301, -3.09969174473499, -2.43562930746629, -4.38768531869847, -3.43478744885036, -3.34279307536218, -2.64244816099255, -2.86557196340501, -1.88166580885968, -2.55883209772006, -2.37856145751808, -2.95529677977313, -2.22557987596604, -3.82725858372359, -4.79505659547768, -4.47035786662853, -4.61454829646788, -2.23339051356913, -2.05285230379688, -2.00240068190616, -3.40288651003642, -3.81213582285334, -3.78722633736912, -3.90351513223767, -5.15298438057303, -4.5505241292552, -4.8487931573462, -4.94246796530016, -4.93131555092498, -5.98937399225139],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [-1.09473393851418, -1.48856439517912, 0.0118940992870554, 0.454027546296758, -0.801923487168722, -0.878531892422523, -0.447107210372033, -0.11495424608873, -1.08351573631683, -0.770641699974193, -0.494861002089287, 0.769157567864551, 0.102164547483652, -1.04976042739671, -2.09554620780134, -0.907372950726291, -0.573562158785809, -1.11206856758098, 0.0329043828554094, -0.900250421131032, -2.39435614368181, -0.314100512145061, 0.0793067216700762, 0.0535085501705594, 1.51479317373476, 0.118986665750654, 0.361069326031715, 2.38240379077482, 2.48350584366696, 2.37336957227673, 3.09347003376502, 3.85222368870708, 3.04803361822485, 3.10299478749561, 2.86178484050307, 3.5424986216751, 3.78534222060658, 2.97027476734945, 3.47974344715342, 3.32974314700943, 4.14516865516601, 4.76600581386132, 3.95590074500221, 4.79400070652903, 3.36406998796426, 3.01854976430917, 3.77494695273084, 4.61368204157066, 3.41825814436497, 4.14573464582138, 4.51722577998456, 6.5630945980675, 6.56150278188177, 7.14338503598869, 7.64601666042471, 6.2322683202664, 5.57702849500095, 4.7572097827469, 5.54895880912509, 5.82461777212491, 7.39621945321711, 7.75969505150816, 7.20061823859021, 7.27221527239659, 6.47036886247964, 7.01760595170769, 6.54332591912901, 6.79525247821413, 5.33231765490807, 3.9852497794206, 4.3336534413535, 3.8196977783867, 6.20695010455411, 7.06475262413476, 7.78498871182186, 7.95358671519943, 8.08319169521747, 7.60693947170782, 5.70394940938156, 5.60083072549846, 5.29204903072891, 4.37591951193829, 4.81610186757716, 3.23174170901059, 4.12645638151142, 4.69332422057099, 3.9333112427129, 2.28259246561551, 1.69045797516593, -0.081740045940383, 0.130382812205728, -1.27183392983515, -0.482044132516253, 0.114475450893794, 0.97885854584329, 0.033169799163192, -0.805256402213844, -1.56712296303935, -3.14037084917474, -3.69300771462375],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [0.664316786613118, 0.6631879306344, 0.317910898105197, 1.47071828641406, 1.80294180264825, 2.79653276633874, 1.92873914995863, 3.84125776406834, 3.66529881155734, 2.33654163653, 1.56367912931906, -0.277034450136541, -0.0663850905977053, -0.356983812945819, -1.51459346727113, -0.602155050800092, 0.314513821300752, -0.126763314360146, -0.857572179259422, 1.10830990051487, -1.29422010717299, -3.04730371607676, -4.31189925483449, -4.40590299985903, -5.9396570046818, -7.18971937638826, -6.86369571700047, -9.11738798184694, -8.43314071063169, -7.68782993186532, -7.2981686427938, -7.75921486910628, -6.10012613866087, -4.2071874692718, -4.58068630619006, -4.6786997474883, -6.64968104968738, -6.53380966407602, -6.59358710244793, -8.19395175629745, -6.97480824322103, -8.58386300779593, -8.56786244417743, -9.22382367805343, -7.83165620216089, -7.81120507402142, -7.69449768065183, -7.27838328617377, -5.8359229920206, -5.1425038480434, -4.05820026762785, -6.03967609596274, -8.41388581557487, -8.44716233086717, -8.60474313129755, -6.53815977805877, -6.25425964962039, -5.91804476580413, -6.0238744756299, -5.75607781201318, -5.98201204460489, -6.15160478276651, -6.50582207373908, -6.86394746375707, -7.69154552204012, -7.47184734908317, -5.37202175385639, -5.1700145651275, -5.88537616468212, -6.0753067563382, -6.00101394061812, -5.36799454642827, -5.86070004077784, -5.82602925828187, -5.43556726647215, -5.903085442259, -5.3941825150814, -3.88476994723782, -4.11904890345627, -3.94403797960058, -4.16473217170064, -3.93061926935004, -4.37803652974294, -5.3266901760655, -5.97604419980241, -6.9921025057534, -7.66663769708827, -4.5927607248068, -5.89118408218636, -6.59273548392242, -6.92057330283471, -8.0993333114449, -7.86190143493392, -7.21775316958454, -7.45651897994167, -8.35978814525624, -8.98005649204497, -6.25155998112746, -5.58195436189479, -5.2261656260719],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [0.466508018506787, 2.01224340690518, 1.16866872594076, 1.68367943369776, 2.30794805992426, 3.60062175564382, 3.84103331237302, 4.60304523777786, 4.15251204228052, 6.92633074447088, 6.23113164881061, 6.06222543315545, 5.77978763448342, 5.36769414537636, 4.21846079845864, 4.47095955487964, 6.18072598501505, 7.6210420806737, 9.86515494307939, 9.93710544753271, 10.4234500971213, 10.543428106558, 9.21398855471384, 11.0525992743524, 11.336449573341, 11.1853474326809, 11.3345418128128, 10.823541325665, 10.9426913703, 12.0149309543015, 12.0893561586818, 11.0332793319079, 12.3768180793536, 12.7071515363084, 12.5467534781813, 10.8340002260298, 12.9961811461743, 13.6677921469816, 13.8867085595735, 12.4645991379359, 10.9706355538927, 10.7080449941122, 10.961017737977, 9.00292857803966, 10.0073776287689, 11.1762329928158, 11.5190665304205, 13.3127951961081, 13.6723436582699, 12.7918695355528, 13.3069231189974, 13.3311517658852, 15.5145311404359, 13.8219410261511, 15.1275970215696, 15.1221632541101, 17.0010656213021, 15.6009864689443, 15.8803795149322, 15.4283861206797, 16.2691352362506, 16.5433578176992, 16.0745191579856, 16.9798566880949, 17.1442273244154, 17.8821800380779, 16.5080081560383, 15.7459813752695, 18.616822621922, 19.3130066733209, 18.8470251254951, 15.593447627187, 12.5805887839803, 11.5897482672706, 12.7999182610834, 11.5481237908371, 11.4203035294087, 12.0689628415136, 12.1382923781532, 12.4862616262901, 11.5704669735839, 10.5154072134017, 10.0965049997076, 11.129552253102, 13.7364221258862, 15.7430072451606, 16.6427318739519, 15.0208033214886, 13.5651453919299, 13.4843568153374, 13.7347185490943, 13.170208677273, 13.6692127136499, 13.3427930584806, 12.896664681243, 13.7982156360905, 12.7840668853567, 11.390155827213, 11.4586481679687, 13.2944605783581],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [-0.0891928652848887, -0.224480946530962, 0.394648103883871, 1.97115863498262, 1.87430004212804, 5.07989180135351, 4.15683078429025, 4.7274776085811, 6.14195608278677, 6.72098602247482, 6.00952399342085, 7.22461916662728, 5.92500698741373, 4.69826539908832, 4.54699343884412, 4.36448947598107, 4.10828680423614, 3.11534524865191, 2.02719632831383, 1.16787574483782, 1.16214757531455, 1.03567716778871, 2.53854655825097, 1.06857443838105, -1.21290398899332, -0.0800047152274621, 0.847185669995091, 1.23344339825845, 0.0841601527221891, 0.730162301662871, 1.03275941505386, 1.23032412918548, -0.164613086326211, -1.46860904898735, -2.12644438797438, -2.64193044860302, -3.39315656119243, -3.39262355076669, -3.29937791470654, -4.70188310511403, -5.04054624553259, -6.1459434226974, -5.23491803006887, -5.39037875362549, -6.27634139637087, -8.05344751320047, -7.11132639825949, -7.27454099238599, -8.16333022167649, -8.89195413692006, -9.33179652090141, -8.53855833833888, -6.89992786892338, -7.70150374865771, -7.74522136367639, -8.46894462973888, -8.05087416714545, -6.94886277721225, -7.11343476841822, -8.35126979812936, -9.08847562221727, -9.72915843798505, -9.50704850618641, -10.4765718745499, -9.81924852169473, -9.19867464863292, -8.40263936361129, -9.15628741256038, -8.45801207786762, -8.3840706520192, -7.60428581296526, -8.00500913530105, -7.81405828336455, -7.6565584915492, -6.78559011154642, -6.99782204313255, -7.79770797973986, -7.29452582347955, -7.8502051329657, -9.19194157099713, -9.11966017655186, -7.8300224089094, -7.01146927172832, -8.9374381539818, -9.62715241527077, -8.62930834290195, -5.95372380304779, -5.2150978057816, -5.58226865862461, -5.20685918319126, -4.93215429346794, -4.1491637986014, -5.44701822946993, -2.65410820319541, -0.579261144275072, -0.551177793941855, -1.74778273837683, -1.63301508273104, -2.07581058594896, -1.12826819843749],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [-0.760428584600736, 0.70499691526814, 1.67215709262763, 1.97923141654666, 1.96418595666577, 1.06107811430271, -0.534900252786077, -0.228753084341008, -0.688831654056225, -0.423488483134665, -0.238699228464938, 0.449063496387782, -1.27995093892852, 0.590927419644239, -1.19944991467527, -0.278032111116619, -0.549385584930217, 0.392366160200737, 1.61786118072913, 0.500909917088829, -0.750793067247395, -0.432221814477607, -2.22786601499817, -1.87746867399611, -2.27940800723843, -1.11538798406941, 1.09307262900342, 1.02566216380472, 0.53213458647894, 0.823125813784561, 1.99765837527146, 2.0204544072257, 0.128595446360089, -0.934010041307155, -1.22800041607495, -2.14880544551941, -0.624400449450459, -0.146617340607466, -0.233692280209332, -0.91090991560704, 0.522582139022931, 1.27136623692663, 0.629408074252147, -0.62802249533879, -0.285996647597119, -1.31348338610832, -1.85038324332142, -2.24379678993565, -2.16815906134735, -2.8507026740941, -3.74195376400346, -3.94371374111803, -5.58579660283518, -6.24907646797706, -6.78328901605342, -6.7960472265103, -7.90997733199961, -7.67418218868482, -7.9475466427728, -7.90281231194684, -7.00423941275587, -6.57649384770359, -6.77704248354917, -6.59257716284809, -5.76042864584553, -4.97009378988057, -3.18577881304178, -3.44866582686889, -4.66909287067385, -4.4417024561256, -3.63996516037334, -5.09907517505922, -5.0050534185218, -4.37146290792494, -5.66899620182727, -4.53593407048921, -5.39004332273959, -6.28300936575443, -6.51563147386196, -7.18632243711264, -5.97713708356474, -8.16334808165744, -7.56361589478143, -6.7069477415656, -5.85611939729364, -5.41929701635637, -6.77998751209008, -5.93678813226942, -6.06599932483239, -4.40532677473869, -4.96323942800644, -5.31664333168081, -3.23135047940938, -2.13028279962417, -1.6561083971712, -2.63285246795818, -2.32030662611885, -1.59102403806648, -2.21710457734714, -2.04279761033664],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [-0.541732899514607, -0.585880644402574, -1.44249745107157, -1.9303039169102, -0.562695254312609, -1.84470631588554, -1.13590800559474, -1.7322648606897, -3.05870377704656, -4.21303689872833, -4.71264640653265, -4.18127140923999, -4.35246854567035, -5.04546360247465, -3.18541719673231, -3.16806968625388, -3.06917399836898, -2.68635163657412, -2.36009236278635, -3.50354638951782, -2.98803121075297, -3.95896125992185, -4.00800019720047, -4.41029427801165, -5.14092825266384, -3.65630274270003, -3.19470210201187, -2.05110612313823, -0.766581474773151, -1.40379157476408, -0.76332490841325, 0.532325831524559, -0.780483930205435, -0.898210822234781, -0.0632621493511288, 1.42126149943334, 1.33940271338079, 0.915754119410683, 2.44201719930705, 1.19090920333148, 1.76067455699906, 2.23740684330317, 2.44978565977889, 2.58722262510025, 3.40020661206091, 2.56602947200574, 1.84617214403775, 1.15620404605749, 0.890385398717786, 0.299049075214201, -0.81224230716436, -0.977434656860914, -2.16135770261417, -4.6199798402092, -7.22952153725775, -6.94866552361684, -5.94837670873564, -5.59492880919759, -4.43642725135884, -4.51177013133802, -4.85247351055543, -5.0151100182186, -5.99537981883668, -5.42627312271665, -5.75825313464617, -6.68672831836492, -7.65164994944718, -8.55171448457505, -8.51643180257894, -8.44518990941405, -9.24182617325508, -10.0391374439721, -11.9168491155741, -11.5576070263385, -11.8748558579453, -12.2302130392144, -11.8060785749, -9.4702976116913, -9.93136949849984, -11.4478700682892, -12.0657769980532, -13.2048890280134, -14.2283694984456, -13.1610950713514, -13.007255473091, -12.1198506364371, -11.9242777866283, -12.4001682882374, -14.7275133240605, -14.1064469887415, -12.909683946255, -12.0581268553309, -12.1847716783167, -12.5554428357864, -11.5992433333224, -10.4528458163097, -10.9836134094262, -8.5330739456846, -9.21332892837087, -10.303256917084],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [-0.760971783244871, 0.151549475347118, -0.81591223393716, -0.283007822063894, -0.783196224432478, -0.48888898689241, 0.737666892160385, 0.645295605074643, 0.841982636449841, -0.062426176492269, -0.646187993786724, -0.00614681363944847, 1.25131687338564, 1.65901097357952, 0.767073314389497, 0.549865635556374, -0.0965717821031343, 0.366877591633249, 0.859771479488246, 1.1714510761679, 1.79049628632629, -0.875791687677677, -1.30696837865867, -2.03337281580252, -0.810830847775891, 0.150093339579916, -0.342538232516221, -1.68930083637894, -0.839419473898992, -1.51555549919007, -0.311138318385373, -1.0209627461157, -1.87998178171599, -1.04519848862745, 0.642562529720297, -0.346451681303917, -1.426855488448, -1.7444150610819, -0.905388673666068, -1.87319406599027, -1.98907617475282, -2.86267557013511, -2.61918042249494, -3.62819008160905, -3.93069686980721, -3.61670750420187, -4.17075638944153, -4.88393788472109, -4.37107960785255, -3.96170203604515, -3.97273597422063, -1.55414428330225, -0.166660826935596, -0.879924037914271, -1.38177759989816, -1.52811796880849, -1.60107238325991, -3.31682602908688, -4.75863712193561, -3.50547897703543, -2.84986262739906, -3.92190575313627, -3.89899719203437, -3.91171073976747, -4.70786359505599, -4.68301930216165, -5.00936527385606, -3.82927362392503, -5.40049158189124, -4.28736089256669, -3.15898194058895, -4.53619574693218, -5.62386374550429, -5.81221100345414, -9.16581504960564, -9.92138523157615, -10.0379700728907, -8.09984942625223, -10.2085482871279, -10.9998417792719, -11.4736219175158, -13.5711565098389, -12.8796094851965, -13.992499628303, -13.6514335575286, -13.3803479500514, -13.1522931417102, -13.8715728852135, -12.9620448053952, -12.0217217268285, -11.2126317431148, -11.7113018160865, -11.1260559265844, -10.4030482938602, -11.6096533710607, -12.1117455069805, -10.19118454561, -9.4204770123403, -9.72451994060952, -9.71452706518304],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [0.122071993988616, -0.0342714001115683, 1.07497809030373, -0.429187643518608, -1.3380654243021, -1.83650378360352, -3.41621608413288, -3.51692268722602, -4.32388627826916, -4.1779150172966, -6.22797820618145, -4.80843200414369, -3.83556601020932, -4.08973830190652, -3.48540405391846, -4.74099207140194, -5.15643389182455, -6.04318536121316, -6.10711871201423, -7.12487966468458, -7.16127843096681, -5.21386305007633, -4.57923748571203, -3.7315719963573, -3.67857408073172, -4.00764810790115, -5.09772932921061, -3.42070237932697, -3.70853792466823, -3.29526386257533, -2.42116861556071, -1.30610966767586, -2.6596598192839, -1.2407635911348, -1.98020393640898, -2.03797382320323, -1.17815218596037, -1.92995899308194, -0.934305354556412, -1.50098003238923, -1.13705734655641, -0.959792094145858, -1.68212226782518, -1.85739298228777, -2.52110713143389, -2.01860906641531, -1.49887714755067, -0.589316890326945, 0.0437963526560831, 1.28022208514819, 1.71346666168468, 1.71227430240972, 2.17015724711691, 1.57718720512271, 3.17705669284785, 3.46028774031773, 3.37246286548405, 4.23738589706481, 3.13252597941558, 3.47620555717722, 4.36545789823636, 2.31200225411394, 2.20008534548673, 0.890892048189507, 0.550707913605142, 0.442580028084812, -1.0971361001541, -2.45098210262707, -1.17277484036836, -2.00821970031895, -3.27693138129845, -4.87279319751602, -4.40439188036476, -1.91257165075337, -1.61090742915841, -2.40878732285459, -2.49443410692845, -1.44794422127423, -0.0455339922281078, 1.0595748943891, 0.166986398329278, -0.4686995907774, 0.273027433091389, -0.737957510042796, 0.417171035525639, -0.481482389393912, -0.980095969022802, -2.21985650918766, -3.22005306763387, -0.839306985584494, -0.938205842805636, -0.760250603747284, -1.35567295509986, -1.09361342960005, -1.02557209570784, -0.428265725715963, 1.86350789700944, 1.76303466539493, 1.82970274198466, 1.15178730395632],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [-2.15676447617919, -1.08546957764747, -1.49569320275963, -3.97972092126228, -2.29420830603417, -0.0876670002253349, -0.488233465593238, -1.72991943865354, -0.386200817399728, 0.944366857728174, -0.531330721678907, -1.82061625829501, -1.31684122856077, -1.36293450903832, -1.00894431542017, -2.19100702424751, -2.78645921970008, -2.40333419597511, -4.14919520351751, -2.74010585541227, -1.57892924155132, -3.41735549761646, -5.05178953361896, -5.87740345204734, -6.16732856232529, -6.71245079636506, -7.27686613428115, -5.81473365058364, -6.90256203844485, -4.56169603542114, -4.59171341463176, -3.75776715085565, -4.09350888493877, -3.47090297650951, -4.35620395944781, -5.20868192238979, -6.24746087302097, -6.59496319793218, -6.70575974487462, -7.64465277456504, -7.19323643664024, -6.74596780791996, -8.38544216110967, -6.28588118479967, -6.47718649069354, -8.11330944349784, -7.39117729214291, -7.35106472156273, -7.63730721369535, -7.99275063457834, -9.93706741578868, -8.41628491857965, -8.94161858055391, -9.86682826676102, -10.7486557879884, -11.0879996476812, -12.4841883766906, -12.8195936605593, -12.4572018013964, -12.6522393759874, -12.9435912198222, -14.0938270602615, -14.524613944561, -15.0605287712622, -16.5825812383058, -16.7924857662839, -16.291922239099, -17.4173944967047, -18.8870356458242, -20.478837955947, -21.5760353687946, -21.024015320645, -21.3038056272673, -21.6906261500449, -21.0921298050972, -20.6600769772371, -20.9899116369475, -21.006949027054, -22.4308934400877, -22.6465701928399, -23.8600275075955, -23.0088844624162, -22.0119927712205, -22.1837780557672, -19.6211460172395, -20.9402561566435, -21.1087046283808, -21.5454411988754, -21.772264105839, -21.3147589777788, -23.2969109319214, -23.2332517807062, -21.8643512381012, -21.3579485002762, -21.6441212821605, -20.2201707724134, -22.8505169103438, -22.9933725692636, -23.6914242514649, -23.640277498915],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 1
+        },
+        "constant": true
+      },
+      {
+        "values": [0.138196587742374, -1.2133801555691, 1.12374458704428, 3.49015139834227, 4.56110409582651, 3.8436358546905, 4.28181892699782, 5.42502280584231, 4.71789731750356, 5.40647645287484, 2.89119513994603, 3.41664255869171, 4.73394337585007, 5.22648499176737, 5.61107808206775, 5.26322987786881, 6.01437948674018, 5.74272830068447, 6.49181376164924, 4.70417034595894, 3.62077844098784, 3.43034240504431, 3.09083792964033, 2.82577874862301, 2.20174737974639, 3.55004116764574, 4.78403639486896, 4.40946754493967, 3.4697752740572, 2.81064975875047, 3.0382941134335, 2.58696314549455, 3.6528351679614, 3.17859042036202, 2.92514372850317, 2.8338748646039, 2.58051475679702, 4.23122367594183, 4.11702481276189, 3.88634107310268, 3.80549917470586, 2.35403365919476, 3.66109224704512, 2.25635202902232, 2.76566327231378, 3.21782917586258, 4.88004694679744, 5.05412198357525, 4.63816114195579, 3.34017880171155, 2.42750480290696, 3.2615269917545, 2.65422362030281, 5.14501005267377, 5.68029586921542, 2.82109035412156, 2.12567728764505, 1.08496541588664, 1.15253969643228, 1.80483112375765, -0.698155084239209, -1.03002554193875, -1.5018785676138, -2.567654062778, -2.62687679759884, -3.27318953994717, -5.59358446102297, -5.04007147402661, -3.37255514356129, -0.221403381090723, -0.618057776042168, -0.845132383887661, -0.381700871053962, -2.27764691530988, -0.836611686351885, -0.174063159236818, -1.374185861755, -1.31386904015294, -0.395284549358685, -0.391546409646876, -0.940687569596589, -0.918424491037802, -0.519025177200545, -0.338345958558876, -0.554452536767073, -2.45573938426483, -2.08812430767804, -1.57486464481215, -1.59744666734739, -2.12788853270254, -0.889100935593254, 0.204674090189726, 0.540801444811351, 1.15010337338397, 0.421795093126083, 0.764706237855462, 1.51817039366727, 0.218404628025549, -0.506883597704614, -0.215525319145274],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [-1.17338100510596, -1.15463353187783, 0.344572589473042, 0.786305269859653, 1.31212396381038, 0.245437516324779, 1.16183231020131, 0.69251579415286, 2.22278607295532, 3.62324342357989, 3.1492401470928, 2.25611112783961, 4.50782049374051, 2.68978442070803, 2.40189457682867, 1.49575778998103, 1.63665697218986, 2.24706780312755, 3.06792257871582, 2.60057279944435, 2.79163952544566, 3.35061031760686, 5.41714576383145, 6.1779989287851, 4.94609524403976, 4.13165754874422, 3.9858236114674, 4.3243782158575, 4.85410476218348, 4.80967068809715, 4.6259619862844, 5.17574461878675, 5.34080563377168, 5.21806343500976, 4.34705458526399, 4.57692560990229, 2.47158195954431, 2.20842085224573, 1.08326594545199, 0.7334067678348, 0.856131694699197, 1.22757733243315, 1.69213770176714, 0.58484959794732, 0.474141384427064, 0.564596283906099, 0.82566365045543, 0.301023070327404, 0.95739751790858, 0.52290937741161, -2.02591230876635, -0.847954251501765, -1.18496457800795, -0.601932241396277, -1.20240699781786, -3.01998364156115, -3.3403129190749, -2.46448783166345, -1.84361350171794, -1.28494094200871, -0.438707024221832, -1.16734989515983, -0.435368563523975, -1.62109019276247, 0.136632916761078, -0.480729510067583, -2.34450795255713, -2.73581397602042, -2.32237822642748, 0.0464590495148286, 0.532638571197873, 1.41942836993563, 1.4712169225585, 1.43030229215685, 2.00135775671443, 2.36201300321904, 2.77967645963083, 3.60978614640176, 3.67334547572881, 4.02943825774041, 3.27472513010676, 2.50653413168835, 3.05870681849432, 1.92896483360531, 1.96474231455544, 1.15142706853637, 1.52900853946914, 1.14105556290508, 1.16460979914986, 2.73990199494141, 3.97321286444529, 3.3071501808793, 3.55022663766148, 4.3321538216522, 3.57593010091267, 4.71841988838374, 5.59635125600968, 7.4028840597085, 9.00567134418873, 8.78388078302944],
+        "order": {
+          "p": 1,
+          "d": 0,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [1.25880735031577, 1.1374183678295, -0.0458707459949055, 0.755093223512125, 1.96910398004334, 1.56726905325919, 2.07058867922805, 2.66866070594492, 2.49328943227798, 3.31584507673081, 2.66390144383843, 2.79504795835151, 2.60888816628722, 3.97895663697957, 4.68997098020294, 6.95154544772001, 7.82251227134261, 7.542331646584, 8.28335236729876, 8.82392654583239, 8.10439466671333, 5.59770355771668, 5.29089626822312, 4.38734018889198, 4.43779213034072, 4.55069073554159, 5.27502215365652, 4.00046034644418, 4.56366951586698, 4.03193662866758, 3.4922146952235, 2.25954697818269, 2.0991283510603, 1.39778695896169, -0.939233927631813, -0.308068723879856, -1.08677355495923, -1.03044278662792, -0.447307091820204, -0.427726062031249, -0.7909061828568, -0.268106511162038, -0.139424903445706, -1.50864498617696, -1.8176872638462, -3.86437858824512, -5.59272375763019, -3.98862044465116, -4.21123251840689, -3.71338072310646, -2.53037595009234, -2.60337663699672, -2.05196442729527, -2.13349081214077, -2.28470827641259, -0.107920558087611, 0.0691291536601007, -0.224650650965352, 1.47004316511815, 1.85340531235067, 1.31729390201646, 0.645343730154675, 1.09094044770503, 1.02987889206545, 2.35823500355384, 3.60841370170249, 3.71565328045355, 4.64435992928448, 6.19427317722992, 6.63945683214341, 5.52412806087619, 3.84618599290653, 3.09663096218986, 4.83462124325724, 5.49346539219838, 5.06967966785417, 3.55690084440641, 3.01817398890193, 3.80825596038184, 3.52387986907909, 5.23328274210964, 6.66161893112842, 5.69625844057964, 6.20158217102859, 6.6563230761848, 6.62970656699144, 4.4531241825761, 3.30718053325911, 3.58781754232302, 2.6844673936425, 3.58773771695945, 3.79782857556478, 3.45856140462751, 3.70455242083051, 5.27542555651209, 3.12497981214844, 2.01255723815921, 3.58514861279405, 3.22416067245426, 2.68946678645952],
+        "order": {
+          "p": 1,
+          "d": 0,
+          "q": 1
+        },
+        "constant": true
+      },
+      {
+        "values": [-0.209582361044427, -0.581899937053588, -1.89382296996455, -2.08387657344386, -2.76295617628317, -3.04494065741377, -3.48825306738775, -3.9751705551117, -3.69043214574406, -2.92615142864859, -1.44785959810501, -0.496723762588181, -0.0826690666636812, -0.842733521929747, -1.61676735736248, -1.80579584970178, -1.68749724984621, -2.66549194778493, -1.23053292932158, -0.387228771166724, -0.390486489553378, -1.38589532411507, -0.798686438052075, -2.67662145372908, -2.36011384255417, -2.77454511734929, -3.77758671754125, -3.08325734975448, -3.28695842147355, -2.5159328302827, -2.58553783491642, -2.15350114294921, -2.45642623504169, 0.01459307865477, -1.24876514205084, -2.03131015011881, -0.933490542562889, -2.3278719731212, -2.44822111388097, -1.73195726090748, -0.035822862334862, -1.51579209752763, -2.32668921111889, -1.69243066627982, -0.585036237575481, 0.871653281677002, -0.288765823946027, 0.904391720464489, -0.221061696232942, 1.20423541128618, 1.04366514306214, 0.0957200438373668, -1.29634371069632, -1.18799823462782, -2.69922307300422, -3.171555349747, -2.71159088360513, -3.16361026863715, -2.53610017345285, -3.53591351285867, -2.72136265516469, -3.9353862777131, -2.80499641474685, -1.63620927742141, -1.9000246726357, -1.3428006752503, -2.47284072410721, -2.14084360691911, -1.13552662579582, -1.33204945384311, -0.0986094807444353, -0.754232239104136, 0.772742436749414, 0.269091794324873, -0.00732260756152489, -1.95872329800397, -2.72272829352717, -2.79544319695927, -2.99367092226894, -1.06156095239148, -1.10230648230278, -1.50952357113719, -3.72112473243147, -3.58928769501925, -2.91028916668927, -2.24900684127204, -2.57034327833993, -3.2485395832751, -2.79491731234546, -3.73124081271403, -1.55779431411141, -1.13203927689561, 0.577946819372029, 0.762180657798679, 0.0251290891281764, 0.62117245932488, 0.11765011212173, -1.18271706084069, 0.35355337357761, -0.196469406116567],
+        "order": {
+          "p": 1,
+          "d": 0,
+          "q": 0
+        },
+        "constant": true
+      },
+      {
+        "values": [-0.828955118369499, -1.79132545712265, -2.19792516765131, -2.87412402913186, -1.02378746971791, -0.984759647985915, 0.148493000915308, -1.41173663394152, -1.32275445731945, -1.47478531888385, -1.53368069845802, -3.07579983859623, -3.52992812494955, -3.37893754252467, -3.02505256421343, -3.08137878092403, -3.20280978102909, -2.80426571358375, -2.62951910837438, -2.8922282910253, -3.44206005077278, -4.76861369989348, -4.98702222172678, -6.24980464574025, -8.02266732054061, -7.46918758847128, -8.69027369880361, -7.80261902408464, -7.32506585331736, -8.59159216468216, -7.14875518778261, -7.30740279744608, -7.79689564833864, -7.50852040815713, -8.69771282444249, -8.58961554439288, -8.73406733342606, -8.75248181159027, -10.2848147547842, -9.47903782693798, -9.88742518443227, -10.9227928026964, -11.8688736444405, -10.6844292434691, -11.4747678333159, -11.4507805572281, -9.72633528731975, -9.78863895240881, -8.16959805228134, -7.7700044883715, -6.49958842092638, -6.79517356066891, -6.26247435148079, -5.50807076288221, -6.03951654961247, -6.76383805508213, -6.89999272931979, -5.65564679874492, -5.68096579677032, -6.30602917926859, -7.33510410829155, -5.9493090175638, -4.26523041043883, -1.62297038330708, -1.00271592805411, 0.0329756154725614, -1.21645019263698, -2.32728380539454, -0.870194636972928, -0.0395055871836935, -1.43612116355916, -2.27365654381825, -4.13103006586786, -3.82608837192325, -4.23619125496837, -5.31402294359536, -4.98686652024978, -5.46428135545105, -4.15011992031064, -4.23560297865316, -4.90520957924496, -4.07002401826695, -4.26809306513937, -3.52607699833429, -1.90951697649563, -2.5786793232086, -2.94130426075374, -3.16665857292097, -2.42379620673679, -3.95565691066768, -4.51890358253814, -5.25114862483543, -5.34629046552921, -5.47765746911044, -4.46020519668698, -4.52047857342804, -5.10199507887563, -6.23798751312513, -4.11549025491172, -4.64482095413367],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [-0.354311612913626, -1.42397996926522, -3.64685357179663, -1.12340197205421, -2.55226248238968, -3.74583889006197, -3.94934041465374, -3.26402741551764, -2.80271680741773, -4.35624154576165, -3.73565475621372, -1.50471928504846, -3.27847471617806, -2.77083317747551, -2.12496897874668, -2.86204419367615, -4.99424145461469, -5.78444196936737, -6.21609767283628, -5.73009895995956, -6.81874233434413, -8.88470431586284, -7.69611749227355, -7.08339504683805, -7.95050289881076, -8.04634874680852, -9.32899077404459, -10.4441625605085, -9.53918015447775, -8.81375599304155, -8.58617907466915, -8.48701627999363, -10.9689883294528, -11.1776216140207, -12.9941187185987, -14.8339965879981, -13.7280317621835, -13.7575809544693, -14.8474113282666, -15.0411200460683, -16.3657696097655, -15.5634433336374, -17.3392705424893, -18.7436063935034, -18.4473747185596, -18.0943548628583, -18.1632868338031, -16.2118826821542, -16.181291472807, -15.464263678383, -14.7581509062926, -13.6223223644314, -13.7237151456193, -14.3628279527337, -13.1957247538772, -13.9097727879303, -13.9810827625341, -12.6615000989191, -11.5102130404169, -12.8710302107977, -13.9046343304251, -13.8409300509109, -13.7839808222709, -12.9678263492025, -14.2150969733609, -11.8969561411135, -14.5459287281518, -13.5279235207965, -15.1214552605216, -13.7434032670014, -14.0025059159628, -15.0795526691719, -14.9266372267812, -15.1213994680033, -15.8099665877324, -15.0262252022601, -14.6448605526332, -15.1688553297149, -15.6909192921105, -15.074975138681, -13.9942080628105, -16.0762379037858, -18.4661446329048, -19.2373170799043, -17.7315429068682, -17.7213236267337, -19.3083549803789, -18.1311543267109, -18.5142260645958, -20.060731004775, -18.5394669304292, -19.715270930454, -21.1169540518977, -21.3830892693586, -22.8191516712627, -21.4897834327034, -21.4199629942597, -19.8996963734075, -17.8227966951549, -18.0896225247515],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 1
+        },
+        "constant": true
+      },
+      {
+        "values": [0.932027900747433, -0.054106361260961, -0.243157768868333, 1.15752361034382, -0.519483433529479, -0.849396187527738, -1.75868751580179, -1.30539861460332, -2.2184409618703, -2.37854181731728, -1.33303088801215, -1.02992597892533, -0.621460830439719, -1.0018771279392, -0.06428706453838, -2.25352367029181, -2.22618525744209, -3.75044705493946, -2.61629650306464, -2.10427017938641, -1.78821313608028, -2.74164416906001, -3.70008841131323, -3.81837117530103, -2.66350641418931, -2.74110832282575, -2.33523472996304, -1.50979739362511, -0.984839302031434, 0.625622027411736, 0.347175220427269, 0.639260093807236, 0.438779057586612, 0.368674722056521, 0.753180603343106, -0.524798112642181, -1.25026150872642, -1.13558032902012, -2.17829159130113, -3.29524260970465, -2.15418955846299, -1.69295590479633, -1.74925358974075, 0.691724504898242, 0.436794756593102, -0.867039249763053, -1.05182374788734, 0.180124878087129, -0.391686797115016, -0.371333640768669, -0.153643240164978, -0.949344588560303, -2.97224807667897, -1.17027792619729, -0.989286722935019, -2.15656131616253, -2.40067987490047, -1.67728299029203, -1.9759002155067, -3.01643418858607, -2.23532272236986, -2.97247142459789, -3.72756560648064, -3.22804367016654, -3.76052509480052, -4.26263698874988, -4.0265261246466, -2.37063616917491, -1.58805601469019, -2.60586035524173, -2.84431670192671, -4.82401220963145, -4.77652896002348, -5.35227740024478, -5.75407324878025, -5.25253248480072, -6.75790868678845, -8.37075617921479, -7.64529258463061, -6.48640381741029, -6.73845488749993, -7.14355421648909, -7.46222453025655, -8.82214645345733, -8.67199151833943, -7.88824741566009, -7.97007746933503, -7.72087870906862, -8.33958999522945, -9.76414097637869, -10.4117843368899, -10.4130301853393, -9.50121012839192, -8.62143645279466, -9.31547240711233, -8.86902559837184, -8.56156019357435, -10.0994859815747, -10.2295775565352, -12.0226602009518],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [0.0635074070074361, 0.175837918288334, 1.39701921941733, 1.38781396005499, 0.589704513392282, -0.0994151187763104, 0.415880330592569, 0.726807084553776, 2.12361827783868, 1.46646726112783, 0.125048726120068, -1.033838126885, -1.22873626195541, -0.954884577552079, -1.47271764297541, -1.2432663536536, 0.977186003763769, 1.45455237006081, 1.55010475267352, 0.892794090784383, 2.87215906244526, 2.75748321989725, 2.96253336060181, 2.27041656522076, 0.0202693722599762, -1.87030392159042, -1.94931056260977, -1.79477113206332, -3.43304472706761, -3.99299832489393, -3.82475368582556, -3.19192108225956, -3.31677990441376, -3.36874308486898, -3.46707265329356, -3.07413158174427, -2.71180006513342, -3.93141235643544, -5.17868282672675, -4.52281094039131, -5.10429490276217, -4.86578735392208, -3.47094101824138, -2.36121270793633, -1.83043692433824, -2.30084232199111, -3.14507259016687, -2.93321424121895, -2.12882729480852, -1.58201122241958, -2.53752957441738, -2.86766443665289, -4.87777274309106, -5.22417547945843, -5.94692437344397, -5.1482172648315, -7.88745682830506, -8.20138089508388, -6.1816668385601, -7.24081067042847, -6.69204074996338, -5.90378031787681, -5.63835003321341, -7.48363677526433, -8.80461975014889, -5.97905313056274, -6.31439845656799, -7.0374619281063, -6.8608314671453, -7.84681710617925, -6.36047172116702, -7.14026745016931, -6.91876755020466, -6.71383939306704, -6.16403377004098, -6.40099365674218, -7.85127486913074, -6.88471726129878, -5.14913178508759, -5.38949884749949, -5.45351463603117, -6.57094390547799, -6.37046258775589, -6.05610315460012, -7.24156413511273, -8.45459548795838, -8.48120815549055, -9.61201125508807, -9.07245282560472, -9.86266997792757, -10.6856612993422, -10.5704735696368, -9.64940126425072, -7.78650375349448, -6.87717403653053, -7.16583218130814, -6.13218716770932, -6.0525878403307, -7.9845240122063, -6.80177050502471],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [-1.07039503980605, -2.41412782299441, -1.58948951986018, -2.21587339354259, -2.98819751370958, -3.24755378708748, -1.39069149308581, -2.23042835313528, -2.61139058261844, -1.88875056521868, -2.89952975439916, -2.4558927572854, -4.77614834962711, -4.8910969382906, -3.89895151168008, -4.41737480238327, -4.10045180802492, -2.80834557791106, -4.37486592098988, -5.31388774943181, -4.75782035901084, -4.28068398968088, -4.88812374808466, -5.55796868307497, -4.43371272377062, -4.65329171224647, -4.44557376049419, -3.92503888019688, -3.79914181650745, -5.01403827585202, -4.74631434084576, -5.69066583882159, -6.27429107971951, -6.14055031269737, -6.6499752809277, -7.52645369664198, -6.97048857651795, -8.94437895585662, -8.38978372964094, -8.14900624043839, -8.13598275273334, -8.36073178397974, -8.51711575294113, -8.16894061804463, -7.39629249628651, -8.23506911804721, -7.90171149813651, -7.98200934238557, -8.88248306210826, -9.10609461527099, -9.68078042326873, -9.08635893112026, -8.18243409594342, -7.4917775813271, -9.33403369600038, -10.0444872670289, -10.4740928998055, -11.1166274069213, -10.6121927430302, -12.4352920960884, -12.5444006476295, -14.1029848939444, -14.2209003526975, -13.8584823689272, -14.8192926902456, -14.5226628455411, -14.1557443812771, -12.8175220533308, -11.4195221935329, -10.0710778587508, -10.4565371989848, -11.8068731823751, -10.8118793000848, -9.92939815192195, -10.0090202692864, -9.88791576459054, -8.78240553645965, -8.14361408462149, -8.08642068016499, -7.43944539050402, -5.86373338339391, -6.81425664625484, -8.1315588413036, -9.00975903941504, -10.5349091180718, -10.955680538339, -9.4032593605293, -9.03296252542446, -9.86475415241427, -9.70093338509809, -10.7514206329392, -11.1384807474656, -12.6895276204822, -11.7915798373704, -10.3692107736754, -8.11317703308076, -9.86651106765264, -10.3049433397172, -9.02697726917834, -8.34389851347778],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [-1.14174996406226, -0.715382382759916, -0.811468939620528, -0.691865490406096, -2.22025729140674, -3.21648990798472, -3.07690485723501, -4.24855821204527, -3.21035299349488, -3.32186113663013, -3.19979108015039, -3.36522979750394, -2.84808997855063, -4.54034577067455, -5.99561850187769, -6.05801716172819, -5.36992118466164, -5.88837902273789, -6.00974681605174, -5.07529775542897, -5.5313924485381, -6.06193690146224, -4.33386510494549, -3.33769569407022, -2.1730517488868, -1.84621665010364, -1.69204246391377, -2.21174411821515, -0.966109494432476, 0.0393477950945728, 1.71930586991233, 1.62384694090667, 1.83514074437522, 1.96291980406417, 2.41664431999013, 2.44669741491501, 1.66617868808922, 2.20223885584597, 2.12138867901267, 2.66493273930136, 3.75207731666098, 4.23242697605054, 4.23157651505067, 4.19750241509013, 4.57190920746091, 3.96752209538484, 4.41512445700673, 3.30804938825084, 3.93480566675565, 3.8907302963476, 1.38241505005406, 1.87529119961411, 2.20979087916495, 2.98322140815508, 3.05526688230678, 2.00922443085975, 1.47296666339102, -0.252900898960241, 1.14270401361201, 1.50459218582136, 2.02836993633029, 2.30430855755892, 2.20971630278176, 1.821591087541, 1.01700141635952, 2.23666859399158, 2.83201096291955, 2.6067524995365, 2.9360422647012, 2.5187042292365, 4.15226592101071, 5.26344015758542, 5.74289890657429, 4.70992472125688, 3.35679435270449, 2.58145511346355, 2.7336904128063, 3.05024338284352, 3.76950709719582, 1.51737236296105, 0.79239308249224, 1.45613835415627, 0.115830870972473, 0.481451413724296, 0.719262593261103, 0.470990936680492, 1.4684543925188, 0.999223799535133, -0.0369968155828439, 0.16050292707577, 0.424791261590266, 0.281753955606525, 0.145678933113504, -0.749456971481619, -0.498699272419346, 0.269502708208224, -0.505926759036464, -0.695258899420236, 0.329484640783442, 0.00920522832448521],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [1.29444074738979, 2.50636590653362, 3.11401557399963, 2.5829794555951, 4.47890361849299, 3.85173040118554, 3.75667259884308, 3.54557585118679, 3.04626387802619, 2.66421710167806, 1.34563993144619, -1.35867092482977, -1.53032422875638, -2.08424865931792, -0.274386284161428, 0.248830588049703, -0.650303868589637, -1.14180020403094, -1.02510940823697, -0.125166570687121, 1.17482218843138, 0.423542866695238, 0.116600878939167, 0.524010699730708, -0.217495395571013, -1.66398302941009, -1.90506568024727, -1.56964330941952, -1.20425637759961, -1.90422352771805, -1.32335381418622, -1.19172525134091, 0.279609274413517, 1.01665570739263, 1.38922487747344, 0.122012909488542, 1.4019655600583, 3.01297973451494, 1.20463207583553, 2.1438235149633, 2.4920352469435, 2.44178696247149, 0.828783600279133, -0.269841705235552, -1.35029073407732, -1.95796994863927, -0.412368283682899, -0.704409152165907, -2.02536697401021, -2.99519535730585, -4.16978225103354, -3.93311885926676, -3.58489799074502, -3.30136534213383, -3.36755536215901, -3.20872485575335, -1.90788707168303, -0.481779474252563, -1.45941301726858, -1.65938424430823, -2.88109410389914, -2.50543497802901, -2.40940396371937, -2.59257574314962, -3.13794552419385, -3.21444018961162, -3.16724489259083, -3.24897353787824, -3.9672322066423, -4.72446900931247, -5.18576709439115, -4.25939878381376, -3.45734096352473, -4.23337042705421, -3.68887937250651, -3.71527416671114, -4.14540027336745, -3.8646500780589, -4.45105246027065, -2.87598793669665, -2.62306737560394, -3.10574274761224, -3.86443849355016, -3.9965175389922, -4.45297309506374, -5.02195205203966, -6.0190872209347, -5.07877906705874, -4.46915569320487, -7.48092010278901, -6.36144441630177, -4.45945852186298, -3.92840707735576, -4.60980927271052, -4.73759096451978, -4.21073941315497, -3.72880335149026, -3.56506459613552, -4.07721255226596, -4.40780096961655],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [-0.776853489540626, -1.20377666319876, -2.060546987905, -0.84519587414918, -0.588783458644315, 2.0993370887003, 1.55278252686183, 1.34227231200744, 2.31566832570021, 0.683138272058031, -1.20478186455418, -1.32746552971341, -0.6942828660416, -1.70500941940216, -1.67776872675544, -1.73840036098523, -0.675801037405276, -0.644521621929512, -0.905387777801241, -0.534504395700245, -1.61615368650957, -1.08939164635736, -2.88562223491015, -2.25640218785594, -3.34856639929771, -2.33003108062669, 0.353225873281239, -0.41591504726559, -1.25555488260821, 0.178270087507767, 0.751077581232149, 1.72445846808921, 1.7418384149244, 2.77333403372301, 1.16659055832264, 1.9561885126608, 1.76094493028672, 2.45782982326821, 1.06336616841968, 1.93719138186839, 2.46072359977551, 1.71477205893483, 2.03039467359087, 1.49379593115187, 1.728534658168, 0.860612443291755, 0.850753203948517, 0.749598405673331, 1.56058488088315, 1.74170298421601, 1.95368523468606, 2.16917755485593, 3.19539656926865, 3.05758500360785, 3.10472313751123, 3.11146152779825, 3.18919344391581, 2.3959686325598, 0.733190973779805, 0.978891421165103, 2.45545943586989, 3.14402289933737, 3.12415489187748, 3.03291085225505, 2.51838190248849, 1.85505320072312, 1.80332021226411, 1.680224786419, 0.593336799673062, 0.00552222429634445, 0.326911595746721, -0.586972407601117, -2.3137038106978, -2.3653234398894, -3.6761252583604, -2.91594287856306, -3.81170913836113, -4.52976311073157, -3.91431853793952, -4.97679615394637, -4.42386994207112, -5.06327157854765, -7.49019892708263, -9.35575109749568, -8.01329965263923, -6.29326555562665, -6.41672353790895, -8.28500809599163, -9.98954814359704, -9.9106995366036, -10.5737180286579, -10.1124974266595, -10.7627837888755, -9.99877019505125, -9.25024629536925, -9.38237525529949, -7.31040711604243, -6.36245896756934, -6.84469566641255, -5.36427166024991],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 0
+        },
+        "constant": false
+      }
+    ],
+    "ar07": [
+      {
+        "values": [0.0976431169132469, -0.412021873330427, -1.41117833071972, -0.469037703128064, -0.977000685712178, -0.344288154992969, -0.197731349399175, 0.816172927207709, 1.11459831867181, 1.26539639393278, 1.14018580094272, 0.746904617330567, 0.941115342308019, 0.413421635052428, 1.995935195164, 1.06384506830943, 1.23686019073164, 1.27984332290965, 0.727531342566093, 0.508103146127444, -0.587456799936767, -0.466173661108011, -0.274664741868482, 0.307114174030188, 1.20142390151569, 0.537223695683335, -0.614354768553107, -4.42518080173831, -4.32416082998327, -2.17074241714999, -0.913352287480522, -0.253217438407653, -0.555878398524321, 0.197253154536698, 1.04045081684266, 0.145461866964423, -0.190444995361484, 1.59279781598445, 2.51066269342981, 3.46608041735719, 4.48194234146597, 2.04497472113429, 2.40888422942649, 3.12671569037611, 1.79039231336616, 2.07938176016857, 0.14763987045627, 1.47197174536649, -0.392142095825171, -0.234946839953439, -0.262288536391293, -1.47954923502163, -1.39784067080114, -2.29634860005485, -2.26334093084387, -2.20478287869557, -0.536698616201598, -2.1548936880041, -3.10125450830149, -1.02362507252293, -0.979267576479169, -1.82522973537272, -0.157872410645584, 0.166486586007393, 0.626974659719753, 0.332369959485121, 1.09738100092229, 3.01339157384206, 2.41520621353522, 0.323250806137268, 0.106675561674299, 0.954608413373868, -0.417607655921629, -3.34181936458488, -2.56741456920028, -1.57993684023291, -1.16638222716647, -1.2440560331541, -0.446215080790537, -1.87666583796622, -1.58789156668014, -2.41134032092317, -3.03032451303972, -1.42572129444297, -2.50406304538868, -1.3838599033516, -0.307385074488241, -1.24424323081366, -0.976431583377408, -1.56913381921381, -1.10381286999816, -1.66344310737933, -0.985953877164337, 0.523056151994539, 1.35912231222308, 1.24067650718007, 0.564305605205462, 1.97071181536623, 1.42572121209493, 0.152801734353349],
+        "order": {
+          "p": 1,
+          "d": 0,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [0.18595181461856, -0.738648644898395, 1.50337669441082, 1.99276794428867, 3.64487625883718, 4.24840529769882, 2.25164930715634, 1.57660312785473, -0.297382202212646, 0.178700950886162, 0.136936570091971, -1.16096859649698, 0.213092241143696, 0.0217001657699502, -0.91558074557893, -3.84776019127476, -4.47738262658384, -4.65496708797751, -3.61490768327686, -3.75565567661058, -2.83093210536643, -1.49227686177731, -1.55289032309887, -1.83347317596918, -1.85041855142302, -2.18297907775655, -0.583561945637753, 1.78813998446737, 1.94483062921338, 1.64345996950521, 2.4911955923942, -0.0302327102929782, -0.805804033407389, -1.68477783326151, -1.61977626267044, -0.524286498211832, 1.62713114017254, 1.38899636029175, 1.24820441213644, 0.841819835257335, -0.275578132734269, -1.84601861251708, -2.3112612885024, -2.11526776056171, -0.894657057291004, -0.740465704139203, -0.572760249320865, -0.572596252269753, 1.09618360931318, -0.386351286417551, -0.135703009556812, -1.76632561263994, -1.66299311702167, -1.08917110996482, -1.42590838204958, -0.551258102838358, -2.1935580196781, -0.0826577921505975, 2.88991043610698, 1.58964772217693, 1.96379855015236, 1.07387348328791, 2.24323077295632, 1.40575583361026, 0.846791060488447, -0.194782801009342, 2.42961353884507, 0.985384446755523, 1.01917076540734, 2.00334839432739, 1.30737989509674, 0.0530053221156122, -0.866820786725233, -2.15055348666929, 0.554241391654096, -0.758922065506364, 0.876552308675283, 2.20835939074271, 1.10896238472967, -0.66345949150299, -1.21321475358525, -1.48984764076166, -2.05500441907924, -0.899640960258288, -1.9450238044328, -1.13991496657783, -0.907308535519532, -1.43517327683279, -0.583188245800129, -0.477828895619563, -1.29524030080214, -2.63044730023069, -0.0568290189935292, 0.102453271937516, -0.382988114278488, 1.74175785122266, 1.0899185103463, 0.653611796758567, 0.635181672122288, 0.400468511385189],
+        "order": {
+          "p": 1,
+          "d": 0,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [0.158534367608584, 0.148977573506566, -0.199537024419594, 0.938696799801283, -0.383299597818357, 0.600488439983102, 0.845166062543261, 0.385967247730669, -0.922137105895594, -2.95220735966828, -3.23654221494457, -3.78832513202728, -1.26410193417122, 0.0489284746333409, -0.206298589501785, 0.354969321714603, 1.17670392303068, 3.06521595166752, 2.36012141360159, 1.64768263026653, 1.5734176810068, -0.7955402870777, 0.389467978403904, -0.981602794956297, -0.0473561559447909, 0.441508451868687, -0.36213731849305, -1.10843506725153, 0.114456573748937, 2.11017327061837, 0.578174496009549, 0.606951134149487, 1.22346598934599, 1.3436810653723, 0.892713333957374, 1.9494481992756, 2.28507593592325, 2.03507651464801, 1.1590631041255, 1.87834856303779, 1.64825208617647, 2.39167588962434, 2.00235441752505, -0.161614153917053, -1.99140251762809, 0.457656625999142, -0.371675849660126, -0.585280951097984, -1.37615354596772, -3.11800291254168, -1.67081499678198, -0.418411098341001, 0.903213858890998, 1.12134081264394, 1.50716024286877, 1.59183296634432, 2.38908207627446, 0.954608780510893, -0.38259202272697, 0.0401526316579404, -1.88558093991299, -0.881114125576488, -0.242347428246849, 0.913171489430189, 1.32129064399133, 1.51746695576756, 1.09318098065989, 2.49666126593526, 1.48427367059528, 1.62394178313627, 2.24803334380657, 0.925057397945168, 0.982557750111022, 0.595529382705786, -0.118348552813986, -0.643534646636208, 0.0656678985816636, -0.494292175519858, -1.90039213584533, -0.902455908234605, -0.476204761397563, -0.967497782162836, -2.21736696895184, -2.52483313360101, -3.00346920853402, -4.14686672802202, -2.35533970217122, -0.273014026366853, 0.334352777392649, 0.47381816305781, 1.18892583378935, 1.20751719341172, 0.53473483048548, 0.89646365484099, 0.807884557260575, 1.0617920629198, -1.18833426909093, -0.247745512048185, 0.511031134761287, -0.795813228864523],
+        "order": {
+          "p": 1,
+          "d": 0,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [0.00712579169736617, 0.862465283915811, 2.89020287668082, 0.780959720358969, 1.1814183570921, 0.436677432955294, 2.10733254481783, 1.12727890981308, 1.07533215113929, 0.880612376602369, 1.92483247233741, 0.00265789703737918, 0.924786824194714, -1.19854204392633, -1.26975006330932, -1.86510685305402, -2.51150674596347, -2.66733299825848, -3.57520012244585, -3.85798792674304, -2.96825135733063, -2.74975827597874, 0.15467413912076, -1.82198218330227, -1.61910419551465, -2.9214746855881, -2.68485169705481, -2.61424758514238, -1.82065430709555, -0.338260617222748, 1.23853582142998, 1.42965215413406, 1.68868673565286, -0.329366867075283, -1.44454138632549, -0.904996673701446, -0.725196650109919, -1.04991922036235, 0.256401343888192, -1.51306155121376, -0.271837393644505, 0.382104492255745, 0.46060261997294, -0.0791404267347772, -1.77153212802257, -1.15735051130755, 0.142240542370313, -1.41318226723722, -0.2226897523401, -0.0323259332289577, -0.194244594771416, 0.797161821368419, 1.26268442524536, 1.49076219067864, 0.241768544343016, 0.418041878142853, 0.250404261974861, 0.337904682672242, 0.719867515842108, 0.625006254432307, 0.865864116409298, 0.928307229086825, -0.0854321641247031, -0.182581783846328, 1.58467984526295, 0.495984767374551, -0.620732984622227, -1.2933439425673, -0.69457626073749, -1.79901166430111, -1.86248643768505, -3.24477999479025, -0.931297172224971, 1.56363001907051, -0.724665487890971, -0.423414847679459, -0.81678392124838, -2.36002096704469, -1.53701266260916, -1.73757176374915, -0.394734406869466, -0.771651070294379, 0.363962436317441, -0.30143316375278, -0.901511512621944, -2.21093413227889, -1.2443953304714, -2.41028643662022, -2.02674724814547, -1.93015991340411, -1.60914909494678, -0.366230936513345, 1.5480445204713, 0.917666518097425, -0.444316548510069, -0.917853075902661, -0.207305144236137, -1.47350645046909, -1.22842147246219, -1.44412412592078],
+        "order": {
+          "p": 1,
+          "d": 0,
+          "q": 0
+        },
+        "constant": true
+      },
+      {
+        "values": [0.544048639609125, -0.465782962082853, 0.172925203658211, 0.13369683093708, 0.122094102135574, -0.76036707434885, -0.811884800161092, 0.362651615569522, 0.740947248015471, 1.27042681595041, 2.29789523776986, 2.12486283268615, 0.679050941358093, 0.833692721664435, 1.84570508659821, 1.25365122211425, 0.632637912322592, 0.5847485804379, 0.634252648280175, 0.158860511653165, 2.02919041613788, 1.6396078571785, 0.829189117778103, 0.713095983867335, 1.97726760955198, 2.47730135708869, 1.68094992543228, 2.87618975727875, 1.74907242534767, 1.87288464778584, -0.438669509777774, 1.17593064619719, -1.32891640983745, 0.418916653287692, -0.304649189543927, -1.13964611096056, -0.375260042975151, -0.994311551097886, -1.07293690496208, -0.503840561696919, -1.5380728052651, -2.39110800621344, -0.951387319174642, -2.57557656122365, -3.21448472459194, -2.81111463171633, -4.37265194320705, -2.7127003528767, -3.63838660056081, -2.97402665485855, -3.05411219516565, -2.31538815367824, -2.77438657230963, -3.16484469739885, -2.17459013799812, -1.17011505400989, 0.259689303954296, 2.6809911574537, 2.09577117196672, 1.82429463489238, 2.0345130546265, 0.734121752661079, -1.65616362573542, -1.27554783179024, -1.7294560447505, -1.16140942793216, -0.308406782485084, -0.120954663926081, -0.585396239795654, 0.0205197188578654, -0.43511709596852, -1.13617694686987, 0.180070054321485, 0.413583885978449, 0.429634073205233, -0.202034759347296, 1.01288244615944, -1.68778920904893, -1.70936195583999, -1.65020368114433, -2.99983711798895, -3.93264506049322, -1.13432442136723, 0.359383483386531, 0.923403178665083, 2.09205170031731, 0.443666975689489, 1.22450395244511, 0.918119494098343, -1.07064343066133, -0.0649194470363645, -0.939743123664471, -0.417174665200211, -0.334552328178335, -2.27175928989584, -2.08950715307106, -0.46248859313715, -0.827345879309874, -1.65361533496265, -2.48637420707749],
+        "order": {
+          "p": 1,
+          "d": 1,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [0.0877054457431902, 1.52761525599872, 0.123843781746432, 0.745734071270383, -0.356395384815251, -1.75754390936855, -0.672732867095988, -2.10347170947073, -0.834399176078651, 0.0326165384886256, -0.119277606973877, 0.252043501968784, 0.24938194203656, -0.430115693151037, -0.282369076396164, 0.26651718129684, -1.43364713402044, -0.46839501616918, -0.150857493098662, 2.07811774654933, 1.62438169447906, 0.455105828156156, 0.68506271611199, -0.620521050976618, -0.165118421628271, -0.101233583798687, 0.41052615094483, 1.31674004811995, 1.97038193434354, 3.30300810494831, 4.1909903006763, 2.25282187802697, 3.25851055967181, 2.18497225582826, 0.70116997008846, 0.889627872902875, 1.36465027102053, 0.139737595403673, -0.405597397997643, 1.26821415692685, -0.765496004088627, -0.433345986883838, -0.209370674769681, 0.253060755333811, 1.45387941805099, 0.413921996451004, 2.15639141018701, 2.21341259204163, 0.0238633773449788, 0.0833489080667801, -0.771222111868458, -1.20414584483264, -1.38254936236357, -0.890143003601293, -1.09262283696221, 0.648559283063752, 0.421583860072483, 0.972236858500312, -0.63213451096531, 0.8441828142317, 2.57828621089585, 1.86601838026048, 2.62407172343591, 1.91980155735536, 2.68914746574874, 1.90843259239532, 0.454549909660735, 0.724480312145542, 1.79483597076386, 1.15402688655834, 0.0840587825469739, -1.70190792637575, -1.91797540337738, -1.67140131842081, 0.155318400264132, -0.622942553543958, -0.889710341967922, -1.56541770563216, -1.00170644111916, -1.22101979891166, 0.16804532413716, -0.423453618878078, -0.689599565927107, -1.07974207903535, -1.27321148058338, -0.184414490944753, 0.158586117117751, -0.50100943595169, -1.08650204249705, 0.74330645334125, 0.213803817679106, 1.73998597875209, -1.64062278683677, -1.91539402652114, -1.11602032024035, -0.811504658825969, -1.58934894315036, -1.7693003079477, -0.92797676418009, -1.38390100382218],
+        "order": {
+          "p": 1,
+          "d": 1,
+          "q": 1
+        },
+        "constant": false
+      },
+      {
+        "values": [-2.15341730310275, -0.624718701571213, 0.624172121950048, 0.830262876429443, -0.423493802847816, -0.285676329776984, 0.0832060328072886, 0.588798344379906, 1.34868365726893, 2.35404425057253, 2.83968077623766, 1.79248752862404, 1.54127543882426, 2.0493663741719, -0.138311810575033, 0.263568003941112, -0.784334700744647, 0.432808883673174, 1.60335701875631, 2.81647635622161, 1.14382364978395, 0.938457272911502, 0.00978342083031314, 0.36092170079616, -0.403932479242582, 0.414469918870607, -0.802352214732916, 0.258301220010535, 0.106453187721349, -0.610718337129085, -0.358925048917973, 0.703641273646555, -0.157548661708183, 1.45548852283637, 3.37138888553686, 1.76338385884724, 0.43306243238407, -0.132003917964939, 0.274829864148147, 0.369094888130342, -0.597877784134039, -0.291126407669776, 1.126868093927, -0.647821664658828, 1.10206034376429, 1.22955630443402, 1.10629600236277, 2.06368795860182, 0.183212557949057, 1.08251013737685, 1.26564404202512, 1.60285531472473, 1.83103669578631, 2.4146467258549, 2.46851810151441, 1.68670044861567, 1.08710280175728, 1.44822697958669, 1.33920336839118, 0.419670766899336, 3.08138046753354, 3.72758750309044, 4.13753986865645, 3.43148369792943, 2.42561592684219, 1.21194953533787, 0.446302399993434, -0.497815494872022, -0.752784121953794, 1.26372018630519, 0.187659115230187, -0.609395136443398, -0.974747615838076, -0.517340383861559, 1.46276124981603, 1.32181102734613, 2.55587525082812, 3.03802228860779, 3.47027045546995, 2.65544408736153, 1.66837652585892, 0.455518552029742, -0.459980461046455, -0.622253954123139, 0.900924918737518, 0.585923838622225, -1.28497954217762, -0.514412520290487, -0.414575086375338, 0.0167865326786433, 0.0406275437476963, 0.109728285793306, 1.13442310788986, 0.931771902105716, 0.370919017345119, -1.21175732759912, -0.378489731510701, -0.301993645172103, 0.86530041768688, 0.680486547576106],
+        "order": {
+          "p": 1,
+          "d": 0,
+          "q": 0
+        },
+        "constant": true
+      },
+      {
+        "values": [0.516080392774958, -0.178878761990844, -0.835314314118987, -0.0366434831952281, -1.49666402344115, -2.09157335355265, -1.69823668695994, -1.24016580559626, -2.44865362404705, -0.92743602086114, 0.00386442934778619, -1.22322587551658, 0.484982662704871, 1.31925265968841, 0.353814802787207, -0.76338373526259, 1.86508143566957, 2.20211826070269, 2.1223157121995, 1.05976483300292, 1.01621939822098, 1.52656960794296, -1.22845458112855, -0.0695489001646377, -1.17534366011265, 0.158756900126556, 0.179874816977294, -0.80500698909778, 0.374125717101044, -0.471476688311829, -0.986288232645338, -0.985364605330959, -0.9632074175141, -0.298039006778454, 0.621561490351906, 0.0555759322818899, -1.22307328498476, -1.96347678249083, -2.94406934593786, -3.0600029596872, -0.75266770411828, -1.13410474549475, -0.0811504693720146, 0.0434211421293431, 1.53595484885315, 1.20903039009184, 1.4530560159113, 1.60825598709404, -1.45127770558043, -1.43366575421005, -1.47594859786387, -0.826977287926776, 0.167252272093246, 1.34468255749256, 1.54316727546074, 1.99276065108441, 2.96291684425714, 0.888296466816024, 1.07614750728494, 1.33767854071173, -0.422460101161339, -1.12296688168422, -1.47649531286263, -0.76209711166159, -0.149975395263904, 1.15916609988278, 0.677237633079671, -0.671236956339573, 2.21515816227763, 0.681616374953083, 0.99080730052238, 2.67095285607034, 1.00839192517913, -0.00379852765247146, 1.14478298446931, 1.40028385154256, 2.08752713152953, 2.55606954089814, 1.93803841578707, 2.38616353547278, 0.513323784031341, 1.17288531191367, 1.01260980629287, 0.725656398756236, -1.23140035411378, -1.90184552106477, -0.954805358272409, -0.940772324206156, -1.26635864824991, -1.12883286486857, -1.70854083731073, -0.425284466655264, 0.921417050683557, 0.636882587398613, 0.417455624150019, 2.47349052878556, 0.780388194042627, -0.0974971307968348, -0.395062173851873, -0.827027533107841],
+        "order": {
+          "p": 1,
+          "d": 0,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [0.16181136992169, -0.556868075880994, -0.227436592156825, -0.860013822396041, -0.124895900322428, 0.202837552027508, -0.0297928033123421, -1.15066022936243, -0.00427218290509102, -0.282112053275848, -0.859476861926022, -0.100522068244609, -0.0086830337853112, 0.428422542410279, -0.287541566557273, -1.16297379688484, -0.345632326763339, -2.74041838795611, -3.14706147536637, -2.46766945517544, -0.0482662614359981, -0.123767559456028, -1.06450875520157, -1.06429080390637, -0.831881806762811, 1.02519915286201, 0.49058409815557, 2.4805078244547, 3.30926858586747, 2.03880073856243, 1.01933454135751, 0.45262285887647, -0.327109813935061, 0.384825566945382, -0.012106485744886, -1.43016677010612, -0.316802200859989, -0.0188126915835019, 1.62676566639696, 0.555495130370708, 0.446268455496761, -0.976421232555884, -1.7216586437881, -2.12161064437656, -1.66740370611523, -2.13319398333729, -1.13991246570248, -1.35209543771976, -2.6780142199237, 0.165418012191737, -0.669771985096565, -0.467201487759001, -1.06580215955734, -1.54277603336789, -1.30514972215964, -0.258392335435008, -0.72624981228792, -3.05949061291076, -2.91849799055353, -3.42786249576397, -3.49625285698804, -3.32935823738396, -1.9386609179893, -2.19306407715313, -1.52813108863688, -0.816605176272487, -2.1772389207912, -0.665421935608374, 0.824985376784699, -0.556822158532478, -0.55752432136299, 0.127076691130105, -0.396789372401316, -0.445680031753157, 1.02806068363096, 0.827691892107409, -0.579852233255041, 0.0262855688892527, -0.283383040533823, -0.826982087795767, -0.408818130019145, 1.17116763126028, -0.161118339415855, 0.943273879545136, 0.564493841447871, 0.312354353180856, 0.982493830986442, -0.182528515619708, -0.878015055539126, -1.69972896890753, -0.556348046846148, -1.72696139698126, -0.252996405044584, 0.55759392686183, 0.662289218684842, 1.77471126525742, 2.25274808057744, 1.60433115985203, 0.770534228728679, 2.04277053410386],
+        "order": {
+          "p": 1,
+          "d": 0,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [1.96541953726241, 0.83222039324345, 1.17117453136335, -0.757088442654558, 0.137603880860561, 1.14435045216341, -0.306961284751472, -0.390811050874888, 0.474344723256557, -0.265975149296977, -0.725745703276801, -0.74331443401952, 0.298360545880136, 0.282226637764962, 1.46976536409204, 1.84102152815026, 0.117530735632788, -1.00153106516811, 1.400485069814, 1.09194695843243, 0.390043855817244, 0.930557116768437, 0.278254204542167, 0.11496550237484, 1.68230343456681, 0.836407754538373, 1.09888899585543, -1.4502603658907, -0.56443657418532, -0.065054788769591, 0.522262025672198, 3.50507224886812, 3.08621276650742, 2.01209872715621, 2.36627714363628, 1.06506190392423, 1.85235319000351, 1.32378184633837, 1.5671575137035, 1.29021645798631, 0.299647849820906, 0.784910401413589, 0.513718280289595, 0.901243082642599, 0.852856696510963, 0.391699823956656, 0.311023233400544, 0.734192034877314, -0.705799159023925, -0.582891776658778, 1.56134711598943, 0.457991249851714, -0.353256341028678, 1.35683211298459, 1.24835107773275, 2.02721943560764, 1.45430723581444, 0.343551321866688, 1.20485681725161, 1.22146170275859, 0.4028872968074, 1.75735773004242, 1.32126167876624, 0.1171011585465, -0.221936973912419, 0.00721805590074562, 0.719444053755047, -0.179733916146623, -0.548593661515138, 0.0483737154004597, 0.691333631377036, 0.116061762428626, -0.08677741268408, -0.866124335526512, -2.00857599571894, -1.59743915904863, -1.77634855892818, -0.253603208726114, 0.710162633050676, 0.341190687444496, -0.459508607492073, -1.62740670947327, -2.24653393688555, -2.07576498968579, -1.4121931573488, -0.187267268307556, -0.382787025069567, -0.961333656684088, -0.967641317931952, -0.587037394868805, -0.670154116367486, -1.82851198714325, -3.17881952273089, -4.38784349486288, -3.73722664622372, -2.21386029207152, -1.97819220822778, -2.84356375042884, -2.26846927163989, -2.04809389772367],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 2
+        },
+        "constant": false
+      },
+      {
+        "values": [-1.00243978154381, -2.40114469652909, -0.872363614963787, -1.07452159201958, -1.29336403546165, -0.476492903906125, 0.613901329382369, 1.25689123134888, 0.127587797980791, -0.223487118960268, 0.658209225686667, -0.937513061718359, -1.68307833464229, -2.24160340517265, -1.37182471694776, -2.17095392831248, -0.788959651081399, -1.77071797461556, -1.02002272797358, 0.191811531500447, -0.572012223394333, -1.18884933848989, 0.52573574913298, 0.932750159011942, 0.712974638917702, -1.51688053113375, -0.844857121988989, -0.644202710285265, -1.20427603170985, -1.64364673339602, 0.0587578195116167, 1.30447042548439, 0.983512806803507, 1.77693992631776, 2.58492198849958, 0.855200667295192, -0.571147144398705, -0.929465888843826, 0.00613614388489403, -0.517063030416599, -1.7278299681833, -0.995193823672215, -0.640530206144231, -0.434801851386716, -0.838323606861639, -1.59540058222812, 2.27738918723467, 0.762762786977524, -0.140064978139525, 0.0173519709612641, 0.586911613132531, 1.1627005469722, 0.736141461900443, -0.154209941879563, 0.140563054419747, 0.129283869663142, -1.17047626824074, -0.961501027903678, -0.752064991853196, -2.23110181787277, -1.2648623941817, -0.334336094679913, -2.12520589973633, -2.52129414425585, -3.87961181022393, -4.42790842810038, -2.50331231003731, 0.999403077527115, -0.277244215331156, -0.684684799260108, 1.70195812144066, 1.51310027931381, -0.649994933324322, 0.819140405141619, -0.0148554231391338, -0.642687526426213, 0.336527221453151, 1.03423341221391, 1.33315769988635, 1.5866709614338, -0.385926797715678, -0.210051659831408, 0.491787456714616, -0.455414186798786, -1.15405756827576, -3.1958444398861, -0.914824065992589, -0.73480186421437, 1.13622508704456, 0.753107151060876, 0.42031486832805, -0.197445667570808, 0.160736139155445, 0.973370455180611, -0.2660266912608, 0.643321357870415, 0.421980772562596, 0.656051640617214, 0.181643212112715, -0.557559146259959],
+        "order": {
+          "p": 1,
+          "d": 0,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [-0.25107081980883, -0.366823836826878, -0.525180479585828, 1.34648338774365, 1.32680144957364, 1.0166821338519, 0.00580120975173393, -0.308735405565377, -1.16997677181979, -1.08733007306016, -1.65552840956284, 0.604589057349713, 0.590948985277151, -0.159604483097695, -1.29650514418161, 1.39372636219854, 2.30280959504582, 1.54430294450058, 0.777638279935166, 1.22860665772535, -0.35014193194659, 1.298808651773, -0.0981455561551073, -1.74816978532493, -0.439021860299619, 0.374649921807659, -0.188683689198848, 0.00219277778053451, -0.907941714491072, -0.701275560121078, -0.0465685194064036, 1.75816507915448, -0.0976883414967213, -0.0751622552690591, 0.186419427648344, 0.370559159186912, 0.276686603858059, 0.401554665104487, 0.724005177475536, 0.666614302853352, -0.431562712814634, -0.601331515599414, 0.489157316717859, 1.76073749690103, 2.44792951809318, 0.539534739647767, 1.30451865005348, -0.624275271411274, -0.820307792037246, 0.55823175877795, -0.306231219401267, 1.08971267327185, 2.40725375712574, 0.784716062952298, -2.02098741590442, -2.10803746005543, -0.514338235513494, -0.467102658115884, -1.02758063942159, -0.711627910474296, -0.713353067987741, 0.628534157580727, 0.580689652339815, 1.7577312842945, 1.06075714493612, -0.341723975440549, 0.105166128483836, 0.122982721012426, 1.49317490018252, 1.30799392832279, 2.28087053133214, 3.03245452418999, 1.41145743037229, 0.324651309547127, 1.93568632742433, 1.50131970723896, 2.64082073598058, 3.21151144645756, 2.07625178877814, 1.53935102127567, -0.0545659821602207, -0.61571370993536, -0.297663279350395, 0.431987348665042, 0.25462677783923, 0.655311400361171, 0.146311003263824, -0.682025536251059, 1.36378505999385, 1.12713168211973, -1.32976053061222, -0.0495855394977952, -0.192260923994623, 1.11768952876021, -0.203743375616131, 1.67588977066246, 1.36304809396248, 1.11378892269128, 0.537765420137517, 2.12464695859696],
+        "order": {
+          "p": 1,
+          "d": 0,
+          "q": 0
+        },
+        "constant": true
+      },
+      {
+        "values": [-0.351700971931394, -1.04211804734946, -1.48649181358182, -1.10577398127798, 0.309391774001719, 0.893221738828106, 2.83508934261263, 2.59303828662492, 2.16303961902359, 1.97647884910049, 2.33471748257968, 2.40409296728645, 2.10856663108739, 2.74309663799291, 1.53501967055483, 2.00678097537788, 0.328047829699364, -0.935727672432452, -1.06511893579676, 0.168502269173938, 0.581409172871059, 1.4180493722227, 1.62718358419832, 0.762815631017339, 0.103944674970036, -1.40082486615411, 0.851384223908818, -0.0367980088364049, 0.204444398491271, 0.316472465654205, -1.80941853692052, -1.5319755311378, -1.5553710768526, -0.810413812187728, -0.871531231725259, 0.704507509457381, 0.841457562042451, 0.785945426839814, 0.686857883589958, -0.286717912739352, 0.861378800173746, 0.526189647253847, -0.801728818482539, -0.359328229697713, -1.06759144461422, -2.2441421293774, -1.26647624880613, -0.768649523802839, 0.109088835248896, 0.436535201015073, 2.28559340968088, -0.174122856950319, 0.341793709665676, 1.31662393170198, 1.79811768802623, 0.795035090792805, 2.15333533888883, 1.93386485894849, 2.55602011455305, 2.40877891878818, 3.61664362028439, 3.05630062850823, 1.80823549237338, 1.73386727613808, 0.991071393176794, 0.473644775975307, 1.22463265919062, 1.17339806352011, -0.529962512067808, -1.63384129343405, -1.1433331823675, -0.24308917048708, 0.143555986677868, -0.151013002527636, 0.928010250759662, 0.91812801713321, -0.837825490057733, -0.472793968923375, 0.773506119876537, 1.49068544441221, 0.816244595993359, -0.484751472053369, -1.02012096486313, -2.02398561440311, -1.04115305364455, -0.797909898886517, -0.810746948203628, -0.554170451448232, -0.538444150318894, 0.72126722174903, 1.96049895218012, 2.11480310865857, 1.30572882745861, 1.2219852166821, 1.23032941102114, 0.247385694224156, -0.115601040397206, -1.46809330423302, -1.31462632936784, 0.594430677153158],
+        "order": {
+          "p": 1,
+          "d": 0,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [-0.883155781781538, -1.21576240101674, -1.6041471001468, -0.298357571426023, 1.01074283657982, 1.36126739661511, 0.55993038014513, -0.254867186760372, 0.346096934948744, 0.436191643065466, 0.279834494085519, -0.0532690927513354, -0.434517110197319, -0.850023673537164, -2.31638921690032, -0.357452264700095, -0.213905189343025, 0.301824274528245, 1.19197359504925, 0.28412686766692, -0.811553303880119, -1.07624055507223, -1.09121075993327, -0.807764982976671, -1.72794740266377, -2.09147557821679, -1.34078807515731, -0.432068863391866, -1.88692828946501, -1.49634393886054, -2.06632377474163, -2.35612465669836, -0.858010204172188, -1.48047098765355, -1.16911430697585, -0.817142469637321, -0.784558137393588, -0.186934765431979, -0.427020405649493, 0.288518820410808, 0.406709527508971, 0.988167184146087, 0.579789950597928, -0.828261237276405, -0.232715013656689, 1.36690800182083, 2.40196701506581, 1.29826844486632, 1.13885000351433, 1.52710203676193, 2.21920045990197, 2.41174261027913, 0.821284100183277, 1.37868805201464, 1.484895826847, 1.489755156788, 0.628301258682118, 1.54763944014432, 1.09399428181991, -0.0427603645405142, 1.55943069611165, 1.05166271217548, 0.064859705286893, -0.338289007123945, -0.988389388848066, -1.96586679186726, -2.24343173022548, -3.8875016601681, -2.83760323837221, -2.95419813860875, -1.42476455743392, -1.09410811658529, -1.4475292298857, 0.241479113350169, -0.973548864132284, -1.19058316935044, -2.01345860996536, -3.05826730259433, -1.46190410627292, -1.8139944411382, 0.48708087829994, 0.742574159029618, 0.43397528125468, 0.837152340370407, 1.6566929105434, 2.3604009078944, 0.784408059490898, -0.256155025931118, 2.30152630364275, -0.0457765453876757, 0.960829105318123, 2.05848630872505, 0.373734080746108, 0.771358381014029, -0.328040576631704, 1.44824927984135, 0.962509086329929, 1.54565180935667, 0.790909683802174, 0.704821435117132],
+        "order": {
+          "p": 1,
+          "d": 0,
+          "q": 1
+        },
+        "constant": false
+      },
+      {
+        "values": [-0.230241200561288, 0.359897595448335, -0.161757754655077, -1.39106978219689, -0.82310712880196, 1.649813385999, 2.31751919330561, 2.28838742245274, -1.36362157717456, -0.0628489747316032, -1.0384465783384, 1.33283943770025, 1.63894450628302, 0.180514352006173, -0.345022367563377, -1.32097136409151, -0.595108034902996, 0.309289429829037, -0.0512980819520064, 0.723915564839258, 1.62896266589734, -0.808635009449254, -1.22792093489288, 1.28741077172914, 0.37877513388059, 0.283086896034567, -0.631840849750588, -0.735781311605666, 0.871070363251605, 1.42676049529741, 1.540733812905, 2.82370515519628, 1.44544097412488, -1.15881442374217, -0.218435797343038, -0.996283130529614, 0.642131714100102, 1.75513204391554, 2.49226024757464, 1.83590267507269, 1.72532222802915, 0.45972393790649, -0.73132036603633, -0.174586118967131, -0.673753944591825, -1.74601129464429, -0.224319235618052, -1.54993584242375, -0.848289214103149, -1.36048722671419, -1.47800764711941, -0.115538769991583, -0.377844977173198, -0.323117698554026, 0.697636129289801, 0.195842241001268, 0.307540788253214, 0.152919385775702, 0.132183022784814, -0.422740927109758, -2.78161398601313, -1.1921063081495, -1.47074098990059, 0.59481503119743, 2.93105729414106, 2.85383793357055, 1.50517501810683, 1.73962876765093, 1.57179417698722, 0.51513412940029, 1.38906995310041, 2.26382314411449, 2.69414205906864, 2.71088876575468, 2.35145941431526, 1.72926534305461, 1.03216608561871, 0.732354868097931, 0.0065835264367301, -0.0385049540044435, -0.895274245692562, -2.23113566261215, -2.5454335499304, -2.20496002967205, -1.91150130977069, -1.88281460362698, 1.45081491157251, 0.794282721599022, -0.324037913351231, -0.285439574587094, -1.41859565327029, -0.395275954443843, 2.7124137314635, 1.92304499019586, 1.52335555134976, 1.04659884254595, -0.618493261509684, -0.97923762159669, -0.902941905510444, -1.39408916879391],
+        "order": {
+          "p": 1,
+          "d": 0,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [-0.0570246260752637, 1.20938615171538, 1.69942098448275, 2.614180954993, 3.5209493900312, 1.799555377593, 1.78860355108628, 0.817381083492374, 0.497266425385968, 0.011318664589811, 0.0461977756613984, 0.405001769072964, 0.0446831099791474, 0.375115103877451, 0.184211693691995, 0.508068040254754, 0.474278233929609, 0.601999937943708, -2.49312837656835, -2.07817755711625, -1.45425187496525, -0.102401957127935, -0.206367481398515, -1.85474760754854, -2.72953349574127, -0.776426734497996, -0.462044213385067, -1.5880515369732, -0.57755241582074, -0.828246056352225, -0.110253925934053, -0.451504774279281, -0.657465526152041, -1.01961170994667, -1.24521088501445, -0.851106966533439, -0.116848088944956, 0.615549319061664, -0.591162879610715, 1.59653473587143, 0.874337033786485, 2.02678197397396, 0.864362537702748, -0.0818653134240357, -1.50040675981284, -1.34224707143449, -2.42181443322026, -0.567619699637797, -1.8840757050076, 0.256216790567966, 0.368712580657611, 0.877747038125545, 0.758350350171064, -1.30391892440639, 0.684168935864126, -0.192182364616692, 1.43197829650466, 0.378349488128997, 1.22614373318286, 0.175377116228601, -0.0783374603770425, 1.05969294662579, 1.15879634364936, 1.79106102763416, 0.30737922762369, 1.14361587284855, 2.5832085878107, 3.04552176107952, 3.24785189614423, 3.67596264287258, 1.40305578942, 1.07805701092246, -0.0490686579788462, 0.274163226493986, 0.750840326790047, 0.0241886483499538, -1.15918802880029, 0.0843374013701838, -1.73289755085636, -1.97886251445678, -2.10614021461179, -1.339043830619, -0.830232104581344, -0.364827134852801, -1.7763774978529, -1.83934045793527, -0.279309945264489, -1.28461279056802, -0.312891464705602, -0.296180863466297, 0.406695023769109, -0.664186918333753, -0.0870284537702737, -2.02513501085619, 1.26846671653022, 0.877348028684514, -0.226206392605576, 0.839774003237528, 1.857685432109, -0.47953660046895],
+        "order": {
+          "p": 2,
+          "d": 0,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [-1.03257948077779, 0.577656151559877, -1.84946496723052, -0.373188192496313, 0.445330264055681, 1.1128280091739, 0.550252844828967, 0.657670778378359, -0.041812921505496, -2.01536748231464, 0.474934207060522, -1.23396537757591, -1.85598513184798, -2.6825130698132, -1.02143578669362, 0.284749891448123, 0.487636048192157, 1.25314717826438, 0.3459060288871, 1.64881344380178, 1.15813285605894, 1.79539825797144, 0.61212186277331, -0.164253467389055, -0.706624571391954, -0.0326530452295322, -1.36886073920223, 0.419586555346693, -0.883157341822238, 0.157565269743556, -1.14558248753371, 0.203175670167419, 0.412226814649246, 0.462489343833406, -1.68484096608594, -0.709987397749549, 1.70612190572546, -1.25655644444591, 0.101708934713138, 0.599454248273376, 0.454821680795444, 2.3414379871188, 0.314788779790049, -0.0738816833328024, 1.4276790525497, -0.135366485888088, 0.127900483036235, -0.411157492056703, -0.210290654380554, 0.216887704847073, -0.292533932770159, -0.685897324271838, 0.594014953977275, -1.41415000409964, -0.261200843792515, 1.60229286714788, 1.94255406140355, 0.99504660618925, -0.501226962777112, 0.86094924769182, -0.564277956472451, -0.462220381082102, -0.204789544690381, 1.29464394864502, 1.9974221278968, 1.36054284234319, 1.93335242717921, 0.641504838818133, 0.921164901161711, 1.2753371620726, 2.43132773878377, 2.4085524721505, 2.14478200278206, 1.36399492679211, 0.159291667661644, 0.269219982046738, 0.526040020267101, -0.18370274996187, -0.303701327439242, -0.22063709390912, -0.532637329976218, -1.31718973204393, -0.451190526090888, -0.939931606684495, -1.07577280080279, 1.2447661216642, 0.831546508321939, 0.769114426338816, 1.08428883988533, 0.789988746566173, 1.03384448893551, 2.88712771199109, 1.6274959559368, 2.97815180559747, 1.73953921739021, 0.494192226778591, -1.41183016228143, -2.71255475771938, -1.75143396456871, -2.28236384847642],
+        "order": {
+          "p": 2,
+          "d": 0,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [0.47050607338668, -0.336110574046701, 1.05768947525492, 1.7536203710281, 0.107522784858604, 0.0682598193955633, 0.73001271236377, 1.9270027808806, 0.803027827284313, -0.0101677609324409, 0.348728742333306, 0.512638739639138, -1.17539608826915, -1.44927036657452, -2.52094864461929, -3.09851598399352, -2.24070430474087, -0.288332641123267, -0.472169411148388, -0.717364784955115, 0.552157480717521, -0.00883946958132636, 0.998325245752557, 0.552988626507045, 0.123741066424455, 1.46994137516177, -0.201183942552087, 1.23917409146039, 2.02089287158639, 2.08548244655535, 1.68508208021699, 1.06283264822065, 0.227281300015707, -0.299910084751387, 1.24705164207628, 0.272362488433512, -0.129523682446365, 0.689429548482574, 0.696994949735538, 1.13353060781719, 1.11917450014694, 0.947371981320196, 0.72550550718255, 0.296243350915443, 0.556879315518284, -0.688184880488185, -2.76674542829621, -3.04797709637811, -1.99133173221519, -1.15475676376006, -1.14248868005302, -0.0135038344518338, -0.131977157453128, -1.42672241243911, -0.240184830606724, 1.41636148570603, -0.777929226856655, -1.1998718713058, -1.30876181814362, -1.45106678491746, -0.27574175117264, -0.531544360986617, -2.09324920763795, -2.156691885774, -1.71468619784536, -2.60246428994829, -2.78821901867236, -3.06169750933443, -2.30024203487058, -4.01432152448746, -1.73446616089416, -1.10985472620308, 2.74691482222094, 2.78862164519773, 2.1070277428786, 2.17181072607378, 0.122574334616174, -0.537556971712325, 0.929135683733614, 1.53503874096383, 1.43414567018759, 2.17061129681786, 0.825424780763676, -0.0581559162346093, 0.335060065702984, 1.28005939263484, 1.45038977196892, 0.80770638921493, 0.0738256740181595, -2.90757032552545, -2.24224999137631, -0.218937156485321, -1.57523678380518, -0.235961762018533, -0.82828914143767, 0.197286375695374, 1.89686318195757, 2.08819982614061, 1.69177913173213, 1.94300031476908],
+        "order": {
+          "p": 1,
+          "d": 0,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [2.7088721276379, 2.05099179968558, 1.63149534501689, -0.0669264014830631, 0.255206826733497, 0.065217057502917, 0.203801865214059, 0.266056572860935, 0.356143185223778, 0.446456036693704, -0.0998610008396506, 2.10188754167455, -0.0125306567297239, 1.11029367121947, -0.216616693445744, 1.33895275601321, 0.286526788522752, 0.96635973399179, 1.54257433722935, 0.211433319722436, 0.451678049110153, 0.895334213597603, -1.07496311461119e-05, -1.0727479072688, -0.842408469189712, -2.24716677349699, -1.68390842946805, -2.51807734668525, -1.26430702352252, -0.347000510301327, -0.0694248585599031, -0.412940046292761, 0.485462909360374, 1.17666551330651, 2.18327301543921, 3.56292545526905, 2.17639404326298, 0.511178255877514, -0.666120228262762, -1.14438449987078, -0.369927435006919, 1.30927590013178, -0.21297766974084, 0.127128305764465, -0.202013501647062, -0.505092047067787, -1.01907746410281, -0.885307246210294, -1.37340285691054, -0.305459327408282, -0.567079382655217, 0.535622345675178, -0.670756803743676, -1.39310556983975, -0.402885449687646, -1.72042022694891, -0.752699873982273, -2.3898496405394, -1.60132667803814, -2.13829043065303, -1.9677994376328, -0.443692468324166, -0.533319717673387, -1.97020226537042, -1.46499046934572, -1.6699016540839, -2.97039009661286, -0.102344735079328, -0.373571650055468, 0.506093077786835, 1.72293037193286, 1.51659291609923, 0.904209545638713, 0.231610089489767, 0.670437449824086, -0.183928191311675, -0.363234111899452, 1.8498424611852, 2.34620854674159, 0.607917325428502, 0.67479137840438, -0.2791303214786, -0.557187570045518, -1.99584396890814, -2.5723774027832, -0.992856725760095, 0.369141646668711, 2.93998341577094, 1.51520619243017, 0.0242004580796495, 0.00761038348469089, -1.34281152063125, -1.68404700345882, -0.846782010209662, -1.10047652893169, -1.53243672268217, -0.355553722490298, -0.150540839077859, -1.35099937926021, -1.29302406629505],
+        "order": {
+          "p": 1,
+          "d": 0,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [-0.181769091075097, -2.17645960727178, -1.33912027295051, -0.548993859858536, -1.38604029009687, -1.59918805902452, -0.731519447330607, -2.47973976694874, -1.10996306017455, -1.99914169231917, -0.71113716664779, -1.02741974593955, 1.91176270013101, 1.61503827599423, 1.49329540307156, 0.715199338874704, 0.033970508004404, -1.20367863957103, -1.43825404124385, -1.06269525900843, -3.36978992365334, -1.81595768703621, -2.27857110581062, -1.02359548600596, -0.842066922851014, -0.652768244014854, -1.22788227594881, -1.09011364394374, -1.0009362833784, -1.55514074378246, -3.18446618697156, 1.0235887137066, 1.31893265059906, 1.44839809073325, 0.118632290314195, -1.57279133831995, -1.40941343959902, -0.71366484719168, -1.17461029018279, -1.53842670222505, 0.677621988175168, 0.342100379954384, 0.901194930137718, -0.655504636729835, 0.703034971628774, 0.448668491580714, 1.28796197718932, 1.7455863157668, -0.0185734551513994, -1.70929964528115, -0.724534242177697, -1.02386246989304, -1.88963788352307, -1.73339886840908, -1.92764037237866, -1.43577423634652, -1.18632073601215, 0.512839989372892, 0.445830031394348, 0.331248998152063, -0.266724649006959, 0.64693296865758, -0.877139676068111, 0.333997701361147, 1.52055255807033, 2.3830806055502, 2.27316684521924, 1.44108559460431, 0.366482876289797, 0.405943169290687, 1.82920955777275, 0.843634045565747, 0.812182490879616, 0.67494460820724, 1.31389098763916, 2.61112062831108, 2.78881149992377, -0.242810713188166, -0.385030303480467, 0.419364027898951, 0.532977077323321, -0.482644995711048, -2.01353900853101, -2.73061865222317, -1.53265063111269, 0.0271566078605112, -0.135299840934144, -0.464225022608453, 0.26754127599226, 0.38711483166566, -0.905578834690485, -2.52553658473514, -1.63410026694374, -1.17671409581513, -0.37873908877188, -1.03092697987175, 1.08469121594659, -0.676978106334666, 0.362527362508286, 0.306086597715924],
+        "order": {
+          "p": 1,
+          "d": 0,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [2.2296038324864, 1.26111349588949, 2.32713422988052, 0.782043976907841, 0.571320733736045, 0.754925907791526, -0.221537447202976, 0.605272543830393, 0.836818242825475, 0.126977537264711, 0.67540271063191, 0.38208525203049, 2.494971960243, 0.95204429035253, 1.60871684281628, 0.189965186578921, -0.607442438853113, 0.124848070403287, -0.242467881812775, 0.612087366124509, 1.81798423493082, 0.821826698748833, 1.3514377793456, 1.31461066131094, 1.26756431782879, -0.234380650448592, -0.974288515641686, -0.017302999455571, 0.987292950322283, 1.20296771055513, 2.87636275170137, 2.09396185235503, 2.49844052264502, 3.6221971197236, 3.02323634685686, 3.16240606703077, 0.579048854925635, 0.638795669889885, -0.15103370873854, 0.810444705580272, 0.144344942839231, -0.965272194209587, 0.231320572528532, -0.111186373000493, 0.0848160642554109, 0.440128273027853, -1.23924121884445, -2.30311434719827, -0.754322434899499, -0.218906744081361, 0.877065449754133, 0.829487631091317, 1.04593461922191, -0.136194960913588, -0.447926309690752, -0.953063027682223, 0.136610090284352, 0.761211921387266, 0.758819124649031, -1.22491586229, -1.04653943730781, 0.748580143668248, 1.16457115102747, 0.94049136006155, 1.37976588961678, 0.409403603370309, -0.382212112708855, 1.12727652613551, 3.13420199215064, 3.20639755956927, 1.53663850090334, -0.841220155058548, -2.95662894664555, -1.92788045128031, -0.240132944836723, 1.27684519381283, -0.842736041567146, -0.179798167956662, -1.91123077195746, -3.42707947785815, -1.73232248690722, -0.786327616359157, -0.912205439427896, -0.882712462932251, -1.93282368633085, 0.265321090052514, -0.488684830588215, -0.38825186135644, -0.69051516460935, -0.587304140659411, -1.20717921215396, -0.327269993856122, -0.227126658432466, -0.235668754648188, 1.18435393041952, -0.167777893648568, -0.333022493662685, -0.0426877743578334, -1.94412831707748, -1.72111976720056],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [-0.612506618369278, -0.467412109910155, 0.19867380595198, 0.726208053397225, 0.98140141636198, 1.34541823862296, 0.685694249234175, 0.333216517133654, 2.32746234304769, 1.98730831343375, 1.17231647318308, -0.803964256308937, 0.388892038324776, -0.357680090775231, 0.232960934116882, -0.136982854722485, -0.88517592759105, 1.29974617690782, 1.02303069842884, 0.788667429877391, 0.204317946802665, 1.1629344891498, 1.66058571065299, 1.1202463038893, 0.855495501834731, 1.36194111333999, -0.789611672794453, -2.50745128966983, -1.35332348881668, 0.699385105578756, -0.86650026811535, -0.189115290593541, -1.36594150211531, -2.3861462866126, -1.21767463123501, -0.787594793026643, -0.0641260911068639, -1.1840116701461, -1.59108998276615, -1.21066220589901, 0.611511268791383, 2.50826747258428, 2.12828881631812, 1.0146849910089, 0.80269707841112, 1.09840822322424, 1.28711311283943, 1.23802499569326, -0.580403191186483, -0.41405727657186, -0.114271586749945, -0.0417084306360618, -0.421599896251966, 0.127622154104972, 0.260126154681975, 1.98767171049096, 1.76925701900005, 0.394719881200592, 0.845746438814895, 2.33121959334515, 3.0880929982382, 2.00884631792966, 0.0212256577240966, 1.74793985214094, 2.20194656708593, 0.362143956169066, -0.0988483046303182, 0.713366487101693, 0.891326766518897, -0.101695858006516, 0.0661551803980603, 0.220357824593599, -0.860950350611442, -1.33140887324388, -0.528875614605479, -0.184265144200174, -0.322403902499495, 0.168438750635376, -0.700892698661973, 1.58351392357424, 0.892323751315504, -0.187750186771579, -0.682201063529708, 0.5645833581253, 3.11540107948033, 4.01861825691445, 1.12750822169555, 0.252691595353193, 2.10468683705881, 1.94456782747422, 1.13822588055934, 1.4887314567852, 1.05757446328395, 1.0526103267905, 0.743073267837511, -0.0697164663760779, 0.0734720844874417, -1.78791864200404, -0.884623175364222, 0.13106186540964],
+        "order": {
+          "p": 0,
+          "d": 0,
+          "q": 2
+        },
+        "constant": true
+      },
+      {
+        "values": [1.96419753756334, 2.49616662314821, 1.88907797411612, 3.81161243289938, 4.70048869940725, 3.05220598571328, 4.31852595248362, 2.60552938069946, 0.884375013455155, 1.86713471037807, 0.935980210318404, -1.046065350118, 1.01677428862395, -0.1492805382223, -1.03328943191002, -1.40952891012494, -0.973395132190984, 0.377354729794394, -1.3717083741662, -2.76739912093085, -1.97670722473308, -2.4150688385722, -2.04115121503453, -2.60220605533904, -0.335294516378763, 0.380791858539525, -0.133215257746692, 0.323423084455562, 0.164323405880937, 0.230966364117302, -0.752721851320623, -2.45130944303275, -0.456610886471813, -0.383209087023634, -1.66774189472623, -0.488826627642013, -0.860008378020868, -1.0432089137256, -1.01284429768531, -0.61004198285225, 0.139885478840875, -0.13828974859587, 0.799329794345939, 1.5349153944698, 0.463568739293538, 0.816389767978265, 1.4367757208153, 0.113599257942483, -0.804639125747234, -1.25746611456476, -0.786707651923724, -2.54545984859133, -0.45194380995678, 0.580460009429643, 0.503222049421875, 2.15595368142097, 1.10523399549956, -0.561817444616576, 0.138935169387551, 1.09394730727465, 0.485892500408029, 1.05302235091563, 1.54642355777158, 0.762167426141432, 0.952628167663449, -0.0463081163026331, -2.77771740146709, -1.38656177851896, 0.183045419169264, -1.3486741083089, -0.635460481650922, -0.685626780069072, -1.19405043470286, -1.3478850434192, -0.601036849036493, -0.190069256275783, 0.579532741402491, 0.382431543306361, 0.516107461342877, -1.8106605014373, -1.40802630698725, 1.01546639920672, 0.137798267961961, -0.909151554124115, -3.36292338976613, -2.35714879846795, -0.594854128733884, -0.251696228773898, -1.45741508061644, 0.307759019993697, -1.05785256294805, -0.886490556635767, 0.0924011003616728, -0.614288002123701, 1.19777994453135, 1.86787273072408, -0.136498253344643, -1.58297349142834, 0.186302158661081, 0.666663019833115],
+        "order": {
+          "p": 1,
+          "d": 0,
+          "q": 3
+        },
+        "constant": false
+      },
+      {
+        "values": [-0.679588837740577, -0.158261514746831, 1.47546330893247, 0.870740334274639, -0.328403155428608, -1.18457401313848, -2.15650187181216, -1.35625287446639, 0.529835950400212, -1.45658443942546, -1.04688875496008, -1.00168255886847, -0.560500482476284, -1.57067013784563, 0.0535664360976618, 0.301836086326832, 1.12671843915246, 1.18165356058936, 0.73037233106891, 1.12740009664, 2.8026091966854, 3.55353768525034, 1.42097216698336, 0.874697407152322, 1.57310929176854, 0.350510729946526, -0.6723852659308, -0.434279591685072, 0.493248665755302, 1.44723845604948, 0.156500885080124, -0.684910425175127, 0.894792464006784, 0.420425813202907, -1.59920946927597, -2.61212521963284, -1.41612451898461, -1.1523710010411, -2.09864865211859, -0.705736903897329, -1.83454069890788, -2.02741743340539, -0.852545095283302, -0.29678688806063, -1.36837220129757, -1.14595453064774, -1.23359182566043, -1.16251712241453, -1.24700545124533, -0.965705328447567, -1.49565597921447, -0.484242217301503, -0.774258480509984, -0.790112600068267, -0.554577935367032, -0.564253213857278, 0.936932921514673, 2.1605071209156, 0.276528076430826, 0.811216813543381, -0.488513916114356, 1.24128007442906, -2.55023904957767, -1.28633659453138, -0.8981264271898, -1.45054531618045, -1.74663130696172, -3.01997362114408, -2.53066140029767, -2.90716749948546, -1.15197003391112, -1.18163970041907, 0.363072800917871, 1.16450219484724, 0.51947043806403, 1.57635381790069, 0.757269737353846, 1.60715980403205, 1.5723258707053, 2.37118521794008, 1.48959890687446, 1.31725502815942, 0.307199419891967, 0.0558641636583096, 0.419977701463376, 0.0349207356568282, -0.725869416125259, -0.249443665968436, -0.647154814440945, -0.818122262610409, -1.77548280610446, -1.33735226193282, -1.18465398463023, -0.137469033793976, 0.518579078061067, 0.417651121812305, 1.09540564273981, 1.76745363677722, 1.06174440941393, 1.87201911545528],
+        "order": {
+          "p": 1,
+          "d": 0,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [-0.267562792660972, 0.92060635933987, -0.253701089653778, -0.460761660028689, 0.327385225928105, 0.726326861907043, 2.2364331284365, 0.545823620682148, -0.673459586593208, -0.62150304649379, -0.38954634663056, 1.17446523890157, 1.9309993626134, 2.24594837209739, 1.61255796091773, 1.2382661668721, 0.310996397451783, 0.759449965749537, 0.387105224727227, 2.41786444388244, 2.15909568874235, 0.326797535578785, -0.520207402231974, -1.11124942140755, 0.0715068264201016, 1.65867859600883, 0.817779490636874, -0.978372659713985, -1.11416881259042, -1.78192254288977, -1.08240154881241, -0.804348638549377, 0.693181492606351, 0.399126814704782, -1.11040541627708, -0.00403054896862931, 1.89186312894982, 0.505399540937585, 0.0503427737476573, 0.544948971131866, -0.225407892448864, -0.492294039936363, -0.300145826075835, -0.708186350625923, 0.451878848179081, 0.12139053802505, 1.24602308815883, 0.348603603478941, 0.884429643406232, 0.399287988154797, -0.222199903784826, -1.038710822259, -0.526066157287972, -0.220999614785597, 0.239570032724875, -0.558059447518062, 1.08268736011411, 1.2837638349325, 1.35650089483625, 1.31175752914804, 2.0989596448478, 1.44544106348451, 1.2174990509533, 1.42756221964597, 0.136157644548979, -2.48924366893299, -2.18989948879394, -0.904745723555196, 1.41403009678419, -0.684167724917302, -1.1747657652608, -0.316464087868306, -0.888548223074044, -2.05548294873507, -2.2230209636784, -1.68237183240818, -1.75633485240827, 0.624248924917569, 0.278360736196555, -1.09536626932522, -0.564812065120297, -2.0190144497527, -0.114702346439934, 1.41065872848951, 0.707123114366047, 1.60151610566823, 1.21461103536494, 1.13684716701741, -0.749210290330776, -0.193708680663219, -0.555488632485516, -0.925283551846109, -0.677720870467193, 0.540478298172459, -0.169682075356431, 0.590387893490972, -0.4349565548409, 0.239613470110818, -1.11541432315355, -1.63293202111086],
+        "order": {
+          "p": 2,
+          "d": 0,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [-1.79140875237766, -1.77280434396044, -1.2302778773163, -0.785653621085963, -0.042299610839361, -0.322149567225395, -1.0171943192253, -1.241864019509, -0.715999703019389, -1.47627382517726, -2.27685415336742, -3.53301707218786, -4.68527545161098, -3.7419651798384, -1.14970162169795, -1.16592292551261, -1.08038085498358, -1.18799093947259, -0.45234970884858, 1.50511185997932, 2.74007859180103, 1.96395581449299, 2.56059763813391, 2.48740904875274, 2.47273581527942, 1.17536798280063, 1.62809733916913, 2.09611225130564, 1.08182700356217, 0.346608390320798, 0.964257429440139, -0.08473961498753, -1.41135680336474, -0.0225480837685046, 1.41870538750454, 0.577483735985355, -0.894361328017901, 0.506716640696005, 0.536315647691969, 0.867093764253169, 0.411763375217879, -1.34906338337049, 1.50881347733692, 1.16433163661661, 0.562514403964747, 1.19528808237288, 2.64590408347191, 1.45339836675002, 1.99161181287182, 1.64053186908429, 0.742363878224521, 2.36861917737426, 1.04364491206896, 1.85452972914749, 3.2008303496821, 3.03750838936827, 3.43413872118844, 2.8753611001191, 1.19094665438512, 0.373572531043905, 1.53083435126992, 2.04218053817153, 2.67566220329989, 2.16765904781986, -0.0363984042254273, -0.0620066139787757, 0.302373545757021, 1.88622379143473, 2.09812312903596, 0.97928804447655, -0.231296952206665, -0.415240795966395, 1.18107698138473, 0.0363513692890696, 0.104953647315894, 0.318674563235588, 0.89268399818974, 0.747440012589393, -0.686098473874887, 1.09022942999496, 1.02951299427454, 0.647878713075958, -0.481386924164189, -2.41910243364913, -1.71822257280545, -1.56990177712185, -0.315002379365437, -0.523121579056352, -1.91667846685298, -0.690999318792465, -1.8825535621551, -1.73016969821643, 0.0896257791856478, -0.155830963912404, 0.368106148063788, 1.93914068907658, 0.490748859957842, 1.31945252231055, 1.1614255484846, 0.183764449361617],
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 2
+        },
+        "constant": false
+      },
+      {
+        "values": [3.7726102435478, 4.18394103834434, 3.23857837234158, 3.63678607967674, 3.36206984157056, 1.38888794583126, 0.332846311107064, 1.65211621738707, 0.37357798772805, -0.17333246830022, -2.30949347692352, -2.03798939026827, -0.956015745405655, -1.04432398123434, -0.187019327890965, -0.151806552111217, -0.958971599622152, -2.10389471599032, -2.40980817690428, -1.1294198734596, -0.235108019776756, 0.844458534799979, 1.96320752501295, 1.10676871779913, 1.80336978950463, 2.94408895842771, 0.589288919025807, 0.0596214986911621, -2.51205583349255, 0.029555033774286, -0.274221378712192, -0.536685129141239, -2.15566666265304, -3.10390014139288, -1.73489158202765, -0.812026575322305, -1.89893176537367, -1.91919780757607, -1.02562312479851, -1.94950338440995, 0.769718707767401, 2.53553803698749, 0.724799190471019, 1.18338248569037, 1.92060706786319, 0.411249682916893, 1.8699922301096, 1.59965649933043, 3.3669009439115, 1.91090799883746, 1.78381472676083, 0.347227776717539, -1.00615523288761, -1.48118426384979, 0.851911763303823, 1.54736662420362, 2.49045683088151, 1.61610339875217, -0.146444751233219, -0.297769583328496, 1.14563687758483, 1.68671626643788, 0.0982805570334755, -0.964439456726724, -0.569495381755318, 1.49937356896643, 0.261843499555293, -0.667705740626565, -0.77991166031683, -1.10424081688501, 0.655810119668827, -1.1176205245361, -1.6503069618751, 0.325662584889368, 1.97666952175527, 0.756426658016543, 0.789572999489933, 2.56043082606909, 0.232679078597503, -0.651501854794987, -0.573821419116626, 0.514687983824434, 1.33173961991236, 2.40720656268952, 2.27452756087009, 0.924456780742094, -0.362133481326967, -1.39992934624108, -1.4719556778756, -3.04254871698163, -1.891617270507, -1.39655871269565, 0.569098273420324, 0.898181301764413, 0.632770844366776, 1.3122421046111, 1.53174389604399, 2.73630002477923, 1.48106580116527, -0.353350330871455],
+        "order": {
+          "p": 1,
+          "d": 0,
+          "q": 0
+        },
+        "constant": false
+      },
+      {
+        "values": [-1.71329755979115, -1.66554564525237, -0.810291876038535, -1.92086938933771, -2.70781028223647, -2.17846461291593, -1.6665417188095, -0.231814874770005, -0.335684540757463, 0.137601112557618, -0.67107038064901, 0.683021502020222, 1.37145231412932, 0.727722184178936, 0.548947411124623, -1.71144809673322, 1.47275154657104, 0.21198423589979, -1.35785404430777, 1.09730326761232, -0.155247716971059, -1.94531486600996, -2.7376637739425, -2.90862373353689, -2.59999384428971, -1.05466372026053, -1.04879313244266, 0.970088240207636, 1.81137791059505, 1.13326080733021, 1.39938844632577, -0.203252326482652, -0.0322682231940348, 0.391260509289368, 0.163262698459342, -0.160146643825053, -0.11190422757689, 0.438857865095169, 1.24939231957047, 0.470542922899687, -0.0997500970457564, -1.07708008443238, 0.419206959763056, 0.707971379449297, 0.357168996847656, 2.0291372526173, 1.59393411783425, 0.309270682465177, 0.740060954579206, -0.0737172213943607, -1.64220419446626, -1.56657192957188, -1.23005540780159, -0.405078146127743, -0.178412536220996, 0.0618397615720983, -0.71496420460722, 0.41834548172476, -0.22670277546942, 0.804005077202095, 0.566201428084728, 2.13495741223744, 0.616643926209541, 1.43938796895957, -0.906484504303187, -1.16303574037079, -0.339343570430038, -0.983401157077357, 0.0908026915778146, -0.27582993330065, -0.234555001288438, -1.17986046151203, -1.05310608669235, 0.298876962616633, 0.255656469236493, 0.580217788993998, -0.314298483744421, 0.760156597165341, 0.941314236259928, 0.726507459471053, 2.39957244029914, 2.3115312350158, 2.89594219616574, 3.53357769507687, 2.14779835792831, 4.18103781637629, 2.20017275612846, 0.309871825161814, 1.09546518199561, 0.764418048753164, 2.03579071335684, 1.89736200825302, 1.87461982303053, 0.317611185128461, 1.25680085175882, 0.864985923011536, -0.187996490532719, 0.703600253451697, -0.76956606619547, -1.27104458804575],
+        "order": {
+          "p": 1,
+          "d": 1,
+          "q": 1
+        },
+        "constant": false
+      },
+      {
+        "values": [-2.63622191441367, -1.01189564363732, -1.26972358351902, -2.61859680108854, -1.95703447366768, -2.86035337789079, -2.14480844654582, -3.28901700178609, -2.38173930626661, 0.0958244622425013, -0.22471549581223, 0.139975062514014, 0.25218462644627, 1.02292837613947, 1.2845733196338, 0.091109138455265, -3.68375062540636, -2.44197989789965, 0.0225766474657527, -1.26331674295683, -1.62125283466319, -1.34659564063894, 0.611120559543856, 0.499932162316493, 1.94880637740363, -0.255587123049239, 1.01355199130631, 2.52411343153842, 1.17335229528216, 0.871159107428439, 0.91666933702243, 0.588246396242428, 0.933172613986915, 0.28061928531486, 0.219572839064836, -0.393241418034495, -1.95151539997081, -1.70320241318946, -0.391014642440024, -0.376540039364958, 1.45391196953306, 2.20335070562191, 0.592214039136575, 1.17420003705483, 2.05787485508431, 0.947002142507123, 1.11039102809201, 0.519322809242401, -0.0150241850607538, 0.832702241391646, -0.480870545956773, 0.246534494418067, 1.08828982029878, 1.64165933643994, 1.42284825783566, 1.27986224275981, 2.33513023297651, 2.05931445398226, 1.3232317407427, 0.943698358877613, -0.186130746609769, -0.386719596947255, -1.0815764154345, 1.55098830639363, 2.39220710800214, 1.48223878415133, -0.642152623214702, -0.206723213177818, 1.36273710235916, 1.72473330694351, 2.55579519697222, 1.80005627314479, 1.10583585412685, 0.573371554576762, 1.19917844912967, 0.293271009246689, 0.403775845120763, 0.978280064014222, -0.468940368309882, -1.65732608381694, -1.45570512115451, -0.0772108552956239, -1.22291482974685, -1.70090064917839, -1.49231359917126, -1.51659467503044, -0.333907671307626, -1.08848987119013, -2.86653049883606, -1.27529761735126, 1.098006518484, -1.28141044286146, -0.691687228515819, 1.90126814099549, 0.0919273877347062, 1.05032701195206, 0.35151564930886, -1.04472490115182, -0.34887596973456, -1.31287337797484],
+        "order": {
+          "p": 2,
+          "d": 1,
+          "q": 2
+        },
+        "constant": false
+      },
+      {
+        "values": [1.60963748015515, 1.54212449244306, 0.813433051785653, 1.87924488363593, 2.31364386550899, 1.67139615136136, 1.27032513204017, 1.81002964653801, 2.04274043639371, 0.251048071295552, 0.841133798121475, 1.72139808511058, 0.435102007845227, -0.669954155816103, 0.273616967210795, -2.00442832666446, -3.09262595639002, -2.32529222851804, -1.46271058719214, -2.68599468743421, -3.56367183153245, -4.62950107101501, -3.14523105761027, -3.29248338403269, -2.71723063686436, -2.68712203895211, -2.83253564503007, -3.02472307279449, -2.5833841884799, -1.1631013845122, -1.67474673693534, -2.08663080145446, -0.460053095964397, 1.23890245049759, 0.736518937998522, 2.10185728064909, 1.51585404427428, -0.38846900501492, -0.912159276505409, -2.4419818144717, -0.904177717626972, -0.548774078988335, -0.708436799280176, 0.911673237303177, -0.646676607160417, 1.35098513298294, -0.785312699070767, 0.201416585303775, 0.749240499789033, 0.628105264897036, -0.753956528042356, -1.24039896727186, 0.0633760597433074, -0.255561102498347, -1.92687971205173, -1.77506514705818, -0.301040745871117, -2.54544144283446, -4.18248319317003, -3.1250400373557, -2.318332752004, -2.49050904850065, 0.390627441267802, -0.0371122986723374, -0.345815822779453, 1.61559908020945, 1.68205844423141, 1.11227814960241, -0.225842467764731, 1.21945009797863, 2.48875791519468, 2.74724021696793, 2.50803227958855, 1.15581438434764, 0.143913357359435, 0.535985024879611, -0.854374475510709, -0.254736406810292, -0.673553112947368, 1.61075955131606, 1.54315544202077, 1.77810977851376, 1.28929364414531, 1.05213549404328, 1.40221610946132, 0.992612801088262, 1.36568440787516, 2.488582920963, 2.14421733656244, 2.50798954251958, 1.46405274409434, 1.79078071943643, 1.20336453264187, -0.553188710302826, -0.45362364472676, -1.42100755128709, -0.291022599799159, -0.834140158885353, -0.442937929148059, -1.10126350303418],
+        "order": {
+          "p": 1,
+          "d": 0,
+          "q": 0
+        },
+        "constant": false
+      }
+    ]
+  }
+}

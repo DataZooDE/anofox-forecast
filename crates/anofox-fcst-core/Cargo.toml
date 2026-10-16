@@ -3,6 +3,7 @@ name = "anofox-fcst-core"
 description = "Core forecasting library for anofox-forecast DuckDB extension"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 
@@ -19,10 +20,13 @@ thiserror = { workspace = true }
 chrono = { workspace = true }
 statrs = { workspace = true }
 serde_json = "1"
+rustfft = "6.4"
 
-# fdars-core with target-specific features
+# fdars-core with target-specific features (DEP-03: no "linalg" -- drops the
+# duplicate anofox-regression 0.4.0 / faer transitive pull; this crate's own
+# anofox-regression/faer deps above stay at their pinned workspace versions)
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-fdars-core = { workspace = true, features = ["parallel", "linalg"] }
+fdars-core = { workspace = true, features = ["parallel"] }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 fdars-core = { workspace = true, features = ["js"] }

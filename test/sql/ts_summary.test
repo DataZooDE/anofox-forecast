@@ -226,10 +226,13 @@ SELECT 'constant1' AS id,
        100.0 AS value
 FROM generate_series(0, 9) AS t(i);
 
-# Test stats summary on comprehensive data
+# Test stats summary on comprehensive data. Class A fix (Phase 18, 18-01): ts_stats's
+# output has always been the flattened statistics columns directly (id, length,
+# n_nulls, mean, ...) -- there is no "stats" struct column to select; confirmed
+# directly via DESCRIBE.
 statement ok
 CREATE TABLE comprehensive_stats AS
-SELECT id, stats FROM ts_stats('comprehensive_series', id, date, value, '1 day');
+SELECT id FROM ts_stats('comprehensive_series', id, date, value, '1 day');
 
 query I
 SELECT COUNT(*) AS n_series FROM comprehensive_stats;
@@ -265,13 +268,15 @@ FROM stats_table;
 true
 
 # Verify all fields are returned by ts_data_quality_summary
+# (Phase 18, 18-02, WR-05/D-10: added n_unassessed as the final column)
 query I
 SELECT
     n_total IS NOT NULL AND
     n_good IS NOT NULL AND
     n_fair IS NOT NULL AND
     n_poor IS NOT NULL AND
-    avg_score IS NOT NULL
+    avg_score IS NOT NULL AND
+    n_unassessed IS NOT NULL
 FROM ts_data_quality_summary('test_series', id, date, value, 5);
 ----
 true

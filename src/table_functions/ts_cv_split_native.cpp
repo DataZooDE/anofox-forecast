@@ -424,6 +424,12 @@ static OperatorFinalizeResultType TsCvSplitNativeFinalize(
         // Step 3: For each group and fold, compute train/test membership by position
         for (auto &[group_key, sorted_indices] : gstate.group_sorted_indices) {
             idx_t n_points = sorted_indices.size();
+            // Tracks the previous fold's (unclipped) test_end position for embargo.
+            // bind_data.folds is populated in ascending train_end / fold_id order
+            // (see TsCvSplitNativeBind), so iterating in order and updating this after
+            // each fold mirrors ts_cv_split_folds_by's LAG(test_end) OVER (ORDER BY fold_id).
+            idx_t prev_test_end_pos = 0;
+            bool has_prev_fold = false;
 
             for (auto &fold : bind_data.folds) {
                 // Find train_end position: largest index where date <= fold.train_end
@@ -445,17 +451,27 @@ static OperatorFinalizeResultType TsCvSplitNativeFinalize(
                     }
                 }
 
-                // Handle embargo: adjust train_start if needed
-                // For position-based, embargo shifts train_start forward
-                if (bind_data.embargo > 0 && fold.fold_id > 1) {
-                    // Find previous fold's test_end position and apply embargo
-                    // This is simplified - proper implementation would track prev fold's test_end_pos
-                    // For now, keep expanding window behavior for simplicity
+                // Handle embargo: train_start must be at least `embargo` positions after
+                // the previous fold's (unclipped) test_end -- mirrors ts_cv_split_folds_by's
+                // `LAG(test_end) + embargo * interval` (src/macros/ts_macros.cpp:1436-1444).
+                // Fixed (Phase 18, 18-01, Rule 1/2): this block was a documented no-op
+                // stub ("keep expanding window behavior for simplicity"), surfaced by
+                // test/sql/ts_cv_split.test under the json gate.
+                if (bind_data.embargo > 0 && has_prev_fold) {
+                    idx_t min_train_start = prev_test_end_pos + static_cast<idx_t>(bind_data.embargo);
+                    if (train_start_pos < min_train_start) {
+                        train_start_pos = min_train_start;
+                    }
                 }
 
                 // Test positions: start after train_end + gap
                 idx_t test_start_pos = train_end_pos + 1 + fold.gap;
                 idx_t test_end_pos = test_start_pos + fold.horizon - 1;
+
+                // Track this fold's unclipped test_end position for the NEXT fold's
+                // embargo computation before clipping to available data.
+                prev_test_end_pos = test_end_pos;
+                has_prev_fold = true;
 
                 // Clip to available data
                 test_end_pos = std::min(test_end_pos, n_points - 1);

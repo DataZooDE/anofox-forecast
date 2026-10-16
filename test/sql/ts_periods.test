@@ -41,6 +41,43 @@ SELECT (_ts_detect_periods([1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.
 true
 
 #######################################
+# ts_detect_periods - 6-arg overload NULL expected_periods (DET-01, 18-06)
+#######################################
+
+# Regression pin: the 6-arg overload (values, method, max_period,
+# min_confidence, expected_periods, tolerance) must treat a NULL
+# expected_periods as "not provided" rather than short-circuiting the whole
+# row to NULL (FunctionNullHandling::SPECIAL_HANDLING, DET-01 gap closure).
+query I
+SELECT (_ts_detect_periods(
+    [1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0],
+    'fft', 0, -1.0, NULL::DOUBLE[], -1.0
+)).primary_period IS NOT NULL;
+----
+true
+
+# Same call with an explicit non-NULL empty list returns the identical
+# result -- proves the fix changed null-handling, not behavior.
+query I
+SELECT (_ts_detect_periods(
+    [1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0],
+    'fft', 0, -1.0, NULL::DOUBLE[], -1.0
+)).primary_period
+=
+(_ts_detect_periods(
+    [1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0],
+    'fft', 0, -1.0, []::DOUBLE[], -1.0
+)).primary_period;
+----
+true
+
+# A NULL series still yields a NULL row even on the 6-arg overload.
+query I
+SELECT _ts_detect_periods(NULL::DOUBLE[], 'fft', 0, -1.0, NULL::DOUBLE[], -1.0) IS NULL;
+----
+true
+
+#######################################
 # ts_estimate_period_fft - Tests
 #######################################
 

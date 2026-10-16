@@ -4,6 +4,8 @@
 
 This folder contains runnable SQL examples demonstrating time series feature extraction with the anofox-forecast extension.
 
+All 117 features match tsfresh 0.21.2 (or a direct numpy/scipy reference for the 9 features with no tsfresh counterpart), verified against a 9-series fixture suite, or carry a documented, intentional deviation — see [`docs/api/21-feature-reference.md`](../../docs/api/21-feature-reference.md).
+
 ## Function
 
 | Function | Description |
@@ -172,7 +174,7 @@ FROM feature_data;
 
 2. **Select features for production** - Extract only needed features to reduce computation.
 
-3. **Numeric stability** - Some features (entropy) may return NULL for constant series.
+3. **Numeric stability** - Entropy features are well-defined (not NaN) for constant and all-zero series (Phase 14); some other features (e.g. `variation_coefficient`) are NaN when the mean is exactly zero.
 
 4. **Series length** - Most features require at least 10 data points.
 
@@ -184,9 +186,9 @@ FROM feature_data;
 
 ### Q: Why is a feature NULL?
 
-**A:** The series may be too short or constant. Check:
+**A:** The series may be too short. Check:
 - Series length (need 10+ points for most features)
-- Variance (constant series cause issues with entropy)
+- Zero variance (e.g. `variation_coefficient` is NaN when the mean is exactly zero)
 
 ### Q: How do I get only specific features?
 

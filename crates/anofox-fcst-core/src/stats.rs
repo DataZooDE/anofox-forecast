@@ -2,8 +2,12 @@
 //!
 //! Provides ts_stats functionality that computes 24 metrics per series.
 
+use crate::calendar::CalendarStep;
+use crate::decomposition::mstl_fit;
 use crate::error::Result;
-use chrono::{Datelike, NaiveDateTime};
+use crate::gaps::{gap_counts, resolve_gap_step};
+use crate::missing::trim_edges_reject_interior;
+use crate::seasonality::detect_seasonality;
 
 /// Frequency type for calendar vs fixed frequencies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -62,13 +66,20 @@ pub struct TsStats {
     pub range: f64,
     /// Sum of all values
     pub sum: f64,
-    /// Skewness (Fisher's G1 - bias-corrected sample skewness)
+    /// Skewness: Fisher's bias-corrected G1, equal to `scipy.stats.skew(x, bias=False)`.
+    /// Computed from the population 2nd/3rd central moments (both divided by n, not n-1),
+    /// then bias-corrected: `g1 = m3/m2^1.5`, `G1 = g1 * sqrt(n(n-1)) / (n-2)` (n > 2).
     pub skewness: f64,
-    /// Kurtosis (Fisher's G2 - bias-corrected excess kurtosis)
+    /// Excess kurtosis: Fisher's bias-corrected G2, equal to
+    /// `scipy.stats.kurtosis(x, fisher=True, bias=False)`. Computed from the population
+    /// 2nd/4th central moments: `g2 = m4/m2^2 - 3`, `G2 = ((n+1)*g2 + 6)*(n-1) / ((n-2)(n-3))`
+    /// (n > 3).
     pub kurtosis: f64,
     /// Tail index (Hill estimator, α > 0 indicates heavy tail)
     pub tail_index: f64,
-    /// Bimodality coefficient (BC > 0.555 suggests bimodality)
+    /// Bimodality coefficient, SAS small-sample formula from the G1/G2 above:
+    /// `BC = (G1^2 + 1) / (G2 + 3*(n-1)^2 / ((n-2)(n-3)))` (n > 3). `BC > 0.555` (the
+    /// uniform-distribution value) suggests bimodality or multimodality.
     pub bimodality_coef: f64,
     /// Trimmed mean (10% trimmed from each tail)
     pub trimmed_mean: f64,
@@ -82,28 +93,99 @@ pub struct TsStats {
     pub iqr: f64,
     /// Autocorrelation at lag 1
     pub autocorr_lag1: f64,
-    /// Trend strength (0-1)
-    pub trend_strength: f64,
-    /// Seasonality strength (0-1)
-    pub seasonality_strength: f64,
-    /// Approximate entropy
-    pub entropy: f64,
+    /// Trend strength (D-02, STAT-02): `F_T = max(0, 1 - Var(R)/Var(T+R))`
+    /// from an R-faithful STL decomposition (`stl::stl` for a single usable
+    /// period, the `forecast::mstl` iteration for several, `supsmu::supsmu`
+    /// trend when no period is usable). `None` when the series is
+    /// interior-missing (entropy/strength share the trim rule) or all
+    /// values are missing.
+    pub trend_strength: Option<f64>,
+    /// Seasonality strength (D-02, STAT-02): `F_S = max(0, 1 - Var(R)/Var(S+R))`,
+    /// the maximum over every usable period when several are resolved.
+    /// `None` when no period is usable (none detected, `seasonal_period =
+    /// 1`, or `n <= 2*period`), when the per-period variance ratio is `0/0`
+    /// (e.g. a constant series), or when the series is interior-missing.
+    pub seasonality_strength: Option<f64>,
+    /// Pincus (1991) approximate entropy, m=2, r=0.2*sample std dev, Chebyshev distance,
+    /// self-match included (D-03). `None` when fewer than 3 present values remain after
+    /// trimming leading/trailing missing values, or when an interior value is missing
+    /// (NaN counts as missing). A constant series gives `Some(0.0)`.
+    pub entropy: Option<f64>,
     /// Stability measure
     pub stability: f64,
     /// Expected number of observations based on date range and frequency (None if no dates provided)
     pub expected_length: Option<usize>,
-    /// Number of gaps (missing time periods) in the series (None if no dates provided)
+    /// Number of missing periods (expected timestamps absent under the declared or
+    /// detected frequency) (D-04). `None` if no dates provided. See also
+    /// [`TsStats::n_gap_runs`] for the count of gap intervals (the pre-v2026.10.16 meaning).
     pub n_gaps: Option<usize>,
+    /// Number of gap runs/intervals (consecutive-timestamp transitions whose step count
+    /// is `>= 2`) — the pre-v2026.10.16 meaning of `n_gaps` (D-04). `None` if no dates
+    /// provided.
+    pub n_gap_runs: Option<usize>,
+}
+
+/// Fisher's bias-corrected skewness G1, equal to `scipy.stats.skew(x, bias=False)`
+/// (D-05, Phase 13/14): population central moments `m2`/`m3` (divided by `n`, not
+/// `n-1`), then `g1 = m3/m2^1.5`, `G1 = g1 * sqrt(n(n-1)) / (n-2)`. `NaN` for
+/// `n < 3` or zero variance (`m2 <= EPSILON`) -- shared by [`compute_ts_stats`]
+/// and `anofox_fcst_core::features::extract_features` so both report an
+/// identical value from one implementation.
+pub(crate) fn sample_skewness_g1(values: &[f64]) -> f64 {
+    let n_valid = values.len();
+    if n_valid == 0 {
+        return f64::NAN;
+    }
+    let n = n_valid as f64;
+    let mean = values.iter().sum::<f64>() / n;
+    let m2 = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n;
+
+    if n_valid > 2 && m2 > f64::EPSILON {
+        let m3 = values.iter().map(|v| (v - mean).powi(3)).sum::<f64>() / n;
+        let g1 = m3 / m2.powf(1.5);
+        g1 * (n * (n - 1.0)).sqrt() / (n - 2.0)
+    } else {
+        f64::NAN
+    }
+}
+
+/// Fisher's bias-corrected excess kurtosis G2, equal to
+/// `scipy.stats.kurtosis(x, fisher=True, bias=False)` (D-05, Phase 13/14):
+/// population central moments `m2`/`m4` (divided by `n`), then
+/// `g2 = m4/m2^2 - 3`, `G2 = ((n+1)*g2 + 6)*(n-1) / ((n-2)(n-3))`. `NaN` for
+/// `n < 4` or zero variance (`m2 <= EPSILON`) -- shared by
+/// [`compute_ts_stats`] and `anofox_fcst_core::features::extract_features`.
+pub(crate) fn sample_excess_kurtosis_g2(values: &[f64]) -> f64 {
+    let n_valid = values.len();
+    if n_valid == 0 {
+        return f64::NAN;
+    }
+    let n = n_valid as f64;
+    let mean = values.iter().sum::<f64>() / n;
+    let m2 = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n;
+
+    if n_valid > 3 && m2 > f64::EPSILON {
+        let m4 = values.iter().map(|v| (v - mean).powi(4)).sum::<f64>() / n;
+        let g2 = m4 / m2.powi(2) - 3.0;
+        ((n + 1.0) * g2 + 6.0) * (n - 1.0) / ((n - 2.0) * (n - 3.0))
+    } else {
+        f64::NAN
+    }
 }
 
 /// Compute time series statistics for a series with potential NULL values.
 ///
 /// # Arguments
 /// * `series` - A slice of optional f64 values (None represents NULL)
+/// * `seasonal_period` - Period resolution for `trend_strength` /
+///   `seasonality_strength` (D-02): `0` auto-detects via
+///   [`crate::seasonality::detect_seasonality`] (no usable period if it
+///   errors or returns empty); `1` means "non-seasonal" (no period at all);
+///   `>= 2` uses that period explicitly.
 ///
 /// # Returns
 /// * `Result<TsStats>` - Statistics for the series
-pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
+pub fn compute_ts_stats(series: &[Option<f64>], seasonal_period: usize) -> Result<TsStats> {
     let length = series.len();
 
     if length == 0 {
@@ -145,7 +227,10 @@ pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
         unique_bits.insert(v.to_bits());
     }
     let n_unique_values = unique_bits.len();
-    let is_constant = n_unique_values == 1;
+    // Scale-relative constant check (D-13, G25) -- shared with
+    // filter::is_constant and quality::compute_data_quality.
+    // `n_unique_values` itself stays an EXACT bit-identity count.
+    let is_constant = crate::filter::is_constant_slice(&values);
 
     // Count leading zeros (from original series, including NULLs as breaks)
     let n_zeros_start = count_leading_zeros(series);
@@ -187,38 +272,24 @@ pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
     let q3 = percentile(&sorted, 0.75);
     let iqr = q3 - q1;
 
-    // Skewness (Fisher's G1 - bias-corrected sample skewness)
-    // G1 = sqrt(n(n-1)) / (n-2) * m3 / s^3
-    let skewness = if n_valid > 2 && std_dev > f64::EPSILON {
-        let n = n_valid as f64;
-        let m3 = values.iter().map(|v| (v - mean).powi(3)).sum::<f64>() / n;
-        let g1 = m3 / std_dev.powi(3);
-        // Apply bias correction factor
-        g1 * (n * (n - 1.0)).sqrt() / (n - 2.0)
-    } else {
-        f64::NAN
-    };
-
-    // Kurtosis (Fisher's G2 - bias-corrected excess kurtosis)
-    // G2 = (n-1) / ((n-2)(n-3)) * ((n+1) * g2 + 6)
-    let kurtosis = if n_valid > 3 && std_dev > f64::EPSILON {
-        let n = n_valid as f64;
-        let m4 = values.iter().map(|v| (v - mean).powi(4)).sum::<f64>() / n;
-        let g2 = m4 / std_dev.powi(4) - 3.0; // Population excess kurtosis
-                                             // Apply bias correction factor
-        (n - 1.0) / ((n - 2.0) * (n - 3.0)) * ((n + 1.0) * g2 + 6.0)
-    } else {
-        f64::NAN
-    };
+    // Moments (D-01, STAT-01; D-05 Phase 14): population central moments and the
+    // scipy bias-corrected G1/G2 factors now live in the shared
+    // `sample_skewness_g1` / `sample_excess_kurtosis_g2` helpers below, used by
+    // both ts_stats and ts_features (D-05, FEAT-02). Bit-identical to the
+    // previous inline computation.
+    let n = n_valid as f64;
+    let skewness = sample_skewness_g1(&values);
+    let kurtosis = sample_excess_kurtosis_g2(&values);
 
     // Tail index (Hill estimator on absolute values)
     let tail_index = compute_hill_estimator(&values);
 
-    // Bimodality coefficient: BC = (skewness^2 + 1) / (kurtosis + 3 * (n-1)^2 / ((n-2)(n-3)))
-    // Simplified: BC = (skewness^2 + 1) / (kurtosis_excess + 3)
+    // Bimodality coefficient: SAS small-sample formula using the G1/G2 above.
+    // BC = (G1^2 + 1) / (G2 + 3*(n-1)^2 / ((n-2)(n-3)))
     // BC > 0.555 suggests bimodality (threshold for uniform distribution)
     let bimodality_coef = if n_valid > 3 && kurtosis.is_finite() && skewness.is_finite() {
-        (skewness.powi(2) + 1.0) / (kurtosis + 3.0)
+        let small_sample_term = 3.0 * (n - 1.0).powi(2) / ((n - 2.0) * (n - 3.0));
+        (skewness.powi(2) + 1.0) / (kurtosis + small_sample_term)
     } else {
         f64::NAN
     };
@@ -229,11 +300,40 @@ pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
     // Autocorrelation at lag 1
     let autocorr_lag1 = compute_autocorrelation(&values, 1);
 
-    // Trend and seasonality strength (simplified)
-    let (trend_strength, seasonality_strength) = compute_strength_metrics(&values);
+    // Trend and seasonality strength (D-02, STAT-02): STL-based F_T/F_S.
+    // `None`/`None` when the series is interior-missing (same trim rule as
+    // entropy) or entirely missing; otherwise resolved via `seasonal_period`
+    // and delegated to `stl_strengths`.
+    let (trend_strength, seasonality_strength) = match trim_edges_reject_interior(series) {
+        Ok(Some(range)) => {
+            let trimmed: Vec<f64> = series[range]
+                .iter()
+                .map(|v| v.expect("trim_edges_reject_interior guarantees Some in range"))
+                .collect();
+            let periods: Vec<usize> = match seasonal_period {
+                0 => detect_seasonality(&trimmed, None)
+                    .ok()
+                    .map(|p| {
+                        p.into_iter()
+                            .filter(|&x| x >= 2)
+                            .map(|x| x as usize)
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                1 => vec![],
+                p => vec![p],
+            };
+            match stl_strengths(&trimmed, &periods) {
+                Ok(s) => (s.trend_strength, s.seasonality_strength),
+                Err(_) => (None, None),
+            }
+        }
+        _ => (None, None),
+    };
 
-    // Entropy (approximate)
-    let entropy = compute_approximate_entropy(&values);
+    // Entropy (Pincus approximate entropy, D-03) — computed on the original Option
+    // series (NaN counts as missing), trimming leading/trailing missing first.
+    let entropy = compute_entropy_pincus(series);
 
     // Stability (inverse of coefficient of variation of rolling means)
     let stability = compute_stability(&values);
@@ -275,25 +375,8 @@ pub fn compute_ts_stats(series: &[Option<f64>]) -> Result<TsStats> {
         stability,
         expected_length: None,
         n_gaps: None,
+        n_gap_runs: None,
     })
-}
-
-/// Compute time series statistics with date information for gap detection.
-///
-/// # Arguments
-/// * `series` - A slice of optional f64 values (None represents NULL)
-/// * `dates` - A slice of timestamps in microseconds (must be same length as series)
-/// * `frequency_micros` - Expected frequency between observations in microseconds
-///
-/// # Returns
-/// * `Result<TsStats>` - Statistics for the series including expected_length and n_gaps
-pub fn compute_ts_stats_with_dates(
-    series: &[Option<f64>],
-    dates: &[i64],
-    frequency_micros: i64,
-) -> Result<TsStats> {
-    // Delegate to the new function with Fixed frequency type for backward compatibility
-    compute_ts_stats_with_dates_and_type(series, dates, frequency_micros, FrequencyType::Fixed)
 }
 
 /// Compute time series statistics with date information and frequency type for gap detection.
@@ -306,6 +389,10 @@ pub fn compute_ts_stats_with_dates(
 /// * `dates` - A slice of timestamps in microseconds (must be same length as series)
 /// * `frequency_micros` - Expected frequency between observations in microseconds (used for Fixed type)
 /// * `frequency_type` - The type of frequency (Fixed, Monthly, Quarterly, Yearly)
+/// * `seasonal_period` - See [`compute_ts_stats`]'s `seasonal_period` argument (D-02).
+/// * `period_count` - User-declared calendar multiplier for Monthly/Quarterly/Yearly
+///   frequencies (e.g. `2` for `'2mo'`); see [`resolve_gap_step`]'s doc comment
+///   (CR-01 fix, 13-03 deferred item). Ignored for `Fixed`.
 ///
 /// # Returns
 /// * `Result<TsStats>` - Statistics for the series including expected_length and n_gaps
@@ -314,165 +401,38 @@ pub fn compute_ts_stats_with_dates_and_type(
     dates: &[i64],
     frequency_micros: i64,
     frequency_type: FrequencyType,
+    seasonal_period: usize,
+    period_count: u32,
 ) -> Result<TsStats> {
     // First compute base stats
-    let mut stats = compute_ts_stats(series)?;
+    let mut stats = compute_ts_stats(series, seasonal_period)?;
 
-    // Then compute date-based metrics if we have valid dates
+    // Then compute date-based metrics if we have valid dates (D-04, STAT-03): n_gaps
+    // becomes the number of missing periods, n_gap_runs keeps the pre-v2026.10.16 meaning
+    // (number of gap intervals), via the shared gaps::gap_counts helper.
     if !dates.is_empty() {
-        // Sort dates to handle potential out-of-order data
-        let mut sorted_dates = dates.to_vec();
-        sorted_dates.sort();
+        let mut distinct_dates = dates.to_vec();
+        distinct_dates.sort_unstable();
+        distinct_dates.dedup();
 
-        // Compute expected length and gaps based on frequency type
-        if sorted_dates.len() >= 2 {
-            let first = sorted_dates[0];
-            let last = sorted_dates[sorted_dates.len() - 1];
-
-            match frequency_type {
-                FrequencyType::Monthly => {
-                    stats.expected_length = Some(compute_expected_months(first, last));
-                    stats.n_gaps = Some(count_monthly_gaps(&sorted_dates));
-                }
-                FrequencyType::Quarterly => {
-                    stats.expected_length = Some(compute_expected_quarters(first, last));
-                    stats.n_gaps = Some(count_quarterly_gaps(&sorted_dates));
-                }
-                FrequencyType::Yearly => {
-                    stats.expected_length = Some(compute_expected_years(first, last));
-                    stats.n_gaps = Some(count_yearly_gaps(&sorted_dates));
-                }
-                FrequencyType::Fixed => {
-                    if frequency_micros > 0 {
-                        let duration = last - first;
-                        let expected = ((duration / frequency_micros) + 1) as usize;
-                        stats.expected_length = Some(expected);
-                        stats.n_gaps =
-                            Some(count_gaps_with_frequency(&sorted_dates, frequency_micros));
-                    }
-                }
-            }
-        } else {
-            stats.expected_length = Some(sorted_dates.len());
-            stats.n_gaps = Some(0);
+        if distinct_dates.len() < 2 {
+            // A single distinct date (or none) needs no step: gap_counts short-circuits
+            // before the step is ever consulted. The placeholder step is unused.
+            let counts = gap_counts(dates, CalendarStep::Fixed(1))?;
+            stats.expected_length = Some(counts.expected_length);
+            stats.n_gaps = Some(counts.n_missing_periods);
+            stats.n_gap_runs = Some(counts.n_gap_runs);
+        } else if let Some(step) =
+            resolve_gap_step(dates, frequency_micros, frequency_type, period_count)?
+        {
+            let counts = gap_counts(dates, step)?;
+            stats.expected_length = Some(counts.expected_length);
+            stats.n_gaps = Some(counts.n_missing_periods);
+            stats.n_gap_runs = Some(counts.n_gap_runs);
         }
     }
 
     Ok(stats)
-}
-
-/// Convert microseconds since epoch to NaiveDateTime.
-fn micros_to_datetime(micros: i64) -> NaiveDateTime {
-    let secs = micros / 1_000_000;
-    let nsecs = ((micros % 1_000_000) * 1000) as u32;
-    chrono::DateTime::from_timestamp(secs, nsecs)
-        .map(|dt| dt.naive_utc())
-        .unwrap_or_default()
-}
-
-/// Compute expected number of monthly observations between two timestamps.
-fn compute_expected_months(first_micros: i64, last_micros: i64) -> usize {
-    let first = micros_to_datetime(first_micros);
-    let last = micros_to_datetime(last_micros);
-
-    let first_months = first.year() * 12 + first.month() as i32;
-    let last_months = last.year() * 12 + last.month() as i32;
-
-    ((last_months - first_months) + 1) as usize
-}
-
-/// Compute expected number of quarterly observations between two timestamps.
-fn compute_expected_quarters(first_micros: i64, last_micros: i64) -> usize {
-    let first = micros_to_datetime(first_micros);
-    let last = micros_to_datetime(last_micros);
-
-    let first_quarters = first.year() * 4 + ((first.month() - 1) / 3) as i32;
-    let last_quarters = last.year() * 4 + ((last.month() - 1) / 3) as i32;
-
-    ((last_quarters - first_quarters) + 1) as usize
-}
-
-/// Compute expected number of yearly observations between two timestamps.
-fn compute_expected_years(first_micros: i64, last_micros: i64) -> usize {
-    let first = micros_to_datetime(first_micros);
-    let last = micros_to_datetime(last_micros);
-
-    ((last.year() - first.year()) + 1) as usize
-}
-
-/// Count gaps in monthly data.
-/// A gap is when consecutive observations span more than 1 month.
-fn count_monthly_gaps(sorted_dates: &[i64]) -> usize {
-    if sorted_dates.len() < 2 {
-        return 0;
-    }
-
-    sorted_dates
-        .windows(2)
-        .filter(|w| {
-            let d1 = micros_to_datetime(w[0]);
-            let d2 = micros_to_datetime(w[1]);
-            let months1 = d1.year() * 12 + d1.month() as i32;
-            let months2 = d2.year() * 12 + d2.month() as i32;
-            // Gap if more than 1 month difference
-            (months2 - months1) > 1
-        })
-        .count()
-}
-
-/// Count gaps in quarterly data.
-/// A gap is when consecutive observations span more than 1 quarter.
-fn count_quarterly_gaps(sorted_dates: &[i64]) -> usize {
-    if sorted_dates.len() < 2 {
-        return 0;
-    }
-
-    sorted_dates
-        .windows(2)
-        .filter(|w| {
-            let d1 = micros_to_datetime(w[0]);
-            let d2 = micros_to_datetime(w[1]);
-            let q1 = d1.year() * 4 + ((d1.month() - 1) / 3) as i32;
-            let q2 = d2.year() * 4 + ((d2.month() - 1) / 3) as i32;
-            // Gap if more than 1 quarter difference
-            (q2 - q1) > 1
-        })
-        .count()
-}
-
-/// Count gaps in yearly data.
-/// A gap is when consecutive observations span more than 1 year.
-fn count_yearly_gaps(sorted_dates: &[i64]) -> usize {
-    if sorted_dates.len() < 2 {
-        return 0;
-    }
-
-    sorted_dates
-        .windows(2)
-        .filter(|w| {
-            let d1 = micros_to_datetime(w[0]);
-            let d2 = micros_to_datetime(w[1]);
-            // Gap if more than 1 year difference
-            (d2.year() - d1.year()) > 1
-        })
-        .count()
-}
-
-/// Count gaps in a date series given an explicit frequency.
-///
-/// A gap is detected when the difference between consecutive dates
-/// is significantly larger than the expected frequency (1.5x tolerance).
-fn count_gaps_with_frequency(sorted_dates: &[i64], frequency_micros: i64) -> usize {
-    if sorted_dates.len() < 2 || frequency_micros <= 0 {
-        return 0;
-    }
-
-    let threshold = (frequency_micros as f64 * 1.5) as i64;
-
-    sorted_dates
-        .windows(2)
-        .filter(|w| (w[1] - w[0]) > threshold)
-        .count()
 }
 
 /// Compute percentile using linear interpolation.
@@ -523,84 +483,223 @@ fn compute_autocorrelation(values: &[f64], lag: usize) -> f64 {
     }
 }
 
-/// Compute trend and seasonality strength (simplified version).
-fn compute_strength_metrics(values: &[f64]) -> (f64, f64) {
-    if values.len() < 4 {
-        return (0.0, 0.0);
-    }
-
-    // Simple trend strength: based on linear regression R-squared
-    let n = values.len() as f64;
-    let x_mean = (n - 1.0) / 2.0;
-    let y_mean: f64 = values.iter().sum::<f64>() / n;
-
-    let mut ss_xy = 0.0;
-    let mut ss_xx = 0.0;
-    let mut ss_yy = 0.0;
-
-    for (i, &y) in values.iter().enumerate() {
-        let x = i as f64;
-        ss_xy += (x - x_mean) * (y - y_mean);
-        ss_xx += (x - x_mean).powi(2);
-        ss_yy += (y - y_mean).powi(2);
-    }
-
-    let trend_strength = if ss_xx.abs() > f64::EPSILON && ss_yy.abs() > f64::EPSILON {
-        (ss_xy.powi(2) / (ss_xx * ss_yy)).sqrt().clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-
-    // Simple seasonality strength: based on autocorrelation at common lags
-    let acf_2 = compute_autocorrelation(values, 2).abs();
-    let acf_4 = compute_autocorrelation(values, 4).abs();
-    let acf_7 = compute_autocorrelation(values, 7).abs();
-    let acf_12 = compute_autocorrelation(values, 12).abs();
-
-    let seasonality_strength = [acf_2, acf_4, acf_7, acf_12]
-        .iter()
-        .filter(|v| v.is_finite())
-        .cloned()
-        .fold(0.0_f64, f64::max)
-        .clamp(0.0, 1.0);
-
-    (trend_strength, seasonality_strength)
+/// Trend/seasonality strength result (D-02, STAT-02); see
+/// [`TsStats::trend_strength`] / [`TsStats::seasonality_strength`] for the
+/// full contract.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct StlStrengths {
+    pub trend_strength: Option<f64>,
+    pub seasonality_strength: Option<f64>,
 }
 
-/// Compute approximate entropy (simplified version).
-fn compute_approximate_entropy(values: &[f64]) -> f64 {
-    if values.len() < 10 {
+/// Sample variance (`ddof = 1`), matching R's `var()`. `NaN` for `n < 2`
+/// (never reached by the callers below, which always pass `n == values.len()
+/// >= 1` complete series, but kept total for safety).
+fn sample_var(x: &[f64]) -> f64 {
+    let n = x.len();
+    if n < 2 {
         return f64::NAN;
     }
+    let mean = x.iter().sum::<f64>() / n as f64;
+    x.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (n - 1) as f64
+}
 
-    // Use a histogram-based entropy approximation
-    let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
-    let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    let range = max - min;
+/// `tsfeatures::stl_features`'s trend-strength rule: `varx < eps -> 0`;
+/// `vardeseason/varx < 1e-10 -> 0`; else `max(0, min(1, 1 -
+/// vare/vardeseason))`. `deseason = trend + remainder` (the series with
+/// every seasonal component removed; an exact decomposition identity).
+fn trend_strength_rule(x: &[f64], deseason: &[f64], remainder: &[f64]) -> f64 {
+    let varx = sample_var(x);
+    if varx < f64::EPSILON {
+        return 0.0;
+    }
+    let vardeseason = sample_var(deseason);
+    if vardeseason / varx < 1e-10 {
+        return 0.0;
+    }
+    let vare = sample_var(remainder);
+    (1.0 - vare / vardeseason).clamp(0.0, 1.0)
+}
 
-    if range.abs() < f64::EPSILON {
-        return 0.0; // Constant series has zero entropy
+/// `tsfeatures::stl_features`'s per-period seasonal-strength rule: `max(0,
+/// min(1, 1 - vare/var(remainder + seasonal_i)))`. `None` for R's `NaN`
+/// (both variances exactly zero, e.g. a constant series or constant
+/// seasonal component).
+fn seasonal_strength_rule(remainder: &[f64], seasonal: &[f64]) -> Option<f64> {
+    let n = remainder.len();
+    let remainder_plus: Vec<f64> = (0..n).map(|i| remainder[i] + seasonal[i]).collect();
+    let var_rp = sample_var(&remainder_plus);
+    let vare = sample_var(remainder);
+    // R's `vare/var_rp` is exactly `NaN` only when both are exactly 0, but a
+    // genuinely constant (or near-constant) input series decomposes into
+    // trend/seasonal/remainder components that carry pure floating-point
+    // rounding noise at the ~1e-30 scale (confirmed against R's own
+    // `stats::stl`/`tsfeatures::stl_features` on `rep(5, 48)`, which itself
+    // divides two ~1e-30 noise variances and happens to land on 0.056 — not
+    // reproducible bit-for-bit across STL ports or platforms). Treat both
+    // variances as "exactly zero" below `f64::EPSILON` so a degenerate input
+    // deterministically reports `None` rather than chasing non-portable
+    // rounding noise (D-02).
+    if var_rp.abs() < f64::EPSILON && vare.abs() < f64::EPSILON {
+        return None;
+    }
+    Some((1.0 - vare / var_rp).clamp(0.0, 1.0))
+}
+
+/// STL-based trend/seasonal strength (D-02, STAT-02), matching
+/// `tsfeatures::stl_features` (built on `forecast::mstl` -> `stats::stl`):
+/// `F_T = max(0, 1 - Var(R)/Var(T+R))`, `F_S = max(0, 1 - Var(R)/Var(S+R))`.
+///
+/// `periods` is filtered to `p >= 2` with `n > 2*p`, sorted ascending, and
+/// de-duplicated. No usable period left -> the trend comes from
+/// [`crate::supsmu::supsmu`] (R's `stats::supsmu(seq_len(n), x)`, the same
+/// fallback `forecast::mstl` uses) and `seasonality_strength` is `None`.
+/// Exactly one usable period -> a single [`crate::stl::stl`] call with
+/// `s.window = 11` (R's `stats::stl` default). Two or more -> the
+/// `forecast::mstl` iteration (2 passes, `s.window = 7 + 4*(position+1)` by
+/// ascending period position, trend from the last `stl` call); seasonality
+/// is the maximum `F_S_i` over every period (not exposed as separate
+/// columns — "strongest seasonal component").
+pub fn stl_strengths(values: &[f64], periods: &[usize]) -> Result<StlStrengths> {
+    let n = values.len();
+
+    // D-09 (Phase 15 plan 15-04): the shared `forecast::mstl` fit --
+    // `mstl_fit` applies the identical usable-period filter (ascending,
+    // de-duplicated, `p >= 2 && n > 2*p`), non-seasonal `supsmu` fallback,
+    // and 2-pass iteration this function used to implement inline.
+    let fit = mstl_fit(values, periods)?;
+
+    if fit.periods.is_empty() {
+        // deseason = trend + remainder = values exactly (no seasonal
+        // component to remove); pass `values` directly rather than
+        // re-deriving it.
+        let trend_strength = trend_strength_rule(values, values, &fit.remainder);
+        return Ok(StlStrengths {
+            trend_strength: Some(trend_strength),
+            seasonality_strength: None,
+        });
     }
 
-    let n_bins = 10;
-    let mut bins = vec![0usize; n_bins];
+    let deseason_total: Vec<f64> = (0..n).map(|i| fit.trend[i] + fit.remainder[i]).collect();
+    let trend_strength = trend_strength_rule(values, &deseason_total, &fit.remainder);
 
-    for &v in values {
-        let bin = (((v - min) / range) * (n_bins - 1) as f64).round() as usize;
-        let bin = bin.min(n_bins - 1);
-        bins[bin] += 1;
-    }
-
-    let n = values.len() as f64;
-    let mut entropy = 0.0;
-    for &count in &bins {
-        if count > 0 {
-            let p = count as f64 / n;
-            entropy -= p * p.ln();
+    let mut best_fs: Option<f64> = None;
+    for seasonal in &fit.seasonals {
+        if let Some(fs) = seasonal_strength_rule(&fit.remainder, seasonal) {
+            best_fs = Some(best_fs.map_or(fs, |b| b.max(fs)));
         }
     }
 
-    entropy
+    Ok(StlStrengths {
+        trend_strength: Some(trend_strength),
+        seasonality_strength: best_fs,
+    })
+}
+
+/// Compute Pincus (1991) approximate entropy for the original (possibly-missing)
+/// series (D-03): m=2, r=0.2*sample std dev of the trimmed values, Chebyshev
+/// distance, self-match included (matching R `pracma::approx_entropy(x, edim = 2, r =
+/// 0.2*sd(x), elag = 1)`).
+///
+/// Leading/trailing missing values (`None` or `Some(NaN)`) are trimmed first; an
+/// interior missing value, or fewer than 3 present values after trimming, gives
+/// `None`. A constant series gives `Some(0.0)`.
+fn compute_entropy_pincus(series: &[Option<f64>]) -> Option<f64> {
+    let range = match trim_edges_reject_interior(series) {
+        Ok(Some(r)) => r,
+        Ok(None) => return None,
+        Err(_) => return None, // interior missing value
+    };
+
+    let x: Vec<f64> = series[range]
+        .iter()
+        .map(|v| v.expect("trim_edges_reject_interior guarantees Some in range"))
+        .collect();
+
+    if x.len() < 3 {
+        return None;
+    }
+
+    Some(approximate_entropy(&x, 2))
+}
+
+/// Pincus approximate entropy: `ApEn = Phi(m) - Phi(m+1)`, `r = 0.2 * sample std dev`.
+///
+/// Uses a sorted-band search (T-13-01): template start indices are sorted by their
+/// first coordinate, so each template's match count is found by binary-searching the
+/// `[x_i - r, x_i + r]` window on that coordinate before checking the remaining `m-1`
+/// (or `m`) coordinates via Chebyshev distance — avoiding the naive all-pairs O(n^2)
+/// loop for long series while producing identical counts.
+fn approximate_entropy(x: &[f64], m: usize) -> f64 {
+    let n = x.len() as f64;
+    let mean = x.iter().sum::<f64>() / n;
+    let sample_var = x.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (n - 1.0);
+    let r = 0.2 * sample_var.sqrt();
+
+    phi(x, m, r) - phi(x, m + 1, r)
+}
+
+/// `Phi(m) = mean_i(ln(C_i / N_m))` where `C_i` counts templates `j` (self included)
+/// with Chebyshev distance `<= r` from template `i`, over the `N_m = n - m + 1`
+/// length-`m` templates starting at each index.
+fn phi(x: &[f64], m: usize, r: f64) -> f64 {
+    let n_m = x.len() - m + 1;
+    let counts = template_match_counts(x, m, r);
+
+    let mut sum_log = 0.0;
+    for &count in &counts {
+        let c_i = count as f64 / n_m as f64;
+        sum_log += c_i.ln();
+    }
+
+    sum_log / n_m as f64
+}
+
+/// Shared sorted-band template-match counter (Phase 14 Task 1, T-14-09):
+/// for each of the `n - m + 1` length-`m` templates starting at each index,
+/// counts the number of templates `j` (self included) within Chebyshev
+/// (max-abs) distance `<= r` of template `i`, returned in index order
+/// `0..n-m+1`.
+///
+/// Sorts template-start indices by their first coordinate with
+/// [`f64::total_cmp`] (not `partial_cmp().unwrap()`, T-14-10) so a NaN
+/// element can never panic the sort -- callers that need NaN-safety should
+/// still short-circuit on NaN input before calling, since a NaN's
+/// `total_cmp` position does not participate meaningfully in a Chebyshev
+/// distance comparison. Used by `ts_stats`'s Pincus approximate entropy
+/// ([`phi`], above) and `ts_features`'s `sample_entropy`/`approximate_entropy`
+/// (features.rs).
+pub(crate) fn template_match_counts(x: &[f64], m: usize, r: f64) -> Vec<usize> {
+    let n_m = x.len() - m + 1;
+
+    // Sort template-start indices by their first coordinate for the band search.
+    let mut order: Vec<usize> = (0..n_m).collect();
+    order.sort_by(|&a, &b| x[a].total_cmp(&x[b]));
+    let sorted_first: Vec<f64> = order.iter().map(|&i| x[i]).collect();
+
+    let mut counts = vec![0usize; n_m];
+    for i in 0..n_m {
+        let xi = x[i];
+        let lo = sorted_first.partition_point(|&v| v < xi - r);
+        let hi = sorted_first.partition_point(|&v| v <= xi + r);
+
+        let mut count = 0usize;
+        for &j in &order[lo..hi] {
+            let mut max_diff = 0.0f64;
+            for d in 0..m {
+                let diff = (x[i + d] - x[j + d]).abs();
+                if diff > max_diff {
+                    max_diff = diff;
+                }
+            }
+            if max_diff <= r {
+                count += 1;
+            }
+        }
+        counts[i] = count;
+    }
+
+    counts
 }
 
 /// Compute stability as inverse of coefficient of variation of rolling means.
@@ -800,7 +899,7 @@ mod tests {
     #[test]
     fn test_basic_stats() {
         let series: Vec<Option<f64>> = vec![Some(1.0), Some(2.0), Some(3.0), Some(4.0), Some(5.0)];
-        let stats = compute_ts_stats(&series).unwrap();
+        let stats = compute_ts_stats(&series, 0).unwrap();
 
         assert_eq!(stats.length, 5);
         assert_eq!(stats.n_nulls, 0);
@@ -814,7 +913,7 @@ mod tests {
     #[test]
     fn test_with_nulls() {
         let series: Vec<Option<f64>> = vec![Some(1.0), None, Some(3.0), None, Some(5.0)];
-        let stats = compute_ts_stats(&series).unwrap();
+        let stats = compute_ts_stats(&series, 0).unwrap();
 
         assert_eq!(stats.length, 5);
         assert_eq!(stats.n_nulls, 2);
@@ -824,7 +923,7 @@ mod tests {
     #[test]
     fn test_empty_series() {
         let series: Vec<Option<f64>> = vec![];
-        let stats = compute_ts_stats(&series).unwrap();
+        let stats = compute_ts_stats(&series, 0).unwrap();
         assert_eq!(stats.length, 0);
     }
 
@@ -832,7 +931,7 @@ mod tests {
     fn test_zeros_and_signs() {
         let series: Vec<Option<f64>> =
             vec![Some(-2.0), Some(-1.0), Some(0.0), Some(1.0), Some(2.0)];
-        let stats = compute_ts_stats(&series).unwrap();
+        let stats = compute_ts_stats(&series, 0).unwrap();
 
         assert_eq!(stats.n_zeros, 1);
         assert_eq!(stats.n_positive, 2);
@@ -842,7 +941,7 @@ mod tests {
     #[test]
     fn test_nan_values() {
         let series: Vec<Option<f64>> = vec![Some(1.0), Some(f64::NAN), Some(3.0), Some(f64::NAN)];
-        let stats = compute_ts_stats(&series).unwrap();
+        let stats = compute_ts_stats(&series, 0).unwrap();
 
         assert_eq!(stats.length, 4);
         assert_eq!(stats.n_nan, 2);
@@ -855,14 +954,31 @@ mod tests {
     fn test_unique_values_and_constant() {
         // Constant series
         let series: Vec<Option<f64>> = vec![Some(5.0), Some(5.0), Some(5.0)];
-        let stats = compute_ts_stats(&series).unwrap();
+        let stats = compute_ts_stats(&series, 0).unwrap();
         assert_eq!(stats.n_unique_values, 1);
         assert!(stats.is_constant);
 
         // Non-constant series
         let series: Vec<Option<f64>> = vec![Some(1.0), Some(2.0), Some(3.0), Some(1.0)];
-        let stats = compute_ts_stats(&series).unwrap();
+        let stats = compute_ts_stats(&series, 0).unwrap();
         assert_eq!(stats.n_unique_values, 3);
+        assert!(!stats.is_constant);
+    }
+
+    /// D-13, G25: is_constant is scale-relative (shared with
+    /// filter::is_constant_slice), but n_unique_values stays an EXACT
+    /// bit-identity count -- 2 distinct f64 bit patterns that are
+    /// scale-relatively "constant".
+    #[test]
+    fn test_is_constant_scale_relative_but_n_unique_exact() {
+        let series: Vec<Option<f64>> = vec![Some(1e12), Some(1e12 + 0.001)];
+        let stats = compute_ts_stats(&series, 0).unwrap();
+        assert_eq!(stats.n_unique_values, 2);
+        assert!(stats.is_constant);
+
+        let series: Vec<Option<f64>> = vec![Some(1.0), Some(1.0 + 1e-9)];
+        let stats = compute_ts_stats(&series, 0).unwrap();
+        assert_eq!(stats.n_unique_values, 2);
         assert!(!stats.is_constant);
     }
 
@@ -877,7 +993,7 @@ mod tests {
             Some(0.0),
             Some(0.0),
         ];
-        let stats = compute_ts_stats(&series).unwrap();
+        let stats = compute_ts_stats(&series, 0).unwrap();
 
         assert_eq!(stats.n_zeros_start, 2);
         assert_eq!(stats.n_zeros_end, 3);
@@ -887,7 +1003,7 @@ mod tests {
     fn test_leading_zeros_with_null() {
         // NULL breaks the leading zero count
         let series: Vec<Option<f64>> = vec![Some(0.0), None, Some(0.0), Some(1.0)];
-        let stats = compute_ts_stats(&series).unwrap();
+        let stats = compute_ts_stats(&series, 0).unwrap();
         assert_eq!(stats.n_zeros_start, 1);
     }
 
@@ -901,7 +1017,7 @@ mod tests {
             Some(3.0),
             Some(3.0),
         ];
-        let stats = compute_ts_stats(&series).unwrap();
+        let stats = compute_ts_stats(&series, 0).unwrap();
         assert_eq!(stats.plateau_size, 3); // Three 2.0s
     }
 
@@ -917,7 +1033,7 @@ mod tests {
             Some(3.0),
             Some(3.0),
         ];
-        let stats = compute_ts_stats(&series).unwrap();
+        let stats = compute_ts_stats(&series, 0).unwrap();
         assert_eq!(stats.plateau_size_nonzero, 4); // Four 5.0s
     }
 
@@ -925,12 +1041,12 @@ mod tests {
     fn test_skewness_kurtosis_bias_corrected() {
         // Symmetric distribution: skewness should be 0
         let series: Vec<Option<f64>> = vec![Some(1.0), Some(2.0), Some(3.0), Some(4.0), Some(5.0)];
-        let stats = compute_ts_stats(&series).unwrap();
+        let stats = compute_ts_stats(&series, 0).unwrap();
         assert_relative_eq!(stats.skewness, 0.0, epsilon = 1e-10);
 
         // Skewed distribution: [1, 1, 1, 1, 5] should have positive skewness
         let skewed: Vec<Option<f64>> = vec![Some(1.0), Some(1.0), Some(1.0), Some(1.0), Some(5.0)];
-        let stats_skewed = compute_ts_stats(&skewed).unwrap();
+        let stats_skewed = compute_ts_stats(&skewed, 0).unwrap();
         assert!(stats_skewed.skewness > 0.0, "Expected positive skewness");
 
         // Verify kurtosis is computed (uniform-like has negative excess kurtosis)

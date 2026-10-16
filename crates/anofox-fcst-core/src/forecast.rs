@@ -5,10 +5,14 @@ use crate::imputation::fill_nulls_interpolate;
 use crate::seasonality::detect_seasonality;
 
 // Model types from anofox-forecast crate
-use anofox_forecast::core::TimeSeries;
-use anofox_forecast::models::arima::{AutoARIMA, AutoARIMAConfig};
+use anofox_forecast::core::{CalendarAnnotations, TimeSeries};
+use anofox_forecast::models::arima::{AutoARIMA, AutoARIMAConfig, ARIMA, SARIMA};
+use anofox_forecast::models::baseline::{
+    Naive, SeasonalNaive as SeasonalNaiveModel,
+    SeasonalWindowAverage as SeasonalWindowAverageModel, SimpleMovingAverage,
+};
 use anofox_forecast::models::exponential::{
-    AutoETS, AutoETSConfig, ETSSpec, HoltLinearTrend, HoltWinters as HoltWintersModel, ModelPool,
+    AutoETS, AutoETSConfig, ETSSpec, HoltWinters as HoltWintersModel, ModelPool,
     SeasonalES as SeasonalESModel, SimpleExponentialSmoothing, ETS as ETSModel,
 };
 use anofox_forecast::models::garch::GARCH;
@@ -20,6 +24,7 @@ use anofox_forecast::models::tbats::{AutoTBATS, TBATS as TBATSModel};
 use anofox_forecast::models::theta::{AutoTheta, DynamicTheta, OptimizedTheta, Theta};
 use anofox_forecast::models::MFLES;
 use anofox_forecast::prelude::Forecaster;
+use std::collections::HashMap;
 
 /// Forecast result.
 #[derive(Debug, Clone)]
@@ -158,8 +163,9 @@ pub enum ModelType {
     /// AutoEnsemble: auto-fits AutoARIMA/AutoETS/AutoTheta, ranks by in-sample MSE,
     /// combines top-K members using the specified CombinationMethod.
     /// `ensemble_top_k` (default 3) and `ensemble_method` (default "mean") in
-    /// `ForecastOptions` configure the combination. Prediction intervals are NULL
-    /// in Phase 4 (point forecasts only; intervals deferred to Phase 6 EPI-01).
+    /// `ForecastOptions` configure the combination. Prediction intervals are a
+    /// passthrough of the crate `AutoEnsemble`'s own `predict_with_intervals`
+    /// (D-01); empty/NULL only when the crate itself returns no bounds (D-02).
     AutoEnsemble,
 }
 
@@ -391,6 +397,17 @@ pub struct ForecastOptions {
     /// Accepted: "" | "mean" | "median" | "weighted_mse" | "inverse_aic" | "stacking" |
     /// "horizon_adaptive" (and common aliases). Only consulted when model is AutoEnsemble.
     pub ensemble_method: Option<String>,
+    /// ARIMA non-seasonal order `[p, d, q]`. `None` = unset. Only consulted
+    /// when model is `ARIMA`; without it, `ARIMA` is a hard error (D-09) —
+    /// use `AutoARIMA` for automatic order selection. See
+    /// [`parse_order_triplet`] for the string encoding used at the FFI
+    /// boundary.
+    pub arima_order: Option<[usize; 3]>,
+    /// ARIMA seasonal order `[P, D, Q]`. `None` = unset (non-seasonal).
+    /// Only consulted when model is `ARIMA`; requires `seasonal_period > 1`
+    /// and a non-zero `arima_order` (D-08/D-09). The seasonal period itself
+    /// always comes from `seasonal_period`, never from auto-detection.
+    pub seasonal_order: Option<[usize; 3]>,
 }
 
 impl Default for ForecastOptions {
@@ -414,6 +431,8 @@ impl Default for ForecastOptions {
             kalman_model: None,
             ensemble_top_k: 0,
             ensemble_method: None,
+            arima_order: None,
+            seasonal_order: None,
         }
     }
 }
@@ -529,6 +548,10 @@ pub struct ForecastOptionsExog {
     /// AutoEnsemble: combination method string. None → "mean" (Phase 4 default).
     /// Only consulted when model is AutoEnsemble.
     pub ensemble_method: Option<String>,
+    /// ARIMA non-seasonal order `[p, d, q]`. See [`ForecastOptions::arima_order`].
+    pub arima_order: Option<[usize; 3]>,
+    /// ARIMA seasonal order `[P, D, Q]`. See [`ForecastOptions::seasonal_order`].
+    pub seasonal_order: Option<[usize; 3]>,
 }
 
 impl Default for ForecastOptionsExog {
@@ -553,6 +576,8 @@ impl Default for ForecastOptionsExog {
             kalman_model: None,
             ensemble_top_k: 0,
             ensemble_method: None,
+            arima_order: None,
+            seasonal_order: None,
         }
     }
 }
@@ -579,37 +604,73 @@ impl From<ForecastOptions> for ForecastOptionsExog {
             kalman_model: opts.kalman_model,
             ensemble_top_k: opts.ensemble_top_k,
             ensemble_method: opts.ensemble_method,
+            arima_order: opts.arima_order,
+            seasonal_order: opts.seasonal_order,
+        }
+    }
+}
+
+/// The reverse of [`From<ForecastOptions> for ForecastOptionsExog`] — drops
+/// `exog` only. Used by `forecast_with_exog`'s no-regressor/unsupported-model
+/// branch to delegate to [`forecast`] itself (FCST-05 "it runs forecast()
+/// itself") so every option (ets_spec, garch_p/q, kalman_model, window,
+/// seasonal_periods, model_pool, laplace options, ensemble options, arima
+/// orders, confidence level, include flags) is honoured exactly like the
+/// non-exog surface, instead of a second hand-maintained dispatch
+/// (`forecast_with_model`, deleted) that could silently drift out of sync.
+impl From<&ForecastOptionsExog> for ForecastOptions {
+    fn from(opts: &ForecastOptionsExog) -> Self {
+        Self {
+            model: opts.model,
+            ets_spec: opts.ets_spec.clone(),
+            horizon: opts.horizon,
+            confidence_level: opts.confidence_level,
+            seasonal_period: opts.seasonal_period,
+            auto_detect_seasonality: opts.auto_detect_seasonality,
+            include_fitted: opts.include_fitted,
+            include_residuals: opts.include_residuals,
+            window: opts.window,
+            seasonal_periods: opts.seasonal_periods.clone(),
+            model_pool: opts.model_pool.clone(),
+            laplace_variant: opts.laplace_variant,
+            laplace_seasonal_batch_init: opts.laplace_seasonal_batch_init,
+            garch_p: opts.garch_p,
+            garch_q: opts.garch_q,
+            kalman_model: opts.kalman_model.clone(),
+            ensemble_top_k: opts.ensemble_top_k,
+            ensemble_method: opts.ensemble_method.clone(),
+            arima_order: opts.arima_order,
+            seasonal_order: opts.seasonal_order,
         }
     }
 }
 
 /// Generate forecasts for a time series.
 pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<ForecastOutput> {
-    // Handle NULLs by interpolation
-    let clean_values: Vec<f64> = fill_nulls_interpolate(values);
-
-    if clean_values.is_empty() {
-        return Err(ForecastError::InsufficientData { needed: 1, got: 0 });
-    }
-
-    if clean_values.len() < 3 {
-        return Err(ForecastError::InsufficientData {
-            needed: 3,
-            got: clean_values.len(),
+    if !(options.confidence_level > 0.0 && options.confidence_level < 1.0) {
+        return Err(ForecastError::InvalidParameter {
+            param: "confidence_level".to_string(),
+            value: options.confidence_level.to_string(),
+            reason: "must be in the open interval (0, 1)".to_string(),
         });
     }
 
-    // Detect seasonality if needed
-    let period = if options.auto_detect_seasonality && options.seasonal_period == 0 {
-        detect_seasonality(&clean_values, None)
-            .ok()
-            .and_then(|p| p.first().cloned())
-            .unwrap_or(1) as usize
-    } else if options.seasonal_period > 0 {
-        options.seasonal_period
-    } else {
-        1
-    };
+    // Explicit input policy (D-11/D-12): NaN ≡ NULL, ±Inf rejected, all-NULL
+    // or <3-point series rejected, leading/trailing NULLs trimmed with
+    // trailing-NULL-aware forecast-step alignment handled by finalize_output.
+    let prep = prepare_series(values)?;
+
+    // Resolve the seasonal period to use (D-07): explicit > 0 wins; otherwise
+    // auto-detect when requested OR the model requires a period; a
+    // period-requiring model with nothing detected and no seasonal_periods
+    // list is a hard error naming the model — never a silent default.
+    let period = resolve_period(
+        &prep.values,
+        options.model,
+        options.seasonal_period,
+        options.auto_detect_seasonality,
+        !options.seasonal_periods.is_empty(),
+    )?;
 
     // Validate seasonal_period vs model compatibility
     // Only error when user explicitly set seasonal_period (auto_detect_seasonality == false)
@@ -621,7 +682,6 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
                 | ModelType::SESOptimized
                 | ModelType::Holt
                 | ModelType::RandomWalkDrift
-                | ModelType::ARIMA
                 | ModelType::CrostonClassic
                 | ModelType::CrostonOptimized
                 | ModelType::CrostonSBA
@@ -639,60 +699,101 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
         }
     }
 
+    // arima_order / seasonal_order (D-08/D-09) are only meaningful for ARIMA;
+    // ARIMA validates them itself (incl. seasonal_period interplay) inside
+    // forecast_arima — this just rejects them on every other model.
+    if options.model != ModelType::ARIMA
+        && (options.arima_order.is_some() || options.seasonal_order.is_some())
+    {
+        let param = if options.arima_order.is_some() {
+            "arima_order"
+        } else {
+            "seasonal_order"
+        };
+        return Err(ForecastError::InvalidParameter {
+            param: param.to_string(),
+            value: options.model.name().to_string(),
+            reason: "only valid when method='ARIMA'".to_string(),
+        });
+    }
+
     // Generate forecast based on model
     // Note: Auto* models (AutoARIMA, AutoETS, etc.) run their respective algorithms
     // with automatic parameter selection, not a generic model selection heuristic
-    let result = match options.model {
+    let level = options.confidence_level;
+    // Models are fit on prep.values and asked for horizon + trail_trim steps so
+    // finalize_output can drop the lead-in and realign step 1 to the period
+    // after the ORIGINAL last row (D-12 trailing-NULL alignment).
+    let extended_horizon = options.horizon + prep.trail_trim;
+    let mut result = match options.model {
         // Basic Models
-        ModelType::Naive => forecast_naive(&clean_values, options.horizon),
-        ModelType::SeasonalNaive => forecast_seasonal_naive(&clean_values, options.horizon, period),
+        ModelType::Naive => forecast_naive(&prep.values, extended_horizon, level),
+        ModelType::SeasonalNaive => {
+            forecast_seasonal_naive(&prep.values, extended_horizon, period, level)
+        }
         ModelType::SMA => {
             let w = if options.window > 0 {
                 options.window
             } else {
                 period.max(3)
             };
-            forecast_sma(&clean_values, options.horizon, w)
+            forecast_sma(&prep.values, extended_horizon, w, level)
         }
-        ModelType::RandomWalkDrift => forecast_drift(&clean_values, options.horizon),
+        ModelType::RandomWalkDrift => forecast_drift(&prep.values, extended_horizon, level),
         // Exponential Smoothing
-        ModelType::SES => forecast_ses_fixed(&clean_values, options.horizon),
-        ModelType::SESOptimized => forecast_ses_optimized(&clean_values, options.horizon),
-        ModelType::Holt => forecast_holt_lib(&clean_values, options.horizon),
-        ModelType::HoltWinters => forecast_holt_winters_lib(&clean_values, options.horizon, period),
-        ModelType::SeasonalES => forecast_seasonal_es_lib(&clean_values, options.horizon, period),
+        ModelType::SES => forecast_ses_fixed(&prep.values, extended_horizon, level),
+        ModelType::SESOptimized => forecast_ses_optimized(&prep.values, extended_horizon, level),
+        ModelType::Holt => forecast_holt_lib(&prep.values, extended_horizon, level),
+        ModelType::HoltWinters => {
+            forecast_holt_winters_lib(&prep.values, extended_horizon, period, level)
+        }
+        ModelType::SeasonalES => {
+            forecast_seasonal_es_lib(&prep.values, extended_horizon, period, level)
+        }
         ModelType::SeasonalESOptimized => {
-            forecast_seasonal_es_optimized(&clean_values, options.horizon, period)
+            forecast_seasonal_es_optimized(&prep.values, extended_horizon, period, level)
         }
         ModelType::SeasonalWindowAverage => {
-            forecast_seasonal_window_average(&clean_values, options.horizon, period)
+            forecast_seasonal_window_average(&prep.values, extended_horizon, period, level)
         }
         ModelType::ETS => forecast_ets(
-            &clean_values,
-            options.horizon,
+            &prep.values,
+            extended_horizon,
             period,
             options.ets_spec.as_deref(),
+            level,
         ),
         ModelType::AutoETS => forecast_auto_ets(
-            &clean_values,
-            options.horizon,
+            &prep.values,
+            extended_horizon,
             period,
             options.model_pool.as_deref(),
+            level,
         ),
         // Theta Methods
-        ModelType::Theta => forecast_theta_stm(&clean_values, options.horizon, period),
+        ModelType::Theta => forecast_theta_stm(&prep.values, extended_horizon, period, level),
         ModelType::OptimizedTheta => {
-            forecast_optimized_theta(&clean_values, options.horizon, period)
+            forecast_optimized_theta(&prep.values, extended_horizon, period, level)
         }
-        ModelType::DynamicTheta => forecast_dynamic_theta(&clean_values, options.horizon, period),
+        ModelType::DynamicTheta => {
+            forecast_dynamic_theta(&prep.values, extended_horizon, period, level)
+        }
         ModelType::DynamicOptimizedTheta => {
-            forecast_dynamic_optimized_theta(&clean_values, options.horizon, period)
+            forecast_dynamic_optimized_theta(&prep.values, extended_horizon, period, level)
         }
-        ModelType::AutoTheta => forecast_auto_theta(&clean_values, options.horizon, period),
+        ModelType::AutoTheta => forecast_auto_theta(&prep.values, extended_horizon, period, level),
         // ARIMA
-        ModelType::ARIMA => forecast_arima(&clean_values, options.horizon),
-        ModelType::AutoARIMA => forecast_auto_arima(&clean_values, options.horizon, period),
-        // Multiple Seasonality
+        ModelType::ARIMA => forecast_arima(
+            &prep.values,
+            extended_horizon,
+            level,
+            options.seasonal_period,
+            options.arima_order,
+            options.seasonal_order,
+        ),
+        ModelType::AutoARIMA => forecast_auto_arima(&prep.values, extended_horizon, period, level),
+        // Multiple Seasonality. MFLES/AutoMFLES both report model_name "MFLES"
+        // (D-06 — "Auto" is a documented, deprecated input alias only).
         ModelType::MFLES | ModelType::AutoMFLES => {
             let periods = if !options.seasonal_periods.is_empty() {
                 &options.seasonal_periods
@@ -701,53 +802,55 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
             } else {
                 &vec![]
             };
-            forecast_mfles(&clean_values, options.horizon, periods)
+            forecast_mfles(&prep.values, extended_horizon, periods, level).map(|mut r| {
+                r.model_name = "MFLES".to_string();
+                r
+            })
         }
+        // MSTL/AutoMSTL both report model_name "MSTL" (D-06 — no AutoMSTL
+        // relabel; "Auto" only reflects the alias accepted on input).
+        // `resolve_period` already guarantees `period > 1` by the time we
+        // get here whenever `seasonal_periods` is empty (D-07) — no hardcoded
+        // fallback period is reachable.
         ModelType::MSTL | ModelType::AutoMSTL => {
             let periods = if !options.seasonal_periods.is_empty() {
                 options.seasonal_periods.clone()
-            } else if period > 1 {
-                vec![period]
             } else {
-                vec![12]
+                vec![period]
             };
-            let mut result = forecast_mstl_lib(&clean_values, options.horizon, &periods)?;
-            if options.model == ModelType::AutoMSTL {
-                result.model_name = "AutoMSTL".to_string();
-            }
-            Ok(result)
+            forecast_mstl_lib(&prep.values, extended_horizon, &periods, level)
         }
         ModelType::TBATS => {
             let periods = if !options.seasonal_periods.is_empty() {
                 options.seasonal_periods.clone()
-            } else if period > 1 {
-                vec![period]
             } else {
-                vec![12]
+                vec![period]
             };
-            forecast_tbats_lib(&clean_values, options.horizon, &periods)
+            forecast_tbats_lib(&prep.values, extended_horizon, &periods, level)
         }
         ModelType::AutoTBATS => {
             let periods = if !options.seasonal_periods.is_empty() {
-                &options.seasonal_periods
-            } else if period > 1 {
-                &vec![period]
+                options.seasonal_periods.clone()
             } else {
-                &vec![12]
+                vec![period]
             };
-            forecast_auto_tbats(&clean_values, options.horizon, periods)
+            forecast_auto_tbats(&prep.values, extended_horizon, &periods, level)
         }
         // Intermittent Demand
-        ModelType::CrostonClassic => forecast_croston_classic(&clean_values, options.horizon),
-        ModelType::CrostonOptimized => forecast_croston_optimized(&clean_values, options.horizon),
-        ModelType::CrostonSBA => forecast_croston_sba(&clean_values, options.horizon),
-        ModelType::TSB => forecast_tsb(&clean_values, options.horizon),
-        ModelType::ADIDA => forecast_adida(&clean_values, options.horizon),
-        ModelType::IMAPA => forecast_imapa(&clean_values, options.horizon),
+        ModelType::CrostonClassic => {
+            forecast_croston_classic(&prep.values, extended_horizon, level)
+        }
+        ModelType::CrostonOptimized => {
+            forecast_croston_optimized(&prep.values, extended_horizon, level)
+        }
+        ModelType::CrostonSBA => forecast_croston_sba(&prep.values, extended_horizon, level),
+        ModelType::TSB => forecast_tsb(&prep.values, extended_horizon, level),
+        ModelType::ADIDA => forecast_adida(&prep.values, extended_horizon, level),
+        ModelType::IMAPA => forecast_imapa(&prep.values, extended_horizon, level),
         // Distributional
         ModelType::Laplace => forecast_laplace(
-            &clean_values,
-            options.horizon,
+            &prep.values,
+            extended_horizon,
             period,
             options.laplace_variant.unwrap_or_default(),
             options.laplace_seasonal_batch_init,
@@ -755,8 +858,8 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
         ),
         // Classical
         ModelType::GARCH => forecast_garch(
-            &clean_values,
-            options.horizon,
+            &prep.values,
+            extended_horizon,
             if options.garch_p == 0 {
                 1
             } else {
@@ -767,16 +870,18 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
             } else {
                 options.garch_q
             },
+            level,
         ),
         ModelType::Kalman => forecast_kalman(
-            &clean_values,
-            options.horizon,
+            &prep.values,
+            extended_horizon,
             options.kalman_model.as_deref(),
+            level,
         ),
         // Ensemble Models (Phase 4)
         ModelType::AutoEnsemble => forecast_auto_ensemble(
-            &clean_values,
-            options.horizon,
+            &prep.values,
+            extended_horizon,
             if options.ensemble_top_k == 0 {
                 3
             } else {
@@ -784,74 +889,30 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
             },
             options.ensemble_method.as_deref(),
             period,
+            level,
         ),
     }?;
 
-    // Calculate confidence intervals — skip for models that document no v1 intervals.
-    // GARCH point forecasts are conditional standard deviations (not level forecasts), so
-    // wrapping them with ±z×σ_historical produces meaningless bounds. Kalman v1 likewise
-    // has no prediction intervals. AutoEnsemble is point-forecast-only in Phase 4
-    // (ensemble prediction intervals deferred to Phase 6, EPI-01).
-    // Emit empty vecs for all three, matching the docs.
-    let (lower, upper) = match options.model {
-        ModelType::GARCH | ModelType::Kalman | ModelType::AutoEnsemble => (vec![], vec![]),
-        _ => calculate_confidence_intervals(&result.point, &clean_values, options.confidence_level),
-    };
+    // Use the model_name from the result (contains selected parameters for Auto* models);
+    // fall back to the enum name if the result doesn't have a specific one.
+    if result.model_name.is_empty() {
+        result.model_name = options.model.name().to_string();
+    }
 
-    // Calculate fitted values and residuals if requested.
-    // Some models (GARCH, Kalman) return empty fitted from calculate_fitted_values — treat
-    // empty as "not available" and emit None for both fitted and residuals rather than
-    // propagating SES-approximated values that would be semantically wrong.
-    let (fitted, residuals) = if options.include_fitted || options.include_residuals {
-        let fitted_vec = calculate_fitted_values(&clean_values, options.model, period);
-        if fitted_vec.is_empty() {
-            // Model does not surface fitted values in v1; return NULL for both.
-            (None, None)
-        } else {
-            let residuals = if options.include_residuals {
-                Some(
-                    clean_values
-                        .iter()
-                        .zip(fitted_vec.iter())
-                        .map(|(a, f)| a - f)
-                        .collect(),
-                )
-            } else {
-                None
-            };
-            (Some(fitted_vec), residuals)
-        }
-    } else {
-        (None, None)
-    };
-
-    // Calculate MSE
-    let mse = fitted.as_ref().map(|f| {
-        let sse: f64 = clean_values
-            .iter()
-            .zip(f.iter())
-            .map(|(a, f)| (a - f).powi(2))
-            .sum();
-        sse / clean_values.len() as f64
-    });
-
-    Ok(ForecastOutput {
-        point: result.point,
-        lower,
-        upper,
-        fitted: if options.include_fitted { fitted } else { None },
-        residuals,
-        // Use the model_name from the result (contains selected parameters for Auto* models)
-        // Fall back to enum name if result doesn't have a specific name
-        model_name: if result.model_name.is_empty() {
-            options.model.name().to_string()
-        } else {
-            result.model_name
-        },
-        aic: None,
-        bic: None,
-        mse,
-    })
+    // Prediction intervals, fitted values, residuals, and MSE all come straight from
+    // whichever forecast_* function ran above (D-01/D-03/D-11) — never recomputed here.
+    // A model whose crate Forecast has no native interval/fitted/residual support simply
+    // returns empty/None for those fields (D-02); this wrapper must not paper over that
+    // with a fabricated formula. finalize_output (D-12) drops the trail_trim lead-in,
+    // realigns to the original date anchor, excludes interpolated points from MSE, and
+    // pads fitted/residuals back to the original length.
+    Ok(finalize_output(
+        result,
+        &prep,
+        options.horizon,
+        options.include_fitted,
+        options.include_residuals,
+    ))
 }
 
 /// Generate forecasts with exogenous variables.
@@ -891,507 +952,936 @@ pub fn forecast_with_exog(
     values: &[Option<f64>],
     options: &ForecastOptionsExog,
 ) -> Result<ForecastOutput> {
-    // Validate exogenous data if provided
+    if !(options.confidence_level > 0.0 && options.confidence_level < 1.0) {
+        return Err(ForecastError::InvalidParameter {
+            param: "confidence_level".to_string(),
+            value: options.confidence_level.to_string(),
+            reason: "must be in the open interval (0, 1)".to_string(),
+        });
+    }
+
+    // arima_order / seasonal_order (D-08/D-09) are only meaningful for ARIMA
+    // — same guard as forecast()'s equivalent check. Without this, a
+    // non-constant regressor routes execution through forecast_crate_exog
+    // directly (bypassing the `.into()` delegation to forecast() below,
+    // which is the only place this guard would otherwise run), silently
+    // ignoring arima_order/seasonal_order on every other model instead of
+    // erroring (D-04).
+    if options.model != ModelType::ARIMA
+        && (options.arima_order.is_some() || options.seasonal_order.is_some())
+    {
+        let param = if options.arima_order.is_some() {
+            "arima_order"
+        } else {
+            "seasonal_order"
+        };
+        return Err(ForecastError::InvalidParameter {
+            param: param.to_string(),
+            value: options.model.name().to_string(),
+            reason: "only valid when method='ARIMA'".to_string(),
+        });
+    }
+
+    // Validate exogenous data if provided — against the ORIGINAL dimensions,
+    // before prepare_series trims/interpolates. Exog arrays are caller-aligned
+    // to the raw input; align_exog (below) re-slices them onto the trimmed range.
     if let Some(ref exog) = options.exog {
         exog.validate(values.len(), options.horizon)?;
     }
 
-    // Handle NULLs by interpolation
-    let clean_values: Vec<f64> = fill_nulls_interpolate(values);
+    // Explicit input policy (D-11/D-12) — see forecast()'s matching comment.
+    let prep = prepare_series(values)?;
 
-    if clean_values.is_empty() {
-        return Err(ForecastError::InsufficientData { needed: 1, got: 0 });
-    }
+    let extended_horizon = options.horizon + prep.trail_trim;
+    let level = options.confidence_level;
 
-    if clean_values.len() < 3 {
-        return Err(ForecastError::InsufficientData {
-            needed: 3,
-            got: clean_values.len(),
-        });
-    }
-
-    // Detect seasonality if needed
-    let period = if options.auto_detect_seasonality && options.seasonal_period == 0 {
-        detect_seasonality(&clean_values, None)
-            .ok()
-            .and_then(|p| p.first().cloned())
-            .unwrap_or(1) as usize
-    } else if options.seasonal_period > 0 {
-        options.seasonal_period
-    } else {
-        1
+    // Align the caller's regressors onto the trimmed/trail-extended range
+    // (D-12), then policy-process them (D-10/D-12, FCST-08): NaN/±Inf
+    // handling, historical-NaN interpolation, future-NULL rejection, and
+    // dropping any regressor that is constant in history (0 effect by
+    // construction). `None` here means every regressor was dropped (or none
+    // were given) — delegate to `forecast()` itself exactly like the
+    // no-exog case (FCST-05): every option (ets_spec, garch_p/q,
+    // kalman_model, window, seasonal_periods, model_pool, laplace/ensemble
+    // options, arima orders, confidence level, include flags) is honoured
+    // identically to the non-exog surface because it IS that surface, never
+    // a second hand-maintained dispatch.
+    let aligned_exog = options.exog.as_ref().map(|exog| align_exog(&prep, exog));
+    let prepared_exog = match aligned_exog {
+        Some(ref exog) => prepare_exog_regressors(exog)?,
+        None => None,
     };
 
-    // Check if requested model supports exogenous variables
-    let supports_exog = matches!(
+    let Some(exog) = prepared_exog else {
+        let opts_without_exog: ForecastOptions = options.into();
+        return forecast(values, &opts_without_exog);
+    };
+
+    // At least one real (non-constant) regressor remains: the requested
+    // model must be one the crate itself can fit with regressors attached
+    // (D-04 spirit) — never a silent ignore of the regressors.
+    if !exog_capable(options.model) {
+        return Err(ForecastError::InvalidInput(format!(
+            "model '{}' does not support exogenous regressors; exog-capable models: \
+             AutoARIMA, ARIMA, Naive, Theta, OptimizedTheta, DynamicTheta, \
+             DynamicOptimizedTheta, AutoTheta, ETS, AutoETS, MFLES, MSTL — or forecast \
+             without regressors",
+            options.model.name()
+        )));
+    }
+
+    // Resolve the seasonal period (D-07) through the SAME resolve_period()
+    // helper forecast() uses — explicit > 0 wins; otherwise auto-detect when
+    // requested OR the model requires a period (MSTL/AutoMSTL are the only
+    // requires_seasonal_period model that is also exog_capable, reached
+    // only past the check above); a period-requiring model with nothing
+    // detected and no seasonal_periods list is a hard error naming the
+    // model — never a silent default of 1. Resolved AFTER exog_capable (not
+    // alongside prepare_series above) so a non-exog-capable, period-requiring
+    // model (e.g. HoltWinters) still reports "does not support exogenous
+    // regressors" first — the same error precedence the old inline period
+    // code (which never errored) happened to preserve.
+    let period = resolve_period(
+        &prep.values,
         options.model,
-        ModelType::ARIMA
+        options.seasonal_period,
+        options.auto_detect_seasonality,
+        !options.seasonal_periods.is_empty(),
+    )?;
+
+    let mut result = forecast_crate_exog(
+        &prep.values,
+        options,
+        period,
+        extended_horizon,
+        level,
+        &exog,
+    )?;
+
+    if result.model_name.is_empty() {
+        result.model_name = options.model.name().to_string();
+    }
+
+    // Prediction intervals, fitted values, residuals, and MSE all come straight from
+    // whichever crate model `forecast_crate_exog` fitted (D-01/D-03/D-11) — never
+    // recomputed here. See `forecast()` for the matching non-exog policy, finalize_output,
+    // and D-12 trailing-NULL alignment rationale.
+    Ok(finalize_output(
+        result,
+        &prep,
+        options.horizon,
+        options.include_fitted,
+        options.include_residuals,
+    ))
+}
+
+/// Models whose crate `Forecaster` implementation overrides `supports_exog()`
+/// to `true` in anofox-forecast 0.15.10 (D-10, FCST-05) — checked against the
+/// crate source (`grep -rl 'fn supports_exog'`). A model NOT in this list
+/// given at least one non-constant regressor is a hard `InvalidInput` (D-04
+/// spirit), never a silent ignore of the regressors.
+fn exog_capable(model: ModelType) -> bool {
+    matches!(
+        model,
+        ModelType::Naive
+            | ModelType::ARIMA
             | ModelType::AutoARIMA
+            | ModelType::Theta
             | ModelType::OptimizedTheta
             | ModelType::DynamicTheta
+            | ModelType::DynamicOptimizedTheta
+            | ModelType::AutoTheta
+            | ModelType::ETS
+            | ModelType::AutoETS
             | ModelType::MFLES
             | ModelType::AutoMFLES
-    );
+            | ModelType::MSTL
+            | ModelType::AutoMSTL
+    )
+}
 
-    // Generate forecast based on model
-    // For models that support exog with exog data provided, use exogenous-aware forecasting
-    // Don't do auto-selection when using exog - use the requested model family
-    let result = if let (true, Some(exog)) = (supports_exog, options.exog.as_ref()) {
-        match options.model {
-            ModelType::ARIMA | ModelType::AutoARIMA => {
-                forecast_arima_with_exog(&clean_values, options.horizon, exog)
-            }
-            ModelType::OptimizedTheta | ModelType::DynamicTheta | ModelType::AutoTheta => {
-                forecast_theta_with_exog(&clean_values, options.horizon, exog)
-            }
-            ModelType::MFLES | ModelType::AutoMFLES => {
-                let periods = if !options.seasonal_periods.is_empty() {
-                    &options.seasonal_periods
-                } else if period > 1 {
-                    &vec![period]
-                } else {
-                    &vec![]
-                };
-                forecast_mfles_with_exog(&clean_values, options.horizon, periods, exog)
-            }
-            _ => {
-                // Shouldn't happen due to supports_exog check, but fallback to ARIMA with exog
-                forecast_arima_with_exog(&clean_values, options.horizon, exog)
-            }
+/// D-10/D-12 (FCST-05/08): policy-process a caller's (already trimmed/
+/// trail-extended, see `align_exog`) regressors before handing them to the
+/// crate's own exog-aware fit. NaN ≡ missing (the series-wide D-11
+/// convention, applied per-regressor): an all-missing historical regressor,
+/// a future NULL, or any ±Inf value is a hard `InvalidInput` naming the
+/// regressor (and step, for a future NULL); interior/edge historical gaps
+/// are filled via `fill_nulls_interpolate`. A regressor whose INTERPOLATED
+/// historical values are constant gets a 0 effect by construction: it is
+/// dropped (both its historical and future columns) before the crate ever
+/// sees it — a documented consequence of the planner's discretion (avoids a
+/// singular normal-equation system in the crate's own OLS pre-regression),
+/// and the reason a dropped regressor's future values are never checked for
+/// NULLs below. Returns `None` when every regressor was dropped (or the
+/// input had none) — the caller then delegates to `forecast()` (no `" with
+/// regressors"` suffix, D-05's "ETS"-without-spec-style un-prefixed naming
+/// policy does not apply here: this is "no regressors at all", not a
+/// selection).
+fn prepare_exog_regressors(exog: &ExogenousData) -> Result<Option<ExogenousData>> {
+    let mut historical = Vec::new();
+    let mut future = Vec::new();
+
+    for (i, hist) in exog.historical.iter().enumerate() {
+        let fut = &exog.future[i];
+
+        if let Some(idx) = hist.iter().position(|v| v.is_infinite()) {
+            return Err(ForecastError::InvalidInput(format!(
+                "regressor {i} contains an infinite value (historical index {idx})"
+            )));
         }
-    } else {
-        // No exog data or model doesn't support exog - use standard forecasting
-        // Auto* models run their respective algorithms with automatic parameter selection.
-        // AutoEnsemble is dispatched separately to honour user-supplied ensemble_top_k /
-        // ensemble_method from ForecastOptionsExog; routing it through forecast_with_model
-        // would silently hard-code top_k=3 and method=None (WR-02).
-        match options.model {
-            ModelType::AutoEnsemble => forecast_auto_ensemble(
-                &clean_values,
-                options.horizon,
-                if options.ensemble_top_k == 0 {
-                    3
-                } else {
-                    options.ensemble_top_k
-                },
-                options.ensemble_method.as_deref(),
-                period,
-            ),
-            _ => forecast_with_model(
-                &clean_values,
-                options.horizon,
-                options.model,
-                period,
-                options.window,
-                &options.seasonal_periods,
-                options.model_pool.as_deref(),
-                options.laplace_variant.unwrap_or_default(),
-                options.laplace_seasonal_batch_init,
-                options.confidence_level,
-            ),
+        if let Some(idx) = fut.iter().position(|v| v.is_infinite()) {
+            return Err(ForecastError::InvalidInput(format!(
+                "regressor {i} contains an infinite value (future step {idx})"
+            )));
         }
-    }?;
 
-    // For fitted values calculation, use the requested model
-    let model = options.model;
+        if !hist.iter().any(|v| !v.is_nan()) {
+            return Err(ForecastError::InvalidInput(format!(
+                "regressor {i} has no non-NULL historical value"
+            )));
+        }
 
-    // Calculate confidence intervals — skip for GARCH, Kalman, and AutoEnsemble
-    // (no synthetic historical-volatility bounds on volatility forecasts or state-space outputs;
-    // AutoEnsemble intervals deferred to Phase 6, EPI-01).
-    let (lower, upper) = match options.model {
-        ModelType::GARCH | ModelType::Kalman | ModelType::AutoEnsemble => (vec![], vec![]),
-        _ => calculate_confidence_intervals(&result.point, &clean_values, options.confidence_level),
-    };
-
-    // Calculate fitted values and residuals if requested
-    let (fitted, residuals) = if options.include_fitted || options.include_residuals {
-        let fitted = calculate_fitted_values(&clean_values, options.model, period);
-        let residuals = if options.include_residuals {
-            Some(
-                clean_values
-                    .iter()
-                    .zip(fitted.iter())
-                    .map(|(a, f)| a - f)
-                    .collect(),
-            )
-        } else {
-            None
-        };
-        (Some(fitted), residuals)
-    } else {
-        (None, None)
-    };
-
-    // Calculate MSE
-    let mse = fitted.as_ref().map(|f| {
-        let sse: f64 = clean_values
+        let as_opt: Vec<Option<f64>> = hist
             .iter()
-            .zip(f.iter())
-            .map(|(a, f)| (a - f).powi(2))
-            .sum();
-        sse / clean_values.len() as f64
-    });
+            .map(|v| if v.is_nan() { None } else { Some(*v) })
+            .collect();
+        let interpolated = fill_nulls_interpolate(&as_opt);
 
-    // Use the model name from the result (e.g., "ARIMAX" for exog) if available,
-    // otherwise use the model enum name
-    let model_name = if !result.model_name.is_empty() {
-        result.model_name
+        let min = interpolated.iter().copied().fold(f64::INFINITY, f64::min);
+        let max = interpolated
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+        let is_constant = (max - min) <= 1e-12 * 1.0_f64.max(max.abs());
+        if is_constant {
+            continue;
+        }
+
+        if let Some(h) = fut.iter().position(|v| v.is_nan()) {
+            return Err(ForecastError::InvalidInput(format!(
+                "future value of regressor {i} at step {h} is NULL"
+            )));
+        }
+
+        historical.push(interpolated);
+        future.push(fut.clone());
+    }
+
+    if historical.is_empty() {
+        Ok(None)
     } else {
-        model.name().to_string()
-    };
+        Ok(Some(ExogenousData { historical, future }))
+    }
+}
+
+/// Fit a crate model that already carries its attached regressors (via
+/// `TimeSeries::set_calendar`) and predict with `predict_with_exog_intervals`
+/// (D-10). `name_fn` runs on the POST-FIT model so auto-selection types
+/// (AutoARIMA/AutoTheta/AutoETS/'ETS' without a spec) can report what they
+/// actually selected; it returns the BARE model name — this helper appends
+/// `" with regressors"` exactly once, so every call site's `name_fn` is
+/// identical in shape to its non-exog naming counterpart.
+fn fit_predict_exog<M: Forecaster>(
+    mut model: M,
+    ts: &TimeSeries,
+    horizon: usize,
+    future_map: &HashMap<String, Vec<f64>>,
+    level: f64,
+    label: &str,
+    name_fn: impl FnOnce(&M) -> String,
+) -> Result<ForecastOutput> {
+    model.fit(ts).map_err(|e| {
+        ForecastError::ComputationError(format!("{label} (with regressors) fit failed: {e}"))
+    })?;
+    let forecast = model
+        .predict_with_exog_intervals(horizon, future_map, level)
+        .map_err(|e| {
+            ForecastError::ComputationError(format!(
+                "{label} (with regressors) predict failed: {e}"
+            ))
+        })?;
+
+    let base_name = name_fn(&model);
+    let point = forecast.primary().to_vec();
+    let (lower, upper) = extract_bounds(&forecast, point.len());
 
     Ok(ForecastOutput {
-        point: result.point,
+        point,
         lower,
         upper,
-        fitted: if options.include_fitted { fitted } else { None },
-        residuals,
-        model_name,
+        fitted: model.fitted_values().map(|v| v.to_vec()),
+        residuals: model.residuals().map(|v| v.to_vec()),
+        model_name: format!("{base_name} with regressors"),
         aic: None,
         bic: None,
-        mse,
+        mse: None,
     })
 }
 
-/// Internal helper to forecast with a specific model (no exog).
-#[allow(clippy::too_many_arguments)]
-fn forecast_with_model(
+/// Dispatch an exog-capable `ModelType` to the crate's OWN exog-aware fit
+/// (D-10, FCST-05): attach every validated/filtered regressor to the
+/// `TimeSeries` via `CalendarAnnotations`, construct the SAME crate model
+/// the non-exog path would (same `new_*` shared constructors where they
+/// exist), fit, and predict with `predict_with_exog_intervals`. Only
+/// reachable with at least one non-constant regressor and an
+/// `exog_capable(options.model)` model — see `forecast_with_exog`.
+fn forecast_crate_exog(
     values: &[f64],
-    horizon: usize,
-    model: ModelType,
+    options: &ForecastOptionsExog,
     period: usize,
-    window: usize,
-    seasonal_periods: &[usize],
-    model_pool: Option<&str>,
-    laplace_variant: LaplaceVariant,
-    laplace_seasonal_batch_init: bool,
-    confidence_level: f64,
+    horizon: usize,
+    level: f64,
+    exog: &ExogenousData,
 ) -> Result<ForecastOutput> {
-    match model {
-        // Basic Models
-        ModelType::Naive => forecast_naive(values, horizon),
-        ModelType::SeasonalNaive => forecast_seasonal_naive(values, horizon, period),
-        ModelType::SMA => {
-            let w = if window > 0 { window } else { period.max(3) };
-            forecast_sma(values, horizon, w)
-        }
-        ModelType::RandomWalkDrift => forecast_drift(values, horizon),
-        // Exponential Smoothing
-        ModelType::SES => forecast_ses_fixed(values, horizon),
-        ModelType::SESOptimized => forecast_ses_optimized(values, horizon),
-        ModelType::Holt => forecast_holt_lib(values, horizon),
-        ModelType::HoltWinters => forecast_holt_winters_lib(values, horizon, period),
-        ModelType::SeasonalES => forecast_seasonal_es_lib(values, horizon, period),
-        ModelType::SeasonalESOptimized => forecast_seasonal_es_optimized(values, horizon, period),
-        ModelType::SeasonalWindowAverage => {
-            forecast_seasonal_window_average(values, horizon, period)
-        }
-        ModelType::ETS => forecast_ets(values, horizon, period, None),
-        ModelType::AutoETS => forecast_auto_ets(values, horizon, period, model_pool),
-        // Theta Methods
-        ModelType::Theta => forecast_theta_stm(values, horizon, period),
-        ModelType::OptimizedTheta => forecast_optimized_theta(values, horizon, period),
-        ModelType::DynamicTheta => forecast_dynamic_theta(values, horizon, period),
-        ModelType::DynamicOptimizedTheta => {
-            forecast_dynamic_optimized_theta(values, horizon, period)
-        }
-        ModelType::AutoTheta => forecast_auto_theta(values, horizon, period),
-        // ARIMA
-        ModelType::ARIMA => forecast_arima(values, horizon),
-        ModelType::AutoARIMA => forecast_auto_arima(values, horizon, period),
-        // Multiple Seasonality
-        ModelType::MFLES | ModelType::AutoMFLES => {
-            let periods = if !seasonal_periods.is_empty() {
-                seasonal_periods
-            } else if period > 1 {
-                &vec![period]
-            } else {
-                &vec![]
+    let mut ts = make_timeseries(values)?;
+    let mut calendar = CalendarAnnotations::new();
+    for (i, hist) in exog.historical.iter().enumerate() {
+        calendar = calendar.with_regressor(regressor_name(i), hist.clone());
+    }
+    ts.set_calendar(calendar);
+
+    let future_map: HashMap<String, Vec<f64>> = exog
+        .future
+        .iter()
+        .enumerate()
+        .map(|(i, fut)| (regressor_name(i), fut.clone()))
+        .collect();
+
+    match options.model {
+        ModelType::Naive => fit_predict_exog(
+            Naive::new(),
+            &ts,
+            horizon,
+            &future_map,
+            level,
+            "Naive",
+            |_: &Naive| "Naive".to_string(),
+        ),
+        ModelType::ARIMA => {
+            let Some([p, d, q]) = options.arima_order else {
+                return Err(ForecastError::InvalidInput(
+                    "ARIMA requires arima_order=[p,d,q] (e.g. [1,1,1]); use 'AutoARIMA' for \
+                     automatic order selection"
+                        .to_string(),
+                ));
             };
-            forecast_mfles(values, horizon, periods)
+            let seasonal_nonzero = options
+                .seasonal_order
+                .map(|[cap_p, cap_d, cap_q]| cap_p + cap_d + cap_q > 0)
+                .unwrap_or(false);
+            if seasonal_nonzero && options.seasonal_period <= 1 {
+                return Err(ForecastError::InvalidInput(
+                    "seasonal_order requires seasonal_period > 1".to_string(),
+                ));
+            }
+            if !seasonal_nonzero && options.seasonal_period > 1 {
+                return Err(ForecastError::InvalidInput(
+                    "seasonal_period > 1 requires a non-zero seasonal_order=[P,D,Q] (e.g. \
+                     [0,1,1]); ARIMA never uses the auto-detected seasonal period"
+                        .to_string(),
+                ));
+            }
+            if seasonal_nonzero {
+                let [cap_p, cap_d, cap_q] = options.seasonal_order.expect("checked above");
+                let s = options.seasonal_period;
+                let name = format!("ARIMA({p},{d},{q})({cap_p},{cap_d},{cap_q})[{s}]");
+                fit_predict_exog(
+                    SARIMA::new(p, d, q, cap_p, cap_d, cap_q, s),
+                    &ts,
+                    horizon,
+                    &future_map,
+                    level,
+                    &name.clone(),
+                    move |_: &SARIMA| name,
+                )
+            } else {
+                let name = format!("ARIMA({p},{d},{q})");
+                fit_predict_exog(
+                    ARIMA::new(p, d, q),
+                    &ts,
+                    horizon,
+                    &future_map,
+                    level,
+                    &name.clone(),
+                    move |_: &ARIMA| name,
+                )
+            }
+        }
+        ModelType::AutoARIMA => fit_predict_exog(
+            new_auto_arima(period),
+            &ts,
+            horizon,
+            &future_map,
+            level,
+            "AutoARIMA",
+            auto_arima_model_name,
+        ),
+        ModelType::Theta => fit_predict_exog(
+            new_theta(period),
+            &ts,
+            horizon,
+            &future_map,
+            level,
+            "Theta",
+            |_: &Theta| "Theta".to_string(),
+        ),
+        ModelType::OptimizedTheta => fit_predict_exog(
+            new_optimized_theta(period),
+            &ts,
+            horizon,
+            &future_map,
+            level,
+            "OptimizedTheta",
+            |_: &OptimizedTheta| "OptimizedTheta".to_string(),
+        ),
+        ModelType::DynamicTheta => fit_predict_exog(
+            new_dynamic_theta(period),
+            &ts,
+            horizon,
+            &future_map,
+            level,
+            "DynamicTheta",
+            |_: &DynamicTheta| "DynamicTheta".to_string(),
+        ),
+        ModelType::DynamicOptimizedTheta => fit_predict_exog(
+            new_dynamic_optimized_theta(period),
+            &ts,
+            horizon,
+            &future_map,
+            level,
+            "DynamicOptimizedTheta",
+            |_: &DynamicTheta| "DynamicOptimizedTheta".to_string(),
+        ),
+        ModelType::AutoTheta => fit_predict_exog(
+            new_auto_theta(period),
+            &ts,
+            horizon,
+            &future_map,
+            level,
+            "AutoTheta",
+            |m: &AutoTheta| match m.selected_model() {
+                Some(selected) => format!("AutoTheta({selected})"),
+                None => "AutoTheta".to_string(),
+            },
+        ),
+        ModelType::ETS => {
+            if let Some(notation) = options.ets_spec.as_deref() {
+                if !is_valid_ets_notation(notation) {
+                    return Err(ForecastError::InvalidInput(format!(
+                        "Invalid ETS model specification '{}'. \
+                         Expected 3 or 4 character notation: Error(A/M) + Trend(A/M/N) + Seasonal(A/M/N), \
+                         with optional 'd' for damped trend.",
+                        notation
+                    )));
+                }
+                let parsed_spec = ETSSpec::from_notation(notation).map_err(|e| {
+                    ForecastError::InvalidInput(format!(
+                        "Invalid ETS model specification '{}': {}",
+                        notation, e
+                    ))
+                })?;
+                let seasonal_period = if parsed_spec.has_seasonal() && period > 1 {
+                    period
+                } else {
+                    1
+                };
+                let name = parsed_spec.short_name();
+                fit_predict_exog(
+                    ETSModel::new(parsed_spec, seasonal_period),
+                    &ts,
+                    horizon,
+                    &future_map,
+                    level,
+                    "ETS",
+                    move |_: &ETSModel| name,
+                )
+            } else {
+                // 'ETS' without a spec runs the same crate AutoETS selection
+                // as standalone 'AutoETS' (D-05), reported un-prefixed.
+                let pool = match options.model_pool.as_deref() {
+                    Some(s) => Some(parse_model_pool(s)?),
+                    None => None,
+                };
+                fit_predict_exog(
+                    new_auto_ets(period, pool),
+                    &ts,
+                    horizon,
+                    &future_map,
+                    level,
+                    "AutoETS",
+                    |m: &AutoETS| match m.selected_spec() {
+                        Some(spec) => format_auto_ets_name(&spec, false),
+                        None => "ETS".to_string(),
+                    },
+                )
+            }
+        }
+        ModelType::AutoETS => {
+            let pool = match options.model_pool.as_deref() {
+                Some(s) => Some(parse_model_pool(s)?),
+                None => None,
+            };
+            fit_predict_exog(
+                new_auto_ets(period, pool),
+                &ts,
+                horizon,
+                &future_map,
+                level,
+                "AutoETS",
+                |m: &AutoETS| match m.selected_spec() {
+                    Some(spec) => format_auto_ets_name(&spec, true),
+                    None => "AutoETS".to_string(),
+                },
+            )
+        }
+        ModelType::MFLES | ModelType::AutoMFLES => {
+            let periods = if !options.seasonal_periods.is_empty() {
+                options.seasonal_periods.clone()
+            } else if period > 1 {
+                vec![period]
+            } else {
+                vec![]
+            };
+            fit_predict_exog(
+                MFLES::new(periods),
+                &ts,
+                horizon,
+                &future_map,
+                level,
+                "MFLES",
+                |_: &MFLES| "MFLES".to_string(),
+            )
         }
         ModelType::MSTL | ModelType::AutoMSTL => {
-            let periods = if !seasonal_periods.is_empty() {
-                seasonal_periods.to_vec()
-            } else if period > 1 {
+            let periods = if !options.seasonal_periods.is_empty() {
+                options.seasonal_periods.clone()
+            } else {
                 vec![period]
-            } else {
-                vec![12]
             };
-            let mut result = forecast_mstl_lib(values, horizon, &periods)?;
-            if model == ModelType::AutoMSTL {
-                result.model_name = "AutoMSTL".to_string();
-            }
-            Ok(result)
+            fit_predict_exog(
+                MSTLForecaster::new(periods),
+                &ts,
+                horizon,
+                &future_map,
+                level,
+                "MSTL",
+                |_: &MSTLForecaster| "MSTL".to_string(),
+            )
         }
-        ModelType::TBATS => {
-            let periods = if !seasonal_periods.is_empty() {
-                seasonal_periods.to_vec()
-            } else if period > 1 {
-                vec![period]
-            } else {
-                vec![12]
-            };
-            forecast_tbats_lib(values, horizon, &periods)
-        }
-        ModelType::AutoTBATS => {
-            let periods = if !seasonal_periods.is_empty() {
-                seasonal_periods
-            } else if period > 1 {
-                &vec![period]
-            } else {
-                &vec![12]
-            };
-            forecast_auto_tbats(values, horizon, periods)
-        }
-        // Intermittent Demand
-        ModelType::CrostonClassic => forecast_croston_classic(values, horizon),
-        ModelType::CrostonOptimized => forecast_croston_optimized(values, horizon),
-        ModelType::CrostonSBA => forecast_croston_sba(values, horizon),
-        ModelType::TSB => forecast_tsb(values, horizon),
-        ModelType::ADIDA => forecast_adida(values, horizon),
-        ModelType::IMAPA => forecast_imapa(values, horizon),
-        // Distributional
-        ModelType::Laplace => forecast_laplace(
-            values,
-            horizon,
-            period,
-            laplace_variant,
-            laplace_seasonal_batch_init,
-            confidence_level,
+        _ => unreachable!(
+            "forecast_with_exog only calls forecast_crate_exog when exog_capable(model) is true"
         ),
-        // Classical (default params: GARCH(1,1), Kalman local_level)
-        ModelType::GARCH => forecast_garch(values, horizon, 1, 1),
-        ModelType::Kalman => forecast_kalman(values, horizon, None),
-        // Ensemble (default params: top_k=3, method=Mean)
-        ModelType::AutoEnsemble => forecast_auto_ensemble(values, horizon, 3, None, period),
     }
 }
 
 // Model implementations
 
-fn forecast_naive(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
-    let last = *values.last().expect("values validated non-empty by caller");
-    Ok(ForecastOutput {
-        point: vec![last; horizon],
-        lower: vec![],
-        upper: vec![],
-        fitted: None,
-        residuals: None,
-        model_name: String::new(),
-        aic: None,
-        bic: None,
-        mse: None,
-    })
+fn forecast_naive(values: &[f64], horizon: usize, level: f64) -> Result<ForecastOutput> {
+    let ts = make_timeseries(values)?;
+    let mut model = Naive::new();
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("Naive fit failed: {}", e)))?;
+    extract_forecast(&model, horizon, level, "Naive")
 }
 
 fn forecast_seasonal_naive(
     values: &[f64],
     horizon: usize,
     period: usize,
+    level: f64,
 ) -> Result<ForecastOutput> {
-    let p = period.max(1).min(values.len());
-    let last_season: Vec<f64> = values.iter().rev().take(p).rev().cloned().collect();
-
-    let point: Vec<f64> = (0..horizon).map(|i| last_season[i % p]).collect();
-
-    Ok(ForecastOutput {
-        point,
-        lower: vec![],
-        upper: vec![],
-        fitted: None,
-        residuals: None,
-        model_name: String::new(),
-        aic: None,
-        bic: None,
-        mse: None,
-    })
+    // D-07: SeasonalNaive requires an explicit or detected period >= 2 —
+    // `resolve_period` (called from `forecast()`) already guarantees this
+    // before this function is ever reached in production; a direct call
+    // with period < 2 is a hard error (never a silent delegation to Naive,
+    // which was this function's pre-10-03 behaviour).
+    if period < 2 {
+        return Err(ForecastError::InvalidInput(format!(
+            "no seasonal period could be detected for model 'SeasonalNaive'; pass \
+             seasonal_period explicitly (got {period})"
+        )));
+    }
+    let ts = make_timeseries(values)?;
+    let mut model = new_seasonal_naive(period.min(values.len().max(2)));
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("SeasonalNaive fit failed: {}", e)))?;
+    extract_forecast(&model, horizon, level, "SeasonalNaive")
 }
 
-fn forecast_sma(values: &[f64], horizon: usize, window: usize) -> Result<ForecastOutput> {
-    let w = window.min(values.len());
-    let forecast_value: f64 = values.iter().rev().take(w).sum::<f64>() / w as f64;
-
-    Ok(ForecastOutput {
-        point: vec![forecast_value; horizon],
-        lower: vec![],
-        upper: vec![],
-        fitted: None,
-        residuals: None,
-        model_name: String::new(),
-        aic: None,
-        bic: None,
-        mse: None,
-    })
+fn forecast_sma(
+    values: &[f64],
+    horizon: usize,
+    window: usize,
+    level: f64,
+) -> Result<ForecastOutput> {
+    let ts = make_timeseries(values)?;
+    let mut model = new_sma(window);
+    model
+        .fit(&ts)
+        .map_err(|e| ForecastError::ComputationError(format!("SMA fit failed: {}", e)))?;
+    extract_forecast(&model, horizon, level, "SMA")
 }
 
-fn forecast_drift(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
-    let n = values.len();
-    let first = values[0];
-    let last = values[n - 1];
-    let drift = (last - first) / (n - 1) as f64;
-
-    let point: Vec<f64> = (1..=horizon).map(|h| last + drift * h as f64).collect();
-
-    Ok(ForecastOutput {
-        point,
-        lower: vec![],
-        upper: vec![],
-        fitted: None,
-        residuals: None,
-        model_name: String::new(),
-        aic: None,
-        bic: None,
-        mse: None,
-    })
+fn forecast_drift(values: &[f64], horizon: usize, level: f64) -> Result<ForecastOutput> {
+    use anofox_forecast::models::baseline::RandomWalkWithDrift;
+    let ts = make_timeseries(values)?;
+    let mut model = RandomWalkWithDrift::new();
+    model.fit(&ts).map_err(|e| {
+        ForecastError::ComputationError(format!("RandomWalkDrift fit failed: {}", e))
+    })?;
+    extract_forecast(&model, horizon, level, "RandomWalkDrift")
 }
 
-fn forecast_ses_fixed(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+fn forecast_ses_fixed(values: &[f64], horizon: usize, level: f64) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = SimpleExponentialSmoothing::new(0.3);
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("SES fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "SES")
+    extract_forecast(&model, horizon, level, "SES")
 }
 
-fn forecast_ses_optimized(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+fn forecast_ses_optimized(values: &[f64], horizon: usize, level: f64) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = SimpleExponentialSmoothing::auto();
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("SESOptimized fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "SESOptimized")
+    extract_forecast(&model, horizon, level, "SESOptimized")
 }
 
-fn forecast_holt_lib(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+/// SQL 'Holt' (D-12/D-13, 17-03 Task 1): R's `holt()` is defined as
+/// `ets(y, "AAN", damped = FALSE)` (confirmed via `args(forecast::holt)` /
+/// the installed `forecast` 9.0.2 source) — a state-space ETS(A,A,N) fit by
+/// joint maximum-likelihood over the smoothing parameters AND the initial
+/// level/trend, not `HoltLinearTrend`'s SSE objective with the trend
+/// initialised from a single first difference. Remapping to the crate's own
+/// ETS(A,A,N) construction (the same one 'ETS' with `ets_spec='AAN'` uses)
+/// cut the measured AirPassengers deviation 6.86x (1.155e-1 -> 1.684e-2) and
+/// the rw deviation 13.41x (7.517e-2 -> 5.604e-3) — see
+/// `validation/reference/README.md` "R-parity gap root causes (D-12)" RC-01
+/// and `crates/anofox-fcst-core/tests/r_parity_diagnosis.rs`. `model_name`
+/// stays "Holt" (D-12: SQL surface name is unchanged, only the underlying
+/// crate construction is).
+fn forecast_holt_lib(values: &[f64], horizon: usize, level: f64) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
-    let mut model = HoltLinearTrend::auto();
+    let mut model = ETSModel::new(ETSSpec::aan(), 1);
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("Holt fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "Holt")
+    extract_forecast(&model, horizon, level, "Holt")
 }
 
 fn forecast_holt_winters_lib(
     values: &[f64],
     horizon: usize,
     period: usize,
+    level: f64,
 ) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
-    let p = period.max(2);
-    let mut model = HoltWintersModel::auto(
-        p,
-        anofox_forecast::models::exponential::SeasonalType::Additive,
-    );
+    let mut model = new_holt_winters(period);
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("HoltWinters fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "HoltWinters")
+    extract_forecast(&model, horizon, level, "HoltWinters")
 }
 
-fn forecast_theta_stm(values: &[f64], horizon: usize, period: usize) -> Result<ForecastOutput> {
+fn forecast_theta_stm(
+    values: &[f64],
+    horizon: usize,
+    period: usize,
+    level: f64,
+) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
-    let mut model = if period > 1 {
-        Theta::seasonal(period)
-    } else {
-        Theta::new()
-    };
+    let mut model = new_theta(period);
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("Theta fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "Theta")
+    extract_forecast(&model, horizon, level, "Theta")
 }
 
 fn forecast_optimized_theta(
     values: &[f64],
     horizon: usize,
     period: usize,
+    level: f64,
 ) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
-    let mut model = if period > 1 {
-        OptimizedTheta::seasonal(period)
-    } else {
-        OptimizedTheta::new()
-    };
+    let mut model = new_optimized_theta(period);
     model.fit(&ts).map_err(|e| {
         ForecastError::ComputationError(format!("OptimizedTheta fit failed: {}", e))
     })?;
-    extract_forecast(&model, horizon, "OptimizedTheta")
+    extract_forecast(&model, horizon, level, "OptimizedTheta")
 }
 
-fn forecast_dynamic_theta(values: &[f64], horizon: usize, period: usize) -> Result<ForecastOutput> {
+fn forecast_dynamic_theta(
+    values: &[f64],
+    horizon: usize,
+    period: usize,
+    level: f64,
+) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
-    let mut model = if period > 1 {
-        DynamicTheta::seasonal(period)
-    } else {
-        DynamicTheta::new(0.1)
-    };
+    let mut model = new_dynamic_theta(period);
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("DynamicTheta fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "DynamicTheta")
+    extract_forecast(&model, horizon, level, "DynamicTheta")
 }
 
 fn forecast_dynamic_optimized_theta(
     values: &[f64],
     horizon: usize,
     period: usize,
+    level: f64,
 ) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
-    let mut model = if period > 1 {
-        DynamicTheta::seasonal_optimized(period)
-    } else {
-        DynamicTheta::optimized()
-    };
+    let mut model = new_dynamic_optimized_theta(period);
     model.fit(&ts).map_err(|e| {
         ForecastError::ComputationError(format!("DynamicOptimizedTheta fit failed: {}", e))
     })?;
-    extract_forecast(&model, horizon, "DynamicOptimizedTheta")
+    extract_forecast(&model, horizon, level, "DynamicOptimizedTheta")
 }
 
 fn forecast_seasonal_es_lib(
     values: &[f64],
     horizon: usize,
     period: usize,
+    level: f64,
 ) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
-    let p = period.max(2);
-    let mut model = SeasonalESModel::new(p);
+    let mut model = new_seasonal_es(period);
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("SeasonalES fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "SeasonalES")
+    extract_forecast(&model, horizon, level, "SeasonalES")
 }
 
 fn forecast_seasonal_es_optimized(
     values: &[f64],
     horizon: usize,
     period: usize,
+    level: f64,
 ) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
-    let p = period.max(2);
-    let mut model = SeasonalESModel::optimized(p);
+    let mut model = new_seasonal_es_optimized(period);
     model.fit(&ts).map_err(|e| {
         ForecastError::ComputationError(format!("SeasonalESOptimized fit failed: {}", e))
     })?;
-    extract_forecast(&model, horizon, "SeasonalESOptimized")
+    extract_forecast(&model, horizon, level, "SeasonalESOptimized")
 }
 
 fn forecast_seasonal_window_average(
     values: &[f64],
     horizon: usize,
     period: usize,
+    level: f64,
 ) -> Result<ForecastOutput> {
-    use anofox_forecast::models::baseline::SeasonalWindowAverage as SWA;
     let ts = make_timeseries(values)?;
-    let p = period.max(2).min(values.len());
-    let n_seasons = (values.len() / p).max(1);
-    let mut model = SWA::new(p, n_seasons);
+    let mut model = new_seasonal_window_average(period, values.len());
     model.fit(&ts).map_err(|e| {
         ForecastError::ComputationError(format!("SeasonalWindowAverage fit failed: {}", e))
     })?;
-    extract_forecast(&model, horizon, "SeasonalWindowAverage")
+    extract_forecast(&model, horizon, level, "SeasonalWindowAverage")
+}
+
+// ============================================================================
+// Shared forecaster constructors (FCST-07, D-07): every standalone
+// `forecast_*` function above and `build_forecaster`'s matching
+// ensemble-member arm call the SAME constructor below — a model built as an
+// ensemble member is therefore bit-identical to the standalone forecast for
+// that same model name. `requires_seasonal_period` models (see
+// `resolve_period`) always receive `period > 1` here in the standalone path;
+// `build_forecaster` applies its own defensive guard (D-07) for the
+// ensemble-member path, where a per-member period isn't individually
+// detected.
+// ============================================================================
+
+fn new_sma(window: usize) -> SimpleMovingAverage {
+    SimpleMovingAverage::new(window)
+}
+
+fn new_holt_winters(period: usize) -> HoltWintersModel {
+    HoltWintersModel::auto(
+        period,
+        anofox_forecast::models::exponential::SeasonalType::Additive,
+    )
+}
+
+fn new_seasonal_es(period: usize) -> SeasonalESModel {
+    SeasonalESModel::new(period)
+}
+
+fn new_seasonal_es_optimized(period: usize) -> SeasonalESModel {
+    SeasonalESModel::optimized(period)
+}
+
+fn new_seasonal_naive(period: usize) -> SeasonalNaiveModel {
+    SeasonalNaiveModel::new(period)
+}
+
+/// `n_seasons = (n_obs / period).max(1)` — mirrors the adaptive computation
+/// the standalone path has always used (`values.len() / p`), now shared
+/// with `build_forecaster` via the `n_obs` parameter threaded through its
+/// signature (D-07; previously ensemble members hard-coded `n_seasons=2`).
+fn new_seasonal_window_average(period: usize, n_obs: usize) -> SeasonalWindowAverageModel {
+    let p = period.max(1);
+    let n_seasons = (n_obs / p).max(1);
+    SeasonalWindowAverageModel::new(p, n_seasons)
+}
+
+fn new_theta(period: usize) -> Theta {
+    if period > 1 {
+        Theta::seasonal(period)
+    } else {
+        Theta::new()
+    }
+}
+
+fn new_optimized_theta(period: usize) -> OptimizedTheta {
+    if period > 1 {
+        OptimizedTheta::seasonal(period)
+    } else {
+        OptimizedTheta::new()
+    }
+}
+
+fn new_dynamic_theta(period: usize) -> DynamicTheta {
+    if period > 1 {
+        DynamicTheta::seasonal(period)
+    } else {
+        DynamicTheta::new(0.1)
+    }
+}
+
+fn new_dynamic_optimized_theta(period: usize) -> DynamicTheta {
+    if period > 1 {
+        DynamicTheta::seasonal_optimized(period)
+    } else {
+        DynamicTheta::optimized()
+    }
+}
+
+fn new_auto_theta(period: usize) -> AutoTheta {
+    if period > 1 {
+        AutoTheta::seasonal(period)
+    } else {
+        AutoTheta::new()
+    }
+}
+
+fn new_auto_arima(period: usize) -> AutoARIMA {
+    let cfg = if period > 1 {
+        AutoARIMAConfig::default().with_seasonal_period(period)
+    } else {
+        AutoARIMAConfig::default()
+    };
+    AutoARIMA::with_config(cfg)
+}
+
+/// Kalman filter state-space specification (D-07): the only two crate specs
+/// `KalmanForecaster` exposes. `None`/`""` means `LocalLevel` (the
+/// documented default) — anything else unrecognised is a hard
+/// `InvalidParameter` naming `kalman_model`, never a silent default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KalmanSpec {
+    /// `KalmanForecaster::local_level()`.
+    LocalLevel,
+    /// `KalmanForecaster::local_linear_trend()`.
+    LocalLinearTrend,
+}
+
+impl KalmanSpec {
+    /// Tag used inside the `"Kalman(<tag>)"` model_name.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            KalmanSpec::LocalLevel => "local_level",
+            KalmanSpec::LocalLinearTrend => "local_linear_trend",
+        }
+    }
+}
+
+/// Parse a `kalman_model` option string (D-07). `None`/`""`/`"local_level"`
+/// (case-insensitive) → `LocalLevel`; `"local_linear_trend"` →
+/// `LocalLinearTrend`; anything else is `InvalidParameter { param:
+/// "kalman_model" }` — never a silent default.
+pub fn parse_kalman_spec(s: Option<&str>) -> Result<KalmanSpec> {
+    match s.unwrap_or("").trim().to_lowercase().as_str() {
+        "" | "local_level" => Ok(KalmanSpec::LocalLevel),
+        "local_linear_trend" => Ok(KalmanSpec::LocalLinearTrend),
+        other => Err(ForecastError::InvalidParameter {
+            param: "kalman_model".to_string(),
+            value: other.to_string(),
+            reason: "expected local_level or local_linear_trend".to_string(),
+        }),
+    }
+}
+
+fn new_kalman(spec: KalmanSpec) -> KalmanForecaster {
+    match spec {
+        KalmanSpec::LocalLevel => KalmanForecaster::local_level(),
+        KalmanSpec::LocalLinearTrend => KalmanForecaster::local_linear_trend(),
+    }
+}
+
+/// Models that require a usable seasonal period to fit meaningfully (D-07).
+/// `resolve_period` uses this to decide whether auto-detection is forced and
+/// whether "no period available" is a hard error rather than a silent
+/// default of 12 (or 2).
+fn requires_seasonal_period(model: ModelType) -> bool {
+    matches!(
+        model,
+        ModelType::HoltWinters
+            | ModelType::SeasonalES
+            | ModelType::SeasonalESOptimized
+            | ModelType::SeasonalNaive
+            | ModelType::SeasonalWindowAverage
+            | ModelType::MSTL
+            | ModelType::AutoMSTL
+            | ModelType::TBATS
+            | ModelType::AutoTBATS
+    )
+}
+
+/// Resolve the seasonal period to use for `model` (D-07). An explicit
+/// `seasonal_period > 0` always wins. Otherwise `detect_seasonality` runs
+/// when `auto_detect` is true OR `model` is in [`requires_seasonal_period`]
+/// (treating `Err`/empty as "none detected"). If `model` requires a period,
+/// has no `seasonal_periods` list (`has_period_list`), and no period was
+/// detected (`<= 1`), this is a hard `InvalidInput` naming the model —
+/// never a silent default of 12 or 2.
+fn resolve_period(
+    values: &[f64],
+    model: ModelType,
+    seasonal_period: usize,
+    auto_detect: bool,
+    has_period_list: bool,
+) -> Result<usize> {
+    if seasonal_period > 0 {
+        return Ok(seasonal_period);
+    }
+
+    let needs_detection = auto_detect || requires_seasonal_period(model);
+    let detected = if needs_detection {
+        detect_seasonality(values, None)
+            .ok()
+            .and_then(|p| p.first().copied())
+            .map(|p| p as usize)
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
+    if requires_seasonal_period(model) && !has_period_list && detected <= 1 {
+        return Err(ForecastError::InvalidInput(format!(
+            "no seasonal period could be detected for model '{}'; pass seasonal_period \
+             (or seasonal_periods) explicitly",
+            model.name()
+        )));
+    }
+
+    Ok(detected.max(1))
 }
 
 /// Validate ETS notation format.
@@ -1427,6 +1917,7 @@ fn forecast_ets(
     horizon: usize,
     period: usize,
     ets_spec: Option<&str>,
+    level: f64,
 ) -> Result<ForecastOutput> {
     // Parse and validate ETS specification if provided
     if let Some(notation) = ets_spec {
@@ -1443,7 +1934,12 @@ fn forecast_ets(
             )));
         }
 
-        // Parse the spec
+        // Parse the spec. anofox-forecast 0.16.x: every constructible
+        // (error, trend, seasonal) combination -- including MAA/MAdA, once
+        // rejected here as "unstable" -- parses successfully; from_notation
+        // itself no longer rejects them (ETSSpec::is_valid() always returns
+        // true per the crate's 0.16.0 CHANGELOG "Changed — ETS (UPST-03)"),
+        // so a second gate here would be dead code.
         let parsed_spec = ETSSpec::from_notation(notation).map_err(|e| {
             ForecastError::InvalidInput(format!(
                 "Invalid ETS model specification '{}': {}",
@@ -1451,19 +1947,10 @@ fn forecast_ets(
             ))
         })?;
 
-        // Reject unstable combinations (multiplicative error with additive components)
-        if !parsed_spec.is_valid() {
-            return Err(ForecastError::InvalidInput(format!(
-                "ETS model '{}' is an unstable combination (multiplicative error with additive components). \
-                 Try one of: 'AAA', 'ANA', 'AAdA', 'MNM', 'MAM', 'MAdM', 'MMM', 'MMdM', or use 'AutoETS' for automatic selection.",
-                notation
-            )));
-        }
-
         // User explicitly requested this spec — if it fails to fit,
         // return ComputationError so the group is skipped (null forecast),
         // not an InvalidInput error that would abort the whole pipeline.
-        return forecast_with_ets_spec(values, horizon, period, &parsed_spec).map_err(|e| {
+        return forecast_with_ets_spec(values, horizon, period, &parsed_spec, level).map_err(|e| {
             ForecastError::ComputationError(format!(
                 "ETS model '{}' failed to fit: {}",
                 notation, e
@@ -1471,16 +1958,11 @@ fn forecast_ets(
         });
     }
 
-    // No explicit spec: use library ETS implementations based on data characteristics
-    let mut result = if period > 1 && values.len() >= 2 * period {
-        forecast_holt_winters_lib(values, horizon, period)
-    } else if values.len() >= 10 {
-        forecast_holt_lib(values, horizon)
-    } else {
-        forecast_ses_fixed(values, horizon)
-    }?;
-    result.model_name = "ETS".to_string();
-    Ok(result)
+    // No explicit spec: 'ETS' means the same crate AutoETS selection as
+    // 'AutoETS' (D-05) — the chosen spec is reported un-prefixed in
+    // model_name (e.g. "ETS(M,A,M)"), never "ETS(ETS(...))" and never a
+    // hand-picked HoltWinters/Holt/SES substitute.
+    forecast_auto_ets_core(values, horizon, period, None, level, false)
 }
 
 /// Forecast using the anofox-forecast ETS model with explicit spec.
@@ -1489,6 +1971,7 @@ fn forecast_with_ets_spec(
     horizon: usize,
     period: usize,
     spec: &ETSSpec,
+    level: f64,
 ) -> Result<ForecastOutput> {
     // Determine seasonal period for the model
     let seasonal_period = if spec.has_seasonal() && period > 1 {
@@ -1508,26 +1991,32 @@ fn forecast_with_ets_spec(
         .fit(&time_series)
         .map_err(|e| ForecastError::ComputationError(format!("Failed to fit ETS model: {}", e)))?;
 
-    // Generate forecasts
-    let forecast = forecaster.predict(horizon).map_err(|e| {
-        ForecastError::ComputationError(format!("Failed to generate ETS forecasts: {}", e))
-    })?;
+    // Generate forecasts (D-01: native intervals, not point-only)
+    let forecast = forecaster
+        .predict_with_intervals(horizon, level)
+        .map_err(|e| {
+            ForecastError::ComputationError(format!("Failed to generate ETS forecasts: {}", e))
+        })?;
 
     // Extract point forecasts (univariate - first dimension)
     let point = forecast.point().first().cloned().unwrap_or_default();
+    let (lower, upper) = extract_bounds(&forecast, point.len());
 
-    // Get fitted values
+    // Get fitted/residuals from the crate (D-03/D-11)
     let fitted = forecaster.fitted_values().map(|v| v.to_vec());
+    let residuals = forecaster.residuals().map(|v| v.to_vec());
 
-    // Get model name from spec
-    let model_name = format!("ETS({})", spec.short_name());
+    // Get model name from spec. `ETSSpec::short_name()` already returns the
+    // fully-formed "ETS(E,T,S)" text (anofox-forecast 0.15.10) — wrapping it
+    // again produced the "ETS(ETS(M,A,M))" double-wrap bug fixed by D-05.
+    let model_name = spec.short_name();
 
     Ok(ForecastOutput {
         point,
-        lower: vec![],
-        upper: vec![],
+        lower,
+        upper,
         fitted,
-        residuals: None,
+        residuals,
         model_name,
         aic: None,
         bic: None,
@@ -1535,51 +2024,203 @@ fn forecast_with_ets_spec(
     })
 }
 
-fn forecast_arima(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
-    // Simplified ARIMA(1,1,1) - AR(1) on differenced series
-    if values.len() < 5 {
-        return forecast_naive(values, horizon);
+/// Parse an `arima_order`/`seasonal_order` string like `"[0,1,1]"` or
+/// `" 0, 1 ,1 "` into `Option<[usize; 3]>` (D-08/D-09).
+///
+/// An empty (post-trim) string is `Ok(None)` ("unset"). Otherwise: one
+/// optional leading `[`/`(` and trailing `]`/`)` are stripped, the remainder
+/// is split on `,`, and it must yield exactly three non-negative decimal
+/// integers. AR/MA orders (`p`, `q` — positions 0 and 2) must be `<= 10`;
+/// the differencing order (`d` — position 1) must be `<= 2`. Any violation
+/// (wrong count, non-digit characters, negative sign, decimal point,
+/// out-of-range value) is `InvalidParameter` naming `param` and echoing the
+/// original (untrimmed) `s` as `value` — never a silent default or a
+/// partially-parsed result.
+pub fn parse_order_triplet(param: &str, s: &str) -> Result<Option<[usize; 3]>> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
     }
 
-    // Difference the series
-    let diff: Vec<f64> = values.windows(2).map(|w| w[1] - w[0]).collect();
+    let invalid = || ForecastError::InvalidParameter {
+        param: param.to_string(),
+        value: s.to_string(),
+        reason: "expected three non-negative integers [p,d,q] with p,q <= 10 and d <= 2"
+            .to_string(),
+    };
 
-    // Fit AR(1) on differenced series
-    let mean_diff = diff.iter().sum::<f64>() / diff.len() as f64;
-    let ar_coef = 0.5; // Simplified: fixed AR coefficient
-
-    let last_val = *values
-        .last()
-        .expect("values.len() >= 5 validated by caller");
-    let last_diff = *diff.last().expect("diff non-empty when values.len() >= 5");
-
-    let mut point = Vec::with_capacity(horizon);
-    let mut prev_diff = last_diff;
-    let mut cumsum = last_val;
-
-    for _ in 0..horizon {
-        let next_diff = mean_diff + ar_coef * (prev_diff - mean_diff);
-        cumsum += next_diff;
-        point.push(cumsum);
-        prev_diff = next_diff;
+    let mut inner = trimmed;
+    if let Some(rest) = inner.strip_prefix('[').or_else(|| inner.strip_prefix('(')) {
+        inner = rest;
+    }
+    if let Some(rest) = inner.strip_suffix(']').or_else(|| inner.strip_suffix(')')) {
+        inner = rest;
     }
 
-    Ok(ForecastOutput {
-        point,
-        lower: vec![],
-        upper: vec![],
-        fitted: None,
-        residuals: None,
-        model_name: String::new(),
-        aic: None,
-        bic: None,
-        mse: None,
-    })
+    let parts: Vec<&str> = inner.split(',').collect();
+    if parts.len() != 3 {
+        return Err(invalid());
+    }
+
+    let mut vals = [0usize; 3];
+    for (i, part) in parts.iter().enumerate() {
+        let p = part.trim();
+        if p.is_empty() || !p.chars().all(|c| c.is_ascii_digit()) {
+            return Err(invalid());
+        }
+        vals[i] = p.parse::<usize>().map_err(|_| invalid())?;
+    }
+
+    let (p, d, q) = (vals[0], vals[1], vals[2]);
+    if p > 10 || q > 10 || d > 2 {
+        return Err(invalid());
+    }
+
+    Ok(Some([p, d, q]))
+}
+
+/// Parse a `seasonal_periods` string like `"[7, 365]"` into `Vec<usize>`
+/// (D-07 — the strict replacement for the FFI's old silently-dropping
+/// `parse_seasonal_periods_str`).
+///
+/// An empty (post-trim) string is `Ok(vec![])`. Otherwise: one optional
+/// leading `[`/`(` and trailing `]`/`)` are stripped, the remainder is split
+/// on `,`, and every entry must parse as a non-negative decimal integer
+/// `>= 2` — any non-digit entry or any value `< 2` (including `0`/`1`,
+/// which cannot be a seasonal period) is `InvalidParameter { param:
+/// "seasonal_periods" }`; no entry is ever silently dropped.
+pub fn parse_seasonal_periods(s: &str) -> Result<Vec<usize>> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let invalid = || ForecastError::InvalidParameter {
+        param: "seasonal_periods".to_string(),
+        value: s.to_string(),
+        reason: "expected a comma-separated list of integers >= 2, e.g. \"[7, 365]\"".to_string(),
+    };
+
+    let mut inner = trimmed;
+    if let Some(rest) = inner.strip_prefix('[').or_else(|| inner.strip_prefix('(')) {
+        inner = rest;
+    }
+    if let Some(rest) = inner.strip_suffix(']').or_else(|| inner.strip_suffix(')')) {
+        inner = rest;
+    }
+
+    let mut out = Vec::new();
+    for part in inner.split(',') {
+        let p = part.trim();
+        if p.is_empty() || !p.chars().all(|c| c.is_ascii_digit()) {
+            return Err(invalid());
+        }
+        let v: usize = p.parse().map_err(|_| invalid())?;
+        if v < 2 {
+            return Err(invalid());
+        }
+        out.push(v);
+    }
+
+    Ok(out)
+}
+
+/// Real crate ARIMA/SARIMA fit (D-08/D-09). `arima_order=[p,d,q]` is mandatory
+/// — `ARIMA` without it is a hard error naming `AutoARIMA` as the
+/// automatic-order alternative, never a silent fallback (the old fixed-AR(1)
+/// stand-in this replaces, and the `n<5`-delegates-to-Naive branch it had,
+/// are both gone entirely).
+///
+/// `seasonal_order=[P,D,Q]` is optional; a non-zero seasonal order requires
+/// an explicit `seasonal_period > 1` (never the auto-detected period — the
+/// caller passes `options.seasonal_period` directly, see `forecast()`).
+/// `seasonal_order=[0,0,0]` (or omitted) is non-seasonal: a plain `ARIMA`
+/// fit runs even if the caller passed an all-zero seasonal order.
+fn forecast_arima(
+    values: &[f64],
+    horizon: usize,
+    level: f64,
+    seasonal_period: usize,
+    arima_order: Option<[usize; 3]>,
+    seasonal_order: Option<[usize; 3]>,
+) -> Result<ForecastOutput> {
+    let Some([p, d, q]) = arima_order else {
+        return Err(ForecastError::InvalidInput(
+            "ARIMA requires arima_order=[p,d,q] (e.g. [1,1,1]); use 'AutoARIMA' for \
+             automatic order selection"
+                .to_string(),
+        ));
+    };
+
+    // seasonal_order=[0,0,0] is explicitly non-seasonal (D-08) — only a
+    // genuinely non-zero seasonal order engages SARIMA / requires a period.
+    let seasonal_nonzero = seasonal_order
+        .map(|[cap_p, cap_d, cap_q]| cap_p + cap_d + cap_q > 0)
+        .unwrap_or(false);
+
+    if seasonal_nonzero && seasonal_period <= 1 {
+        return Err(ForecastError::InvalidInput(
+            "seasonal_order requires seasonal_period > 1".to_string(),
+        ));
+    }
+    if !seasonal_nonzero && seasonal_period > 1 {
+        return Err(ForecastError::InvalidInput(
+            "seasonal_period > 1 requires a non-zero seasonal_order=[P,D,Q] (e.g. [0,1,1]); \
+             ARIMA never uses the auto-detected seasonal period"
+                .to_string(),
+        ));
+    }
+
+    let ts = make_timeseries(values)?;
+
+    // Constant handling (per the crate's documented allowdrift-style AICc
+    // comparison): d+D == 1 with p or q >= 1 may fit a drift term; d+D == 0
+    // optimises an intercept (≈ mean); d+D >= 2 never carries a constant.
+    // Report whichever non-zero constant the crate actually fit.
+    let output = if seasonal_nonzero {
+        let [cap_p, cap_d, cap_q] = seasonal_order.expect("seasonal_nonzero implies Some");
+        let s = seasonal_period;
+        let name = format!("ARIMA({p},{d},{q})({cap_p},{cap_d},{cap_q})[{s}]");
+        let mut model = SARIMA::new(p, d, q, cap_p, cap_d, cap_q, s);
+        model
+            .fit(&ts)
+            .map_err(|e| ForecastError::ComputationError(format!("{name} fit failed: {e}")))?;
+        let intercept = model.intercept();
+        let mut out = extract_forecast(&model, horizon, level, &name)?;
+        let d_total = d + cap_d;
+        if d_total == 1 && intercept != 0.0 {
+            out.model_name.push_str(" with drift");
+        } else if d_total == 0 && intercept != 0.0 {
+            out.model_name.push_str(" with non-zero mean");
+        }
+        out
+    } else {
+        let name = format!("ARIMA({p},{d},{q})");
+        let mut model = ARIMA::new(p, d, q);
+        model
+            .fit(&ts)
+            .map_err(|e| ForecastError::ComputationError(format!("{name} fit failed: {e}")))?;
+        let intercept = model.intercept();
+        let mut out = extract_forecast(&model, horizon, level, &name)?;
+        if d == 1 && intercept != 0.0 {
+            out.model_name.push_str(" with drift");
+        } else if d == 0 && intercept != 0.0 {
+            out.model_name.push_str(" with non-zero mean");
+        }
+        out
+    };
+
+    Ok(output)
 }
 
 /// AutoARIMA: Automatic ARIMA model selection using AIC-based search.
 /// Uses the proper AutoARIMA implementation from anofox-forecast library.
-fn forecast_auto_arima(values: &[f64], horizon: usize, period: usize) -> Result<ForecastOutput> {
+fn forecast_auto_arima(
+    values: &[f64],
+    horizon: usize,
+    period: usize,
+    level: f64,
+) -> Result<ForecastOutput> {
     use chrono::{Duration, TimeZone, Utc};
 
     // Create timestamps for TimeSeries (required by anofox-forecast)
@@ -1592,67 +2233,23 @@ fn forecast_auto_arima(values: &[f64], horizon: usize, period: usize) -> Result<
         ForecastError::ComputationError(format!("Failed to create TimeSeries: {}", e))
     })?;
 
-    // Configure AutoARIMA with seasonal period if provided
-    let config = if period > 1 {
-        AutoARIMAConfig::default().with_seasonal_period(period)
-    } else {
-        AutoARIMAConfig::default()
-    };
-
-    let mut model = AutoARIMA::with_config(config);
+    let mut model = new_auto_arima(period);
 
     // Fit the model
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("AutoARIMA fit failed: {}", e)))?;
 
-    // Get forecasts
+    // Get forecasts (D-01: native intervals)
     let forecast = model
-        .predict(horizon)
+        .predict_with_intervals(horizon, level)
         .map_err(|e| ForecastError::ComputationError(format!("AutoARIMA predict failed: {}", e)))?;
 
-    // Get the selected order for model name
-    // The model_scores() contains sorted (best first) results
-    let model_name = if let Some(order) = model.selected_full_order() {
-        let name = if order.is_seasonal() {
-            format!(
-                "AutoARIMA({},{},{})({},{},{})[{}]",
-                order.p, order.d, order.q, order.cap_p, order.cap_d, order.cap_q, order.s
-            )
-        } else {
-            format!("AutoARIMA({},{},{})", order.p, order.d, order.q)
-        };
-        name
-    } else if let Some((p, d, q)) = model.selected_order() {
-        format!("AutoARIMA({},{},{})", p, d, q)
-    } else if let Some((order, _score)) = model.model_scores().first() {
-        // Fallback: use best model from scores
-        if order.is_seasonal() {
-            format!(
-                "AutoARIMA({},{},{})({},{},{})[{}]",
-                order.p, order.d, order.q, order.cap_p, order.cap_d, order.cap_q, order.s
-            )
-        } else {
-            format!("AutoARIMA({},{},{})", order.p, order.d, order.q)
-        }
-    } else {
-        "AutoARIMA".to_string()
-    };
+    let model_name = auto_arima_model_name(&model);
 
     // Extract point forecasts (primary dimension)
     let point = forecast.primary().to_vec();
-
-    // Extract confidence intervals (first dimension for univariate)
-    let lower = forecast
-        .lower()
-        .and_then(|intervals| intervals.first())
-        .cloned()
-        .unwrap_or_default();
-    let upper = forecast
-        .upper()
-        .and_then(|intervals| intervals.first())
-        .cloned()
-        .unwrap_or_default();
+    let (lower, upper) = extract_bounds(&forecast, point.len());
 
     Ok(ForecastOutput {
         point,
@@ -1665,6 +2262,46 @@ fn forecast_auto_arima(values: &[f64], horizon: usize, period: usize) -> Result<
         bic: None,
         mse: None,
     })
+}
+
+/// Format the selected order of a fitted `AutoARIMA` as `"AutoARIMA(p,d,q)"`
+/// or `"AutoARIMA(p,d,q)(P,D,Q)[s]"` (seasonal) — the single naming helper
+/// shared by the non-exog path ([`forecast_auto_arima`]) and the crate-exog
+/// path ([`forecast_autoarima_crate_exog`]) so the two can never diverge.
+fn auto_arima_model_name(model: &AutoARIMA) -> String {
+    if let Some(order) = model.selected_full_order() {
+        if order.is_seasonal() {
+            format!(
+                "AutoARIMA({},{},{})({},{},{})[{}]",
+                order.p, order.d, order.q, order.cap_p, order.cap_d, order.cap_q, order.s
+            )
+        } else {
+            format!("AutoARIMA({},{},{})", order.p, order.d, order.q)
+        }
+    } else if let Some((p, d, q)) = model.selected_order() {
+        format!("AutoARIMA({},{},{})", p, d, q)
+    } else if let Some((order, _score)) = model.model_scores().first() {
+        if order.is_seasonal() {
+            format!(
+                "AutoARIMA({},{},{})({},{},{})[{}]",
+                order.p, order.d, order.q, order.cap_p, order.cap_d, order.cap_q, order.s
+            )
+        } else {
+            format!("AutoARIMA({},{},{})", order.p, order.d, order.q)
+        }
+    } else {
+        "AutoARIMA".to_string()
+    }
+}
+
+/// Deterministic regressor name used when attaching aligned historical/
+/// future regressor columns to a crate `CalendarAnnotations`/future map
+/// (D-10): `"x000"`, `"x001"`, ... — the index order matches the caller's
+/// `ExogenousData.historical`/`.future` column order, so the i-th
+/// historical column and the i-th future column always share the same
+/// generated name.
+fn regressor_name(i: usize) -> String {
+    format!("x{i:03}")
 }
 
 /// Parse a model pool string into the `ModelPool` enum.
@@ -1683,15 +2320,64 @@ fn parse_model_pool(s: &str) -> Result<ModelPool> {
     }
 }
 
+/// Build a crate `AutoETS` configured consistently for every call site that
+/// means "run the crate's own AICc model search": standalone `AutoETS`,
+/// `ETS` without an explicit spec (D-05), and ensemble members built via
+/// `build_forecaster` — the single shared constructor that makes all three
+/// bit-identical by construction (FCST-07).
+fn new_auto_ets(period: usize, pool: Option<ModelPool>) -> AutoETS {
+    let mut config = if period > 1 {
+        AutoETSConfig::with_period(period)
+    } else {
+        AutoETSConfig::non_seasonal()
+    };
+    if let Some(p) = pool {
+        config = config.with_model_pool(p);
+    }
+    AutoETS::with_config(config)
+}
+
+/// Format an AutoETS-selected spec's `model_name`. `ETSSpec::short_name()`
+/// already returns the fully-formed `"ETS(E,T,S)"` text (e.g. "ETS(M,A,M)");
+/// `auto=false` ('ETS' without a spec, D-05) returns that text unchanged —
+/// identical to an explicit `ETS` spec's model_name, never double-wrapped —
+/// while `auto=true` (standalone 'AutoETS') prepends "Auto" to get
+/// "AutoETS(M,A,M)".
+fn format_auto_ets_name(spec: &ETSSpec, auto: bool) -> String {
+    let short = spec.short_name();
+    if auto {
+        format!("Auto{short}")
+    } else {
+        short
+    }
+}
+
 /// AutoETS: Automatic ETS model selection using AICc-based search.
 /// Uses the proper AutoETS implementation from anofox-forecast library.
-/// Falls back to simplified ETS if the library panics (e.g. constant series
-/// causing NaN in optimizer — see #192).
+/// A crate fit/predict error or panic (e.g. a constant series causing NaN
+/// in the optimizer — issue #192) is a hard `InvalidInput` naming AutoETS
+/// (D-07) — never a silent fallback to a different model.
 fn forecast_auto_ets(
     values: &[f64],
     horizon: usize,
     period: usize,
     model_pool: Option<&str>,
+    level: f64,
+) -> Result<ForecastOutput> {
+    forecast_auto_ets_core(values, horizon, period, model_pool, level, true)
+}
+
+/// Shared AutoETS core (D-05/FCST-07). `auto_label=true` is standalone
+/// 'AutoETS' (model_name "AutoETS(...)"); `auto_label=false` is 'ETS'
+/// without an explicit spec (model_name "ETS(...)", via `forecast_ets`) —
+/// both run the exact same crate search through [`new_auto_ets`].
+fn forecast_auto_ets_core(
+    values: &[f64],
+    horizon: usize,
+    period: usize,
+    model_pool: Option<&str>,
+    level: f64,
+    auto_label: bool,
 ) -> Result<ForecastOutput> {
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -1702,65 +2388,34 @@ fn forecast_auto_ets(
     };
 
     let lib_result = catch_unwind(AssertUnwindSafe(|| -> Result<ForecastOutput> {
-        use chrono::{Duration, TimeZone, Utc};
-
-        // Create timestamps for TimeSeries (required by anofox-forecast)
-        let base = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
-        let timestamps: Vec<_> = (0..values.len())
-            .map(|i| base + Duration::hours(i as i64))
-            .collect();
-
-        let ts = TimeSeries::univariate(timestamps, values.to_vec()).map_err(|e| {
-            ForecastError::ComputationError(format!("Failed to create TimeSeries: {}", e))
-        })?;
-
-        // Configure AutoETS with seasonal period if provided
-        let mut config = if period > 1 {
-            AutoETSConfig::with_period(period)
-        } else {
-            AutoETSConfig::non_seasonal()
-        };
-
-        if let Some(p) = pool {
-            config = config.with_model_pool(p);
-        }
-
-        let mut model = AutoETS::with_config(config);
+        let ts = make_timeseries(values)?;
+        let mut model = new_auto_ets(period, pool);
 
         // Fit the model
         model
             .fit(&ts)
             .map_err(|e| ForecastError::ComputationError(format!("AutoETS fit failed: {}", e)))?;
 
-        // Get forecasts
-        let forecast = model.predict(horizon).map_err(|e| {
+        // Get forecasts (D-01: native intervals)
+        let forecast = model.predict_with_intervals(horizon, level).map_err(|e| {
             ForecastError::ComputationError(format!("AutoETS predict failed: {}", e))
         })?;
 
-        // Get the selected spec for model name
-        let model_name = if let Some(spec) = model.selected_spec() {
-            format!(
-                "AutoETS({:?},{:?},{:?})",
-                spec.error, spec.trend, spec.seasonal
-            )
-        } else {
-            "AutoETS".to_string()
+        // Get the selected spec for model name. A successful fit with no
+        // selected spec would otherwise surface as an unlabelled "AutoETS"/
+        // "ETS" result — report it as an error naming AutoETS instead (D-07).
+        let model_name = match model.selected_spec() {
+            Some(spec) => format_auto_ets_name(&spec, auto_label),
+            None => {
+                return Err(ForecastError::InvalidInput(
+                    "AutoETS fit succeeded but reported no selected spec".to_string(),
+                ))
+            }
         };
 
         // Extract point forecasts (primary dimension)
         let point = forecast.primary().to_vec();
-
-        // Extract confidence intervals (first dimension for univariate)
-        let lower = forecast
-            .lower()
-            .and_then(|intervals| intervals.first())
-            .cloned()
-            .unwrap_or_default();
-        let upper = forecast
-            .upper()
-            .and_then(|intervals| intervals.first())
-            .cloned()
-            .unwrap_or_default();
+        let (lower, upper) = extract_bounds(&forecast, point.len());
 
         Ok(ForecastOutput {
             point,
@@ -1777,13 +2432,15 @@ fn forecast_auto_ets(
 
     match lib_result {
         Ok(Ok(output)) => Ok(output),
-        Ok(Err(_)) | Err(_) => {
-            // Library error or panic (e.g. constant series → NaN optimizer → unwrap panic).
-            // Fall back to simplified ETS which handles edge cases gracefully.
-            let mut fallback = forecast_ets(values, horizon, period, None)?;
-            fallback.model_name = "AutoETS".to_string();
-            Ok(fallback)
-        }
+        Ok(Err(e)) => Err(ForecastError::InvalidInput(format!(
+            "AutoETS could not fit this series: {e}. Constant or near-constant series are \
+             not supported by AutoETS; use 'Naive' or 'SES' for them"
+        ))),
+        Err(_) => Err(ForecastError::InvalidInput(
+            "AutoETS could not fit this series: crate panic. Constant or near-constant \
+             series are not supported by AutoETS; use 'Naive' or 'SES' for them"
+                .to_string(),
+        )),
     }
 }
 
@@ -1831,16 +2488,11 @@ fn forecast_laplace(
             .map_err(|e| ForecastError::ComputationError(format!("Laplace predict failed: {e}")))?;
 
         let point = forecast.primary().to_vec();
-        let lower = forecast
-            .lower()
-            .and_then(|intervals| intervals.first())
-            .cloned()
-            .unwrap_or_default();
-        let upper = forecast
-            .upper()
-            .and_then(|intervals| intervals.first())
-            .cloned()
-            .unwrap_or_default();
+        let (lower, upper) = extract_bounds(&forecast, point.len());
+
+        // Fitted/residuals from the crate (D-03/D-11) — no SES(0.3) approximation.
+        let fitted = model.fitted_values().map(|v| v.to_vec());
+        let residuals = model.residuals().map(|v| v.to_vec());
 
         let model_name = match (period > 1, seasonal_batch_init && period > 1) {
             (true, true) => format!("Laplace({},seasonal={},batch_init)", variant.tag(), period),
@@ -1852,8 +2504,8 @@ fn forecast_laplace(
             point,
             lower,
             upper,
-            fitted: None,
-            residuals: None,
+            fitted,
+            residuals,
             model_name,
             aic: None,
             bic: None,
@@ -1884,85 +2536,64 @@ fn forecast_laplace(
 ///
 /// Unsupported models return an `InvalidModel` error naming the model.
 pub fn forecast_inspect(values: &[Option<f64>], options: &ForecastOptions) -> Result<String> {
-    use anofox_forecast::models::arima::{AutoARIMA, AutoARIMAConfig};
-    use anofox_forecast::models::exponential::{AutoETS, AutoETSConfig};
     use anofox_forecast::models::mstl_forecaster::MSTLForecaster;
     use anofox_forecast::models::tbats::AutoTBATS;
-    use anofox_forecast::models::theta::AutoTheta;
     use anofox_forecast::models::{Inspectable, MFLES};
     use anofox_forecast::prelude::Forecaster;
 
-    let clean_values: Vec<f64> = fill_nulls_interpolate(values);
-    if clean_values.len() < 3 {
-        return Err(ForecastError::InsufficientData {
-            needed: 3,
-            got: clean_values.len(),
-        });
-    }
+    // Explicit input policy (D-11/D-12) — see forecast()'s matching comment.
+    let prep = prepare_series(values)?;
 
-    let period = if options.auto_detect_seasonality && options.seasonal_period == 0 {
-        detect_seasonality(&clean_values, None)
-            .ok()
-            .and_then(|p| p.first().cloned())
-            .unwrap_or(1) as usize
-    } else if options.seasonal_period > 0 {
-        options.seasonal_period
-    } else {
-        1
-    };
+    // D-07: resolve_period errors for a period-requiring model (AutoTBATS/
+    // AutoMSTL here) with nothing detected and no seasonal_periods list —
+    // never a silent hardcoded-period default.
+    let period = resolve_period(
+        &prep.values,
+        options.model,
+        options.seasonal_period,
+        options.auto_detect_seasonality,
+        !options.seasonal_periods.is_empty(),
+    )?;
 
-    let ts = make_timeseries(&clean_values)?;
+    let ts = make_timeseries(&prep.values)?;
 
     // Build → fit → introspect, per model. `.explanation()` returns
     // the typed enum; we serialise to JSON so the wire is one string.
     let explanation = match options.model {
         ModelType::AutoETS => {
-            let mut config = if period > 1 {
-                AutoETSConfig::with_period(period)
-            } else {
-                AutoETSConfig::non_seasonal()
+            // D-07: an invalid model_pool must propagate as an error, never
+            // be silently swallowed by `if let Ok(..)`.
+            let pool = match options.model_pool.as_deref() {
+                Some(p) => Some(parse_model_pool(p)?),
+                None => None,
             };
-            if let Some(pool) = options.model_pool.as_deref() {
-                if let Ok(p) = parse_model_pool(pool) {
-                    config = config.with_model_pool(p);
-                }
-            }
-            let mut model = AutoETS::with_config(config);
+            let mut model = new_auto_ets(period, pool);
             model.fit(&ts).map_err(|e| {
                 ForecastError::ComputationError(format!("AutoETS fit failed: {e}"))
             })?;
             Inspectable::explanation(&model)
         }
         ModelType::AutoARIMA => {
-            let config = if period > 1 {
-                AutoARIMAConfig::default().with_seasonal_period(period)
-            } else {
-                AutoARIMAConfig::default()
-            };
-            let mut model = AutoARIMA::with_config(config);
+            let mut model = new_auto_arima(period);
             model.fit(&ts).map_err(|e| {
                 ForecastError::ComputationError(format!("AutoARIMA fit failed: {e}"))
             })?;
             Inspectable::explanation(&model)
         }
         ModelType::AutoTheta => {
-            let mut model = if period > 1 {
-                AutoTheta::seasonal(period)
-            } else {
-                AutoTheta::new()
-            };
+            let mut model = new_auto_theta(period);
             model.fit(&ts).map_err(|e| {
                 ForecastError::ComputationError(format!("AutoTheta fit failed: {e}"))
             })?;
             Inspectable::explanation(&model)
         }
         ModelType::AutoTBATS => {
+            // resolve_period guarantees period > 1 here whenever
+            // seasonal_periods is empty (AutoTBATS requires a period, D-07).
             let periods: Vec<usize> = if !options.seasonal_periods.is_empty() {
                 options.seasonal_periods.clone()
-            } else if period > 1 {
-                vec![period]
             } else {
-                vec![]
+                vec![period]
             };
             let mut model = AutoTBATS::new(periods);
             model.fit(&ts).map_err(|e| {
@@ -1971,6 +2602,8 @@ pub fn forecast_inspect(values: &[Option<f64>], options: &ForecastOptions) -> Re
             Inspectable::explanation(&model)
         }
         ModelType::MFLES | ModelType::AutoMFLES => {
+            // MFLES/AutoMFLES are not in requires_seasonal_period — a
+            // non-seasonal vec![] periods list is a legitimate default.
             let periods: Vec<usize> = if !options.seasonal_periods.is_empty() {
                 options.seasonal_periods.clone()
             } else if period > 1 {
@@ -1985,12 +2618,12 @@ pub fn forecast_inspect(values: &[Option<f64>], options: &ForecastOptions) -> Re
             Inspectable::explanation(&model)
         }
         ModelType::MSTL | ModelType::AutoMSTL => {
+            // resolve_period guarantees period > 1 here whenever
+            // seasonal_periods is empty (MSTL/AutoMSTL require a period, D-07).
             let periods: Vec<usize> = if !options.seasonal_periods.is_empty() {
                 options.seasonal_periods.clone()
-            } else if period > 1 {
-                vec![period]
             } else {
-                vec![12]
+                vec![period]
             };
             let mut model = MSTLForecaster::new(periods);
             model.fit(&ts).map_err(|e| {
@@ -2054,26 +2687,20 @@ pub fn forecast_explain(
     use anofox_forecast::models::theta::Theta;
     use anofox_forecast::prelude::Forecaster;
 
-    let clean_values: Vec<f64> = fill_nulls_interpolate(values);
-    if clean_values.len() < 3 {
-        return Err(ForecastError::InsufficientData {
-            needed: 3,
-            got: clean_values.len(),
-        });
-    }
+    // Explicit input policy (D-11/D-12) — see forecast()'s matching comment.
+    let prep = prepare_series(values)?;
 
-    let period = if options.auto_detect_seasonality && options.seasonal_period == 0 {
-        detect_seasonality(&clean_values, None)
-            .ok()
-            .and_then(|p| p.first().cloned())
-            .unwrap_or(1) as usize
-    } else if options.seasonal_period > 0 {
-        options.seasonal_period
-    } else {
-        1
-    };
+    // D-07: resolve_period errors for MSTL/AutoMSTL with nothing detected
+    // and no seasonal_periods list — never a silent hardcoded-period default.
+    let period = resolve_period(
+        &prep.values,
+        options.model,
+        options.seasonal_period,
+        options.auto_detect_seasonality,
+        !options.seasonal_periods.is_empty(),
+    )?;
 
-    let ts = make_timeseries(&clean_values)?;
+    let ts = make_timeseries(&prep.values)?;
 
     let explanation = match options.model {
         ModelType::ETS => {
@@ -2088,12 +2715,12 @@ pub fn forecast_explain(
             model.explain(horizon)
         }
         ModelType::MSTL | ModelType::AutoMSTL => {
+            // resolve_period guarantees period > 1 here whenever
+            // seasonal_periods is empty (MSTL/AutoMSTL require a period, D-07).
             let periods: Vec<usize> = if !options.seasonal_periods.is_empty() {
                 options.seasonal_periods.clone()
-            } else if period > 1 {
-                vec![period]
             } else {
-                vec![12]
+                vec![period]
             };
             let mut model = MSTLForecaster::new(periods);
             model
@@ -2165,7 +2792,12 @@ pub fn forecast_explain(
 
 /// AutoTheta: Automatic selection of best Theta variant (STM, OTM, DSTM, DOTM).
 /// Uses the proper AutoTheta implementation from anofox-forecast library.
-fn forecast_auto_theta(values: &[f64], horizon: usize, period: usize) -> Result<ForecastOutput> {
+fn forecast_auto_theta(
+    values: &[f64],
+    horizon: usize,
+    period: usize,
+    level: f64,
+) -> Result<ForecastOutput> {
     use chrono::{Duration, TimeZone, Utc};
 
     // Create timestamps for TimeSeries (required by anofox-forecast)
@@ -2178,21 +2810,16 @@ fn forecast_auto_theta(values: &[f64], horizon: usize, period: usize) -> Result<
         ForecastError::ComputationError(format!("Failed to create TimeSeries: {}", e))
     })?;
 
-    // Configure AutoTheta with seasonal period if provided
-    let mut model = if period > 1 {
-        AutoTheta::seasonal(period)
-    } else {
-        AutoTheta::new()
-    };
+    let mut model = new_auto_theta(period);
 
     // Fit the model
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("AutoTheta fit failed: {}", e)))?;
 
-    // Get forecasts
+    // Get forecasts (D-01: native intervals)
     let forecast = model
-        .predict(horizon)
+        .predict_with_intervals(horizon, level)
         .map_err(|e| ForecastError::ComputationError(format!("AutoTheta predict failed: {}", e)))?;
 
     // Get the selected model type for model name
@@ -2204,18 +2831,7 @@ fn forecast_auto_theta(values: &[f64], horizon: usize, period: usize) -> Result<
 
     // Extract point forecasts (primary dimension)
     let point = forecast.primary().to_vec();
-
-    // Extract confidence intervals (first dimension for univariate)
-    let lower = forecast
-        .lower()
-        .and_then(|intervals| intervals.first())
-        .cloned()
-        .unwrap_or_default();
-    let upper = forecast
-        .upper()
-        .and_then(|intervals| intervals.first())
-        .cloned()
-        .unwrap_or_default();
+    let (lower, upper) = extract_bounds(&forecast, point.len());
 
     Ok(ForecastOutput {
         point,
@@ -2236,6 +2852,7 @@ fn forecast_auto_tbats(
     values: &[f64],
     horizon: usize,
     periods: &[usize],
+    level: f64,
 ) -> Result<ForecastOutput> {
     use chrono::{Duration, TimeZone, Utc};
 
@@ -2257,9 +2874,9 @@ fn forecast_auto_tbats(
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("AutoTBATS fit failed: {}", e)))?;
 
-    // Get forecasts
+    // Get forecasts (D-01: native intervals)
     let forecast = model
-        .predict(horizon)
+        .predict_with_intervals(horizon, level)
         .map_err(|e| ForecastError::ComputationError(format!("AutoTBATS predict failed: {}", e)))?;
 
     // Get the selected configuration for model name
@@ -2271,18 +2888,7 @@ fn forecast_auto_tbats(
 
     // Extract point forecasts (primary dimension)
     let point = forecast.primary().to_vec();
-
-    // Extract confidence intervals (first dimension for univariate)
-    let lower = forecast
-        .lower()
-        .and_then(|intervals| intervals.first())
-        .cloned()
-        .unwrap_or_default();
-    let upper = forecast
-        .upper()
-        .and_then(|intervals| intervals.first())
-        .cloned()
-        .unwrap_or_default();
+    let (lower, upper) = extract_bounds(&forecast, point.len());
 
     Ok(ForecastOutput {
         point,
@@ -2297,7 +2903,12 @@ fn forecast_auto_tbats(
     })
 }
 
-fn forecast_mfles(values: &[f64], horizon: usize, periods: &[usize]) -> Result<ForecastOutput> {
+fn forecast_mfles(
+    values: &[f64],
+    horizon: usize,
+    periods: &[usize],
+    level: f64,
+) -> Result<ForecastOutput> {
     use chrono::{Duration, TimeZone, Utc};
 
     // Create timestamps for TimeSeries (required by anofox-forecast)
@@ -2317,25 +2928,14 @@ fn forecast_mfles(values: &[f64], horizon: usize, periods: &[usize]) -> Result<F
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("MFLES fit failed: {}", e)))?;
 
-    // Get forecasts
+    // Get forecasts (D-01: native intervals)
     let forecast = model
-        .predict(horizon)
+        .predict_with_intervals(horizon, level)
         .map_err(|e| ForecastError::ComputationError(format!("MFLES predict failed: {}", e)))?;
 
     // Extract point forecasts
     let point = forecast.primary().to_vec();
-
-    // Extract confidence intervals
-    let lower = forecast
-        .lower()
-        .and_then(|intervals| intervals.first())
-        .cloned()
-        .unwrap_or_default();
-    let upper = forecast
-        .upper()
-        .and_then(|intervals| intervals.first())
-        .cloned()
-        .unwrap_or_default();
+    let (lower, upper) = extract_bounds(&forecast, point.len());
 
     Ok(ForecastOutput {
         point,
@@ -2351,22 +2951,32 @@ fn forecast_mfles(values: &[f64], horizon: usize, periods: &[usize]) -> Result<F
     })
 }
 
-fn forecast_mstl_lib(values: &[f64], horizon: usize, periods: &[usize]) -> Result<ForecastOutput> {
+fn forecast_mstl_lib(
+    values: &[f64],
+    horizon: usize,
+    periods: &[usize],
+    level: f64,
+) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = MSTLForecaster::new(periods.to_vec());
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("MSTL fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "MSTL")
+    extract_forecast(&model, horizon, level, "MSTL")
 }
 
-fn forecast_tbats_lib(values: &[f64], horizon: usize, periods: &[usize]) -> Result<ForecastOutput> {
+fn forecast_tbats_lib(
+    values: &[f64],
+    horizon: usize,
+    periods: &[usize],
+    level: f64,
+) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = TBATSModel::new(periods.to_vec());
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("TBATS fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "TBATS")
+    extract_forecast(&model, horizon, level, "TBATS")
 }
 
 /// Helper to create a TimeSeries from values (hourly timestamps).
@@ -2380,18 +2990,260 @@ fn make_timeseries(values: &[f64]) -> Result<TimeSeries> {
         .map_err(|e| ForecastError::ComputationError(format!("Failed to create TimeSeries: {}", e)))
 }
 
-/// Helper to extract ForecastOutput from a fitted Forecaster model.
-/// `name_override`: use this instead of model.name() to match our ModelType enum names.
-fn extract_forecast(
-    model: &dyn Forecaster,
-    horizon: usize,
-    name_override: &str,
-) -> Result<ForecastOutput> {
-    let forecast = model.predict(horizon).map_err(|e| {
-        ForecastError::ComputationError(format!("{} predict failed: {}", name_override, e))
-    })?;
+/// A series that has been policy-processed and is ready for model fitting
+/// (D-11/D-12, plan 10-01 Task 3).
+///
+/// - A valid `NaN` (`Some(f64::NAN)`) is treated exactly like `None` (missing).
+/// - Leading/trailing missing values are trimmed; interior gaps are filled by
+///   `fill_nulls_interpolate` on the TRIMMED slice (imputation.rs is untouched).
+/// - `values`/`interpolated` are indexed relative to the trimmed slice (index 0
+///   is the first originally-observed value); `lead_trim`/`trail_trim`/
+///   `original_len` carry the information needed to re-align back onto the
+///   caller's original array (see `finalize_output`).
+#[derive(Debug, Clone)]
+pub struct PreparedSeries {
+    /// Trimmed, interior-interpolated values ready to hand to a crate model.
+    pub values: Vec<f64>,
+    /// `interpolated[i]` is `true` iff `values[i]` was filled in by
+    /// interpolation rather than an originally-observed value.
+    pub interpolated: Vec<bool>,
+    /// Count of leading missing values dropped before `values[0]`.
+    pub lead_trim: usize,
+    /// Count of trailing missing values dropped after `values[last]`.
+    pub trail_trim: usize,
+    /// Length of the original (pre-trim) input array.
+    pub original_len: usize,
+}
 
-    let point = forecast.primary().to_vec();
+/// Apply the explicit input policy (D-11) to a raw `Option<f64>` series:
+/// `Some(NaN)` ≡ `None`; `±Inf` is a hard `InvalidInput` error (not missing);
+/// an all-missing series (or one with fewer than 3 points after trimming)
+/// is `InsufficientData`; leading/trailing missing values are trimmed;
+/// interior gaps are interpolated via `fill_nulls_interpolate` on the
+/// trimmed slice.
+pub fn prepare_series(values: &[Option<f64>]) -> Result<PreparedSeries> {
+    let original_len = values.len();
+
+    // ±Inf is always a hard input error — name the first offending index.
+    // (A valid NaN is explicitly NOT in this category: it is missing data,
+    // not an invalid one, per D-11.)
+    if let Some(idx) = values
+        .iter()
+        .position(|v| matches!(v, Some(x) if x.is_infinite()))
+    {
+        return Err(ForecastError::InvalidInput(format!(
+            "value at index {idx} is ±Infinity, which is not a valid forecast input \
+             (use NULL for missing data)"
+        )));
+    }
+
+    // Some(NaN) ≡ None (D-11): normalize before locating the trim bounds.
+    let normalized: Vec<Option<f64>> = values.iter().map(|v| v.filter(|x| !x.is_nan())).collect();
+
+    let first_idx = normalized.iter().position(|v| v.is_some());
+    let last_idx = normalized.iter().rposition(|v| v.is_some());
+
+    let (first_idx, last_idx) = match (first_idx, last_idx) {
+        (Some(f), Some(l)) => (f, l),
+        _ => return Err(ForecastError::InsufficientData { needed: 3, got: 0 }),
+    };
+
+    let lead_trim = first_idx;
+    let trail_trim = original_len - 1 - last_idx;
+    let trimmed = &normalized[first_idx..=last_idx];
+
+    if trimmed.len() < 3 {
+        return Err(ForecastError::InsufficientData {
+            needed: 3,
+            got: trimmed.len(),
+        });
+    }
+
+    // trimmed[0] and trimmed[last] are both Some by construction (first_idx/
+    // last_idx are the first/last Some positions), so fill_nulls_interpolate
+    // only fills INTERIOR gaps here — no edge flat-extension applies.
+    let interpolated_mask: Vec<bool> = trimmed.iter().map(|v| v.is_none()).collect();
+    let interpolated_values = fill_nulls_interpolate(trimmed);
+
+    Ok(PreparedSeries {
+        values: interpolated_values,
+        interpolated: interpolated_mask,
+        lead_trim,
+        trail_trim,
+        original_len,
+    })
+}
+
+/// Re-align a raw model output (fitted on `prep.values` for
+/// `horizon + prep.trail_trim` steps) onto the caller's original indexing
+/// (D-12): drop the leading `trail_trim` forecast steps so step 1 is the
+/// period after the ORIGINAL last row (the date anchor the C++ layer uses),
+/// mark interpolated-position residuals as NaN (they measure interpolation,
+/// not the model), compute MSE over the remaining finite residuals, and pad
+/// fitted/residuals back out to `original_len` with NaN at the
+/// leading/trailing trimmed positions.
+///
+/// Crate fitted/residuals arrays whose length doesn't match
+/// `prep.values.len()` are treated as unavailable (T-10-02: never index a
+/// crate array of unexpected length) rather than causing a panic or being
+/// silently misaligned.
+pub fn finalize_output(
+    raw: ForecastOutput,
+    prep: &PreparedSeries,
+    horizon: usize,
+    include_fitted: bool,
+    include_residuals: bool,
+) -> ForecastOutput {
+    let trail_trim = prep.trail_trim;
+
+    // raw.point/lower/upper were generated for `horizon + trail_trim` steps;
+    // drop the first `trail_trim` so step 1 corresponds to the period after
+    // the ORIGINAL last row, then cap at `horizon` entries.
+    let drop_and_align = |v: Vec<f64>| -> Vec<f64> {
+        if v.len() > trail_trim {
+            v[trail_trim..].iter().take(horizon).copied().collect()
+        } else {
+            vec![]
+        }
+    };
+
+    let point = drop_and_align(raw.point);
+    let mut lower = drop_and_align(raw.lower);
+    let mut upper = drop_and_align(raw.upper);
+    if lower.len() != point.len() {
+        lower = vec![];
+    }
+    if upper.len() != point.len() {
+        upper = vec![];
+    }
+
+    let fitted_vals = raw.fitted.filter(|f| f.len() == prep.values.len());
+
+    // MSE = mean of r^2 over finite residuals — always computed when the
+    // crate exposes usable residuals, regardless of include_residuals (which
+    // only gates whether the array itself is returned to the caller). This is
+    // computed from `raw.residuals` directly (not the length-filtered,
+    // position-aligned `residuals_vals` below): a scalar mean doesn't need
+    // positional alignment the way a returned array does, so a model whose
+    // residuals length differs from `prep.values.len()` (e.g. AutoARIMA,
+    // whose crate residuals drop the d+D*s differencing warmup rows instead
+    // of NaN-padding them) still gets a real MSE — just without the
+    // interpolated-position exclusion below, since position-correspondence
+    // with `prep.interpolated` is unknown for a shorter/longer array.
+    let mse = raw.residuals.as_ref().and_then(|r| {
+        let finite: Vec<f64> = if r.len() == prep.values.len() {
+            r.iter()
+                .zip(prep.interpolated.iter())
+                .filter(|(v, is_interp)| v.is_finite() && !**is_interp)
+                .map(|(v, _)| *v)
+                .collect()
+        } else {
+            r.iter().copied().filter(|v| v.is_finite()).collect()
+        };
+        if finite.is_empty() {
+            None
+        } else {
+            Some(finite.iter().map(|v| v.powi(2)).sum::<f64>() / finite.len() as f64)
+        }
+    });
+
+    // For the EXPORTED residuals array (T-10-02): only a length-matched array
+    // can be safely padded/position-aligned back onto the original indexing;
+    // a mismatched length is treated as unavailable here, independent of the
+    // MSE fallback above (which only needs a scalar, not positional alignment).
+    let mut residuals_vals = raw.residuals.filter(|r| r.len() == prep.values.len());
+
+    // Residuals at interpolated positions measure the interpolation, not the
+    // model — exclude them from the EXPORTED array by marking NaN (D-12).
+    if let Some(ref mut r) = residuals_vals {
+        for (i, is_interp) in prep.interpolated.iter().enumerate() {
+            if *is_interp {
+                r[i] = f64::NAN;
+            }
+        }
+    }
+
+    // Pad fitted/residuals back out to the ORIGINAL length, with NaN at the
+    // leading/trailing positions that were trimmed before fitting.
+    let pad_to_original = |v: Vec<f64>| -> Vec<f64> {
+        let mut out = vec![f64::NAN; prep.original_len];
+        for (i, val) in v.into_iter().enumerate() {
+            out[prep.lead_trim + i] = val;
+        }
+        out
+    };
+
+    let fitted = if include_fitted {
+        fitted_vals.map(pad_to_original)
+    } else {
+        None
+    };
+    let residuals = if include_residuals {
+        residuals_vals.map(pad_to_original)
+    } else {
+        None
+    };
+
+    ForecastOutput {
+        point,
+        lower,
+        upper,
+        fitted,
+        residuals,
+        model_name: raw.model_name,
+        aic: raw.aic,
+        bic: raw.bic,
+        mse,
+    }
+}
+
+/// Slice/align an `ExogenousData` onto a `PreparedSeries`'s trimmed range
+/// (D-12 exog variant of the same trailing-NULL alignment policy as
+/// `finalize_output`): each historical regressor is sliced to
+/// `[lead_trim, original_len - trail_trim)`, and the trimmed trailing rows'
+/// own historical values are prepended onto each future regressor so the
+/// aligned future length is `horizon + trail_trim` — matching the extended
+/// horizon the model is actually asked to predict.
+fn align_exog(prep: &PreparedSeries, exog: &ExogenousData) -> ExogenousData {
+    let start = prep.lead_trim;
+    let end = prep.original_len.saturating_sub(prep.trail_trim);
+
+    let historical: Vec<Vec<f64>> = exog
+        .historical
+        .iter()
+        .map(|col| {
+            let end = end.min(col.len());
+            let start = start.min(end);
+            col[start..end].to_vec()
+        })
+        .collect();
+
+    let future: Vec<Vec<f64>> = exog
+        .future
+        .iter()
+        .zip(exog.historical.iter())
+        .map(|(fcol, hcol)| {
+            let trail_start = end.min(hcol.len());
+            let mut out = hcol[trail_start..].to_vec();
+            out.extend_from_slice(fcol);
+            out
+        })
+        .collect();
+
+    ExogenousData { historical, future }
+}
+
+/// Extract `(lower, upper)` from a crate `Forecast`'s first (univariate) interval
+/// dimension. A crate model with no native interval support (`lower()`/`upper()`
+/// return `None`), or whose returned bound length does not match `point_len`,
+/// yields empty vecs — NULL lower/upper at the FFI/SQL layer (D-02) — never a
+/// partial, misaligned, or fabricated array. This is the single bounds-extraction
+/// path used by every forecast_* function in this module (no z-value or interval
+/// arithmetic may be computed here or anywhere else in this file — FCST-02).
+fn extract_bounds(
+    forecast: &anofox_forecast::core::Forecast,
+    point_len: usize,
+) -> (Vec<f64>, Vec<f64>) {
     let lower = forecast
         .lower()
         .and_then(|i| i.first())
@@ -2402,6 +3254,39 @@ fn extract_forecast(
         .and_then(|i| i.first())
         .cloned()
         .unwrap_or_default();
+    let lower = if lower.len() == point_len {
+        lower
+    } else {
+        vec![]
+    };
+    let upper = if upper.len() == point_len {
+        upper
+    } else {
+        vec![]
+    };
+    (lower, upper)
+}
+
+/// Helper to extract ForecastOutput from a fitted Forecaster model.
+///
+/// Uses `predict_with_intervals(horizon, level)` (not `predict`) so `lower`/`upper`
+/// reflect the model's own interval theory (D-01). A crate `Forecast` with no native
+/// interval support returns `lower()`/`upper()` as `None`, which this helper surfaces
+/// as empty vecs (D-02) — never a fabricated width.
+///
+/// `name_override`: use this instead of model.name() to match our ModelType enum names.
+fn extract_forecast(
+    model: &dyn Forecaster,
+    horizon: usize,
+    level: f64,
+    name_override: &str,
+) -> Result<ForecastOutput> {
+    let forecast = model.predict_with_intervals(horizon, level).map_err(|e| {
+        ForecastError::ComputationError(format!("{} predict failed: {}", name_override, e))
+    })?;
+
+    let point = forecast.primary().to_vec();
+    let (lower, upper) = extract_bounds(&forecast, point.len());
 
     Ok(ForecastOutput {
         point,
@@ -2416,58 +3301,62 @@ fn extract_forecast(
     })
 }
 
-fn forecast_croston_classic(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+fn forecast_croston_classic(values: &[f64], horizon: usize, level: f64) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = Croston::new();
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("Croston fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "CrostonClassic")
+    extract_forecast(&model, horizon, level, "CrostonClassic")
 }
 
-fn forecast_croston_optimized(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+fn forecast_croston_optimized(
+    values: &[f64],
+    horizon: usize,
+    level: f64,
+) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = Croston::new().optimized();
     model.fit(&ts).map_err(|e| {
         ForecastError::ComputationError(format!("CrostonOptimized fit failed: {}", e))
     })?;
-    extract_forecast(&model, horizon, "CrostonOptimized")
+    extract_forecast(&model, horizon, level, "CrostonOptimized")
 }
 
-fn forecast_croston_sba(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+fn forecast_croston_sba(values: &[f64], horizon: usize, level: f64) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = Croston::new().sba();
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("CrostonSBA fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "CrostonSBA")
+    extract_forecast(&model, horizon, level, "CrostonSBA")
 }
 
-fn forecast_tsb(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+fn forecast_tsb(values: &[f64], horizon: usize, level: f64) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = TSB::new();
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("TSB fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "TSB")
+    extract_forecast(&model, horizon, level, "TSB")
 }
 
-fn forecast_adida(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+fn forecast_adida(values: &[f64], horizon: usize, level: f64) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = ADIDA::new();
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("ADIDA fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "ADIDA")
+    extract_forecast(&model, horizon, level, "ADIDA")
 }
 
-fn forecast_imapa(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
+fn forecast_imapa(values: &[f64], horizon: usize, level: f64) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = IMAPA::new();
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("IMAPA fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "IMAPA")
+    extract_forecast(&model, horizon, level, "IMAPA")
 }
 
 // ============================================================================
@@ -2481,8 +3370,19 @@ fn forecast_imapa(values: &[f64], horizon: usize) -> Result<ForecastOutput> {
 /// `Forecaster::predict()` for this: it returns seed-1 simulated innovations,
 /// not the analytical variance forecast.
 ///
+/// `lower`/`upper` are a passthrough of `predict_with_intervals(horizon, level)`
+/// (D-01): those bounds are centred on the crate's simulated-innovation path,
+/// not on `point ± z*sqrt(variance)` — intentional, not a bug (see plan 10-01 D-01).
+/// `fitted`/`residuals` come from the crate's own `fitted_values()`/`residuals()`.
+///
 /// Requires `p + q + 10` observations minimum (GARCH(1,1) → 12 min).
-fn forecast_garch(values: &[f64], horizon: usize, p: usize, q: usize) -> Result<ForecastOutput> {
+fn forecast_garch(
+    values: &[f64],
+    horizon: usize,
+    p: usize,
+    q: usize,
+    level: f64,
+) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = GARCH::new(p, q);
     model
@@ -2494,12 +3394,20 @@ fn forecast_garch(values: &[f64], horizon: usize, p: usize, q: usize) -> Result<
         .map_err(|e| ForecastError::ComputationError(format!("GARCH forecast failed: {}", e)))?;
     // Output is volatility (std-dev = sqrt of variance), not variance itself
     let volatility: Vec<f64> = variance.iter().map(|&v| v.sqrt()).collect();
+
+    let forecast = model
+        .predict_with_intervals(horizon, level)
+        .map_err(|e| ForecastError::ComputationError(format!("GARCH predict failed: {}", e)))?;
+    let (lower, upper) = extract_bounds(&forecast, volatility.len());
+    let fitted = model.fitted_values().map(|v| v.to_vec());
+    let residuals = model.residuals().map(|v| v.to_vec());
+
     Ok(ForecastOutput {
         point: volatility,
-        lower: vec![],
-        upper: vec![],
-        fitted: None,
-        residuals: None,
+        lower,
+        upper,
+        fitted,
+        residuals,
         model_name: format!("GARCH({},{})", p, q),
         aic: None,
         bic: None,
@@ -2507,25 +3415,32 @@ fn forecast_garch(values: &[f64], horizon: usize, p: usize, q: usize) -> Result<
     })
 }
 
-/// Forecast using a Kalman filter state-space model.
+/// Forecast using a Kalman filter state-space model (D-07).
 ///
-/// `spec`:
-/// - `None` or `"local_level"` → `KalmanForecaster::local_level()` (default)
-/// - `"local_linear_trend"` → `KalmanForecaster::local_linear_trend()`
+/// `spec`: `None`/`""`/`"local_level"` (case-insensitive) → local level
+/// (documented default); `"local_linear_trend"` → local linear trend;
+/// anything else is `InvalidParameter { param: "kalman_model" }` — parsed
+/// via [`parse_kalman_spec`], never a silent default. model_name is always
+/// `"Kalman(local_level)"` or `"Kalman(local_linear_trend)"`, naming the
+/// spec that actually ran.
 ///
 /// Uses `extract_forecast` because `KalmanForecaster` implements the
 /// `Forecaster` trait — same path as all other trait-based models.
-fn forecast_kalman(values: &[f64], horizon: usize, spec: Option<&str>) -> Result<ForecastOutput> {
+fn forecast_kalman(
+    values: &[f64],
+    horizon: usize,
+    spec: Option<&str>,
+    level: f64,
+) -> Result<ForecastOutput> {
+    let kalman_spec = parse_kalman_spec(spec)?;
     let ts = make_timeseries(values)?;
-    let mut model = match spec.unwrap_or("local_level") {
-        "local_linear_trend" => KalmanForecaster::local_linear_trend(),
-        _ => KalmanForecaster::local_level(),
-    };
+    let mut model = new_kalman(kalman_spec);
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("Kalman fit failed: {}", e)))?;
     // KalmanForecaster implements Forecaster — extract_forecast works directly
-    extract_forecast(&model, horizon, "Kalman")
+    let name = format!("Kalman({})", kalman_spec.tag());
+    extract_forecast(&model, horizon, level, &name)
 }
 
 /// Parse a `combination_method` string to a `CombinationMethod` enum variant.
@@ -2565,14 +3480,16 @@ fn parse_combination_method(
 /// ascending; combines the top-`top_k` members using the specified `CombinationMethod`.
 ///
 /// Mirrors `forecast_kalman` in structure — uses `extract_forecast` via the
-/// `Forecaster` trait. Point forecasts only in Phase 4; prediction intervals are
-/// deferred to Phase 6 (EPI-01).
+/// `Forecaster` trait, so lower/upper/fitted/residuals are a passthrough of the
+/// crate `AutoEnsemble`'s own `predict_with_intervals`/`fitted_values`/`residuals`
+/// (D-01); empty/NULL only when the crate itself returns no bounds (D-02).
 fn forecast_auto_ensemble(
     values: &[f64],
     horizon: usize,
     top_k: usize,
     method_str: Option<&str>,
     period: usize,
+    level: f64,
 ) -> Result<ForecastOutput> {
     use anofox_forecast::models::ensemble::{AutoEnsemble, AutoEnsembleConfig};
 
@@ -2587,7 +3504,7 @@ fn forecast_auto_ensemble(
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("AutoEnsemble fit failed: {}", e)))?;
-    extract_forecast(&model, horizon, "AutoEnsemble")
+    extract_forecast(&model, horizon, level, "AutoEnsemble")
 }
 
 // ============================================================================
@@ -2609,119 +3526,69 @@ fn forecast_auto_ensemble(
 pub(crate) fn build_forecaster(
     model_type: ModelType,
     period: Option<usize>,
+    n_obs: usize,
 ) -> Result<anofox_forecast::models::BoxedForecaster> {
-    use anofox_forecast::models::baseline::{
-        Naive, RandomWalkWithDrift, SeasonalNaive, SeasonalWindowAverage, WindowAverage,
-    };
+    use anofox_forecast::models::baseline::{Naive, RandomWalkWithDrift};
 
     let p = period.unwrap_or(0);
 
+    // D-07: a seasonal-required member reaching here with no usable period
+    // is a hard error naming the member and `seasonal_period` — never a
+    // silent default of 12. `forecast_explicit_ensemble`/
+    // `inspect_explicit_ensemble` resolve a shared period before calling
+    // this function, so this is a defensive guard for direct callers.
+    let require_period = |p: usize| -> Result<usize> {
+        if p > 1 {
+            Ok(p)
+        } else {
+            Err(ForecastError::InvalidParameter {
+                param: "seasonal_period".to_string(),
+                value: model_type.name().to_string(),
+                reason: format!(
+                    "{} requires a seasonal period > 1 for every ensemble member; pass \
+                     seasonal_period explicitly",
+                    model_type.name()
+                ),
+            })
+        }
+    };
+
     match model_type {
         // Auto-selection models
-        ModelType::AutoARIMA => {
-            let cfg = AutoARIMAConfig {
-                seasonal_period: p,
-                ..Default::default()
-            };
-            Ok(Box::new(AutoARIMA::with_config(cfg)))
-        }
-        ModelType::AutoETS => {
-            let cfg = if p > 1 {
-                AutoETSConfig::with_period(p)
-            } else {
-                AutoETSConfig::default()
-            };
-            Ok(Box::new(AutoETS::with_config(cfg)))
-        }
-        ModelType::AutoTheta => {
-            if p > 1 {
-                Ok(Box::new(AutoTheta::seasonal(p)))
-            } else {
-                Ok(Box::new(AutoTheta::new()))
-            }
-        }
-        // Theta family
-        ModelType::Theta => {
-            if p > 1 {
-                Ok(Box::new(Theta::seasonal(p)))
-            } else {
-                Ok(Box::new(Theta::new()))
-            }
-        }
-        ModelType::OptimizedTheta => {
-            if p > 1 {
-                Ok(Box::new(OptimizedTheta::seasonal(p)))
-            } else {
-                Ok(Box::new(OptimizedTheta::new()))
-            }
-        }
-        ModelType::DynamicTheta => {
-            if p > 1 {
-                Ok(Box::new(DynamicTheta::seasonal(p)))
-            } else {
-                Ok(Box::new(DynamicTheta::new(0.1)))
-            }
-        }
-        ModelType::DynamicOptimizedTheta => {
-            if p > 1 {
-                Ok(Box::new(DynamicTheta::seasonal_optimized(p)))
-            } else {
-                Ok(Box::new(DynamicTheta::optimized()))
-            }
-        }
+        ModelType::AutoARIMA => Ok(Box::new(new_auto_arima(p))),
+        ModelType::AutoETS => Ok(Box::new(new_auto_ets(p, None))),
+        ModelType::AutoTheta => Ok(Box::new(new_auto_theta(p))),
+        // Theta family (not in requires_seasonal_period — non-seasonal is a
+        // legitimate, documented default, same as the standalone path)
+        ModelType::Theta => Ok(Box::new(new_theta(p))),
+        ModelType::OptimizedTheta => Ok(Box::new(new_optimized_theta(p))),
+        ModelType::DynamicTheta => Ok(Box::new(new_dynamic_theta(p))),
+        ModelType::DynamicOptimizedTheta => Ok(Box::new(new_dynamic_optimized_theta(p))),
         // Baselines (crate types that implement Forecaster)
         ModelType::Naive => Ok(Box::new(Naive::new())),
         ModelType::RandomWalkDrift => Ok(Box::new(RandomWalkWithDrift::new())),
         ModelType::SES => Ok(Box::new(SimpleExponentialSmoothing::new(0.3))),
         ModelType::SESOptimized => Ok(Box::new(SimpleExponentialSmoothing::auto())),
-        ModelType::SMA => {
-            let window = if p > 1 { p.max(3) } else { 3 };
-            Ok(Box::new(WindowAverage::new(window)))
-        }
-        ModelType::Holt => Ok(Box::new(HoltLinearTrend::auto())),
-        ModelType::HoltWinters => {
-            // HoltWinters requires period >= 2; fall back to 12 if not seasonal
-            let sp = if p > 1 { p } else { 12 };
-            Ok(Box::new(HoltWintersModel::auto(
-                sp,
-                anofox_forecast::models::exponential::SeasonalType::Additive,
-            )))
-        }
-        ModelType::SeasonalNaive => {
-            let sp = if p > 1 { p } else { 12 };
-            Ok(Box::new(SeasonalNaive::new(sp)))
-        }
-        ModelType::SeasonalES => {
-            let sp = if p > 1 { p } else { 12 };
-            Ok(Box::new(SeasonalESModel::new(sp)))
-        }
+        ModelType::SMA => Ok(Box::new(new_sma(p.max(3)))),
+        // D-12/D-13 (17-03 Task 1): mirrors the standalone `forecast_holt_lib`
+        // remap to the crate's ETS(A,A,N) construction (R's holt()).
+        ModelType::Holt => Ok(Box::new(ETSModel::new(ETSSpec::aan(), 1))),
+        ModelType::HoltWinters => Ok(Box::new(new_holt_winters(require_period(p)?))),
+        ModelType::SeasonalNaive => Ok(Box::new(new_seasonal_naive(require_period(p)?))),
+        ModelType::SeasonalES => Ok(Box::new(new_seasonal_es(require_period(p)?))),
         ModelType::SeasonalESOptimized => {
-            let sp = if p > 1 { p } else { 12 };
-            Ok(Box::new(SeasonalESModel::optimized(sp)))
+            Ok(Box::new(new_seasonal_es_optimized(require_period(p)?)))
         }
         ModelType::SeasonalWindowAverage => {
-            // SeasonalWindowAverage::new(period, n_seasons).
-            // The adaptive computation `(values.len() / p).max(1)` used by the
-            // single-model path (forecast_seasonal_window_average) requires the series
-            // length, which is unavailable at build_forecaster construction time — the
-            // Ensemble::fit() call owns the series and calls each member's fit()
-            // independently.  We fix n_seasons=2 here as a conservative default.
-            // TODO ENS-03: derive n_seasons from series length at fit time once the
-            // Ensemble API exposes a per-member pre-fit hook.
-            let sp = if p > 1 { p } else { 12 };
-            Ok(Box::new(SeasonalWindowAverage::new(sp, 2)))
+            let sp = require_period(p)?;
+            Ok(Box::new(new_seasonal_window_average(sp, n_obs)))
         }
-        ModelType::ETS => {
-            // Use AAA spec (additive error/trend/seasonal) when period > 1, ANN otherwise
-            // ETSModel is imported as `ETS as ETSModel` at the top of this file
-            if p > 1 {
-                Ok(Box::new(ETSModel::new(ETSSpec::aaa(), p)))
-            } else {
-                Ok(Box::new(ETSModel::default()))
-            }
-        }
+        // 'ETS' without a spec means the same crate AutoETS selection as
+        // standalone 'AutoETS' (D-05/FCST-07) — an ensemble member built
+        // from 'ETS' must match the standalone 'ETS' result bit-for-bit.
+        ModelType::ETS => Ok(Box::new(new_auto_ets(p, None))),
         // State-space
-        ModelType::Kalman => Ok(Box::new(KalmanForecaster::local_level())),
+        ModelType::Kalman => Ok(Box::new(new_kalman(KalmanSpec::LocalLevel))),
         // Intermittent demand
         ModelType::CrostonClassic => Ok(Box::new(Croston::new())),
         ModelType::CrostonOptimized => Ok(Box::new(Croston::new().optimized())),
@@ -2827,6 +3694,7 @@ pub fn forecast_explicit_ensemble(
     member_names: &[String],
     method_str: Option<&str>,
     period: usize,
+    confidence_level: f64,
 ) -> Result<ForecastOutput> {
     use anofox_forecast::models::ensemble::Ensemble;
 
@@ -2839,23 +3707,41 @@ pub fn forecast_explicit_ensemble(
         });
     }
 
-    // 2. Parse combination method (reuse Phase 4 function verbatim — one definition)
-    let combination_method = parse_combination_method(method_str)?;
-
-    // 3. Interpolate NULLs and validate length (mirrors the main forecast() path)
-    let clean_values: Vec<f64> = fill_nulls_interpolate(values);
-    if clean_values.is_empty() {
-        return Err(ForecastError::InsufficientData { needed: 1, got: 0 });
-    }
-    if clean_values.len() < 3 {
-        return Err(ForecastError::InsufficientData {
-            needed: 3,
-            got: clean_values.len(),
+    // 1b. Validate confidence_level (D-01, plan 10-03 Task 3)
+    if !(confidence_level > 0.0 && confidence_level < 1.0) {
+        return Err(ForecastError::InvalidParameter {
+            param: "confidence_level".to_string(),
+            value: confidence_level.to_string(),
+            reason: "must be in the open interval (0, 1)".to_string(),
         });
     }
 
-    // 4. Build member forecasters
-    let member_period = if period > 1 { Some(period) } else { None };
+    // 2. Parse combination method (reuse Phase 4 function verbatim — one definition)
+    let combination_method = parse_combination_method(method_str)?;
+
+    // 3. Explicit input policy (D-11/D-12) — mirrors the main forecast() path,
+    // including the trailing-NULL-aware extended horizon below.
+    let prep = prepare_series(values)?;
+
+    // 4. Build member forecasters. `period == 0` auto-detects a shared
+    // period (D-07 — matches `ts_forecast_by`'s own `seasonal_period=0`
+    // default); an explicit `period > 1` always wins. A seasonal-required
+    // member reaching `build_forecaster` with no usable period is a hard
+    // error naming that member (build_forecaster's own guard).
+    let detected_period = if period > 1 {
+        period
+    } else {
+        detect_seasonality(&prep.values, None)
+            .ok()
+            .and_then(|p| p.first().copied())
+            .map(|p| p as usize)
+            .unwrap_or(0)
+    };
+    let member_period = if detected_period > 1 {
+        Some(detected_period)
+    } else {
+        None
+    };
     let mut members: Vec<anofox_forecast::models::BoxedForecaster> =
         Vec::with_capacity(member_names.len());
     for name in member_names {
@@ -2867,17 +3753,30 @@ pub fn forecast_explicit_ensemble(
                 name
             ),
         })?;
-        members.push(build_forecaster(model_type, member_period)?);
+        members.push(build_forecaster(
+            model_type,
+            member_period,
+            prep.values.len(),
+        )?);
     }
 
     // 5. Build + fit ensemble + extract forecast
     // Ensemble implements Forecaster (anofox-forecast 0.15.3, model.rs:575)
-    let ts = make_timeseries(&clean_values)?;
+    let ts = make_timeseries(&prep.values)?;
     let mut ens = Ensemble::new(members).with_method(combination_method);
     ens.fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("Ensemble fit failed: {}", e)))?;
-    // model_name = "Ensemble" (plain, mirroring Phase 4's plain "AutoEnsemble")
-    extract_forecast(&ens, horizon, "Ensemble")
+    // model_name = "Ensemble" (plain, mirroring Phase 4's plain "AutoEnsemble").
+    // D-01 (plan 10-03 Task 3): lower/upper are the crate Ensemble's own
+    // predict_with_intervals bounds (pooled across members) at
+    // confidence_level — no longer hardcoded empty. finalize_output is still
+    // used for the shared trailing-NULL alignment policy (D-12), with
+    // include_fitted/include_residuals forced false since the FFI ensemble
+    // path (anofox_ts_forecast_ensemble) always nulls those fields
+    // regardless of what this function returns.
+    let extended_horizon = horizon + prep.trail_trim;
+    let raw = extract_forecast(&ens, extended_horizon, confidence_level, "Ensemble")?;
+    Ok(finalize_output(raw, &prep, horizon, false, false))
 }
 
 // ============================================================================
@@ -2921,20 +3820,25 @@ pub fn inspect_explicit_ensemble(
     // 2. Parse combination method (reuse Phase 4 function verbatim)
     let combination_method = parse_combination_method(method_str)?;
 
-    // 3. Interpolate NULLs and validate length (mirrors forecast_explicit_ensemble)
-    let clean_values: Vec<f64> = fill_nulls_interpolate(values);
-    if clean_values.is_empty() {
-        return Err(ForecastError::InsufficientData { needed: 1, got: 0 });
-    }
-    if clean_values.len() < 3 {
-        return Err(ForecastError::InsufficientData {
-            needed: 3,
-            got: clean_values.len(),
-        });
-    }
+    // 3. Explicit input policy (D-11/D-12) — mirrors forecast_explicit_ensemble.
+    let prep = prepare_series(values)?;
 
-    // 4. Build member forecasters (same loop as forecast_explicit_ensemble)
-    let member_period = if period > 1 { Some(period) } else { None };
+    // 4. Build member forecasters (same loop + period-0-detect as
+    // forecast_explicit_ensemble, D-07).
+    let detected_period = if period > 1 {
+        period
+    } else {
+        detect_seasonality(&prep.values, None)
+            .ok()
+            .and_then(|p| p.first().copied())
+            .map(|p| p as usize)
+            .unwrap_or(0)
+    };
+    let member_period = if detected_period > 1 {
+        Some(detected_period)
+    } else {
+        None
+    };
     let mut members: Vec<anofox_forecast::models::BoxedForecaster> =
         Vec::with_capacity(member_names.len());
     for name in member_names {
@@ -2946,12 +3850,16 @@ pub fn inspect_explicit_ensemble(
                 name
             ),
         })?;
-        members.push(build_forecaster(model_type, member_period)?);
+        members.push(build_forecaster(
+            model_type,
+            member_period,
+            prep.values.len(),
+        )?);
     }
 
     // 5. Build + fit ensemble — DIVERGE: call .weights() instead of extract_forecast
     // NOTE: weights() called AFTER .fit() — pre-fit weights are always uniform (RESEARCH Pitfall 2)
-    let ts = make_timeseries(&clean_values)?;
+    let ts = make_timeseries(&prep.values)?;
     let mut ens = Ensemble::new(members).with_method(combination_method);
     ens.fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("Ensemble fit failed: {}", e)))?;
@@ -3179,193 +4087,6 @@ mod insp01_tests {
     }
 }
 
-// ============================================================================
-// Exogenous-aware forecasting functions
-// ============================================================================
-
-use anofox_regression::prelude::*;
-
-/// Fit OLS regression: y = X * beta using anofox-regression
-/// Returns coefficients (intercept + betas) and residuals
-fn fit_ols_regression(y: &[f64], x: &[Vec<f64>]) -> (Vec<f64>, Vec<f64>) {
-    let n = y.len();
-    let k = x.len(); // number of regressors
-
-    if k == 0 || n == 0 {
-        return (vec![], y.to_vec());
-    }
-
-    // Build design matrix using faer: n_obs rows × k columns
-    let x_mat = faer::Mat::from_fn(n, k, |i, j| x[j][i]);
-    let y_col = faer::Col::from_fn(n, |i| y[i]);
-
-    // Fit OLS with intercept
-    let fitted = match OlsRegressor::builder()
-        .with_intercept(true)
-        .build()
-        .fit(&x_mat, &y_col)
-    {
-        Ok(f) => f,
-        Err(_) => {
-            // Fallback: return zeros and original y as residuals
-            return (vec![0.0; k + 1], y.to_vec());
-        }
-    };
-
-    // Get coefficients: [intercept, beta1, beta2, ...]
-    // The intercept is accessed separately via fitted.intercept()
-    // The coefficients() method only returns the beta coefficients
-    let intercept = fitted.intercept().unwrap_or(0.0);
-    let coeffs_col = fitted.coefficients();
-    let mut coeffs = vec![intercept];
-    for i in 0..coeffs_col.nrows() {
-        coeffs.push(coeffs_col[i]);
-    }
-
-    // Calculate residuals: y - y_hat
-    let predictions = fitted.predict(&x_mat);
-    let residuals: Vec<f64> = (0..n).map(|i| y[i] - predictions[i]).collect();
-
-    (coeffs, residuals)
-}
-
-/// Apply regression coefficients to future X values
-fn apply_regression(coeffs: &[f64], future_x: &[Vec<f64>], horizon: usize) -> Vec<f64> {
-    if coeffs.is_empty() || future_x.is_empty() {
-        return vec![0.0; horizon];
-    }
-
-    // coeffs format: [intercept, beta1, beta2, ...]
-    let intercept = coeffs[0];
-    let betas = &coeffs[1..];
-
-    (0..horizon)
-        .map(|h| {
-            let mut effect = intercept;
-            for (j, beta) in betas.iter().enumerate() {
-                if j < future_x.len() && h < future_x[j].len() {
-                    effect += beta * future_x[j][h];
-                }
-            }
-            effect
-        })
-        .collect()
-}
-
-/// ARIMA forecast with exogenous variables (ARIMAX).
-///
-/// Approach: Regress y on X, then forecast the residuals with ARIMA,
-/// and add back the exogenous effect for forecast horizon.
-fn forecast_arima_with_exog(
-    values: &[f64],
-    horizon: usize,
-    exog: &ExogenousData,
-) -> Result<ForecastOutput> {
-    // Fit regression: y = X*beta + residuals
-    let (coeffs, residuals) = fit_ols_regression(values, &exog.historical);
-
-    // Forecast residuals with ARIMA
-    let residual_forecast = forecast_arima(&residuals, horizon)?;
-
-    // Calculate exogenous effect for future
-    let exog_effect = apply_regression(&coeffs, &exog.future, horizon);
-
-    // Combine: forecast = residual_forecast + exog_effect
-    let point: Vec<f64> = residual_forecast
-        .point
-        .iter()
-        .zip(exog_effect.iter())
-        .map(|(r, e)| r + e)
-        .collect();
-
-    Ok(ForecastOutput {
-        point,
-        lower: vec![],
-        upper: vec![],
-        fitted: None,
-        residuals: None,
-        model_name: "ARIMAX".to_string(),
-        aic: None,
-        bic: None,
-        mse: None,
-    })
-}
-
-/// Theta forecast with exogenous variables.
-///
-/// Approach: Similar to ARIMAX - regress, forecast residuals, add back exog effect.
-fn forecast_theta_with_exog(
-    values: &[f64],
-    horizon: usize,
-    exog: &ExogenousData,
-) -> Result<ForecastOutput> {
-    // Fit regression
-    let (coeffs, residuals) = fit_ols_regression(values, &exog.historical);
-
-    // Forecast residuals with Theta (STM for exog path)
-    let residual_forecast = forecast_theta_stm(&residuals, horizon, 1)?;
-
-    // Calculate exogenous effect for future
-    let exog_effect = apply_regression(&coeffs, &exog.future, horizon);
-
-    // Combine
-    let point: Vec<f64> = residual_forecast
-        .point
-        .iter()
-        .zip(exog_effect.iter())
-        .map(|(r, e)| r + e)
-        .collect();
-
-    Ok(ForecastOutput {
-        point,
-        lower: vec![],
-        upper: vec![],
-        fitted: None,
-        residuals: None,
-        model_name: "ThetaX".to_string(),
-        aic: None,
-        bic: None,
-        mse: None,
-    })
-}
-
-/// MFLES forecast with exogenous variables.
-fn forecast_mfles_with_exog(
-    values: &[f64],
-    horizon: usize,
-    periods: &[usize],
-    exog: &ExogenousData,
-) -> Result<ForecastOutput> {
-    // Fit regression
-    let (coeffs, residuals) = fit_ols_regression(values, &exog.historical);
-
-    // Forecast residuals with MFLES
-    let residual_forecast = forecast_mfles(&residuals, horizon, periods)?;
-
-    // Calculate exogenous effect for future
-    let exog_effect = apply_regression(&coeffs, &exog.future, horizon);
-
-    // Combine
-    let point: Vec<f64> = residual_forecast
-        .point
-        .iter()
-        .zip(exog_effect.iter())
-        .map(|(r, e)| r + e)
-        .collect();
-
-    Ok(ForecastOutput {
-        point,
-        lower: vec![],
-        upper: vec![],
-        fitted: None,
-        residuals: None,
-        model_name: "MFLESX".to_string(),
-        aic: None,
-        bic: None,
-        mse: None,
-    })
-}
-
 /// Check if model is an auto-selection model
 #[cfg(test)]
 fn is_auto_model(model: ModelType) -> bool {
@@ -3408,99 +4129,6 @@ fn select_best_model(values: &[f64], period: usize) -> ModelType {
         (true, false) => ModelType::Holt,
         (false, true) => ModelType::SeasonalNaive,
         (false, false) => ModelType::SES,
-    }
-}
-
-fn calculate_confidence_intervals(
-    forecasts: &[f64],
-    historical: &[f64],
-    confidence: f64,
-) -> (Vec<f64>, Vec<f64>) {
-    // Calculate residual standard error
-    let mean = historical.iter().sum::<f64>() / historical.len() as f64;
-    let variance =
-        historical.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / historical.len() as f64;
-    let std_error = variance.sqrt();
-
-    // Z-score for confidence level
-    let z = match confidence {
-        c if c >= 0.99 => 2.576,
-        c if c >= 0.95 => 1.96,
-        c if c >= 0.90 => 1.645,
-        c if c >= 0.80 => 1.28,
-        _ => 1.0,
-    };
-
-    let lower: Vec<f64> = forecasts
-        .iter()
-        .enumerate()
-        .map(|(i, &f)| f - z * std_error * ((i + 1) as f64).sqrt())
-        .collect();
-
-    let upper: Vec<f64> = forecasts
-        .iter()
-        .enumerate()
-        .map(|(i, &f)| f + z * std_error * ((i + 1) as f64).sqrt())
-        .collect();
-
-    (lower, upper)
-}
-
-fn calculate_fitted_values(values: &[f64], model: ModelType, period: usize) -> Vec<f64> {
-    match model {
-        // GARCH, Kalman, and AutoEnsemble do not surface true fitted values in v1
-        // via this path. AutoEnsemble uses `extract_forecast` which reads fitted
-        // values directly from the Forecaster trait — not via calculate_fitted_values.
-        // Return empty so the caller emits NULL for fitted/residuals rather than
-        // the misleading SES-approximated values the catch-all would produce.
-        ModelType::GARCH | ModelType::Kalman | ModelType::AutoEnsemble => vec![],
-        ModelType::Naive => {
-            let mut fitted = vec![values[0]];
-            fitted.extend(values[..values.len() - 1].iter().cloned());
-            fitted
-        }
-        ModelType::SeasonalNaive => {
-            let p = period.max(1).min(values.len());
-            let mut fitted = vec![values[0]; p.min(values.len())];
-            for i in p..values.len() {
-                fitted.push(values[i - p]);
-            }
-            fitted
-        }
-        ModelType::SeasonalWindowAverage => {
-            // Fitted values are the seasonal averages at each position
-            let p = period.max(1).min(values.len());
-            let mut seasonal_sum = vec![0.0; p];
-            let mut seasonal_count = vec![0usize; p];
-            let mut fitted = Vec::with_capacity(values.len());
-
-            for (i, &val) in values.iter().enumerate() {
-                let pos = i % p;
-                // Fitted value is the current average for this seasonal position
-                if seasonal_count[pos] > 0 {
-                    fitted.push(seasonal_sum[pos] / seasonal_count[pos] as f64);
-                } else {
-                    fitted.push(val); // No prior data, use actual
-                }
-                // Update running average
-                seasonal_sum[pos] += val;
-                seasonal_count[pos] += 1;
-            }
-            fitted
-        }
-        _ => {
-            // SES fitted values
-            let alpha = 0.3;
-            let mut fitted = Vec::with_capacity(values.len());
-            let mut level = values[0];
-            fitted.push(level);
-
-            for &v in values.iter().skip(1) {
-                fitted.push(level);
-                level = alpha * v + (1.0 - alpha) * level;
-            }
-            fitted
-        }
     }
 }
 
@@ -3588,6 +4216,15 @@ mod tests {
 
         let result = forecast(&values, &options).unwrap();
         assert_eq!(result.point.len(), 5);
+        // Value check: SES has no trend/seasonal component, so its forecast
+        // is FLAT -- every horizon step repeats the same extrapolated level.
+        let level = result.point[0];
+        assert!(level.is_finite());
+        assert!(
+            result.point.iter().all(|&p| (p - level).abs() < 1e-9),
+            "SES forecast must be flat: {:?}",
+            result.point
+        );
     }
 
     #[test]
@@ -3626,14 +4263,44 @@ mod tests {
         let options = ForecastOptions {
             model: ModelType::ARIMA,
             horizon: 5,
+            arima_order: Some([1, 1, 1]),
             ..Default::default()
         };
 
         let result = forecast(&values, &options).unwrap();
         assert_eq!(result.point.len(), 5);
-        assert_eq!(result.model_name, "ARIMA");
+        // The crate may append " with drift" (d+D==1, AICc-selected nonzero
+        // intercept) or " with non-zero mean" (d+D==0) per its own fit —
+        // only the base "ARIMA(p,d,q)" prefix is asserted here.
+        assert!(
+            result.model_name.starts_with("ARIMA(1,1,1)"),
+            "expected model_name to start with 'ARIMA(1,1,1)', got '{}'",
+            result.model_name
+        );
         // ARIMA forecasts should continue the trend
         assert!(result.point.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn test_forecast_arima_without_order_errors() {
+        // D-09: ARIMA without arima_order is a hard error naming AutoARIMA,
+        // never a silent fallback to a different model.
+        let values: Vec<Option<f64>> = (0..30)
+            .map(|i| Some(100.0 + i as f64 * 2.0 + (i % 3) as f64))
+            .collect();
+
+        let options = ForecastOptions {
+            model: ModelType::ARIMA,
+            horizon: 5,
+            ..Default::default()
+        };
+
+        let err = forecast(&values, &options).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("arima_order") && msg.contains("AutoARIMA"),
+            "expected the no-order ARIMA error to name arima_order and AutoARIMA, got: {msg}"
+        );
     }
 
     #[test]
@@ -3742,6 +4409,19 @@ mod tests {
             })
             .collect();
 
+        // Models that now require a resolved seasonal period (D-07) are
+        // given an explicit seasonal_period (matching `seasonal`'s true
+        // embedded period of 7) rather than relying on auto-detection —
+        // this test asserts naming conventions, not detector accuracy
+        // (detector tuning is Phase 15). `0` means "leave auto-detect on".
+        let seasonal_period_for = |model: ModelType| -> usize {
+            if requires_seasonal_period(model) {
+                7
+            } else {
+                0
+            }
+        };
+
         // Non-auto models: model_name must equal model.name() exactly
         let exact_cases: Vec<(ModelType, &[Option<f64>])> = vec![
             // Basic models
@@ -3762,9 +4442,14 @@ mod tests {
             (ModelType::OptimizedTheta, &seasonal),
             (ModelType::DynamicTheta, &seasonal),
             (ModelType::DynamicOptimizedTheta, &seasonal),
-            // State Space / ARIMA
-            (ModelType::ETS, &seasonal),
-            (ModelType::ARIMA, &seasonal),
+            // State Space: ETS is excluded here (D-05) — without an explicit
+            // spec it now runs the crate AutoETS selection and reports the
+            // chosen spec (e.g. "ETS(M,A,N)"), never the bare enum name;
+            // covered below in prefix_cases.
+            // ARIMA is excluded here (D-09): it now requires an explicit
+            // arima_order and reports "ARIMA(p,d,q)" (and "(P,D,Q)[s]" when
+            // seasonal), never the bare enum name — covered separately by
+            // test_forecast_arima / test_forecast_arima_without_order_errors.
             // Multiple Seasonality
             (ModelType::MFLES, &seasonal),
             (ModelType::MSTL, &seasonal),
@@ -3780,9 +4465,12 @@ mod tests {
 
         for (model_type, data) in &exact_cases {
             let expected = model_type.name();
+            let sp = seasonal_period_for(*model_type);
             let options = ForecastOptions {
                 model: *model_type,
                 horizon: 3,
+                seasonal_period: sp,
+                auto_detect_seasonality: sp == 0,
                 ..Default::default()
             };
             let result = forecast(data, &options).unwrap();
@@ -3793,14 +4481,39 @@ mod tests {
             );
         }
 
+        // D-06: AutoMFLES/AutoMSTL are documented, deprecated input aliases —
+        // model_name always reports the non-Auto family name exactly
+        // ("MFLES"/"MSTL"), never the "Auto" enum name.
+        let alias_cases: Vec<(ModelType, &str, &[Option<f64>])> = vec![
+            (ModelType::AutoMFLES, "MFLES", &seasonal),
+            (ModelType::AutoMSTL, "MSTL", &seasonal),
+        ];
+        for (model_type, expected, data) in &alias_cases {
+            let sp = seasonal_period_for(*model_type);
+            let options = ForecastOptions {
+                model: *model_type,
+                horizon: 3,
+                seasonal_period: sp,
+                auto_detect_seasonality: sp == 0,
+                ..Default::default()
+            };
+            let result = forecast(data, &options).unwrap();
+            assert_eq!(
+                result.model_name, *expected,
+                "{:?} returned model_name='{}', expected exactly '{}' (D-06 alias)",
+                model_type, result.model_name, expected
+            );
+        }
+
         // Auto models: model_name must start with model.name()
         // (they append details like "AutoARIMA(1,0,0)" or "AutoETS(A,N,N)")
         let prefix_cases: Vec<(ModelType, &[Option<f64>])> = vec![
+            // ETS (no spec) reports the crate's selected spec, e.g. "ETS(M,A,N)" (D-05).
+            (ModelType::ETS, &seasonal),
             (ModelType::AutoETS, &seasonal),
             (ModelType::AutoARIMA, &seasonal),
             (ModelType::AutoTheta, &seasonal),
-            (ModelType::AutoMFLES, &seasonal),
-            (ModelType::AutoMSTL, &seasonal),
+            // AutoTBATS: D-07 requires a resolved period just like TBATS.
             (ModelType::AutoTBATS, &seasonal),
             // Laplace's model_name is `Laplace(<variant>)` or
             // `Laplace(<variant>,seasonal=<p>)`; must start with "Laplace".
@@ -3809,9 +4522,12 @@ mod tests {
 
         for (model_type, data) in &prefix_cases {
             let prefix = model_type.name();
+            let sp = seasonal_period_for(*model_type);
             let options = ForecastOptions {
                 model: *model_type,
                 horizon: 3,
+                seasonal_period: sp,
+                auto_detect_seasonality: sp == 0,
                 ..Default::default()
             };
             let result = forecast(data, &options).unwrap();
@@ -3974,8 +4690,14 @@ mod tests {
 
     #[test]
     fn test_forecast_auto_ets_constant_series() {
-        // Constant series triggers NaN in the anofox-forecast optimizer (issue #192).
-        // The catch_unwind fallback should produce valid forecasts near the constant value.
+        // A constant series used to trigger NaN in the anofox-forecast
+        // optimizer (issue #192); anofox-forecast 0.15.10 fits it directly
+        // without panicking, so this exercises the normal Ok(Ok(..)) path,
+        // not the catch_unwind safety net. D-07 (plan 10-03): if the crate
+        // ever does fail/panic on this input again, forecast_auto_ets_core
+        // now returns a hard InvalidInput naming AutoETS — never a silent
+        // fallback to a different model — so this test would then need to
+        // assert on that error instead.
         let values: Vec<Option<f64>> = vec![Some(42.0); 30];
 
         let options = ForecastOptions {
@@ -4015,25 +4737,6 @@ mod tests {
         let values: Vec<f64> = vec![1.0, 2.0, 3.0];
         let model = select_best_model(&values, 1);
         assert_eq!(model, ModelType::Naive);
-    }
-
-    #[test]
-    fn test_calculate_confidence_intervals() {
-        let forecasts = vec![100.0, 105.0, 110.0];
-        let historical: Vec<f64> = (0..20).map(|i| 50.0 + i as f64).collect();
-
-        let (lower, upper) = calculate_confidence_intervals(&forecasts, &historical, 0.95);
-
-        assert_eq!(lower.len(), 3);
-        assert_eq!(upper.len(), 3);
-        // Lower bounds should be below forecasts
-        assert!(lower.iter().zip(&forecasts).all(|(l, f)| l < f));
-        // Upper bounds should be above forecasts
-        assert!(upper.iter().zip(&forecasts).all(|(u, f)| u > f));
-        // Intervals should widen with horizon
-        let width_1 = upper[0] - lower[0];
-        let width_3 = upper[2] - lower[2];
-        assert!(width_3 > width_1);
     }
 
     #[test]
@@ -4224,6 +4927,68 @@ mod tests {
             "ETS without explicit spec should fall back: {:?}",
             result.err()
         );
+        let result = result.unwrap();
+        // WR-03 (Phase 18 review): the former (50.0..=400.0) bound was wide
+        // enough that a forecast 2.5x the true trend ceiling would still pass.
+        // Closed form: input is perfectly linear (value[i] = 100+i, i=0..59),
+        // last observed = 159, slope = 1/step. A clean additive-trend ETS fit
+        // of a noiseless linear series should continue that trend almost
+        // exactly: point[h] ~= 159+h for h=1..5, i.e. 160..164 (confirmed by
+        // running this test: observed [160.0, 161.0, 162.0, 163.0, 164.0]).
+        // Bound generously at last_observed +/- 2*horizon*slope to tolerate
+        // ETS smoothing-parameter fitting variance without hugging the exact
+        // printed value.
+        for &v in &result.point {
+            assert!(v.is_finite());
+            assert!(
+                (149.0..=169.0).contains(&v),
+                "ETS forecast out of sane range: {v}"
+            );
+        }
+        assert!(!result.model_name.is_empty());
+    }
+
+    /// Phase 17 plan 17-01: anofox-forecast 0.16.x's ETSSpec::is_valid()
+    /// always returns true (0.16.0 CHANGELOG "Changed — ETS (UPST-03)"),
+    /// so MAA/MAdA -- previously rejected by the (now-removed) dead
+    /// wrapper validity gates -- fit successfully.
+    #[test]
+    fn test_ets_maa_and_mada_fit_successfully() {
+        let fx = crate::test_fixtures::load_fixture("r_forecast/air_passengers.json");
+        let values: Vec<Option<f64>> = crate::test_fixtures::f64_vec(&fx["inputs"]["values"])
+            .into_iter()
+            .map(Some)
+            .collect();
+
+        let maa_options = ForecastOptions {
+            model: ModelType::ETS,
+            ets_spec: Some("MAA".to_string()),
+            seasonal_period: 12,
+            horizon: 3,
+            ..Default::default()
+        };
+        let maa_result = forecast(&values, &maa_options);
+        assert!(
+            maa_result.is_ok(),
+            "ETS 'MAA' should fit on AirPassengers: {:?}",
+            maa_result.err()
+        );
+        assert_eq!(maa_result.unwrap().model_name, "ETS(M,A,A)");
+
+        let mada_options = ForecastOptions {
+            model: ModelType::ETS,
+            ets_spec: Some("MAdA".to_string()),
+            seasonal_period: 12,
+            horizon: 3,
+            ..Default::default()
+        };
+        let mada_result = forecast(&values, &mada_options);
+        assert!(
+            mada_result.is_ok(),
+            "ETS 'MAdA' should fit on AirPassengers: {:?}",
+            mada_result.err()
+        );
+        assert_eq!(mada_result.unwrap().model_name, "ETS(M,Ad,A)");
     }
 
     #[test]
@@ -4299,9 +5064,11 @@ mod tests {
     }
 
     #[test]
-    fn test_auto_arima_different_from_simple_arima() {
-        // Verify that AutoARIMA produces different results than the simplified ARIMA
-        // by testing on data that benefits from proper order selection
+    fn test_auto_arima_different_from_explicit_arima() {
+        // D-09: ARIMA now requires an explicit arima_order and fits a real
+        // crate model (no more fixed-coefficient AR(1) stand-in) — verify
+        // AutoARIMA's own order search still reports a distinct model_name
+        // from an explicitly-ordered ARIMA(1,1,1) on the same data.
         let values: Vec<Option<f64>> = (0..50)
             .map(|i| Some(100.0 + i as f64 * 2.0 + 5.0 * (i as f64 * 0.2).sin()))
             .collect();
@@ -4312,24 +5079,24 @@ mod tests {
             ..Default::default()
         };
 
-        let simple_options = ForecastOptions {
+        let explicit_options = ForecastOptions {
             model: ModelType::ARIMA,
             horizon: 5,
+            arima_order: Some([1, 1, 1]),
             ..Default::default()
         };
 
         let auto_result = forecast(&values, &auto_options).unwrap();
-        let simple_result = forecast(&values, &simple_options).unwrap();
+        let explicit_result = forecast(&values, &explicit_options).unwrap();
 
-        // AutoARIMA uses library's implementation
         assert!(auto_result.model_name.starts_with("AutoARIMA"));
-        // Simple ARIMA uses our simplified implementation
-        assert_eq!(simple_result.model_name, "ARIMA");
+        assert!(explicit_result.model_name.starts_with("ARIMA(1,1,1)"));
 
-        // Forecasts should be different (AutoARIMA selects optimal p,d,q)
-        // Note: They might occasionally be similar, but typically differ
         println!("AutoARIMA forecasts: {:?}", auto_result.point);
-        println!("Simple ARIMA forecasts: {:?}", simple_result.point);
+        println!(
+            "Explicit ARIMA(1,1,1) forecasts: {:?}",
+            explicit_result.point
+        );
     }
 
     #[test]
@@ -4497,7 +5264,7 @@ mod tests {
             5,
             "Kalman must return horizon=5 point values"
         );
-        assert_eq!(result.model_name, "Kalman");
+        assert_eq!(result.model_name, "Kalman(local_level)");
         assert!(
             result.point.iter().all(|v| v.is_finite()),
             "All Kalman forecasts must be finite"
@@ -4578,7 +5345,7 @@ mod tests {
         let mut model = GARCH::new(1, 1);
         model.fit(&ts).unwrap();
         let variance = model.forecast_variance(5).unwrap();
-        let volatility_from_core = forecast_garch(&values, 5, 1, 1).unwrap();
+        let volatility_from_core = forecast_garch(&values, 5, 1, 1, 0.95).unwrap();
         // Element 0: sqrt(variance[0]) should match volatility[0] within 1e-9
         let expected = variance[0].sqrt();
         let actual = volatility_from_core.point[0];
@@ -4660,6 +5427,14 @@ mod tests {
         let empty_result = parse_combination_method(Some(""));
         assert!(none_result.is_ok(), "None should parse as Mean");
         assert!(empty_result.is_ok(), "empty string should parse as Mean");
+        assert_eq!(
+            none_result.unwrap(),
+            anofox_forecast::models::ensemble::CombinationMethod::Mean
+        );
+        assert_eq!(
+            empty_result.unwrap(),
+            anofox_forecast::models::ensemble::CombinationMethod::Mean
+        );
     }
 
     #[test]
@@ -4694,10 +5469,10 @@ mod tests {
     fn build_forecaster_ok_for_supported_members() {
         // Naive, AutoETS, and Theta should all return Ok (non-seasonal)
         for model in &[ModelType::Naive, ModelType::AutoETS, ModelType::Theta] {
-            let result = build_forecaster(*model, None);
+            let result = build_forecaster(*model, None, 40);
             assert!(
                 result.is_ok(),
-                "build_forecaster({:?}, None) should succeed",
+                "build_forecaster({:?}, None, 40) should succeed",
                 model
             );
         }
@@ -4707,10 +5482,10 @@ mod tests {
     fn build_forecaster_err_for_blocked_variants() {
         // GARCH, ARIMA, and AutoEnsemble are blocked
         for model in &[ModelType::GARCH, ModelType::ARIMA, ModelType::AutoEnsemble] {
-            let result = build_forecaster(*model, None);
+            let result = build_forecaster(*model, None, 40);
             assert!(
                 result.is_err(),
-                "build_forecaster({:?}, None) should return Err",
+                "build_forecaster({:?}, None, 40) should return Err",
                 model
             );
             // Must be an InvalidParameter error with param == "members"
@@ -4727,11 +5502,30 @@ mod tests {
     #[test]
     fn build_forecaster_seasonal_naive_with_period() {
         // SeasonalNaive with period=7 should succeed
-        let result = build_forecaster(ModelType::SeasonalNaive, Some(7));
+        let result = build_forecaster(ModelType::SeasonalNaive, Some(7), 40);
         assert!(
             result.is_ok(),
-            "build_forecaster(SeasonalNaive, Some(7)) should succeed"
+            "build_forecaster(SeasonalNaive, Some(7), 40) should succeed"
         );
+    }
+
+    #[test]
+    fn build_forecaster_seasonal_naive_without_period_errors() {
+        // D-07: a seasonal-required member with no usable period is a hard
+        // error naming the member and seasonal_period — never a silent
+        // default of 12.
+        let result = build_forecaster(ModelType::SeasonalNaive, None, 40);
+        assert!(
+            result.is_err(),
+            "build_forecaster(SeasonalNaive, None, 40) should return Err"
+        );
+        match result {
+            Err(ForecastError::InvalidParameter { param, .. }) => {
+                assert_eq!(param, "seasonal_period");
+            }
+            Err(e) => panic!("expected InvalidParameter, got {:?}", e),
+            Ok(_) => panic!("expected Err, got Ok"),
+        }
     }
 
     #[test]
@@ -4739,7 +5533,7 @@ mod tests {
         // 48-point linear series; ['AutoETS', 'Naive'] with Mean → horizon finite values
         let values: Vec<Option<f64>> = (0..48).map(|i| Some(100.0 + i as f64 * 2.0)).collect();
         let members = vec!["AutoETS".to_string(), "Naive".to_string()];
-        let result = forecast_explicit_ensemble(&values, 6, &members, Some("mean"), 0);
+        let result = forecast_explicit_ensemble(&values, 6, &members, Some("mean"), 0, 0.90);
         assert!(
             result.is_ok(),
             "explicit ensemble on clean series should succeed: {:?}",
@@ -4747,11 +5541,26 @@ mod tests {
         );
         let out = result.unwrap();
         assert_eq!(out.point.len(), 6, "output length must equal horizon");
+        // WR-03 (Phase 18 review): the former (50.0..=400.0) bound was wide
+        // enough that a forecast 2x the true trend ceiling would still pass.
+        // Closed form: input is perfectly linear (value[i] = 100+2i, i=0..47),
+        // last observed = 194, slope = 2/step. Naive persists 194 for every
+        // horizon step (exact, deterministic); AutoETS on this noiseless
+        // trend should continue it almost exactly (~194+2h). Mean of the two
+        // is therefore ~194 + h for h=1..6, i.e. 195..200 (confirmed by
+        // running this test: observed [195.0, 196.0, 197.0, 198.0, 199.0,
+        // 200.0]). Bound generously at Naive's exact 194 +/- 2*horizon*slope
+        // to tolerate AutoETS fitting variance without hugging the exact
+        // printed value.
         for &v in &out.point {
             assert!(
                 v.is_finite(),
                 "all point forecasts must be finite, got {}",
                 v
+            );
+            assert!(
+                (170.0..=218.0).contains(&v),
+                "ensemble forecast out of sane range: {v}"
             );
         }
     }
@@ -4763,7 +5572,7 @@ mod tests {
         // This mirrors the main forecast() path behaviour for the all-None case.
         let values: Vec<Option<f64>> = vec![None; 10];
         let members = vec!["AutoETS".to_string(), "Naive".to_string()];
-        let result = forecast_explicit_ensemble(&values, 3, &members, None, 0);
+        let result = forecast_explicit_ensemble(&values, 3, &members, None, 0, 0.90);
         assert!(result.is_err(), "all-NULL input must return Err");
         // Accept either InsufficientData (empty after interpolation) or ComputationError
         // (NaN detected by ensemble fit); both surface as NULL rows via the FFI.
@@ -4780,7 +5589,7 @@ mod tests {
         // Series with only 2 observations must return InsufficientData (< 3 guard)
         let values: Vec<Option<f64>> = vec![Some(1.0), Some(2.0)];
         let members = vec!["AutoETS".to_string(), "Naive".to_string()];
-        let result = forecast_explicit_ensemble(&values, 3, &members, None, 0);
+        let result = forecast_explicit_ensemble(&values, 3, &members, None, 0, 0.90);
         assert!(result.is_err(), "2-observation series must return Err");
         match result.unwrap_err() {
             ForecastError::InsufficientData { needed, got } => {
@@ -4799,11 +5608,123 @@ mod tests {
         // Duplicate member names should not cause an error
         let values: Vec<Option<f64>> = (0..40).map(|i| Some(i as f64)).collect();
         let members = vec!["AutoETS".to_string(), "AutoETS".to_string()];
-        let result = forecast_explicit_ensemble(&values, 4, &members, None, 0);
+        let result = forecast_explicit_ensemble(&values, 4, &members, None, 0, 0.90);
         assert!(
             result.is_ok(),
             "duplicate members should be allowed: {:?}",
             result.err()
         );
+        // Value check: Mean (the default when method is None) of two
+        // IDENTICAL AutoETS members reproduces standalone AutoETS exactly --
+        // the mean of two equal numbers is that number.
+        let ensemble_point = result.unwrap().point;
+        let standalone = forecast(
+            &values,
+            &ForecastOptions {
+                model: ModelType::AutoETS,
+                horizon: 4,
+                confidence_level: 0.90,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(ensemble_point.len(), standalone.point.len());
+        for (e, s) in ensemble_point.iter().zip(&standalone.point) {
+            assert!(
+                (e - s).abs() < 1e-9,
+                "duplicate-AutoETS ensemble {e} != standalone AutoETS {s}"
+            );
+        }
+    }
+
+    /// FCST-07: for every ModelType build_forecaster can construct, fitting
+    /// it directly (the ensemble-member path) and calling
+    /// predict_with_intervals(12, 0.95) gives a point forecast bit-identical
+    /// to standalone forecast() with the same seasonal_period/confidence —
+    /// proving build_forecaster's shared constructors (new_auto_ets,
+    /// new_holt_winters, new_seasonal_naive, ...) are not merely similar to
+    /// the standalone path but call the exact same crate constructor.
+    #[test]
+    fn build_forecaster_matches_standalone_forecast_for_every_member() {
+        let fx = crate::test_fixtures::load_fixture("r_forecast/air_passengers.json");
+        let values: Vec<Option<f64>> = crate::test_fixtures::f64_vec(&fx["inputs"]["values"])
+            .into_iter()
+            .map(Some)
+            .collect();
+        let n_obs = values.len();
+
+        // Seasonal-required members (D-07) need an explicit period > 1.
+        let seasonal_models: &[ModelType] = &[
+            ModelType::HoltWinters,
+            ModelType::SeasonalNaive,
+            ModelType::SeasonalES,
+            ModelType::SeasonalESOptimized,
+            ModelType::SeasonalWindowAverage,
+        ];
+        // Every other ModelType build_forecaster actually constructs
+        // (the rest are intentionally unsupported — GARCH, Laplace, ARIMA,
+        // MFLES/AutoMFLES, MSTL/AutoMSTL, TBATS/AutoTBATS, AutoEnsemble).
+        let non_seasonal_models: &[ModelType] = &[
+            ModelType::AutoARIMA,
+            ModelType::AutoETS,
+            ModelType::AutoTheta,
+            ModelType::Theta,
+            ModelType::OptimizedTheta,
+            ModelType::DynamicTheta,
+            ModelType::DynamicOptimizedTheta,
+            ModelType::Naive,
+            ModelType::RandomWalkDrift,
+            ModelType::SES,
+            ModelType::SESOptimized,
+            ModelType::SMA,
+            ModelType::Holt,
+            ModelType::ETS,
+            ModelType::Kalman,
+            ModelType::CrostonClassic,
+            ModelType::CrostonOptimized,
+            ModelType::CrostonSBA,
+            ModelType::ADIDA,
+            ModelType::IMAPA,
+            ModelType::TSB,
+        ];
+
+        let prep = prepare_series(&values).expect("AirPassengers should prepare cleanly");
+        assert_eq!(
+            prep.trail_trim, 0,
+            "test assumes no trailing NULLs so point[] alignment is 1:1"
+        );
+        let ts = make_timeseries(&prep.values).expect("make_timeseries should succeed");
+
+        for &mt in seasonal_models.iter().chain(non_seasonal_models.iter()) {
+            let seasonal = seasonal_models.contains(&mt);
+            let period = if seasonal { Some(12) } else { None };
+
+            let mut member = build_forecaster(mt, period, n_obs)
+                .unwrap_or_else(|e| panic!("build_forecaster({:?}) failed: {:?}", mt, e));
+            member
+                .fit(&ts)
+                .unwrap_or_else(|e| panic!("{:?} member fit failed: {e}", mt));
+            let member_forecast = member
+                .predict_with_intervals(12, 0.95)
+                .unwrap_or_else(|e| panic!("{:?} member predict failed: {e}", mt));
+
+            let options = ForecastOptions {
+                model: mt,
+                horizon: 12,
+                seasonal_period: period.unwrap_or(0),
+                auto_detect_seasonality: false,
+                confidence_level: 0.95,
+                ..Default::default()
+            };
+            let standalone = forecast(&values, &options)
+                .unwrap_or_else(|e| panic!("standalone forecast({:?}) failed: {:?}", mt, e));
+
+            assert_eq!(
+                member_forecast.primary().to_vec(),
+                standalone.point,
+                "{:?}: ensemble-member point != standalone point",
+                mt
+            );
+        }
     }
 }

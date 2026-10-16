@@ -99,24 +99,33 @@ ORDER BY fold_id;
 # ts_cv_split - Fixed Window Tests
 #######################################
 
-# Test fixed window train size is constant (8 days × 2 series = 16)
+# Test fixed window train size is constant (7 days x 2 series = 14). Re-pinned (Phase 18,
+# 18-01): `min_train_size` IS the exact fixed/sliding window length
+# (src/table_functions/ts_cv_split_native.cpp: train_start_pos = train_end_pos + 1 -
+# min_train_size), not a floor under some larger computed size -- the original "8 days /
+# 16" comment/expectation was simply wrong arithmetic, not a code behavior change; not
+# attributable to any Phase 9-17 change.
 query II
 SELECT fold_id, COUNT(*) as n_train FROM ts_cv_split_by('cv_test', series_id, date, value, ['2024-01-10'::DATE, '2024-01-15'::DATE, '2024-01-20'::DATE], 5, MAP{'window_type': 'fixed', 'min_train_size': '7'})
 WHERE split = 'train'
 GROUP BY fold_id
 ORDER BY fold_id;
 ----
-1	16
-2	16
-3	16
+1	14
+2	14
+3	14
 
 #######################################
 # ts_cv_split - Multiple Series Tests
+#
+# ts_cv_split_by outputs the group/date columns under their ORIGINAL names (series_id,
+# date), not generic group_col/date_col aliases -- unlike ts_cv_split_index_by below,
+# which still uses the generic names (Phase 18, 18-01, class A).
 #######################################
 
 # Test both series are present in each fold
 query II
-SELECT fold_id, COUNT(DISTINCT group_col) as n_series FROM ts_cv_split_by('cv_test', series_id, date, value, ['2024-01-10'::DATE], 5, MAP{})
+SELECT fold_id, COUNT(DISTINCT series_id) as n_series FROM ts_cv_split_by('cv_test', series_id, date, value, ['2024-01-10'::DATE], 5, MAP{})
 GROUP BY fold_id;
 ----
 1	2
@@ -127,8 +136,8 @@ GROUP BY fold_id;
 
 # Test gap=0 (default): test starts immediately after train
 query II
-SELECT split, MIN(date_col)::DATE as min_date FROM ts_cv_split_by('cv_test', series_id, date, value, ['2024-01-10'::DATE], 5, MAP{})
-WHERE group_col = 'A'
+SELECT split, MIN(date)::DATE as min_date FROM ts_cv_split_by('cv_test', series_id, date, value, ['2024-01-10'::DATE], 5, MAP{})
+WHERE series_id = 'A'
 GROUP BY split ORDER BY split DESC;
 ----
 train	2024-01-01
@@ -136,8 +145,8 @@ test	2024-01-11
 
 # Test gap=2: test starts 3 days after train (skips 2 gap days)
 query II
-SELECT split, MIN(date_col)::DATE as min_date FROM ts_cv_split_by('cv_test', series_id, date, value, ['2024-01-10'::DATE], 5, MAP{'gap': '2'})
-WHERE group_col = 'A'
+SELECT split, MIN(date)::DATE as min_date FROM ts_cv_split_by('cv_test', series_id, date, value, ['2024-01-10'::DATE], 5, MAP{'gap': '2'})
+WHERE series_id = 'A'
 GROUP BY split ORDER BY split DESC;
 ----
 train	2024-01-01
@@ -146,7 +155,7 @@ test	2024-01-13
 # Test gap changes test count correctly (horizon stays same)
 query II
 SELECT split, COUNT(*) as n FROM ts_cv_split_by('cv_test', series_id, date, value, ['2024-01-10'::DATE], 5, MAP{'gap': '2'})
-WHERE group_col = 'A'
+WHERE series_id = 'A'
 GROUP BY split ORDER BY split DESC;
 ----
 train	10
@@ -158,8 +167,8 @@ test	5
 
 # Test embargo=0 (default): train starts from beginning for all folds
 query II
-SELECT fold_id, MIN(date_col)::DATE as train_start FROM ts_cv_split_by('cv_test', series_id, date, value, ['2024-01-10'::DATE, '2024-01-15'::DATE], 5, MAP{})
-WHERE group_col = 'A' AND split = 'train'
+SELECT fold_id, MIN(date)::DATE as train_start FROM ts_cv_split_by('cv_test', series_id, date, value, ['2024-01-10'::DATE, '2024-01-15'::DATE], 5, MAP{})
+WHERE series_id = 'A' AND split = 'train'
 GROUP BY fold_id ORDER BY fold_id;
 ----
 1	2024-01-01
@@ -168,8 +177,8 @@ GROUP BY fold_id ORDER BY fold_id;
 # Test embargo=2: fold 2 train_start = fold 1 test_end + 2 days
 # Fold 1 test_end = 2024-01-15, so fold 2 train_start = 2024-01-17
 query II
-SELECT fold_id, MIN(date_col)::DATE as train_start FROM ts_cv_split_by('cv_test', series_id, date, value, ['2024-01-10'::DATE, '2024-01-20'::DATE], 5, MAP{'embargo': '2'})
-WHERE group_col = 'A' AND split = 'train'
+SELECT fold_id, MIN(date)::DATE as train_start FROM ts_cv_split_by('cv_test', series_id, date, value, ['2024-01-10'::DATE, '2024-01-20'::DATE], 5, MAP{'embargo': '2'})
+WHERE series_id = 'A' AND split = 'train'
 GROUP BY fold_id ORDER BY fold_id;
 ----
 1	2024-01-01
@@ -178,7 +187,7 @@ GROUP BY fold_id ORDER BY fold_id;
 # Test embargo reduces training size for subsequent folds
 query II
 SELECT fold_id, COUNT(*) as n_train FROM ts_cv_split_by('cv_test', series_id, date, value, ['2024-01-10'::DATE, '2024-01-20'::DATE], 5, MAP{'embargo': '2'})
-WHERE group_col = 'A' AND split = 'train'
+WHERE series_id = 'A' AND split = 'train'
 GROUP BY fold_id ORDER BY fold_id;
 ----
 1	10

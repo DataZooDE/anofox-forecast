@@ -6,46 +6,37 @@
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include "duckdb/common/types/vector.hpp"
+#include "ts_list_marshal.hpp"
+#include <cmath>
 
 namespace duckdb {
+
+// List extraction and scalar-parameter reads below go through
+// ts_list_marshal.hpp's ListDoubleReader::ReadSingleSeries and
+// ScalarArgReader<T> (Phase 12 D-01/D-03/D-04/T-12-07, plan 12-02): the series
+// is NULL-free after the Rust single-series gate (trims leading/trailing
+// NULLs, errors on an interior NULL naming its 1-based position), and every
+// scalar parameter (period, thresholds) is read per row (constant-vector
+// safe) instead of row 0.
 
 // ============================================================================
 // ts_detect_seasonality - Returns array of detected periods
 // ============================================================================
 
-static void ExtractListAsDouble(Vector &list_vec, idx_t row_idx, vector<double> &out_values) {
-    auto list_data = ListVector::GetData(list_vec);
-    auto &list_entry = list_data[row_idx];
-
-    auto &child_vec = ListVector::GetEntry(list_vec);
-    auto child_data = FlatVector::GetData<double>(child_vec);
-    auto &child_validity = FlatVector::Validity(child_vec);
-
-    out_values.clear();
-    out_values.reserve(list_entry.length);
-
-    for (idx_t i = 0; i < list_entry.length; i++) {
-        idx_t child_idx = list_entry.offset + i;
-        if (child_validity.RowIsValid(child_idx)) {
-            out_values.push_back(child_data[child_idx]);
-        }
-    }
-}
-
 static void TsDetectSeasonalityFunction(DataChunk &args, ExpressionState &state, Vector &result) {
     auto &list_vec = args.data[0];
     idx_t count = args.size();
 
+    ListDoubleReader series_reader(list_vec, count);
+
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
+    vector<double> values;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(list_vec, row_idx)) {
+        if (!series_reader.ReadSingleSeries(row_idx, values, "ts_detect_seasonality")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
-
-        vector<double> values;
-        ExtractListAsDouble(list_vec, row_idx, values);
 
         int *periods = nullptr;
         size_t n_periods = 0;
@@ -143,20 +134,20 @@ static LogicalType GetSeasonalityResultType() {
 
 // Version with timestamps (C++ API compatible)
 static void TsAnalyzeSeasonalityWithTimestampsFunction(DataChunk &args, ExpressionState &state, Vector &result) {
-    auto &ts_vec = args.data[0];      // timestamps (ignored internally)
+    auto &ts_vec = args.data[0];      // timestamps (ignored internally; never read)
     auto &values_vec = args.data[1];  // values
     idx_t count = args.size();
 
+    ListDoubleReader series_reader(values_vec, count);
+
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
+    vector<double> values;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx)) {
+        if (!series_reader.ReadSingleSeries(row_idx, values, "ts_analyze_seasonality")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
-
-        vector<double> values;
-        ExtractListAsDouble(values_vec, row_idx, values);
 
         SeasonalityResult seas_result;
         memset(&seas_result, 0, sizeof(seas_result));
@@ -212,16 +203,16 @@ static void TsAnalyzeSeasonalityFunction(DataChunk &args, ExpressionState &state
     auto &values_vec = args.data[0];
     idx_t count = args.size();
 
+    ListDoubleReader series_reader(values_vec, count);
+
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
+    vector<double> values;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx)) {
+        if (!series_reader.ReadSingleSeries(row_idx, values, "ts_analyze_seasonality")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
-
-        vector<double> values;
-        ExtractListAsDouble(values_vec, row_idx, values);
 
         SeasonalityResult seas_result;
         memset(&seas_result, 0, sizeof(seas_result));
@@ -396,35 +387,41 @@ static void SetBigintListField(Vector &list_vec, idx_t row_idx, const size_t *da
 // ts_classify_seasonality(values, period, [strength_threshold], [timing_threshold])
 static void TsClassifySeasonalityFunction(DataChunk &args, ExpressionState &state, Vector &result) {
     auto &values_vec = args.data[0];
-    auto &period_vec = args.data[1];
     idx_t count = args.size();
 
-    // Get optional threshold parameters
-    double strength_threshold = 0.3;  // default
-    double timing_threshold = 0.1;    // default
+    ListDoubleReader series_reader(values_vec, count);
+    ScalarArgReader<double> period_reader(args.data[1], count);
 
-    if (args.ColumnCount() > 2 && !FlatVector::IsNull(args.data[2], 0)) {
-        strength_threshold = FlatVector::GetData<double>(args.data[2])[0];
+    bool has_strength_threshold = (args.ColumnCount() > 2);
+    unique_ptr<ScalarArgReader<double>> strength_threshold_reader;
+    if (has_strength_threshold) {
+        strength_threshold_reader = make_uniq<ScalarArgReader<double>>(args.data[2], count);
     }
-    if (args.ColumnCount() > 3 && !FlatVector::IsNull(args.data[3], 0)) {
-        timing_threshold = FlatVector::GetData<double>(args.data[3])[0];
+    bool has_timing_threshold = (args.ColumnCount() > 3);
+    unique_ptr<ScalarArgReader<double>> timing_threshold_reader;
+    if (has_timing_threshold) {
+        timing_threshold_reader = make_uniq<ScalarArgReader<double>>(args.data[3], count);
     }
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
+    vector<double> values;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        if (FlatVector::IsNull(values_vec, row_idx) || FlatVector::IsNull(period_vec, row_idx)) {
+        if (period_reader.IsNull(row_idx) ||
+            !series_reader.ReadSingleSeries(row_idx, values, "ts_classify_seasonality")) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        vector<double> values;
-        ExtractListAsDouble(values_vec, row_idx, values);
+        double period = period_reader.Get(row_idx);
 
-        double period = FlatVector::GetData<double>(period_vec)[row_idx];
-        if (period <= 0 || values.size() < static_cast<size_t>(2 * period)) {
-            FlatVector::SetNull(result, row_idx, true);
-            continue;
+        double strength_threshold = 0.3;  // default
+        if (has_strength_threshold && !strength_threshold_reader->IsNull(row_idx)) {
+            strength_threshold = strength_threshold_reader->Get(row_idx);
+        }
+        double timing_threshold = 0.1;  // default
+        if (has_timing_threshold && !timing_threshold_reader->IsNull(row_idx)) {
+            timing_threshold = timing_threshold_reader->Get(row_idx);
         }
 
         // Call FFI for seasonality classification
@@ -443,6 +440,23 @@ static void TsClassifySeasonalityFunction(DataChunk &args, ExpressionState &stat
         );
 
         if (!success) {
+            // CR-06/WR-04: delegate period validation to the single source
+            // of truth (crates/anofox-fcst-core/src/seasonality.rs ::
+            // classify_seasonality, which rejects a non-finite or
+            // non-positive period as InvalidParameter before any
+            // `period as usize` cast), mapped to INVALID_INPUT at the FFI
+            // boundary (ffi_error_code, fixed in 86802cc for this same
+            // function's FFI entry point). This removes the local
+            // std::isfinite + static_cast<size_t>(2 * period) UB-prone
+            // pre-check entirely and unifies this function's error wording
+            // with its 8 siblings (ts_seasonal_strength,
+            // ts_decompose_seasonal, etc). Insufficient-data failures
+            // (error.code != INVALID_INPUT) keep returning NULL, matching
+            // every other period-validating function in this file.
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_classify_seasonality: %s",
+                    error.message ? error.message : "invalid input");
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }

@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 1
+open_count: 4
 waived_count: 0
 fixed_count: 0
-total_count: 1
-last_updated: 2026-08-21T10:09:15.852Z
+total_count: 4
+last_updated: 2026-10-15T06:03:25.112Z
 ---
 
 # Broken Windows Ledger
@@ -16,6 +16,9 @@ last_updated: 2026-08-21T10:09:15.852Z
 | id | phase | kind | file | line | description | status | reason | recorded_at | resolved_at |
 |----|-------|------|------|------|-------------|--------|--------|-------------|-------------|
 | 1 | 1 | stub | docs/api/10-diagnostics.md |  | Placeholder stubs for ts_kpss, ts_stationarity, ts_ljung_box, ts_durbin_watson, ts_jarque_bera, ts_residual_diagnostics_by (Plans 01-2/01-3) | open |  | 2026-08-21T10:09:15.852Z |  |
+| 2 | 10 | unmet-truth | test/sql/ts_model_distinctness.test | 101 | SeasonalES/SeasonalESOptimized expected values stale since Plan 10-03's resolve_period change (e01e87b); never re-blessed. Discovered during Plan 10-04 Task 3 full-suite run; not caused by 10-04. | open |  | 2026-10-09T15:05:43.862Z |  |
+| 3 | 17 | deviation | test/sql/ts_model_distinctness.test | 126 | Pre-existing MSTL point-value drift (18.18416 -> 18.186245) found while re-blessing the Holt row for D-13; unrelated to the Holt remap, re-pinned to the measured value (deferred-items.md). | open |  | 2026-10-15T06:03:20.661Z |  |
+| 4 | 17 | deviation | docs/api/07-forecasting.md |  | Pre-existing snippet-harness FAIL (sales_data example, untouched block) found during Task 4's --all sweep; reproduces identically on pre-Task-4 HEAD, not fixed (out of scope, deferred-items.md). | open |  | 2026-10-15T06:03:25.112Z |  |
 
 ````json
 [
@@ -29,6 +32,42 @@ last_updated: 2026-08-21T10:09:15.852Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-08-21T10:09:15.852Z",
+    "resolved_at": null
+  },
+  {
+    "id": 2,
+    "kind": "unmet-truth",
+    "phase": "10",
+    "file": "test/sql/ts_model_distinctness.test",
+    "line": 101,
+    "description": "SeasonalES/SeasonalESOptimized expected values stale since Plan 10-03's resolve_period change (e01e87b); never re-blessed. Discovered during Plan 10-04 Task 3 full-suite run; not caused by 10-04.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-09T15:05:43.862Z",
+    "resolved_at": null
+  },
+  {
+    "id": 3,
+    "kind": "deviation",
+    "phase": "17",
+    "file": "test/sql/ts_model_distinctness.test",
+    "line": 126,
+    "description": "Pre-existing MSTL point-value drift (18.18416 -> 18.186245) found while re-blessing the Holt row for D-13; unrelated to the Holt remap, re-pinned to the measured value (deferred-items.md).",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-15T06:03:20.661Z",
+    "resolved_at": null
+  },
+  {
+    "id": 4,
+    "kind": "deviation",
+    "phase": "17",
+    "file": "docs/api/07-forecasting.md",
+    "line": null,
+    "description": "Pre-existing snippet-harness FAIL (sales_data example, untouched block) found during Task 4's --all sweep; reproduces identically on pre-Task-4 HEAD, not fixed (out of scope, deferred-items.md).",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-15T06:03:25.112Z",
     "resolved_at": null
   }
 ]

@@ -1,0 +1,13 @@
+docs/reference/models/multi-seasonal/mfles.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'MFLES', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/multi-seasonal/mfles.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/multi-seasonal/auto_mfles.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'AutoMFLES', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/multi-seasonal/auto_mfles.md	1	PASS	SELECT meter_id, round(ts_detect_periods_agg(timestamp, consumption, 'fft').primary_period) AS prima	
+docs/reference/models/multi-seasonal/mstl.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'MSTL', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/multi-seasonal/mstl.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/multi-seasonal/mstl.md	2	SYNOPSIS	CREATE OR REPLACE TABLE trend_only AS	Invalid Input Error: Invalid input: no seasonal period could be detected for model 'MSTL'; pass seasonal_period (or seasonal_periods) explicitly
+docs/reference/models/multi-seasonal/mstl.md	3	PASS	CREATE OR REPLACE TABLE sales_history AS	
+docs/reference/models/multi-seasonal/auto_mstl.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'AutoMSTL', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/multi-seasonal/auto_mstl.md	1	PASS	SELECT product_id, round(ts_detect_periods_agg(date, quantity, 'fft').primary_period) AS primary_per	
+docs/reference/models/multi-seasonal/tbats.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'TBATS', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/multi-seasonal/tbats.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/multi-seasonal/tbats.md	2	SYNOPSIS	CREATE OR REPLACE TABLE trend_only AS	Invalid Input Error: Invalid input: no seasonal period could be detected for model 'TBATS'; pass seasonal_period (or seasonal_periods) explicitly

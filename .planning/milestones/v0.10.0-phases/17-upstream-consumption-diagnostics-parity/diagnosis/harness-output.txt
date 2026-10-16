@@ -1,0 +1,108 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running tests/r_parity_diagnosis.rs (target/debug/deps/r_parity_diagnosis-382c3a50434319e2)
+
+running 9 tests
+RC-04 repro: own_fit_loglik=-380.625612 loglik_at_r_params=-374.538408
+test repro_rc_04 ... ok
+RC-05 repro: worst crate/R half-width ratio=0.8184
+test repro_rc_05 ... ok
+explicit ARIMA(2,1,1)(0,1,0)[12] on air: model_name=ARIMA(2,1,1)(0,1,0)[12] point_dev=6.883204e-3 interval_dev=2.489813e-1
+  h= 1 r_half= 22.5498 c_half= 23.4523 ratio(c/r)=1.0400
+  h= 2 r_half= 26.4646 c_half= 24.4952 ratio(c/r)=0.9256
+  h= 3 r_half= 29.7091 c_half= 25.4954 ratio(c/r)=0.8582
+  h= 4 r_half= 31.8307 c_half= 26.4578 ratio(c/r)=0.8312
+  h= 5 r_half= 33.3992 c_half= 27.3864 ratio(c/r)=0.8200
+  h= 6 r_half= 34.5618 c_half= 28.2846 ratio(c/r)=0.8184
+  h= 7 r_half= 35.4479 c_half= 29.1551 ratio(c/r)=0.8225
+  h= 8 r_half= 36.1345 c_half= 30.0003 ratio(c/r)=0.8302
+  h= 9 r_half= 36.6756 c_half= 30.8224 ratio(c/r)=0.8404
+  h=10 r_half= 37.1089 c_half= 31.6231 ratio(c/r)=0.8522
+  h=11 r_half= 37.4612 c_half= 32.4041 ratio(c/r)=0.8650
+  h=12 r_half= 37.7520 c_half= 33.1666 ratio(c/r)=0.8785
+test autoarima_air_explicit_arima_e8_probe ... ok
+=== air/holt/ETS:AAN ===
+  E5: loglik_rel_dev=2.633e-16 point_rel_dev=1.138e-15 interval_dev=8.062e-10
+  E6 air/holt/ETS:AAN: crate_loglik=-863.582556 r_loglik=-863.647300 gap=0.064743 alpha=Some(0.9999) beta=Some(0.0001) gamma=None phi=None in_r_bounds=true -> reference (R optimiser stopped at an inferior, in-bounds optimum)
+E3 timestamp sensitivity: interval_dev synthetic_hourly=2.489813e-1 real_monthly=2.489813e-1 same_bits=true
+test autoarima_air_e3_timestamp_probe ... ok
+=== air/holt/Holt (E4 mapping check) ===
+  HoltLinearTrend: point_dev=1.155e-1 interval_dev=2.312e-1
+  ETS(A,A,N) R-faithful: point_dev=1.684e-2 interval_dev=3.334e-2 cut=6.86x
+=== air/hw_additive/HoltWinters (E4 mapping check) ===
+  HoltWinters: point_dev=2.149e-1 interval_dev=1.864e0
+  ETS(A,A,A) R-faithful: point_dev=2.060e-1 interval_dev=1.867e0 cut=1.04x
+=== air/hw_additive/ETS:AAA ===
+  E5: loglik_rel_dev=4.453e-16 point_rel_dev=9.915e-16 interval_dev=8.062e-10
+  E6 air/hw_additive/ETS:AAA: crate_loglik=-718.500709 r_loglik=-765.935848 gap=47.435139 alpha=Some(0.2527606240458275) beta=Some(0.0001) gamma=Some(0.7472393759541724) phi=None in_r_bounds=true -> reference (R optimiser stopped at an inferior, in-bounds optimum)
+RC-03 repro: crate_loglik=-683.964133 r_loglik=-679.583216
+test repro_rc_03 ... ok
+=== air/hw_multiplicative/ETS:MAM ===
+  E5: loglik_rel_dev=8.288e-16 point_rel_dev=8.924e-16 interval_dev=6.110e-2
+  E6 air/hw_multiplicative/ETS:MAM: crate_loglik=-681.105288 r_loglik=-685.827096 gap=4.721808 alpha=Some(0.789859117685874) beta=Some(0.00010000000053192473) gamma=Some(0.21014088231412598) phi=None in_r_bounds=true -> reference (R optimiser stopped at an inferior, in-bounds optimum)
+=== air/ets_auto/AutoETS ===
+  R selected: MAdM (AICc 1400.6384)
+  crate selected: Some("ETS(M,A,M)")
+  E7 candidate ANN: r_aicc=1733.9582 crate_aicc=1733.9582 diff=-0.0000
+  E7 candidate ANA: r_aicc=1568.6091 crate_aicc=1512.8220 diff=-55.7871
+  E7 candidate AAN: r_aicc=1737.7294 crate_aicc=1737.5999 diff=-0.1295
+  E7 candidate AAA: r_aicc=1570.7288 crate_aicc=1475.8586 diff=-94.8703
+  E7 candidate AAdN: r_aicc=1740.2053 crate_aicc=1740.1965 diff=-0.0088
+  E7 candidate AAdA: r_aicc=1576.7029 crate_aicc=1486.0741 diff=-90.6288
+  E7 candidate MNN: r_aicc=1674.0717 crate_aicc=1674.0831 diff=0.0114
+  E7 candidate MNA: r_aicc=1584.5423 crate_aicc=1521.8636 diff=-62.6787
+  E7 candidate MNM: r_aicc=1465.0644 crate_aicc=1409.2427 diff=-55.8217
+  E7 candidate MAN: r_aicc=1674.2299 crate_aicc=1673.4113 diff=-0.8186
+  E7 candidate MAA: r_aicc=1575.3240 crate_aicc=1441.1755 diff=-134.1485
+  E7 candidate MAM: r_aicc=1403.6644 crate_aicc=1401.0677 diff=-2.5967
+  E7 candidate MAdN: r_aicc=1679.4366 crate_aicc=1679.3999 diff=-0.0367
+  E7 candidate MAdA: r_aicc=1588.6819 crate_aicc=1449.7105 diff=-138.9714
+  E7 candidate MAdM: r_aicc=1400.6384 crate_aicc=1409.4003 diff=8.7618
+  E6 air/ets_auto/AutoETS (spec M,Ad,M, R's pick): crate_loglik=-683.964133 r_loglik=-679.583216 gap=-4.380917 alpha=Some(0.8024211075374774) beta=Some(0.019688598829206226) gamma=Some(0.19757889246252258) phi=Some(0.98) in_r_bounds=true -> crate (crate optimiser misses an optimum its own objective scores higher)
+=== air/ets_MAM/ETS:MAM ===
+  E5: loglik_rel_dev=3.332e-16 point_rel_dev=1.388e-15 interval_dev=8.736e-2
+  E6 air/ets_MAM/ETS:MAM: crate_loglik=-681.105288 r_loglik=-682.403619 gap=1.298331 alpha=Some(0.789859117685874) beta=Some(0.00010000000053192473) gamma=Some(0.21014088231412598) phi=None in_r_bounds=true -> reference (R optimiser stopped at an inferior, in-bounds optimum)
+=== air/ets_AAA/ETS:AAA ===
+  E5: loglik_rel_dev=4.453e-16 point_rel_dev=9.915e-16 interval_dev=8.062e-10
+  E6 air/ets_AAA/ETS:AAA: crate_loglik=-718.500709 r_loglik=-765.935848 gap=47.435139 alpha=Some(0.2527606240458275) beta=Some(0.0001) gamma=Some(0.7472393759541724) phi=None in_r_bounds=true -> reference (R optimiser stopped at an inferior, in-bounds optimum)
+=== rw/holt/ETS:AAN ===
+  E5: loglik_rel_dev=1.101e-15 point_rel_dev=4.759e-15 interval_dev=8.062e-10
+  E6 rw/holt/ETS:AAN: crate_loglik=-515.765392 r_loglik=-516.366200 gap=0.600808 alpha=Some(0.9979563951340368) beta=Some(0.0001) gamma=None phi=None in_r_bounds=true -> reference (R optimiser stopped at an inferior, in-bounds optimum)
+=== rw/holt/Holt (E4 mapping check) ===
+  HoltLinearTrend: point_dev=7.517e-2 interval_dev=3.262e-1
+  ETS(A,A,N) R-faithful: point_dev=5.604e-3 interval_dev=1.960e-2 cut=13.41x
+=== inter/ses/SESOptimized (E4/E5/E9) ===
+  SimpleExponentialSmoothing::auto(): point_dev=7.392e-1 interval_dev=3.830e-1
+  ETS(A,N,N) R-faithful mapping: point_dev=7.392e-1 interval_dev=3.830e-1 cut=1.00x
+  E5 ETS(A,N,N) at R's params: loglik_rel_dev=0.000e0 point_rel_dev=6.437e-15 interval_dev=8.062e-10
+  E6 inter/ses/ETS:ANN: crate_loglik=-380.625612 r_loglik=-374.538408 gap=-6.087205 alpha=Some(0.13911309509277336) beta=None gamma=None phi=None in_r_bounds=true -> crate (crate optimiser misses an optimum its own objective scores higher)
+  SES own fit: alpha=Some(0.13911437988281217) l0_fixed_to_values[0]=4
+  R ses(inter) par: alpha=0.000100000835353129 l0=1.24173768106333
+=== trend/holt/Holt (E4 mapping check) ===
+  HoltLinearTrend: point_dev=1.653e-3 interval_dev=2.483e-1
+  ETS(A,A,N) R-faithful: point_dev=5.495e-4 interval_dev=6.532e-3 cut=3.01x
+diagnosis rows: 12
+test diagnosis_report ... ok
+test wrapper_equals_direct_crate_construction ... ok
+=== D-15 Miss E8: air/auto_arima interval ===
+  AutoARIMA == explicit ARIMA at same order? point false lower false upper false
+  h= 1 r_point=  445.635 c_point=  445.597 r_half= 22.5498 c_half= 23.4714 ratio(c/r)=1.0409
+  h= 2 r_point=  420.395 c_point=  420.334 r_half= 26.4646 c_half= 24.5150 ratio(c/r)=0.9263
+  h= 3 r_point=  449.198 c_point=  449.116 r_half= 29.7091 c_half= 25.5161 ratio(c/r)=0.8589
+  h= 4 r_point=  491.840 c_point=  491.740 r_half= 31.8307 c_half= 26.4793 ratio(c/r)=0.8319
+  h= 5 r_point=  503.394 c_point=  503.279 r_half= 33.3992 c_half= 27.4086 ratio(c/r)=0.8206
+  h= 6 r_point=  566.862 c_point=  566.734 r_half= 34.5618 c_half= 28.3075 ratio(c/r)=0.8190
+  h= 7 r_point=  654.260 c_point=  654.121 r_half= 35.4479 c_half= 29.1787 ratio(c/r)=0.8231
+  h= 8 r_point=  638.597 c_point=  638.449 r_half= 36.1345 c_half= 30.0247 ratio(c/r)=0.8309
+  h= 9 r_point=  540.884 c_point=  540.727 r_half= 36.6756 c_half= 30.8474 ratio(c/r)=0.8411
+  h=10 r_point=  494.127 c_point=  493.964 r_half= 37.1089 c_half= 31.6488 ratio(c/r)=0.8529
+  h=11 r_point=  423.333 c_point=  423.164 r_half= 37.4612 c_half= 32.4303 ratio(c/r)=0.8657
+  h=12 r_point=  465.508 c_point=  465.334 r_half= 37.7520 c_half= 33.1935 ratio(c/r)=0.8793
+test autoarima_air_interval_e8_probe ... ok
+autoarima air: r_order=(2,1,1)(0,1,0)[12) crate=AutoARIMA(2,1,1)(0,1,0)[12] order_match=true point=3.982169e-4 interval=1.846662e-1 tier=outside
+autoarima rw: r_order=(0,1,0) crate=AutoARIMA(0,1,0) order_match=true point=0.000000e0 interval=3.276619e-8 tier=parity
+autoarima trend: r_order=(0,1,0) crate=AutoARIMA(0,1,0) order_match=true point=2.232548e-14 interval=3.361326e-3 tier=parity
+autoarima rows: 3
+test autoarima_report ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 20.81s
+

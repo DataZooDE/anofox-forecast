@@ -1,0 +1,15 @@
+docs/api/03-statistics.md	1	SYNOPSIS	ts_stats_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN, frequency VARCHAR,	Parser Error: syntax error at or near "ts_stats_by"
+docs/api/03-statistics.md	2	PASS	SELECT * FROM ts_stats_by('sales', product_id, date, quantity, '1d');	
+docs/api/03-statistics.md	3	PASS	SELECT product_id,	
+docs/api/03-statistics.md	5	PASS	SELECT * FROM ts_data_quality_by('sales', product_id, date, quantity, 10, '1d');	
+docs/api/03-statistics.md	6	PASS	SELECT product_id,	
+docs/api/04-data-preparation.md	22	PASS	CREATE TABLE month_end_gaps AS	
+docs/api/09-evaluation-metrics.md	5	PASS	CREATE TABLE results AS	
+docs/api/09-evaluation-metrics.md	6	PASS	SELECT	
+docs/api/09-evaluation-metrics.md	7	EXPECTED-ERROR	SELECT ts_mase([1.0, 2.0, 3.0], [1.1, 2.1, 3.1], [1.5, 2.5, 3.5]);	Invalid Input Error: ts_mase(actual, forecast, baseline) was removed in v0.10.0: it computed a relative MAE, not MASE. Use ts_rmae(actual, forecast, baseline) for that result, or ts_mase(actual, forec
+docs/api/09-evaluation-metrics.md	13	PASS	CREATE TABLE results_with_history AS	
+docs/guides/02-model-selection.md	0	PASS	SELECT * FROM ts_stats('sales', product_id, date, quantity, '1d');	
+plugins/anofox-forecast/skills/anofox-forecast-data-prep/SKILL.md	2	PASS	CREATE TABLE gaps_filled AS	
+plugins/anofox-forecast/skills/anofox-forecast-eda/SKILL.md	0	SYNOPSIS	ts_stats(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN,	Parser Error: syntax error at or near "ts_stats"
+plugins/anofox-forecast/skills/anofox-forecast-eda/SKILL.md	1	PASS	SELECT * FROM ts_stats('sales', product_id, ds, y, '1d');	
+plugins/anofox-forecast/skills/anofox-forecast-eda/SKILL.md	6	PASS	SELECT * FROM ts_data_quality('sales', product_id, ds, y, 14, '1d');	

@@ -1,5 +1,6 @@
 #include "anofox_forecast_extension.hpp"
 #include "anofox_fcst_ffi.h"
+#include "ts_list_marshal.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/printer.hpp"
@@ -10,8 +11,23 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <limits>
+#include <tuple>
+#include <cmath>
 
 namespace duckdb {
+
+// Strict weak ordering on doubles that is safe for std::sort (NaN sorts after
+// every number). WR-02: same comparator as ts_stats.cpp's StatsValueLess /
+// ts_forecast_agg.cpp's ForecastAggValueLess, used as a deterministic
+// secondary sort key for duplicate timestamps.
+static bool FeaturesAggValueLess(double x, double y) {
+    const bool x_nan = std::isnan(x);
+    const bool y_nan = std::isnan(y);
+    if (x_nan || y_nan) {
+        return !x_nan && y_nan;
+    }
+    return x < y;
+}
 
 // Helper function to emit warnings for unknown feature params
 static void EmitFeatureParamWarnings(const vector<string> &param_names) {
@@ -44,6 +60,11 @@ static void EmitFeatureParamWarnings(const vector<string> &param_names) {
 struct TsFeaturesAggStateData {
     vector<int64_t> timestamps;
     vector<double> values;
+    // Phase 12 D-11: NULL-valued rows are kept (not spliced out) so the Rust
+    // single-series policy (ApplySingleSeriesPolicy) can trim edges / reject
+    // interior NULLs exactly like ts_features_by. Only a NULL TIMESTAMP skips
+    // the row (there is no "position" to record a value at without a date).
+    vector<bool> valid;
     bool initialized;
 
     TsFeaturesAggStateData() : initialized(false) {}
@@ -195,6 +216,9 @@ struct TsFeaturesAggOperation {
             target.data->values.insert(target.data->values.end(),
                                        source.data->values.begin(),
                                        source.data->values.end());
+            target.data->valid.insert(target.data->valid.end(),
+                                      source.data->valid.begin(),
+                                      source.data->valid.end());
         }
     }
 
@@ -226,7 +250,11 @@ static void TsFeaturesAggUpdate(Vector inputs[], AggregateInputData &aggr_input,
         auto ts_idx = ts_data.sel->get_index(i);
         auto val_idx = val_data.sel->get_index(i);
 
-        if (!ts_data.validity.RowIsValid(ts_idx) || !val_data.validity.RowIsValid(val_idx)) {
+        // Phase 12 D-11: a NULL TIMESTAMP has no position to record a value
+        // at, so it is still skipped. A NULL VALUE is kept (valid=false) so
+        // the Rust gate can see it and apply the single-series policy — this
+        // is the fix for the old splice-NULL-rows bug.
+        if (!ts_data.validity.RowIsValid(ts_idx)) {
             continue;
         }
 
@@ -239,10 +267,12 @@ static void TsFeaturesAggUpdate(Vector inputs[], AggregateInputData &aggr_input,
         }
 
         auto ts = UnifiedVectorFormat::GetData<timestamp_t>(ts_data)[ts_idx];
-        auto val = UnifiedVectorFormat::GetData<double>(val_data)[val_idx];
+        bool value_valid = val_data.validity.RowIsValid(val_idx);
+        double val = value_valid ? UnifiedVectorFormat::GetData<double>(val_data)[val_idx] : 0.0;
 
         state.data->timestamps.push_back(ts.value);
         state.data->values.push_back(val);
+        state.data->valid.push_back(value_valid);
     }
 }
 
@@ -264,16 +294,50 @@ static void TsFeaturesAggFinalize(Vector &state_vector, AggregateInputData &aggr
 
         auto &data = *state.data;
 
-        // Sort by timestamp
-        vector<pair<int64_t, double>> sorted_pairs;
+        // Sort (timestamp, value, valid) triples together by timestamp (D-11:
+        // the validity bitmask must stay aligned with the values it describes).
+        // WR-02: duplicate timestamps are tie-broken deterministically (valid
+        // before NULL, then by value with NaN last) — the same comparator
+        // ts_stats.cpp's StatsValueLess and ts_forecast_agg.cpp's
+        // ForecastAggValueLess use — so the result never depends on the order
+        // partial aggregate states were concatenated in Combine() (itself
+        // dependent on thread scheduling); std::sort by timestamp alone left
+        // the relative order of same-timestamp rows unspecified.
+        vector<std::tuple<int64_t, double, bool>> sorted_triples;
+        sorted_triples.reserve(data.timestamps.size());
         for (size_t j = 0; j < data.timestamps.size(); j++) {
-            sorted_pairs.push_back({data.timestamps[j], data.values[j]});
+            sorted_triples.push_back({data.timestamps[j], data.values[j], data.valid[j]});
         }
-        std::sort(sorted_pairs.begin(), sorted_pairs.end());
+        std::sort(sorted_triples.begin(), sorted_triples.end(),
+                  [](const std::tuple<int64_t, double, bool> &a, const std::tuple<int64_t, double, bool> &b) {
+                      if (std::get<0>(a) != std::get<0>(b)) {
+                          return std::get<0>(a) < std::get<0>(b);
+                      }
+                      const bool a_valid = std::get<2>(a);
+                      const bool b_valid = std::get<2>(b);
+                      if (a_valid != b_valid) {
+                          return a_valid;
+                      }
+                      return a_valid && FeaturesAggValueLess(std::get<1>(a), std::get<1>(b));
+                  });
 
         vector<double> sorted_values;
-        for (const auto &p : sorted_pairs) {
-            sorted_values.push_back(p.second);
+        sorted_values.reserve(sorted_triples.size());
+        size_t validity_words = (sorted_triples.size() + 63) / 64;
+        vector<uint64_t> sorted_validity(validity_words, 0);
+        for (size_t j = 0; j < sorted_triples.size(); j++) {
+            sorted_values.push_back(std::get<1>(sorted_triples[j]));
+            if (std::get<2>(sorted_triples[j])) {
+                sorted_validity[j / 64] |= (1ULL << (j % 64));
+            }
+        }
+
+        // Phase 12 D-03/D-04/D-11: Rust single-series gate — trims leading/
+        // trailing NULLs, errors on an interior NULL naming its position,
+        // NULL result if nothing remains after trimming.
+        if (!ApplySingleSeriesPolicy(sorted_values, sorted_validity, "ts_features_agg")) {
+            FlatVector::SetNull(result, row, true);
+            continue;
         }
 
         // Call feature extraction
@@ -344,6 +408,9 @@ static void TsFeaturesAggCombine(Vector &state_vector, Vector &combined, Aggrega
             tgt.data->values.insert(tgt.data->values.end(),
                                     src.data->values.begin(),
                                     src.data->values.end());
+            tgt.data->valid.insert(tgt.data->valid.end(),
+                                   src.data->valid.begin(),
+                                   src.data->valid.end());
         }
     }
 }

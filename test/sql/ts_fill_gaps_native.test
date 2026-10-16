@@ -175,17 +175,20 @@ SELECT * FROM _ts_fill_gaps_native(
 E	2024-01-01	10.0
 E	2024-01-08	80.0
 
-# Test alias with anofox_fcst prefix
-query III
+# Tombstone (Phase 18, 18-01, class A): _ts_fill_gaps_native was renamed from
+# ts_fill_gaps_native (a public macro, auto-aliased as anofox_fcst_ts_fill_gaps_native)
+# to its current leading-underscore internal name in commit 4477e7b "refactor: Remove
+# ts_fill_gaps_operator_by and internalize native functions". Internal (_-prefixed) table
+# functions are registered directly, not through the ts_table_macros[] array, so they never
+# receive the anofox_fcst_ prefixed alias that RegisterTsTableMacros() generates for public
+# macros (src/macros/ts_macros.cpp:2685-2690) -- no replacement exists, by design.
+statement error
 SELECT * FROM anofox_fcst__ts_fill_gaps_native(
     (SELECT group_col, date_col, value FROM test_date ORDER BY group_col, date_col),
     '1d'
 );
 ----
-A	2024-01-01	10.0
-A	2024-01-02	20.0
-A	2024-01-03	NULL
-A	2024-01-04	40.0
+does not exist
 
 # ==============================================================================
 # Test monthly frequency with calendar-aware gap filling
@@ -225,7 +228,9 @@ FROM (VALUES
     ('2023-05-15', 500.0)
 ) AS t(d, v);
 
-# Should fill Feb, Mar, Apr (4 gaps)
+# Should fill Feb, Mar, Apr (4 gaps). D-09/G24 (Phase 13 plan 13-03): neither
+# observed date is month-end or the 1st, so the filled dates keep the observed
+# day-of-month (15th), not the old start-of-month snapping to the 1st.
 query III
 SELECT * FROM _ts_fill_gaps_native(
     (SELECT group_col, date_col, value FROM test_monthly_multi ORDER BY group_col, date_col),
@@ -233,9 +238,9 @@ SELECT * FROM _ts_fill_gaps_native(
 );
 ----
 N	2023-01-15	100.0
-N	2023-02-01	NULL
-N	2023-03-01	NULL
-N	2023-04-01	NULL
+N	2023-02-15	NULL
+N	2023-03-15	NULL
+N	2023-04-15	NULL
 N	2023-05-15	500.0
 
 # Test monthly with DuckDB interval-style "1 month"
@@ -341,3 +346,22 @@ Duplicate (group, date) pair detected
 
 statement ok
 DROP TABLE dup_test;
+
+# ==============================================================================
+# WR-02 (Phase 18 review): a SQL NULL frequency must not stringify to the
+# literal text "NULL" (which previously failed ParseFrequencyWithType with a
+# confusing "Invalid frequency 'NULL'" message). It must be treated like the
+# sibling _ts_fill_forward_native's NULL-guarded optional arguments and fall
+# back to the bind_data default (1-day FIXED frequency).
+# ==============================================================================
+
+query III
+SELECT * FROM _ts_fill_gaps_native(
+    (SELECT group_col, date_col, value FROM test_date ORDER BY group_col, date_col),
+    NULL::VARCHAR
+);
+----
+A	2024-01-01	10.0
+A	2024-01-02	20.0
+A	2024-01-03	NULL
+A	2024-01-04	40.0

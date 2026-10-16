@@ -22,7 +22,13 @@ SELECT * FROM ts_forecast_panel_by(
 
 GlobalETS fits a single set of ETS smoothing parameters across **all series simultaneously** using `GlobalAutoETS` from the `anofox-forecast` crate. It then predicts per-series forecasts from each series' own initial state. This differs from per-series `AutoETS` (which fits N independent models) — GlobalETS pools the optimization, making it faster and better-regularized on large panels where individual series are short.
 
-`GlobalAutoETS` automatically selects the best ETS spec from the `Reduced` model pool (8 candidates: `ANN`, `MNN`, `AAdN`, `MAdN`, `ANA`, `MNM`, `AAdA`, `MAdM`) by minimizing per-series negative log-likelihood. Use `model_pool: 'Complete'` (19 candidates) for higher accuracy at the cost of longer fit time.
+`GlobalAutoETS` automatically selects the best ETS spec from the `reduced` model pool (8 candidates: `ANN`, `MNN`, `AAdN`, `MAdN`, `ANA`, `MNM`, `AAdA`, `MAdM`) by minimizing per-series negative log-likelihood. Use `model_pool: 'complete'` (19 candidates) for higher accuracy at the cost of longer fit time.
+
+`model_pool` is matched **case-insensitively**: `'reduced'`, `'Reduced'`, `'REDUCED'`,
+`'complete'`, `'Complete'`, `'COMPLETE'`, etc. are all accepted. Any value that is not a
+case-insensitive match for `'reduced'` or `'complete'` (e.g. a typo like `'compete'`, or
+invalid UTF-8) is an **error** (`InvalidParameter` naming the bad value) — the FFI panel
+path no longer silently falls back to Reduced on an unrecognized string.
 
 **Ragged panel handling:** Series with different lengths are automatically aligned to a shared date grid (union of dates, gap-filled with linear interpolation). Series with fewer than 10 valid observations after alignment are dropped and surfaced as `DROPPED: too_short` rows rather than causing an error.
 
@@ -42,7 +48,7 @@ GlobalETS fits a single set of ETS smoothing parameters across **all series simu
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
 | `frequency` | VARCHAR | Yes | — | Time step: `'1d'`, `'1h'`, `'1mo'`, etc. |
 | `seasonal_period` | VARCHAR (in MAP) | No | `'0'` | Period for seasonal ETS (e.g., `'7'` for weekly). `'0'` = non-seasonal only. |
-| `model_pool` | VARCHAR (in MAP) | No | `'Reduced'` | ETS spec search space: `'Reduced'` (8 models, default) or `'Complete'` (19 models). |
+| `model_pool` | VARCHAR (in MAP) | No | `'reduced'` | ETS spec search space, matched case-insensitively: `'reduced'` (8 models, default) or `'complete'` (19 models). Any other value is an error. |
 
 ## Returns
 
@@ -91,8 +97,19 @@ ORDER BY series, forecast_step;
 
 **Non-seasonal (default):**
 ```sql
--- method='GlobalETS' without seasonal_period uses Reduced pool, non-seasonal specs only
-SELECT * FROM ts_forecast_panel_by('panel', product_id, ds, y, 'GlobalETS', 14, '1d');
+-- method='GlobalETS' without seasonal_period uses the reduced pool, non-seasonal specs only
+SELECT * FROM ts_forecast_panel_by('seasonal_panel', uid, ds, y, 'GlobalETS', 14, '1d');
+```
+
+**Misspelled model_pool — hard error:**
+```sql
+-- 'compete' is not a recognized model_pool -- InvalidParameter naming the bad value
+SELECT * FROM ts_forecast_panel_by(
+    'seasonal_panel', uid, ds, y, 'GlobalETS', 7, '1d',
+    MAP {'model_pool': 'compete'}
+);
+-- Invalid Input Error: ts_forecast_panel_by (method='GlobalETS'): unknown model_pool
+--                      'compete'; expected 'reduced' or 'complete'
 ```
 
 ## Best For
@@ -104,7 +121,7 @@ SELECT * FROM ts_forecast_panel_by('panel', product_id, ds, y, 'GlobalETS', 14, 
 
 ## See Also
 
-- [`ts_forecast_by`](../../../api/07-forecasting.md) — per-series independent forecasting (33 models)
+- [`ts_forecast_by`](../../../api/07-forecasting.md) — per-series independent forecasting (36 models)
 - [`GlobalTheta`](../theta/global_theta.md) — pooled Theta (trended series, no seasonal config needed)
 - [`GlobalCroston`](../intermittent/global_croston.md) — pooled Croston (intermittent/spare-parts panels)
 - [`ts_forecast_panel_by`](../../../api/07-forecasting.md#panel--global-forecasting-ts_forecast_panel_by) — panel API reference

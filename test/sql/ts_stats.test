@@ -138,6 +138,22 @@ SELECT _ts_stats(NULL) IS NULL;
 ----
 true
 
+# WR-01 regression: a NULL element *inside* an otherwise non-NULL dates list
+# (reachable from the ts_stats(...) macro's _ts_stats_with_dates call) must
+# error, not silently become epoch 0 (which looked like a multi-decade gap to
+# gap_counts/resolve_gap_step).
+# Class B fix (Phase 18, 18-01): the `frequency` argument was passed bare NULL,
+# which short-circuits TsStatsWithDatesFunction's "any top-level NULL input ->
+# SetNull" check (src/table_functions/ts_stats.cpp) BEFORE ExtractListTimestamps
+# ever runs -- so this assertion never reached the WR-01 code path it claims to
+# test (confirmed directly: it silently returned NULL, not an error, matching the
+# early-exit path, not the dates-list-element check). Passing a valid frequency
+# ('1d') lets the NULL-dates-element check actually run.
+statement error
+SELECT _ts_stats_with_dates([1.0, 2.0, 3.0], [DATE '2024-01-01', NULL, DATE '2024-01-03']::TIMESTAMP[], '1d', 0);
+----
+NULL element
+
 #######################################
 # ts_stats_by - Native Table Function Tests (Issue #147)
 #######################################
@@ -249,6 +265,32 @@ FROM ts_stats_by('test_quarterly', sku, quarter_start, revenue, '1q');
 statement ok
 DROP TABLE test_quarterly;
 
+# CR-01 regression (13-03 deferred item): a correctly-spaced bi-monthly series
+# declared with '2mo' must report n_gaps=0, not misclassify every consecutive
+# pair as "1 missing month" (the multiplier was previously silently dropped).
+statement ok
+CREATE TABLE test_bimonthly AS
+SELECT
+    'product_B' AS sku,
+    ('2023-' || LPAD(CAST((m - 1) * 2 + 1 AS VARCHAR), 2, '0') || '-01')::TIMESTAMP AS month_start,
+    (100 + m * 10)::DOUBLE AS sales
+FROM generate_series(1, 4) AS t(m);
+
+query II
+SELECT length, expected_length
+FROM ts_stats_by('test_bimonthly', sku, month_start, sales, '2mo');
+----
+4	4
+
+query I
+SELECT n_gaps
+FROM ts_stats_by('test_bimonthly', sku, month_start, sales, '2mo');
+----
+0
+
+statement ok
+DROP TABLE test_bimonthly;
+
 # Create yearly data: 2020-2024 with 2022 missing (gap)
 statement ok
 CREATE TABLE test_yearly_gaps AS
@@ -279,11 +321,14 @@ DROP TABLE test_yearly_gaps;
 # ts_stats_by - Column Name Preservation with Different Names
 #######################################
 
+# Class B fix (Phase 18, 18-01): `INTERVAL i DAY` requires a literal, not an
+# expression; `INTERVAL (i) DAY` is the parenthesized form DuckDB accepts for a
+# column/expression count.
 statement ok
 CREATE TABLE test_custom_cols AS
 SELECT
     'SKU_' || i AS my_custom_product_name,
-    '2023-01-01'::TIMESTAMP + INTERVAL i DAY AS transaction_date,
+    '2023-01-01'::TIMESTAMP + INTERVAL (i) DAY AS transaction_date,
     (100 + i)::DOUBLE AS amount
 FROM generate_series(1, 5) AS t(i);
 

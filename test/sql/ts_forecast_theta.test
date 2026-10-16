@@ -430,9 +430,11 @@ SELECT COUNT(*) FROM (
 # Edge Cases
 #######################################
 
-# Test Theta with minimum data length (3 points)
+# Test Theta with minimum data length. Re-pinned (Phase 18, 18-01, class D): Theta's
+# actual minimum is 4 points, not 3 -- confirmed directly (n=3 returns NULL, n=4
+# succeeds); lengthened the fixture rather than loosening the assertion.
 query I
-SELECT length((_ts_forecast([1.0, 2.0, 3.0], 2, 'Theta')).point);
+SELECT length((_ts_forecast([1.0, 2.0, 3.0, 4.0], 2, 'Theta')).point);
 ----
 2
 

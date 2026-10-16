@@ -25,23 +25,27 @@ FROM generate_series(0, 37) AS t(i);
 # AutoMFLES should produce reasonable forecasts on intermittent data
 #######################################
 
-# Forecasts should not be catastrophically large (issue #168)
+# Forecasts should not be catastrophically large (issue #168). Class B fix
+# (Phase 18, 18-01): UNNEST is not supported directly inside an aggregate function's
+# argument list ("Binder Error: UNNEST not supported here") -- moved it into the FROM
+# clause as a lateral UNNEST join instead.
 query I
-SELECT bool_and(abs(unnest(f.point_forecast)) < 1000.0)
+SELECT bool_and(abs(pf) < 1000.0)
 FROM (
     SELECT ts_forecast_agg(ts, value, 'AutoMFLES', 6, MAP([], [])) AS f
     FROM intermittent_demand
-);
+), UNNEST(f.point_forecast) AS u(pf);
 ----
 true
 
-# All forecasts should be finite
+# All forecasts should be finite. Class B fix (Phase 18, 18-01): same UNNEST
+# restructuring as above.
 query I
-SELECT bool_and(isfinite(unnest(f.point_forecast)))
+SELECT bool_and(isfinite(pf))
 FROM (
     SELECT ts_forecast_agg(ts, value, 'AutoMFLES', 6, MAP([], [])) AS f
     FROM intermittent_demand
-);
+), UNNEST(f.point_forecast) AS u(pf);
 ----
 true
 
@@ -63,22 +67,24 @@ FROM regular_seasonal;
 ----
 7
 
-# MFLES forecasts are finite on regular data
+# MFLES forecasts are finite on regular data. Class B fix (Phase 18, 18-01): same
+# UNNEST restructuring as above.
 query I
-SELECT bool_and(isfinite(unnest(f.point_forecast)))
+SELECT bool_and(isfinite(pf))
 FROM (
     SELECT ts_forecast_agg(ts, value, 'MFLES', 7, MAP([], [])) AS f
     FROM regular_seasonal
-);
+), UNNEST(f.point_forecast) AS u(pf);
 ----
 true
 
-# MFLES forecasts are in a reasonable range for this data (values roughly 100-135)
+# MFLES forecasts are in a reasonable range for this data (values roughly 100-135).
+# Class B fix (Phase 18, 18-01): same UNNEST restructuring as above.
 query I
-SELECT bool_and(abs(unnest(f.point_forecast)) < 500.0)
+SELECT bool_and(abs(pf) < 500.0)
 FROM (
     SELECT ts_forecast_agg(ts, value, 'MFLES', 7, MAP([], [])) AS f
     FROM regular_seasonal
-);
+), UNNEST(f.point_forecast) AS u(pf);
 ----
 true

@@ -204,12 +204,12 @@ true
 #######################################
 
 query I
-SELECT (_ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0])).n_gaps;
+SELECT (_ts_data_quality([1.0, 2.0, 3.0, 4.0, 5.0], NULL, NULL, 1)).n_gaps;
 ----
 0
 
 query I
-SELECT (_ts_data_quality([1.0, NULL, 3.0, NULL, 5.0])).n_missing;
+SELECT (_ts_data_quality([1.0, NULL, 3.0, NULL, 5.0], NULL, NULL, 1)).n_missing;
 ----
 2
 

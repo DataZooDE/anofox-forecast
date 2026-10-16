@@ -70,9 +70,20 @@ Series with fewer observations are **skipped** (emitted as zero rows) — not er
 | `group_col` | ANY | Series identifier |
 | `<date_col>` | (same as input) | Forecast timestamp |
 | `yhat` | DOUBLE | Conditional **volatility** (std-dev = sqrt(variance)) |
+| `yhat_lower` / `yhat_upper` | DOUBLE | Crate `GARCH::predict_with_intervals` bounds (see caveat below) |
 | `model_name` | VARCHAR | `'GARCH(p,q)'` e.g. `'GARCH(1,1)'` |
 
-Note: `yhat_lower` and `yhat_upper` are not available for GARCH in v1 (prediction intervals deferred).
+> **Interval centring (D-01; fixed upstream in 0.16.0, UPST-05):** `yhat_lower`/`yhat_upper`
+> are centred on the fitted conditional mean (`mean ∓ z·sqrt(forecast_variance(h))`) —
+> previously they were centred on a seed-dependent simulated-innovation draw, which could
+> sit several standard deviations away from the series' actual distribution (measured
+> empirical 95% coverage against a true GARCH(1,1) DGP: 63.3% before the fix, 94.8-96.3%
+> after, across h=1..12). `yhat` itself is unchanged: the analytical, deterministic
+> conditional standard deviation (`sqrt(forecast_variance(h))`). GARCH is not individually
+> R-parity-tested (FCST-09, Phase 17 plan 17-03) — see
+> [07-forecasting.md's "Prediction intervals, fitted values and input handling"](../../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling)
+> for the models that are. For calibrated volatility bands, the conformal prediction
+> functions (`docs/api/11-conformal-prediction.md`) on top of `yhat` remain an option.
 
 ## SQL Example (verified end-to-end)
 
@@ -92,6 +103,22 @@ SELECT
     model_name
 FROM ts_forecast_by('returns', asset_id, ds, y, 'GARCH', 7, '1d')
 ORDER BY asset_id, forecast_step;
+```
+
+```sql
+-- Interval bounds are now returned, but do not bracket yhat (see caveat above) --
+-- yhat_lower/yhat_upper center a band on a simulated innovation path, not on yhat itself.
+SELECT
+    asset_id,
+    forecast_step,
+    ROUND(yhat, 6) AS yhat,
+    ROUND(yhat_lower, 6) AS yhat_lower,
+    ROUND(yhat_upper, 6) AS yhat_upper,
+    (yhat BETWEEN yhat_lower AND yhat_upper) AS brackets_yhat
+FROM ts_forecast_by('returns', asset_id, ds, y, 'GARCH', 7, '1d')
+ORDER BY asset_id, forecast_step;
+-- yhat_lower/yhat_upper are non-NULL; brackets_yhat is false for at least one row,
+-- confirming the bounds are centered on a different (simulated) point forecast.
 ```
 
 Expected output shape: 7 rows, `model_name = 'GARCH(1,1)'`, `yhat` values
@@ -115,6 +142,14 @@ ORDER BY asset_id, forecast_step;
 ## Typical Workflow: Returns → GARCH Volatility
 
 ```sql
+-- Step 0: Synthetic daily price levels (2 tickers, 60 days)
+CREATE OR REPLACE TABLE price_history AS
+    SELECT ticker,
+           DATE '2024-01-01' + INTERVAL (i) DAY AS ds,
+           100.0 * EXP(0.0005 * i + 0.02 * SIN(i * 0.5)) AS price
+    FROM range(0, 60) t(i)
+    CROSS JOIN (SELECT unnest(['AAPL', 'MSFT']) AS ticker);
+
 -- Step 1: Compute log returns from price levels
 CREATE OR REPLACE TABLE price_returns AS
     SELECT

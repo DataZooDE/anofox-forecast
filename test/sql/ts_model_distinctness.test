@@ -73,6 +73,9 @@ FROM forecasts;
 #    DynamicOptimizedTheta (DOTM)
 ###############################################################################
 
+# theta re-pinned 18.356416 -> 19.828823 (Phase 17 plan 17-01, anofox-forecast
+# 0.16.1 PR #222: Theta's alpha is now optimised per-series instead of fixed
+# at 0.1); all_distinct stays 1.
 query IIIII
 WITH vals AS (SELECT list(y) AS y FROM distinctness_ts),
 forecasts AS (
@@ -88,7 +91,7 @@ SELECT theta, opt_theta, dyn_theta, dyn_opt_theta,
   (theta != opt_theta OR theta != dyn_theta OR theta != dyn_opt_theta)::INT AS all_distinct
 FROM forecasts;
 ----
-18.356416	19.778702	18.668893	19.347803	1
+19.828823	19.778702	18.668893	19.347803	1
 
 ###############################################################################
 # 3. Exponential smoothing: Optimized variants — FIXED (forecast-extension-b3ou)
@@ -96,6 +99,17 @@ FROM forecasts;
 #    Each variant now uses library implementations:
 #    SES (fixed alpha=0.3), SESOptimized (auto-tuned alpha),
 #    SeasonalES (fixed), SeasonalESOptimized (auto-tuned)
+#
+#    D-07 re-bless (Phase 10 plan 10-05, deferred from plan 10-04's
+#    deferred-items.md item 1): Phase 10 plan 10-03's resolve_period change
+#    (commit e01e87b) made SeasonalES/SeasonalESOptimized auto-detect their
+#    seasonal period via detect_seasonality REGARDLESS of
+#    auto_detect_seasonality — previously this entry point's hard-coded
+#    auto_detect_seasonality=false meant no period was ever detected for
+#    these two models. seasonal_es/seasonal_es_opt below moved from
+#    14.451866/18.803254 to 12.304672/16.998999 as a direct, correct
+#    consequence of that change (verified against the built extension); the
+#    all_distinct=1 invariant this test guards still holds.
 ###############################################################################
 
 query IIIII
@@ -113,7 +127,7 @@ SELECT ses, ses_opt, seasonal_es, seasonal_es_opt,
   (ses != ses_opt OR seasonal_es != seasonal_es_opt)::INT AS all_distinct
 FROM forecasts;
 ----
-18.943503	19.537535	14.451866	18.803254	1
+18.943503	19.537535	12.304672	16.998999	1
 
 ###############################################################################
 # 4. MSTL/TBATS vs HoltWinters — FIXED (forecast-extension-tlye)
@@ -121,6 +135,24 @@ FROM forecasts;
 #    MSTL and TBATS previously fell back to HoltWinters. Now they use
 #    their own library implementations (MSTLForecaster, TBATS).
 #    Holt included to guard against ETS fallback collapse.
+#
+#    D-07 re-bless (Phase 10 plan 10-05, same root cause as section 3 above):
+#    HoltWinters/MSTL/TBATS are all requires_seasonal_period models (10-03's
+#    resolve_period, commit e01e87b) — this entry point's hard-coded
+#    auto_detect_seasonality=false previously suppressed detection for all
+#    three; now they all auto-detect, moving hw/mstl/tbats from
+#    19.953912/17.364756/17.46623 to 18.00003/18.18416/17.832329 (verified
+#    against the built extension); the all_distinct=1 invariant still holds.
+#
+#    17-03 Task 1 re-bless (D-12/D-13): SQL 'Holt' remapped from
+#    HoltLinearTrend::auto() to ETS(A,A,N) (R holt()'s definition), moving
+#    holt from 20.330877 to 19.955976 (verified against the built
+#    extension). The mstl value also moved, from 18.18416 to 18.186245 —
+#    deterministic and reproduced on this build, but NOT caused by the
+#    Holt remap (MSTLForecaster's trend component doesn't go through the
+#    'Holt' dispatch arm); it is a pre-existing drift left over from the
+#    0.16.1 bump (17-01) that this section's re-bless never caught, logged
+#    in deferred-items.md. The all_distinct=1 invariant still holds.
 ###############################################################################
 
 query IIIII
@@ -138,7 +170,7 @@ SELECT holt, hw, mstl, tbats,
   (holt != hw AND mstl != hw AND tbats != hw AND mstl != tbats)::INT AS all_distinct
 FROM forecasts;
 ----
-20.330877	19.953912	17.364756	17.46623	1
+19.955976	18.00003	18.186245	17.832329	1
 
 ###############################################################################
 # 5. Sanity check: Auto* models that use the library MUST stay distinct
@@ -148,6 +180,11 @@ FROM forecasts;
 ###############################################################################
 
 # AutoETS vs AutoARIMA vs AutoTheta — must always be distinct
+# Re-pinned (Phase 17 plan 17-01, anofox-forecast 0.16.1 PR #223: AutoARIMA
+# R auto.arima port): auto_ets 19.956521 -> 19.955976 (AutoARIMA's changed
+# selection perturbs nothing else here, but AutoETS's own fit shifts at the
+# last printed digit), auto_arima 18.014537 -> 17.412868. all_distinct
+# stays 1.
 query IIII
 WITH vals AS (SELECT list(y) AS y FROM distinctness_ts),
 forecasts AS (
@@ -161,7 +198,7 @@ SELECT auto_ets, auto_arima, auto_theta,
   (auto_ets != auto_arima AND auto_ets != auto_theta)::INT AS all_distinct
 FROM forecasts;
 ----
-19.956521	18.014537	19.778702	1
+19.955976	17.412868	19.778702	1
 
 # Baseline models: Naive vs SMA vs RandomWalkDrift — must always be distinct
 query IIII

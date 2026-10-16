@@ -17,16 +17,7 @@ void RegisterTsFillGapsNativeFunction(ExtensionLoader &loader);
 void RegisterTsFillForwardFunction(ExtensionLoader &loader);
 void RegisterTsFillForwardOperatorFunction(ExtensionLoader &loader);
 void RegisterTsFillForwardNativeFunction(ExtensionLoader &loader);
-void RegisterTsDropConstantFunction(ExtensionLoader &loader);
-void RegisterTsDropShortFunction(ExtensionLoader &loader);
-void RegisterTsDropLeadingZerosFunction(ExtensionLoader &loader);
-void RegisterTsDropTrailingZerosFunction(ExtensionLoader &loader);
-void RegisterTsDropEdgeZerosFunction(ExtensionLoader &loader);
-void RegisterTsFillNullsConstFunction(ExtensionLoader &loader);
-void RegisterTsFillNullsForwardFunction(ExtensionLoader &loader);
-void RegisterTsFillNullsBackwardFunction(ExtensionLoader &loader);
-void RegisterTsFillNullsMeanFunction(ExtensionLoader &loader);
-void RegisterTsDiffFunction(ExtensionLoader &loader);
+void RegisterTsSeriesTransformFunctions(ExtensionLoader &loader);
 void RegisterTsDetectSeasonalityFunction(ExtensionLoader &loader);
 void RegisterTsAnalyzeSeasonalityFunction(ExtensionLoader &loader);
 void RegisterTsMstlDecompositionFunction(ExtensionLoader &loader);
@@ -62,11 +53,9 @@ void RegisterTsClassifySeasonalityAggFunction(ExtensionLoader &loader);
 void RegisterTsDetectSeasonalityChangesFunction(ExtensionLoader &loader);
 void RegisterTsInstantaneousPeriodFunction(ExtensionLoader &loader);
 void RegisterTsDetectAmplitudeModulationFunction(ExtensionLoader &loader);
-void RegisterTsDetectChangepointsFunction(ExtensionLoader &loader);
 void RegisterTsDetectChangepointsBocpdFunction(ExtensionLoader &loader);
 void RegisterTsDetectChangepointsByFunction(ExtensionLoader &loader);
 void RegisterTsDetectChangepointsAggFunction(ExtensionLoader &loader);
-void RegisterTsFeaturesFunction(ExtensionLoader &loader);
 void RegisterTsFeaturesListFunction(ExtensionLoader &loader);
 void RegisterTsFeaturesAggFunction(ExtensionLoader &loader);
 void RegisterTsStatsAggFunction(ExtensionLoader &loader);
@@ -109,6 +98,11 @@ void RegisterTsConformalEvaluateFunction(ExtensionLoader &loader);
 // Per-step conformal prediction
 void RegisterTsConformalPredictPerStepFunction(ExtensionLoader &loader);
 
+// Internal: conformal prediction/calibration directly from per-row (actual,
+// forecast) calibration pairs (Phase 16 D-01/D-02/D-03). Backs the
+// ts_conformal_by / ts_conformal_calibrate macros.
+void RegisterTsConformalFromPairsFunction(ExtensionLoader &loader);
+
 // Bootstrap prediction
 void RegisterTsBootstrapIntervalsFunction(ExtensionLoader &loader);
 void RegisterTsBootstrapQuantilesFunction(ExtensionLoader &loader);
@@ -126,7 +120,6 @@ void RegisterTsResidualDiagnosticsFunction(ExtensionLoader &loader);
 void RegisterTsTableMacros(ExtensionLoader &loader);
 
 // Native table functions (streaming)
-void RegisterTsBacktestNativeFunction(ExtensionLoader &loader);
 void RegisterTsForecastNativeFunction(ExtensionLoader &loader);
 void RegisterTsCvSplitNativeFunction(ExtensionLoader &loader);
 void RegisterTsCvForecastNativeFunction(ExtensionLoader &loader);

@@ -1,0 +1,76 @@
+docs/api/05a-decomposition.md	ts_mstl_decomposition_by(source, group_col, date_col, value_col, params)
+docs/api/05b-peak-detection.md	ts_detect_peaks_by(source, group_col, date_col, value_col, params) → TABLE(group_col, peaks, n_peaks, inter_peak_distances, mean_period)
+docs/api/05b-peak-detection.md	ts_analyze_peak_timing_by(source, group_col, date_col, value_col, period, params) → TABLE(group_col, n_peaks, peak_times, variability_score, is_stable)
+plugins/anofox-forecast/skills/anofox-forecast-detection/SKILL.md	ts_detect_peaks_by(source, group_col, date_col, value_col, params) → TABLE(group_col, peaks, n_peaks, inter_peak_distances, mean_period)
+plugins/anofox-forecast/skills/anofox-forecast-detection/SKILL.md	ts_mstl_decomposition_by(source, group_col, date_col, value_col, params) → TABLE(group_col, trend, seasonal, remainder, periods)
+docs/api/07-forecasting.md	ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, frequency, params?) → TABLE
+docs/api/07-forecasting.md	ts_forecast_exog_by(table_name, group_col, date_col, target_col, x_cols, future_table, future_date_col, future_x_cols, frequency, model, horizon, params?) → TABLE
+docs/api/07-forecasting.md	ts_forecast_panel_by(
+docs/api/07-forecasting.md	ts_forecast_ensemble_by(
+docs/api/07-forecasting.md	ts_ensemble_inspect_by(
+docs/api/07-forecasting.md	ts_auto_ensemble_inspect_by(
+docs/api/07-forecasting.md	ts_forecast_var_by(
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_by(
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_panel_by(
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_var_by(
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_exog_by(
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_exog(source, date_col, target_col, xreg_cols,
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast(source VARCHAR, date_col COLUMN, target_col COLUMN,
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_ensemble_by(
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_ensemble_inspect_by(
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_auto_ensemble_inspect_by(
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_agg(date_col TIMESTAMP, value_col DOUBLE, method VARCHAR, horizon INTEGER, params MAP)
+docs/api/08-cross-validation.md	ts_cv_folds_by(
+docs/api/08-cross-validation.md	ts_cv_forecast_by(
+docs/api/08-cross-validation.md	ts_cv_hydrate_by(
+docs/api/08-cross-validation.md	ts_cv_split_folds_by(
+docs/api/08-cross-validation.md	ts_cv_split_by(
+docs/api/08-cross-validation.md	ts_cv_split_index_by(
+docs/reference/models/baseline/naive.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'Naive', horizon, params);
+docs/reference/models/baseline/seasonal_naive.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'SeasonalNaive', horizon, params);
+docs/reference/models/baseline/sma.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'SMA', horizon, params);
+docs/reference/models/baseline/random_walk_drift.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'RandomWalkDrift', horizon, params);
+docs/reference/models/baseline/seasonal_window_average.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'SeasonalWindowAverage', horizon, params);
+docs/reference/models/exponential-smoothing/ses.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'SES', horizon, params);
+docs/reference/models/exponential-smoothing/ses_optimized.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'SESOptimized', horizon, params);
+docs/reference/models/exponential-smoothing/holt.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'Holt', horizon, params);
+docs/reference/models/exponential-smoothing/holt_winters.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'HoltWinters', horizon, params);
+docs/reference/models/exponential-smoothing/seasonal_es.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'SeasonalES', horizon, params);
+docs/reference/models/exponential-smoothing/seasonal_es_optimized.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'SeasonalESOptimized', horizon, params);
+docs/reference/models/intermittent/croston_classic.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'CrostonClassic', horizon, params);
+docs/reference/models/intermittent/croston_optimized.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'CrostonOptimized', horizon, params);
+docs/reference/models/intermittent/croston_sba.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'CrostonSBA', horizon, params);
+docs/reference/models/intermittent/adida.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'ADIDA', horizon, params);
+docs/reference/models/state-space/arima.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'ARIMA', horizon, params);
+docs/reference/models/state-space/arima.md	SELECT * FROM ts_forecast_by('sales_data', product_id, date, revenue, 'ARIMA', 7, '1d', MAP{});
+docs/reference/models/state-space/auto_arima.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'AutoARIMA', horizon, params);
+docs/reference/models/state-space/ets.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'ETS', horizon, params);
+docs/reference/models/state-space/auto_ets.md	SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'AutoETS', horizon, frequency, params);
+docs/reference/models/state-space/kalman.md	SELECT * FROM ts_forecast_by(
+docs/reference/models/state-space/kalman.md	params := MAP{'kalman_model': 'local_linear_trend'}
+docs/reference/models/theta/theta.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'Theta', horizon, params);
+docs/reference/models/theta/optimized_theta.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'OptimizedTheta', horizon, params);
+docs/reference/models/theta/dynamic_theta.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'DynamicTheta', horizon, params);
+docs/reference/models/theta/dynamic_optimized_theta.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'DynamicOptimizedTheta', horizon, params);
+docs/reference/models/theta/auto_theta.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'AutoTheta', horizon, params);
+docs/reference/models/multi-seasonal/mstl.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'MSTL', horizon, params);
+docs/reference/models/multi-seasonal/mstl.md	CREATE OR REPLACE TABLE trend_only AS
+docs/reference/models/multi-seasonal/mfles.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'MFLES', horizon, params);
+docs/reference/models/multi-seasonal/auto_mfles.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'AutoMFLES', horizon, params);
+docs/reference/models/multi-seasonal/auto_mstl.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'AutoMSTL', horizon, params);
+docs/reference/models/multi-seasonal/tbats.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'TBATS', horizon, params);
+docs/reference/models/multi-seasonal/tbats.md	CREATE OR REPLACE TABLE trend_only AS
+docs/reference/models/multi-seasonal/auto_tbats.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'AutoTBATS', horizon, params);
+docs/reference/models/multi-seasonal/auto_tbats.md	CREATE OR REPLACE TABLE trend_only_tbats AS
+docs/reference/models/intermittent/imapa.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'IMAPA', horizon, params);
+docs/reference/models/intermittent/tsb.md	SELECT * FROM ts_forecast('table', date_col, value_col, 'TSB', horizon, params);
+docs/reference/models/intermittent/global_croston.md	SELECT * FROM ts_forecast_panel_by(
+docs/reference/models/exponential-smoothing/global_ets.md	SELECT * FROM ts_forecast_panel_by(
+docs/reference/models/ensemble/ensemble_explicit.md	SELECT * FROM ts_forecast_ensemble_by(
+docs/reference/models/ensemble/ensemble_explicit.md	SELECT * FROM ts_forecast_ensemble_by('ae_test', id, ds, y,
+docs/reference/models/ensemble/ensemble_inspect.md	ts_ensemble_inspect_by(
+docs/reference/models/ensemble/ensemble_inspect.md	ts_auto_ensemble_inspect_by(
+docs/reference/models/distributional/laplace.md	SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col,
+docs/reference/models/classical/garch.md	SELECT * FROM ts_forecast_by(
+docs/reference/models/classical/garch.md	params := MAP{'garch_p': '1', 'garch_q': '1'}
+docs/reference/models/ensemble/autoensemble.md	SELECT * FROM ts_forecast_by(

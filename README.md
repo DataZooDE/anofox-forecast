@@ -28,7 +28,7 @@ A time series forecasting extension for DuckDB with 36 models, statistical diagn
 ## ✨ Key Features
 
 ### 🎯 Forecasting (36 Models)
-- **AutoML**: AutoETS, AutoARIMA, AutoMFLES, AutoMSTL, AutoTBATS
+- **AutoML**: AutoETS, AutoARIMA, AutoTBATS, plus the deprecated-but-accepted aliases AutoMFLES/AutoMSTL (same code path as MFLES/MSTL, reported `model_name` matches the bare family name)
 - **Statistical**: ETS, ARIMA, Theta, Holt-Winters, Seasonal Naive
 - **Advanced**: TBATS, MSTL, MFLES (multiple seasonality)
 - **Intermittent Demand**: Croston, ADIDA, IMAPA, TSB
@@ -36,19 +36,19 @@ A time series forecasting extension for DuckDB with 36 models, statistical diagn
 - **Volatility & State-Space**: GARCH (conditional volatility), Kalman filter (local-level / local-linear-trend)
 - **Global / Panel**: GlobalETS, GlobalTheta, GlobalCroston — cross-series "fit once, forecast all" via `ts_forecast_panel_by`
 - **Multivariate**: VAR (vector autoregression) via `ts_forecast_var_by` — N value columns → per-variable forecasts
-- **Exogenous Variables**: ARIMAX, ThetaX, MFLESX (external regressors support)
+- **Exogenous Variables**: crate-native exog support for Naive, ARIMA, AutoARIMA, the Theta family, ETS/AutoETS, MFLES, and MSTL — reported `model_name` is the base model's own name with `" with regressors"` appended (no separate model name)
 
 ### 🔬 Statistical Diagnostics
-- **Stationarity**: ADF, KPSS, and a combined four-way verdict (`ts_adf_by`, `ts_kpss_by`, `ts_stationarity_by`)
-- **Residual Adequacy**: Ljung-Box, Durbin-Watson, Jarque-Bera, plus a combined pass/fail report (`ts_residual_diagnostics_by`)
-- **Reference-checked**: numerically cross-validated against statsmodels
+- **Stationarity**: ADF, KPSS, and a combined four-way verdict, each with `regression := 'c'` (default) or `'ct'` for trend-stationarity (`ts_adf_by`, `ts_kpss_by`, `ts_stationarity_by`)
+- **Residual Adequacy**: Ljung-Box (model-aware via `fitted_params := p + q`, R `Box.test(fitdf)`-exact), Durbin-Watson, Jarque-Bera, plus a combined pass/fail report (`ts_residual_diagnostics_by`)
+- **Reference-checked**: Ljung-Box, Jarque-Bera, Durbin-Watson, and the KPSS statistic are numerically cross-checked against R (`stats::Box.test`, `tseries`) and scipy; ADF/KPSS p-values are a coarse approximation, not cross-validated (see `docs/api/10-diagnostics.md`)
 
 ### 📊 Complete Workflow
 - **EDA & Data Quality**: 5 functions (2 table functions, 3 macros) for exploratory analysis and data quality assessment
 - **Data Preparation**: 12 macros for cleaning and transformation
 - **Multi-Key Hierarchy**: 4 functions for combining, aggregating, and splitting hierarchical time series (region/store/item)
 - **Cross-Validation & Backtesting**: Time series CV with expanding/fixed/sliding windows, gap, embargo, and variable horizon support
-- **Conformal Prediction**: Distribution-free prediction intervals with guaranteed coverage probability
+- **Conformal Prediction**: Distribution-free prediction intervals, horizon-ordered and calibrated per group, plus residual-resampling bootstrap intervals (see `docs/api/11-conformal-prediction.md`)
 - **Evaluation**: 12 metrics including coverage analysis
 - **Seasonality Detection**: Automatic period identification, seasonality classification, and peak detection
 - **Changepoint Detection**: Regime identification with probabilities
@@ -57,7 +57,7 @@ A time series forecasting extension for DuckDB with 36 models, statistical diagn
 - **117 Statistical Features**: Extract comprehensive time series features for ML pipelines
 - **GROUP BY & Window Support**: Native DuckDB parallelization for multi-series feature extraction
 - **Flexible Configuration**: Select specific features, customize parameters, or use JSON/CSV configs
-- **tsfresh-Compatible**: Compatible feature vectors for seamless integration with existing ML workflows (hctsa will come also)
+- **tsfresh-Inspired**: Feature vectors inspired by tsfresh's naming/catalogue; a documented subset of features deviates from tsfresh's exact formulas (see `docs/api/21-feature-reference.md`)
 
 ### ⚡ Performance
 - **Parallel**: Native DuckDB parallelization on GROUP BY
@@ -124,7 +124,7 @@ LOAD anofox_forecast;
 
 ### DataZoo Repository (latest builds)
 
-For the freshest builds — ahead of the community-extensions cadence — install from DataZoo's own extension repository. These binaries are unsigned (independent of the DuckDB Foundation), so start DuckDB with the `-unsigned` flag:
+For the freshest builds — ahead of the community-extensions cadence — install from DataZoo's own extension repository. These binaries are unsigned (independent of the DuckDB Foundation), so start DuckDB with the `-unsigned` flag. This command requires outbound network access and will error in a network-restricted environment:
 
 ```sql
 -- launch with:  duckdb -unsigned
@@ -142,7 +142,7 @@ git clone --recurse-submodules https://github.com/DataZooDE/anofox-forecast.git
 cd anofox-forecast
 
 # Build the extension (choose one)
-# This step requires Rust toolchain and CMake
+# This step requires Rust >= 1.89 (workspace rust-version) and CMake
 make release -j$(nproc)      # With Make OR
 GEN=ninja make release       # With Ninja (faster)
 
@@ -154,7 +154,9 @@ GEN=ninja make release       # With Ninja (faster)
 
 ## 🚀 Quick Start on M5 Dataset
 
-The forecast takes ~2 minutes on a Dell XPS 13. (Requires DuckDB v1.4.5 LTS or v1.5.6+).
+The forecast takes ~2 minutes on a Dell XPS 13. (Requires DuckDB v1.4.5 LTS or v1.5.6+). This
+loads `httpfs` and reads a remote parquet file, so it requires outbound network access and the
+`httpfs` extension binary and will error without either:
 
 ```sql
 -- Load extension
@@ -258,7 +260,7 @@ For complete function signatures, parameters, and detailed documentation, see th
 | **Cross-Validation** | Backtesting and CV functions | [08-cross-validation.md](docs/api/08-cross-validation.md) |
 | **Evaluation Metrics** | 12 accuracy metrics | [09-evaluation-metrics.md](docs/api/09-evaluation-metrics.md) |
 | **Conformal Prediction** | Distribution-free prediction intervals | [11-conformal-prediction.md](docs/api/11-conformal-prediction.md) |
-| **Feature Extraction** | 117 tsfresh-compatible features | [20-feature-extraction.md](docs/api/20-feature-extraction.md) |
+| **Feature Extraction** | 117 tsfresh-inspired features | [20-feature-extraction.md](docs/api/20-feature-extraction.md) |
 
 ### Model Reference (36 Models)
 

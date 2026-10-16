@@ -6,43 +6,9 @@
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include "duckdb/common/types/vector.hpp"
+#include "ts_list_marshal.hpp"
 
 namespace duckdb {
-
-// Helper to extract values from LIST vectors
-static void ExtractListAsDouble(Vector &list_vec, idx_t row_idx, vector<double> &out_values) {
-    auto list_data = ListVector::GetData(list_vec);
-    auto &list_entry = list_data[row_idx];
-
-    auto &child_vec = ListVector::GetEntry(list_vec);
-    auto child_data = FlatVector::GetData<double>(child_vec);
-    auto &child_validity = FlatVector::Validity(child_vec);
-
-    out_values.clear();
-    out_values.reserve(list_entry.length);
-
-    for (idx_t i = 0; i < list_entry.length; i++) {
-        idx_t child_idx = list_entry.offset + i;
-        if (child_validity.RowIsValid(child_idx)) {
-            out_values.push_back(child_data[child_idx]);
-        }
-    }
-}
-
-// Helper to write a double array into a LIST vector
-static void WriteListFromArray(Vector &list_vec, idx_t row_idx, const double *data, size_t n) {
-    auto offset = ListVector::GetListSize(list_vec);
-    auto &child = ListVector::GetEntry(list_vec);
-    ListVector::Reserve(list_vec, offset + n);
-    auto child_data = FlatVector::GetData<double>(child);
-    for (idx_t i = 0; i < n; i++) {
-        child_data[offset + i] = data[i];
-    }
-    ListVector::SetListSize(list_vec, offset + n);
-    auto list_data = ListVector::GetData(list_vec);
-    list_data[row_idx].offset = offset;
-    list_data[row_idx].length = n;
-}
 
 // ============================================================================
 // ts_bootstrap_intervals
@@ -58,10 +24,11 @@ static void TsBootstrapIntervalsFunction(DataChunk &args, ExpressionState &state
     auto &seed_vec = args.data[4];
     idx_t count = args.size();
 
-    UnifiedVectorFormat n_paths_data, coverage_data, seed_data;
-    n_paths_vec.ToUnifiedFormat(count, n_paths_data);
-    coverage_vec.ToUnifiedFormat(count, coverage_data);
-    seed_vec.ToUnifiedFormat(count, seed_data);
+    ListDoubleReader residuals_reader(residuals_vec, count);
+    ListDoubleReader forecasts_reader(forecasts_vec, count);
+    ScalarArgReader<int32_t> n_paths_reader(n_paths_vec, count);
+    ScalarArgReader<double> coverage_reader(coverage_vec, count);
+    ScalarArgReader<int64_t> seed_reader(seed_vec, count);
 
     auto &struct_entries = StructVector::GetEntries(result);
     auto &point_out = *struct_entries[0];
@@ -70,44 +37,42 @@ static void TsBootstrapIntervalsFunction(DataChunk &args, ExpressionState &state
     auto &coverage_out = *struct_entries[3];
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        auto np_idx = n_paths_data.sel->get_index(row_idx);
-        auto cov_idx = coverage_data.sel->get_index(row_idx);
-        auto seed_idx = seed_data.sel->get_index(row_idx);
-
-        if (FlatVector::IsNull(residuals_vec, row_idx) ||
-            FlatVector::IsNull(forecasts_vec, row_idx) ||
-            !n_paths_data.validity.RowIsValid(np_idx) ||
-            !coverage_data.validity.RowIsValid(cov_idx)) {
+        if (residuals_reader.IsNull(row_idx) || forecasts_reader.IsNull(row_idx) ||
+            n_paths_reader.IsNull(row_idx) || coverage_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         vector<double> residuals, forecasts;
-        ExtractListAsDouble(residuals_vec, row_idx, residuals);
-        ExtractListAsDouble(forecasts_vec, row_idx, forecasts);
-        int n_paths = UnifiedVectorFormat::GetData<int32_t>(n_paths_data)[np_idx];
-        double coverage = UnifiedVectorFormat::GetData<double>(coverage_data)[cov_idx];
-        int64_t seed = seed_data.validity.RowIsValid(seed_idx)
-            ? UnifiedVectorFormat::GetData<int64_t>(seed_data)[seed_idx]
-            : -1;
+        vector<uint64_t> residuals_validity, forecasts_validity;
+        residuals_reader.Read(row_idx, residuals, residuals_validity);
+        forecasts_reader.Read(row_idx, forecasts, forecasts_validity);
+        int n_paths = n_paths_reader.Get(row_idx);
+        double coverage = coverage_reader.Get(row_idx);
+        int64_t seed = seed_reader.IsNull(row_idx) ? -1 : seed_reader.Get(row_idx);
 
         BootstrapResultFFI bs_result = {};
         AnofoxError error;
         bool success = anofox_ts_bootstrap_intervals(
-            residuals.data(), residuals.size(),
-            forecasts.data(), forecasts.size(),
+            residuals.data(), residuals_validity.empty() ? nullptr : residuals_validity.data(),
+            residuals.size(),
+            forecasts.data(), forecasts_validity.empty() ? nullptr : forecasts_validity.data(),
+            forecasts.size(),
             n_paths, coverage, seed,
             &bs_result, &error
         );
 
         if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_bootstrap_intervals: %s", error.message);
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        WriteListFromArray(point_out, row_idx, bs_result.point, bs_result.n_forecasts);
-        WriteListFromArray(lower_out, row_idx, bs_result.lower, bs_result.n_forecasts);
-        WriteListFromArray(upper_out, row_idx, bs_result.upper, bs_result.n_forecasts);
+        WriteDoubleListNanAsNull(point_out, row_idx, bs_result.point, bs_result.n_forecasts);
+        WriteDoubleListNanAsNull(lower_out, row_idx, bs_result.lower, bs_result.n_forecasts);
+        WriteDoubleListNanAsNull(upper_out, row_idx, bs_result.upper, bs_result.n_forecasts);
         FlatVector::GetData<double>(coverage_out)[row_idx] = bs_result.coverage;
 
         anofox_free_bootstrap_result(&bs_result);
@@ -195,9 +160,11 @@ static void TsBootstrapQuantilesFunction(DataChunk &args, ExpressionState &state
     auto &seed_vec = args.data[4];
     idx_t count = args.size();
 
-    UnifiedVectorFormat n_paths_data, seed_data;
-    n_paths_vec.ToUnifiedFormat(count, n_paths_data);
-    seed_vec.ToUnifiedFormat(count, seed_data);
+    ListDoubleReader residuals_reader(residuals_vec, count);
+    ListDoubleReader forecasts_reader(forecasts_vec, count);
+    ScalarArgReader<int32_t> n_paths_reader(n_paths_vec, count);
+    ListDoubleReader quantiles_reader(quantiles_vec, count);
+    ScalarArgReader<int64_t> seed_reader(seed_vec, count);
 
     auto &struct_entries = StructVector::GetEntries(result);
     auto &point_out = *struct_entries[0];
@@ -205,31 +172,27 @@ static void TsBootstrapQuantilesFunction(DataChunk &args, ExpressionState &state
     auto &values_out = *struct_entries[2];
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
-        auto np_idx = n_paths_data.sel->get_index(row_idx);
-        auto seed_idx = seed_data.sel->get_index(row_idx);
-
-        if (FlatVector::IsNull(residuals_vec, row_idx) ||
-            FlatVector::IsNull(forecasts_vec, row_idx) ||
-            FlatVector::IsNull(quantiles_vec, row_idx) ||
-            !n_paths_data.validity.RowIsValid(np_idx)) {
+        if (residuals_reader.IsNull(row_idx) || forecasts_reader.IsNull(row_idx) ||
+            quantiles_reader.IsNull(row_idx) || n_paths_reader.IsNull(row_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
         vector<double> residuals, forecasts, quantile_levels;
-        ExtractListAsDouble(residuals_vec, row_idx, residuals);
-        ExtractListAsDouble(forecasts_vec, row_idx, forecasts);
-        ExtractListAsDouble(quantiles_vec, row_idx, quantile_levels);
-        int n_paths = UnifiedVectorFormat::GetData<int32_t>(n_paths_data)[np_idx];
-        int64_t seed = seed_data.validity.RowIsValid(seed_idx)
-            ? UnifiedVectorFormat::GetData<int64_t>(seed_data)[seed_idx]
-            : -1;
+        vector<uint64_t> residuals_validity, forecasts_validity;
+        residuals_reader.Read(row_idx, residuals, residuals_validity);
+        forecasts_reader.Read(row_idx, forecasts, forecasts_validity);
+        quantiles_reader.ReadNoNulls(row_idx, quantile_levels, "ts_bootstrap_quantiles", "quantile_levels");
+        int n_paths = n_paths_reader.Get(row_idx);
+        int64_t seed = seed_reader.IsNull(row_idx) ? -1 : seed_reader.Get(row_idx);
 
         BootstrapQuantileResultFFI bq_result = {};
         AnofoxError error;
         bool success = anofox_ts_bootstrap_quantiles(
-            residuals.data(), residuals.size(),
-            forecasts.data(), forecasts.size(),
+            residuals.data(), residuals_validity.empty() ? nullptr : residuals_validity.data(),
+            residuals.size(),
+            forecasts.data(), forecasts_validity.empty() ? nullptr : forecasts_validity.data(),
+            forecasts.size(),
             n_paths,
             quantile_levels.data(), quantile_levels.size(),
             seed,
@@ -237,17 +200,20 @@ static void TsBootstrapQuantilesFunction(DataChunk &args, ExpressionState &state
         );
 
         if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_bootstrap_quantiles: %s", error.message);
+            }
             FlatVector::SetNull(result, row_idx, true);
             continue;
         }
 
-        WriteListFromArray(point_out, row_idx, bq_result.point, bq_result.n_forecasts);
-        WriteListFromArray(quantiles_out, row_idx, bq_result.quantiles, bq_result.n_quantiles);
+        WriteDoubleListNanAsNull(point_out, row_idx, bq_result.point, bq_result.n_forecasts);
+        WriteDoubleList(quantiles_out, row_idx, bq_result.quantiles, bq_result.n_quantiles);
 
         // Values is a flat array of n_quantiles * n_forecasts — write as nested LIST of LISTs
         // We write it as a single flat list for simplicity (q0_t0, q0_t1, ..., q1_t0, q1_t1, ...)
         size_t total = bq_result.n_quantiles * bq_result.n_forecasts;
-        WriteListFromArray(values_out, row_idx, bq_result.values, total);
+        WriteDoubleListNanAsNull(values_out, row_idx, bq_result.values, total);
 
         anofox_free_bootstrap_quantile_result(&bq_result);
     }

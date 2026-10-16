@@ -16,17 +16,20 @@ SELECT * FROM ts_forecast_by('table', group_col, date_col, value_col, 'AutoMFLES
 
 Multiple Frequency Local Exponential Smoothing with automatic model selection. Handles multiple seasonal patterns in the data. Combines Fourier series representation with exponential smoothing for complex seasonality.
 
-> **Important:** Seasonality is NOT auto-detected. Use `ts_detect_periods_by` first to detect seasonal periods, then pass them explicitly via `seasonal_periods`.
+> **Note:** `AutoMFLES` is a documented, accepted **deprecated alias** of `MFLES` — it runs
+> the exact same code path (not a separate model-selection algorithm), and `model_name`
+> reports `"MFLES"` (not `"AutoMFLES"`). When `seasonal_periods` is omitted, `ts_forecast_by`
+> auto-detects a single period internally and uses it as the only entry, or runs non-seasonal
+> if nothing is detected; passing `seasonal_periods` explicitly via `ts_detect_periods_agg` is
+> still recommended for control.
 
 ## Parameters
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `horizon` | INTEGER | Yes | — | Number of periods to forecast |
-| `seasonal_periods` | INTEGER[] | **Yes** | — | Array of seasonal periods (e.g., `'[24, 168]'` for daily+weekly) |
-| `confidence_level` | DOUBLE | No | 0.95 | Confidence for prediction intervals |
-| `include_fitted` | BOOLEAN | No | false | Return in-sample fitted values |
-| `include_residuals` | BOOLEAN | No | false | Return residuals |
+| `seasonal_periods` | INTEGER[] | No | auto-detected (single period) | Array of seasonal periods (e.g., `'[24, 168]'` for daily+weekly); auto-detected (single period) when omitted |
+| `confidence_level` | DOUBLE | No | 0.90 | Confidence for prediction intervals |
 
 ## Returns
 
@@ -38,15 +41,21 @@ Multiple Frequency Local Exponential Smoothing with automatic model selection. H
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
 
+`yhat_lower` / `yhat_upper` are the crate `MFLES` model's own prediction interval at
+`confidence_level` (reported under `model_name = "MFLES"`) — see
+[07-forecasting.md's "Prediction intervals, fitted values and input handling"](../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling)
+for calibration caveats shared across all models.
+
 ## SQL Example
 
 ```sql
--- Step 1: Detect seasonality
-SELECT * FROM ts_detect_periods_by('hourly_energy', meter_id, timestamp, consumption, MAP{});
--- Returns: periods = [24, 168] (daily and weekly)
+-- Step 1: Detect seasonality (aggregate form shown here; ts_detect_periods_by is an
+-- equally valid alternative returning the same primary_period, see docs/api/07-forecasting.md)
+SELECT meter_id, round(ts_detect_periods_agg(timestamp, consumption, 'fft').primary_period) AS primary_period
+FROM hourly_energy GROUP BY meter_id;
 
--- Step 2: Forecast with detected seasonal periods
-SELECT * FROM ts_forecast_by(
+-- Step 2: Forecast with detected seasonal periods — model_name reports "MFLES", not "AutoMFLES"
+SELECT DISTINCT model_name FROM ts_forecast_by(
     'hourly_energy',
     meter_id,
     timestamp,
@@ -56,6 +65,7 @@ SELECT * FROM ts_forecast_by(
     '1h',
     MAP{'seasonal_periods': '[24, 168]'}
 );
+-- model_name = 'MFLES'
 ```
 
 ## Best For

@@ -1,0 +1,10 @@
+docs/reference/models/exponential-smoothing/seasonal_es_optimized.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'SeasonalESOptimized', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/exponential-smoothing/seasonal_es_optimized.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/intermittent/croston_classic.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'CrostonClassic', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/intermittent/croston_classic.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/intermittent/croston_optimized.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'CrostonOptimized', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/intermittent/croston_optimized.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/intermittent/croston_sba.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'CrostonSBA', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/intermittent/croston_sba.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/intermittent/adida.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'ADIDA', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/intermittent/adida.md	1	PASS	CREATE OR REPLACE TABLE intermittent_orders AS	

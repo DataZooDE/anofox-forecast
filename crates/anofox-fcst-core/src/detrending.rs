@@ -3,6 +3,7 @@
 //! This module wraps fdars-core's detrending and decomposition functions
 //! for use with time series data in DuckDB.
 
+use crate::decomposition::{classical_decompose, ClassicalKind};
 use crate::error::{ForecastError, Result};
 use fdars_core::detrend::{
     auto_detrend as fdars_auto_detrend, decompose_additive as fdars_decompose_additive,
@@ -11,15 +12,34 @@ use fdars_core::detrend::{
     detrend_polynomial as fdars_detrend_polynomial, DecomposeResult as FdarsDecomposeResult,
     TrendResult as FdarsTrendResult,
 };
+use fdars_core::matrix::FdMatrix;
 use std::str::FromStr;
+
+/// Build the single-series `(1 x n)` `FdMatrix` that every fdars-core call in
+/// this crate must go through -- the ONLY place `FdMatrix::from_slice` is
+/// called (T-15-01). fdars-core's `FdMatrix` convention is rows =
+/// observations, columns = evaluation points; a single time series of
+/// length `n` is one observation (row) of `n` evaluation points (columns),
+/// i.e. `FdMatrix::from_slice(values, 1, n)`.
+///
+/// `FdMatrix::from_slice(values, n, 1)` still compiles -- it silently builds
+/// an n-observation, 1-timepoint matrix -- and was exactly the B1/B2 bug
+/// this helper exists to prevent. Review this literal `(1, n)` order at
+/// every change to this function.
+pub(crate) fn single_series_matrix(values: &[f64]) -> Result<FdMatrix> {
+    FdMatrix::from_slice(values, 1, values.len())
+        .map_err(|e| ForecastError::InvalidInput(e.to_string()))
+}
 
 /// Method for detrending.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DetrendMethod {
     /// Linear trend removal using least squares
     Linear,
-    /// Polynomial trend removal
-    Polynomial,
+    /// Quadratic (degree 2) polynomial trend removal
+    Quadratic,
+    /// Cubic (degree 3) polynomial trend removal
+    Cubic,
     /// First-order differencing
     Diff,
     /// Second-order differencing
@@ -31,18 +51,30 @@ pub enum DetrendMethod {
     Auto,
 }
 
+/// All detrend method names accepted by [`DetrendMethod::from_str`], for the
+/// error message naming every valid choice (D-02).
+const VALID_DETREND_METHODS: &str =
+    "linear, quadratic (alias polynomial, poly), cubic, diff (alias diff1, difference), diff2, loess (alias lowess), auto";
+
 impl FromStr for DetrendMethod {
-    type Err = std::convert::Infallible;
+    type Err = ForecastError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         Ok(match s.to_lowercase().as_str() {
             "linear" => Self::Linear,
-            "polynomial" | "poly" => Self::Polynomial,
+            "quadratic" | "polynomial" | "poly" => Self::Quadratic,
+            "cubic" => Self::Cubic,
             "diff" | "diff1" | "difference" => Self::Diff,
             "diff2" => Self::Diff2,
             "loess" | "lowess" => Self::Loess,
             "auto" => Self::Auto,
-            _ => Self::Auto,
+            other => {
+                return Err(ForecastError::InvalidParameter {
+                    param: "method".to_string(),
+                    value: other.to_string(),
+                    reason: format!("expected one of: {VALID_DETREND_METHODS}"),
+                })
+            }
         })
     }
 }
@@ -50,23 +82,55 @@ impl FromStr for DetrendMethod {
 /// Decomposition method for seasonal decomposition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DecomposeMethod {
-    /// Additive decomposition: data = trend + seasonal + remainder
+    /// Additive decomposition (fdars LOESS+Fourier): data = trend + seasonal + remainder
     #[default]
     Additive,
-    /// Multiplicative decomposition: data = trend * seasonal * remainder
+    /// Multiplicative decomposition (fdars LOESS+Fourier): data = trend * seasonal * remainder
     Multiplicative,
+    /// Classical additive decomposition (R `stats::decompose`, D-10):
+    /// centred moving-average trend, data = trend + seasonal + remainder
+    ClassicalAdditive,
+    /// Classical multiplicative decomposition (R `stats::decompose`, D-10):
+    /// centred moving-average trend, data = trend * seasonal * remainder
+    ClassicalMultiplicative,
 }
 
+/// All decompose method names accepted by [`DecomposeMethod::from_str`], for
+/// the error message naming every valid choice.
+const VALID_DECOMPOSE_METHODS: &str = "additive (alias add), multiplicative (alias mult, mul), classical_additive (alias classical), classical_multiplicative";
+
 impl FromStr for DecomposeMethod {
-    type Err = std::convert::Infallible;
+    type Err = ForecastError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         Ok(match s.to_lowercase().as_str() {
             "additive" | "add" => Self::Additive,
             "multiplicative" | "mult" | "mul" => Self::Multiplicative,
-            _ => Self::Additive,
+            "classical_additive" | "classical" => Self::ClassicalAdditive,
+            "classical_multiplicative" => Self::ClassicalMultiplicative,
+            other => {
+                return Err(ForecastError::InvalidParameter {
+                    param: "method".to_string(),
+                    value: other.to_string(),
+                    reason: format!("expected one of: {VALID_DECOMPOSE_METHODS}"),
+                })
+            }
         })
     }
+}
+
+/// Validate that a `decompose()` period (`f64`) is an integer `>= 2`, as
+/// classical decomposition requires (D-10). Returns the usize period on
+/// success.
+fn classical_period_as_usize(period: f64) -> Result<usize> {
+    if period < 2.0 || period.fract() != 0.0 {
+        return Err(ForecastError::InvalidParameter {
+            param: "period".to_string(),
+            value: period.to_string(),
+            reason: "classical decomposition requires an integer period >= 2".to_string(),
+        });
+    }
+    Ok(period as usize)
 }
 
 /// Result of detrending operation.
@@ -78,7 +142,12 @@ pub struct DetrendResult {
     pub detrended: Vec<f64>,
     /// Method used for detrending
     pub method: String,
-    /// Polynomial coefficients (for polynomial methods)
+    /// Polynomial coefficients (for polynomial methods). For
+    /// `DetrendMethod::Quadratic`/`Cubic` these are ascending powers of the
+    /// raw 0-based time index (`t = 0..n-1`): `coefficients[k]` is the
+    /// coefficient of `t^k`. fdars-core itself fits in normalised time
+    /// `t/(n-1)`; `detrend_polynomial` below converts back to the raw-index
+    /// basis before returning.
     pub coefficients: Option<Vec<f64>>,
     /// Residual sum of squares
     pub rss: f64,
@@ -90,10 +159,10 @@ impl From<FdarsTrendResult> for DetrendResult {
     fn from(r: FdarsTrendResult) -> Self {
         let rss = r.rss.first().copied().unwrap_or(0.0);
         Self {
-            trend: r.trend,
-            detrended: r.detrended,
-            method: r.method,
-            coefficients: r.coefficients,
+            trend: r.trend.as_slice().to_vec(),
+            detrended: r.detrended.as_slice().to_vec(),
+            method: r.method.into_owned(),
+            coefficients: r.coefficients.map(|c| c.as_slice().to_vec()),
             rss,
             n_params: r.n_params,
         }
@@ -118,11 +187,11 @@ pub struct DecomposeResult {
 impl From<FdarsDecomposeResult> for DecomposeResult {
     fn from(r: FdarsDecomposeResult) -> Self {
         Self {
-            trend: r.trend,
-            seasonal: r.seasonal,
-            remainder: r.remainder,
+            trend: r.trend.as_slice().to_vec(),
+            seasonal: r.seasonal.as_slice().to_vec(),
+            remainder: r.remainder.as_slice().to_vec(),
             period: r.period,
-            method: r.method,
+            method: r.method.into_owned(),
         }
     }
 }
@@ -146,7 +215,8 @@ pub fn detrend_linear(values: &[f64]) -> Result<DetrendResult> {
     }
 
     let argvals = make_argvals(n);
-    let result = fdars_detrend_linear(values, n, 1, &argvals);
+    let mat = single_series_matrix(values)?;
+    let result = fdars_detrend_linear(&mat, &argvals);
 
     Ok(result.into())
 }
@@ -158,7 +228,12 @@ pub fn detrend_linear(values: &[f64]) -> Result<DetrendResult> {
 /// * `degree` - Polynomial degree (1 = linear, 2 = quadratic, etc.)
 ///
 /// # Returns
-/// Detrend result with trend and detrended data
+/// Detrend result with trend and detrended data. For `degree >= 2` the
+/// returned `coefficients` are converted from fdars-core's normalised-time
+/// basis (`t/(n-1)`) to the raw 0-based index basis: coefficient `k` is
+/// divided by `(n-1)^k`. `degree == 1` delegates to fdars-core's own
+/// `detrend_linear`, whose coefficients are already in the raw-index basis
+/// (no conversion applied).
 pub fn detrend_polynomial(values: &[f64], degree: usize) -> Result<DetrendResult> {
     let n = values.len();
     if n < degree + 1 {
@@ -169,9 +244,20 @@ pub fn detrend_polynomial(values: &[f64], degree: usize) -> Result<DetrendResult
     }
 
     let argvals = make_argvals(n);
-    let result = fdars_detrend_polynomial(values, n, 1, &argvals, degree);
+    let mat = single_series_matrix(values)?;
+    let result = fdars_detrend_polynomial(&mat, &argvals, degree);
+    let mut detrend_result: DetrendResult = result.into();
 
-    Ok(result.into())
+    if degree >= 2 {
+        if let Some(ref mut coefs) = detrend_result.coefficients {
+            let scale = (n - 1) as f64;
+            for (k, c) in coefs.iter_mut().enumerate() {
+                *c /= scale.powi(k as i32);
+            }
+        }
+    }
+
+    Ok(detrend_result)
 }
 
 /// Remove trend by differencing.
@@ -192,7 +278,8 @@ pub fn detrend_diff(values: &[f64], order: usize) -> Result<DetrendResult> {
         });
     }
 
-    let result = fdars_detrend_diff(values, n, 1, order);
+    let mat = single_series_matrix(values)?;
+    let result = fdars_detrend_diff(&mat, order);
 
     Ok(result.into())
 }
@@ -221,7 +308,8 @@ pub fn detrend_loess(values: &[f64], bandwidth: f64, degree: usize) -> Result<De
     }
 
     let argvals = make_argvals(n);
-    let result = fdars_detrend_loess(values, n, 1, &argvals, bandwidth, degree);
+    let mat = single_series_matrix(values)?;
+    let result = fdars_detrend_loess(&mat, &argvals, bandwidth, degree);
 
     Ok(result.into())
 }
@@ -243,7 +331,8 @@ pub fn detrend_auto(values: &[f64]) -> Result<DetrendResult> {
     }
 
     let argvals = make_argvals(n);
-    let result = fdars_auto_detrend(values, n, 1, &argvals);
+    let mat = single_series_matrix(values)?;
+    let result = fdars_auto_detrend(&mat, &argvals);
 
     Ok(result.into())
 }
@@ -259,7 +348,8 @@ pub fn detrend_auto(values: &[f64]) -> Result<DetrendResult> {
 pub fn detrend(values: &[f64], method: DetrendMethod) -> Result<DetrendResult> {
     match method {
         DetrendMethod::Linear => detrend_linear(values),
-        DetrendMethod::Polynomial => detrend_polynomial(values, 2),
+        DetrendMethod::Quadratic => detrend_polynomial(values, 2),
+        DetrendMethod::Cubic => detrend_polynomial(values, 3),
         DetrendMethod::Diff => detrend_diff(values, 1),
         DetrendMethod::Diff2 => detrend_diff(values, 2),
         DetrendMethod::Loess => detrend_loess(values, 0.3, 1),
@@ -288,18 +378,24 @@ pub fn decompose_additive(
     n_harmonics: Option<usize>,
 ) -> Result<DecomposeResult> {
     let n = values.len();
+
+    // CR-03: validate period is a positive finite number BEFORE the
+    // insufficient-data check below -- `period as usize` saturates to
+    // usize::MAX for +infinity, and `2 * usize::MAX` overflows (panics in
+    // debug builds, wraps in release), so this order is load-bearing, not
+    // cosmetic.
+    if !period.is_finite() || period <= 0.0 {
+        return Err(ForecastError::InvalidParameter {
+            param: "period".to_string(),
+            value: period.to_string(),
+            reason: "Period must be a positive finite number".to_string(),
+        });
+    }
+
     if n < 2 * period as usize {
         return Err(ForecastError::InsufficientData {
             needed: 2 * period as usize,
             got: n,
-        });
-    }
-
-    if period <= 0.0 {
-        return Err(ForecastError::InvalidParameter {
-            param: "period".to_string(),
-            value: period.to_string(),
-            reason: "Period must be positive".to_string(),
         });
     }
 
@@ -308,7 +404,8 @@ pub fn decompose_additive(
     let bw = bandwidth.unwrap_or(0.3);
     let harmonics = n_harmonics.unwrap_or(3);
 
-    let result = fdars_decompose_additive(values, n, 1, &argvals, period, method, bw, harmonics);
+    let mat = single_series_matrix(values)?;
+    let result = fdars_decompose_additive(&mat, &argvals, period, method, bw, harmonics);
 
     Ok(result.into())
 }
@@ -334,18 +431,22 @@ pub fn decompose_multiplicative(
     n_harmonics: Option<usize>,
 ) -> Result<DecomposeResult> {
     let n = values.len();
+
+    // CR-03: validate period before the insufficient-data check below --
+    // see decompose_additive for why this order is load-bearing (infinity
+    // overflow in `2 * period as usize`).
+    if !period.is_finite() || period <= 0.0 {
+        return Err(ForecastError::InvalidParameter {
+            param: "period".to_string(),
+            value: period.to_string(),
+            reason: "Period must be a positive finite number".to_string(),
+        });
+    }
+
     if n < 2 * period as usize {
         return Err(ForecastError::InsufficientData {
             needed: 2 * period as usize,
             got: n,
-        });
-    }
-
-    if period <= 0.0 {
-        return Err(ForecastError::InvalidParameter {
-            param: "period".to_string(),
-            value: period.to_string(),
-            reason: "Period must be positive".to_string(),
         });
     }
 
@@ -354,8 +455,8 @@ pub fn decompose_multiplicative(
     let bw = bandwidth.unwrap_or(0.3);
     let harmonics = n_harmonics.unwrap_or(3);
 
-    let result =
-        fdars_decompose_multiplicative(values, n, 1, &argvals, period, method, bw, harmonics);
+    let mat = single_series_matrix(values)?;
+    let result = fdars_decompose_multiplicative(&mat, &argvals, period, method, bw, harmonics);
 
     Ok(result.into())
 }
@@ -374,6 +475,28 @@ pub fn decompose(values: &[f64], period: f64, method: DecomposeMethod) -> Result
         DecomposeMethod::Additive => decompose_additive(values, period, None, None, None),
         DecomposeMethod::Multiplicative => {
             decompose_multiplicative(values, period, None, None, None)
+        }
+        DecomposeMethod::ClassicalAdditive => {
+            let p = classical_period_as_usize(period)?;
+            let cd = classical_decompose(values, p, ClassicalKind::Additive)?;
+            Ok(DecomposeResult {
+                trend: cd.trend,
+                seasonal: cd.seasonal,
+                remainder: cd.remainder,
+                period,
+                method: "classical_additive".to_string(),
+            })
+        }
+        DecomposeMethod::ClassicalMultiplicative => {
+            let p = classical_period_as_usize(period)?;
+            let cd = classical_decompose(values, p, ClassicalKind::Multiplicative)?;
+            Ok(DecomposeResult {
+                trend: cd.trend,
+                seasonal: cd.seasonal,
+                remainder: cd.remainder,
+                period,
+                method: "classical_multiplicative".to_string(),
+            })
         }
     }
 }
@@ -421,6 +544,14 @@ mod tests {
         let result = detrend_polynomial(&values, 2).unwrap();
 
         assert_eq!(result.trend.len(), values.len());
+        // Closed form: the input IS an exact degree-2 polynomial, so a
+        // degree-2 polynomial fit must recover it (near-)exactly.
+        let max_resid = values
+            .iter()
+            .zip(&result.trend)
+            .map(|(v, t)| (v - t).abs())
+            .fold(0.0_f64, f64::max);
+        assert!(max_resid < 1e-6, "max residual = {max_resid}");
     }
 
     #[test]
@@ -430,6 +561,21 @@ mod tests {
 
         // Verify function runs without error
         assert!(result.is_ok());
+        let result = result.unwrap();
+        // Closed form: `values` is a perfectly linear series (slope 0.5, no
+        // noise), so the order-1 difference is the constant slope (0.5) at
+        // every position except the last, which is this implementation's
+        // documented edge-padding convention (0.0).
+        let n = result.detrended.len();
+        assert_eq!(n, values.len());
+        assert!(
+            result.detrended[..n - 1]
+                .iter()
+                .all(|&d| (d - 0.5).abs() < 1e-9),
+            "{:?}",
+            result.detrended
+        );
+        assert_eq!(result.detrended[n - 1], 0.0);
     }
 
     #[test]
@@ -447,6 +593,20 @@ mod tests {
         let result = detrend_auto(&values).unwrap();
 
         assert_eq!(result.trend.len(), values.len());
+        // Closed form: `values` is a perfectly linear series (slope 0.5, no
+        // noise); whichever method detrend_auto selects, the residual
+        // (detrended) series must be ~0 everywhere -- a linear trend leaves
+        // no detectable structure behind once properly removed.
+        let max_resid = result
+            .detrended
+            .iter()
+            .cloned()
+            .fold(0.0_f64, |m, d| m.max(d.abs()));
+        assert!(
+            max_resid < 1e-3,
+            "detrend_auto selected {:?}, max |residual| = {max_resid}",
+            result.method
+        );
     }
 
     #[test]
@@ -476,6 +636,197 @@ mod tests {
         assert_eq!(result.method, "multiplicative");
     }
 
+    // ------------------------------------------------------------------
+    // Decompose behavior (Task 3): constant/non-trivial decomposition and
+    // strict DecomposeMethod::from_str.
+    // ------------------------------------------------------------------
+
+    fn pearson(a: &[f64], b: &[f64]) -> f64 {
+        let n = a.len() as f64;
+        let ma = a.iter().sum::<f64>() / n;
+        let mb = b.iter().sum::<f64>() / n;
+        let cov: f64 = a.iter().zip(b).map(|(x, y)| (x - ma) * (y - mb)).sum();
+        let va: f64 = a.iter().map(|x| (x - ma).powi(2)).sum();
+        let vb: f64 = b.iter().map(|y| (y - mb).powi(2)).sum();
+        cov / (va.sqrt() * vb.sqrt())
+    }
+
+    #[test]
+    fn test_decompose_constant_series_trend_is_exact_and_seasonal_is_zero() {
+        // Before fdars-core 0.47 (B1), decompose_additive passed
+        // (values, n, 1, ...) -- backwards for a single series.
+        let constant = vec![1.0; 48];
+        let result = decompose(&constant, 12.0, DecomposeMethod::Additive).unwrap();
+
+        for (i, &t) in result.trend.iter().enumerate() {
+            assert!((t - 1.0).abs() < 1e-12, "trend[{i}] = {t}");
+        }
+        for (i, &s) in result.seasonal.iter().enumerate() {
+            assert!(s.abs() < 1e-12, "seasonal[{i}] = {s}");
+        }
+    }
+
+    #[test]
+    fn test_decompose_additive_reconstructs_input_and_recovers_seasonal() {
+        let n = 120;
+        let seasonal_component: Vec<f64> = (0..n)
+            .map(|i| 3.0 * (2.0 * PI * i as f64 / 12.0).sin())
+            .collect();
+        let values: Vec<f64> = (0..n)
+            .map(|i| 10.0 + 0.1 * i as f64 + seasonal_component[i])
+            .collect();
+        let result = decompose(&values, 12.0, DecomposeMethod::Additive).unwrap();
+
+        for (i, &want) in values.iter().enumerate() {
+            let recon = result.trend[i] + result.seasonal[i] + result.remainder[i];
+            assert!(
+                (recon - want).abs() < 1e-10,
+                "index {i}: trend+seasonal+remainder = {recon}, input = {want}"
+            );
+        }
+        let corr = pearson(&result.seasonal, &seasonal_component);
+        assert!(corr > 0.99, "correlation with generating seasonal = {corr}");
+    }
+
+    #[test]
+    fn test_decompose_multiplicative_reconstructs_input() {
+        let n = 120;
+        let values: Vec<f64> = (0..n)
+            .map(|i| {
+                let trend = 10.0 + 0.1 * i as f64;
+                let seasonal = 1.0 + 0.3 * (2.0 * PI * i as f64 / 12.0).sin();
+                trend * seasonal
+            })
+            .collect();
+        let result = decompose(&values, 12.0, DecomposeMethod::Multiplicative).unwrap();
+
+        for (i, &want) in values.iter().enumerate() {
+            let recon = result.trend[i] * result.seasonal[i] * result.remainder[i];
+            assert!(
+                (recon - want).abs() < 1e-9,
+                "index {i}: trend*seasonal*remainder = {recon}, input = {want}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_decompose_method_accepted_spellings() {
+        assert_eq!(
+            "additive".parse::<DecomposeMethod>().unwrap(),
+            DecomposeMethod::Additive
+        );
+        assert_eq!(
+            "add".parse::<DecomposeMethod>().unwrap(),
+            DecomposeMethod::Additive
+        );
+        assert_eq!(
+            "multiplicative".parse::<DecomposeMethod>().unwrap(),
+            DecomposeMethod::Multiplicative
+        );
+        assert_eq!(
+            "mult".parse::<DecomposeMethod>().unwrap(),
+            DecomposeMethod::Multiplicative
+        );
+        assert_eq!(
+            "mul".parse::<DecomposeMethod>().unwrap(),
+            DecomposeMethod::Multiplicative
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // Classical decomposition dispatch (D-10, Phase 15 plan 15-04)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_decompose_method_classical_accepted_spellings() {
+        assert_eq!(
+            "classical".parse::<DecomposeMethod>().unwrap(),
+            DecomposeMethod::ClassicalAdditive
+        );
+        assert_eq!(
+            "classical_additive".parse::<DecomposeMethod>().unwrap(),
+            DecomposeMethod::ClassicalAdditive
+        );
+        assert_eq!(
+            "classical_multiplicative"
+                .parse::<DecomposeMethod>()
+                .unwrap(),
+            DecomposeMethod::ClassicalMultiplicative
+        );
+    }
+
+    #[test]
+    fn test_decompose_classical_additive_method_string_is_classical_additive() {
+        let values: Vec<f64> = (0..48)
+            .map(|i| 10.0 + 0.1 * i as f64 + 3.0 * (2.0 * PI * i as f64 / 12.0).sin())
+            .collect();
+        let result = decompose(&values, 12.0, DecomposeMethod::ClassicalAdditive).unwrap();
+        assert_eq!(result.method, "classical_additive");
+        assert_eq!(result.period, 12.0);
+    }
+
+    #[test]
+    fn test_decompose_classical_multiplicative_method_string_is_classical_multiplicative() {
+        let values: Vec<f64> = (0..48)
+            .map(|i| {
+                let trend = 10.0 + 0.1 * i as f64;
+                let seasonal = 1.0 + 0.3 * (2.0 * PI * i as f64 / 12.0).sin();
+                trend * seasonal
+            })
+            .collect();
+        let result = decompose(&values, 12.0, DecomposeMethod::ClassicalMultiplicative).unwrap();
+        assert_eq!(result.method, "classical_multiplicative");
+    }
+
+    #[test]
+    fn test_decompose_classical_non_integer_period_is_invalid_parameter() {
+        let values: Vec<f64> = (0..48).map(|i| i as f64).collect();
+        let result = decompose(&values, 12.5, DecomposeMethod::ClassicalAdditive);
+        assert!(matches!(
+            result,
+            Err(ForecastError::InvalidParameter { .. })
+        ));
+    }
+
+    #[test]
+    fn test_decompose_classical_period_one_is_invalid_parameter() {
+        let values: Vec<f64> = (0..48).map(|i| i as f64).collect();
+        let result = decompose(&values, 1.0, DecomposeMethod::ClassicalAdditive);
+        assert!(matches!(
+            result,
+            Err(ForecastError::InvalidParameter { .. })
+        ));
+    }
+
+    #[test]
+    fn test_decompose_classical_multiplicative_nonpositive_value_is_invalid_parameter() {
+        let mut values: Vec<f64> = (1..=48).map(|i| i as f64).collect();
+        values[3] = 0.0;
+        let result = decompose(&values, 12.0, DecomposeMethod::ClassicalMultiplicative);
+        assert!(matches!(
+            result,
+            Err(ForecastError::InvalidParameter { .. })
+        ));
+    }
+
+    #[test]
+    fn test_decompose_method_unknown_name_errors_naming_valid_methods() {
+        let err = "classicalish".parse::<DecomposeMethod>().unwrap_err();
+        match err {
+            ForecastError::InvalidParameter {
+                param,
+                value,
+                reason,
+            } => {
+                assert_eq!(param, "method");
+                assert_eq!(value, "classicalish");
+                assert!(reason.contains("additive"));
+                assert!(reason.contains("multiplicative"));
+            }
+            other => panic!("expected InvalidParameter, got {other:?}"),
+        }
+    }
+
     #[test]
     fn test_invalid_bandwidth() {
         let values = generate_trended_series(100, 0.5, 10.0);
@@ -487,5 +838,142 @@ mod tests {
     fn test_insufficient_data() {
         let values = vec![1.0];
         assert!(detrend_linear(&values).is_err());
+    }
+
+    // ------------------------------------------------------------------
+    // D-02 / B3: strict DetrendMethod::from_str (Task 2)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_detrend_method_accepted_spellings() {
+        assert_eq!(
+            "linear".parse::<DetrendMethod>().unwrap(),
+            DetrendMethod::Linear
+        );
+        assert_eq!(
+            "quadratic".parse::<DetrendMethod>().unwrap(),
+            DetrendMethod::Quadratic
+        );
+        assert_eq!(
+            "polynomial".parse::<DetrendMethod>().unwrap(),
+            DetrendMethod::Quadratic
+        );
+        assert_eq!(
+            "poly".parse::<DetrendMethod>().unwrap(),
+            DetrendMethod::Quadratic
+        );
+        assert_eq!(
+            "cubic".parse::<DetrendMethod>().unwrap(),
+            DetrendMethod::Cubic
+        );
+        assert_eq!(
+            "diff".parse::<DetrendMethod>().unwrap(),
+            DetrendMethod::Diff
+        );
+        assert_eq!(
+            "diff1".parse::<DetrendMethod>().unwrap(),
+            DetrendMethod::Diff
+        );
+        assert_eq!(
+            "difference".parse::<DetrendMethod>().unwrap(),
+            DetrendMethod::Diff
+        );
+        assert_eq!(
+            "diff2".parse::<DetrendMethod>().unwrap(),
+            DetrendMethod::Diff2
+        );
+        assert_eq!(
+            "loess".parse::<DetrendMethod>().unwrap(),
+            DetrendMethod::Loess
+        );
+        assert_eq!(
+            "lowess".parse::<DetrendMethod>().unwrap(),
+            DetrendMethod::Loess
+        );
+        assert_eq!(
+            "auto".parse::<DetrendMethod>().unwrap(),
+            DetrendMethod::Auto
+        );
+        // Case-insensitive
+        assert_eq!(
+            "CUBIC".parse::<DetrendMethod>().unwrap(),
+            DetrendMethod::Cubic
+        );
+    }
+
+    #[test]
+    fn test_detrend_method_unknown_name_errors_naming_valid_methods() {
+        let err = "quartic".parse::<DetrendMethod>().unwrap_err();
+        match err {
+            ForecastError::InvalidParameter {
+                param,
+                value,
+                reason,
+            } => {
+                assert_eq!(param, "method");
+                assert_eq!(value, "quartic");
+                assert!(reason.contains("linear"));
+                assert!(reason.contains("quadratic"));
+                assert!(reason.contains("cubic"));
+                assert!(reason.contains("diff"));
+                assert!(reason.contains("loess"));
+                assert!(reason.contains("auto"));
+            }
+            other => panic!("expected InvalidParameter, got {other:?}"),
+        }
+
+        let err2 = "7".parse::<DetrendMethod>().unwrap_err();
+        assert!(matches!(err2, ForecastError::InvalidParameter { .. }));
+    }
+
+    #[test]
+    fn test_detrend_polynomial_insufficient_data_for_degree() {
+        // Cubic needs degree + 1 = 4 points
+        let values = vec![1.0, 2.0, 3.0];
+        let result = detrend_polynomial(&values, 3);
+        assert!(matches!(
+            result,
+            Err(ForecastError::InsufficientData { needed: 4, got: 3 })
+        ));
+    }
+
+    #[test]
+    fn test_single_series_matrix_shape() {
+        let values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let mat = single_series_matrix(&values).unwrap();
+        assert_eq!(mat.shape(), (1, 5));
+    }
+
+    #[test]
+    fn test_detrend_cubic_matches_polyfit_shape() {
+        // Cubic series: 0.002 t^3 - 0.08 t^2 + 0.5 t + 3 (noise-free, exact fit expected)
+        let n = 40;
+        let values: Vec<f64> = (0..n)
+            .map(|i| {
+                let t = i as f64;
+                0.002 * t.powi(3) - 0.08 * t.powi(2) + 0.5 * t + 3.0
+            })
+            .collect();
+        let result = detrend_polynomial(&values, 3).unwrap();
+        assert_eq!(result.n_params, 4);
+        assert_eq!(result.method, "polynomial(3)");
+        // Exact cubic should fit essentially perfectly.
+        for (t_val, trend_val) in result.trend.iter().enumerate() {
+            let expected = {
+                let t = t_val as f64;
+                0.002 * t.powi(3) - 0.08 * t.powi(2) + 0.5 * t + 3.0
+            };
+            assert!(
+                (trend_val - expected).abs() < 1e-6,
+                "trend[{t_val}] = {trend_val}, expected {expected}"
+            );
+        }
+        // Coefficients (ascending powers of raw index) should recover the
+        // generating polynomial.
+        let coefs = result.coefficients.unwrap();
+        assert!((coefs[0] - 3.0).abs() < 1e-6, "c0 = {}", coefs[0]);
+        assert!((coefs[1] - 0.5).abs() < 1e-6, "c1 = {}", coefs[1]);
+        assert!((coefs[2] - (-0.08)).abs() < 1e-6, "c2 = {}", coefs[2]);
+        assert!((coefs[3] - 0.002).abs() < 1e-6, "c3 = {}", coefs[3]);
     }
 }

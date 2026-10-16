@@ -20,37 +20,10 @@
 
 namespace duckdb {
 
-// Parse frequency string to microseconds and frequency type (e.g., "1d" -> 86400000000, FIXED)
-// Returns (microseconds, FrequencyType) - for ts_stats usage
-static std::pair<int64_t, FrequencyType> ParseFrequencyForStats(const string &frequency_str) {
-    auto parsed = ParseFrequencyWithType(frequency_str);
-    // Convert seconds to microseconds for fixed frequencies
-    int64_t micros;
-    if (parsed.type == FrequencyType::FIXED) {
-        micros = parsed.seconds * 1000000LL;
-    } else {
-        // For calendar frequencies, use approximate values for stats computation
-        switch (parsed.type) {
-            case FrequencyType::MONTHLY:
-                micros = parsed.seconds * 86400LL * 30LL * 1000000LL;
-                break;
-            case FrequencyType::QUARTERLY:
-                micros = parsed.seconds * 86400LL * 90LL * 1000000LL;
-                break;
-            case FrequencyType::YEARLY:
-                micros = parsed.seconds * 86400LL * 365LL * 1000000LL;
-                break;
-            default:
-                micros = parsed.seconds * 1000000LL;
-        }
-    }
-    return std::make_pair(micros, parsed.type);
-}
-
-// Parse frequency string to microseconds (e.g., "1d" -> 86400000000) - backward compatible version
-static int64_t ParseFrequencyToMicroseconds(const string &frequency_str) {
-    return ParseFrequencyForStats(frequency_str).first;
-}
+// Frequency parsing for ts_stats now shared via ParseFrequencyToMicrosAndType
+// (ts_fill_gaps_native.hpp/.cpp; CR-01 fix, WR-02) -- the previous
+// ParseFrequencyForStats, a verbatim copy-paste of ts_data_quality.cpp's
+// ParseFrequencyForDataQuality, is removed in favor of the single shared helper.
 
 // Define the output STRUCT type for ts_stats (34 metrics)
 // Note: Using LogicalType(LogicalTypeId::XXX) instead of LogicalType::XXX
@@ -93,6 +66,7 @@ static LogicalType GetTsStatsResultType() {
     children.push_back(make_pair("stability", LogicalType(LogicalTypeId::DOUBLE)));
     children.push_back(make_pair("expected_length", LogicalType(LogicalTypeId::UBIGINT)));
     children.push_back(make_pair("n_gaps", LogicalType(LogicalTypeId::UBIGINT)));
+    children.push_back(make_pair("n_gap_runs", LogicalType(LogicalTypeId::UBIGINT)));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -146,6 +120,12 @@ static void SetStructField(Vector &result, idx_t field_idx, idx_t row_idx, T val
 }
 
 // Extract timestamps from a LIST vector into a flat array (for TIMESTAMP type)
+//
+// WR-01 fix: a NULL element *inside* an otherwise non-NULL dates list previously
+// silently became epoch 0 (1970-01-01), which -- once sorted into the series --
+// looks like a multi-decade gap to gap_counts/resolve_gap_step, corrupting
+// n_gaps/n_gap_runs/expected_length/temporal_score for the whole row without any
+// error. Throws instead, naming the offending row and position.
 static void ExtractListTimestamps(Vector &list_vec, idx_t count, idx_t row_idx,
                                   vector<int64_t> &out_timestamps) {
     UnifiedVectorFormat list_data;
@@ -174,7 +154,11 @@ static void ExtractListTimestamps(Vector &list_vec, idx_t count, idx_t row_idx,
         if (child_data.validity.RowIsValid(unified_child_idx)) {
             out_timestamps[i] = child_values[unified_child_idx].value;
         } else {
-            out_timestamps[i] = 0;
+            throw InvalidInputException(
+                "ts_stats: dates list for row %llu contains a NULL element at "
+                "position %llu; every element of a declared dates list must be "
+                "non-NULL (pass a NULL dates list itself for \"no date information\")",
+                (unsigned long long)row_idx, (unsigned long long)i);
         }
     }
 }
@@ -211,19 +195,40 @@ static void PopulateTsStatsResult(Vector &result, idx_t row_idx, const TsStatsRe
     SetStructField<double>(result, 27, row_idx, stats_result.q3);
     SetStructField<double>(result, 28, row_idx, stats_result.iqr);
     SetStructField<double>(result, 29, row_idx, stats_result.autocorr_lag1);
-    SetStructField<double>(result, 30, row_idx, stats_result.trend_strength);
-    SetStructField<double>(result, 31, row_idx, stats_result.seasonality_strength);
-    SetStructField<double>(result, 32, row_idx, stats_result.entropy);
     SetStructField<double>(result, 33, row_idx, stats_result.stability);
 
-    // Set date-based metrics
+    // trend_strength / seasonality_strength: NULL when the Rust side has no value
+    // (D-02: interior-missing series, or -- for seasonality_strength -- no usable
+    // period/zero seasonal variance).
     auto &children = StructVector::GetEntries(result);
+    if (stats_result.has_trend_strength) {
+        SetStructField<double>(result, 30, row_idx, stats_result.trend_strength);
+    } else {
+        FlatVector::SetNull(*children[30], row_idx, true);
+    }
+    if (stats_result.has_seasonality_strength) {
+        SetStructField<double>(result, 31, row_idx, stats_result.seasonality_strength);
+    } else {
+        FlatVector::SetNull(*children[31], row_idx, true);
+    }
+
+    // entropy: NULL when the Rust side has no entropy value (D-03: interior-missing or
+    // fewer-than-3-present series).
+    if (stats_result.has_entropy) {
+        SetStructField<double>(result, 32, row_idx, stats_result.entropy);
+    } else {
+        FlatVector::SetNull(*children[32], row_idx, true);
+    }
+
+    // expected_length / n_gaps / n_gap_runs: NULL when no date metrics are available.
     if (stats_result.has_date_metrics) {
         SetStructField<uint64_t>(result, 34, row_idx, stats_result.expected_length);
         SetStructField<uint64_t>(result, 35, row_idx, stats_result.n_gaps);
+        SetStructField<uint64_t>(result, 36, row_idx, stats_result.n_gap_runs);
     } else {
         FlatVector::SetNull(*children[34], row_idx, true);
         FlatVector::SetNull(*children[35], row_idx, true);
+        FlatVector::SetNull(*children[36], row_idx, true);
     }
 }
 
@@ -255,6 +260,8 @@ static void TsStatsFunction(DataChunk &args, ExpressionState &state, Vector &res
             values.data(),
             validity.empty() ? nullptr : validity.data(),
             values.size(),
+            0,  // seasonal_period: auto-detect (D-02); this values-only scalar has no
+                // caller today (ts_stats/ts_stats_by use the dates-aware paths below)
             &stats_result,
             &error
         );
@@ -269,27 +276,31 @@ static void TsStatsFunction(DataChunk &args, ExpressionState &state, Vector &res
     }
 }
 
-// Scalar function for ts_stats with dates and frequency
-// Takes: LIST(DOUBLE) values, LIST(TIMESTAMP) dates, VARCHAR frequency
+// Scalar function for ts_stats with dates, frequency and seasonal_period
+// Takes: LIST(DOUBLE) values, LIST(TIMESTAMP) dates, VARCHAR frequency, INTEGER seasonal_period
 static void TsStatsWithDatesFunction(DataChunk &args, ExpressionState &state, Vector &result) {
     auto &values_vec = args.data[0];
     auto &dates_vec = args.data[1];
     auto &freq_vec = args.data[2];
+    auto &seasonal_period_vec = args.data[3];
     idx_t count = args.size();
 
     result.SetVectorType(VectorType::FLAT_VECTOR);
 
-    UnifiedVectorFormat values_format, dates_format, freq_format;
+    UnifiedVectorFormat values_format, dates_format, freq_format, seasonal_period_format;
     values_vec.ToUnifiedFormat(count, values_format);
     dates_vec.ToUnifiedFormat(count, dates_format);
     freq_vec.ToUnifiedFormat(count, freq_format);
+    seasonal_period_vec.ToUnifiedFormat(count, seasonal_period_format);
 
     auto freq_data = UnifiedVectorFormat::GetData<string_t>(freq_format);
+    auto seasonal_period_data = UnifiedVectorFormat::GetData<int32_t>(seasonal_period_format);
 
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
         auto values_idx = values_format.sel->get_index(row_idx);
         auto dates_idx = dates_format.sel->get_index(row_idx);
         auto freq_idx = freq_format.sel->get_index(row_idx);
+        auto seasonal_period_idx = seasonal_period_format.sel->get_index(row_idx);
 
         // Check if any input is NULL
         if (!values_format.validity.RowIsValid(values_idx) ||
@@ -297,6 +308,19 @@ static void TsStatsWithDatesFunction(DataChunk &args, ExpressionState &state, Ve
             !freq_format.validity.RowIsValid(freq_idx)) {
             FlatVector::SetNull(result, row_idx, true);
             continue;
+        }
+
+        // seasonal_period: NULL -> 0 (auto-detect, D-02); negative is rejected (matches
+        // _ts_stats_by_native's bind-time check, kept here since this scalar validates
+        // per-row rather than once at bind).
+        int64_t seasonal_period = 0;
+        if (seasonal_period_format.validity.RowIsValid(seasonal_period_idx)) {
+            seasonal_period = seasonal_period_data[seasonal_period_idx];
+            if (seasonal_period < 0) {
+                throw InvalidInputException(
+                    "ts_stats: seasonal_period must be >= 0, got %lld",
+                    (long long)seasonal_period);
+            }
         }
 
         // Extract values
@@ -308,20 +332,26 @@ static void TsStatsWithDatesFunction(DataChunk &args, ExpressionState &state, Ve
         vector<int64_t> timestamps;
         ExtractListTimestamps(dates_vec, count, row_idx, timestamps);
 
-        // Parse frequency
+        // Parse frequency (micros + type + period_count) so monthly/quarterly/yearly
+        // gap counting is calendar-aware here too, matching ts_stats_by (Phase 13 plan
+        // 13-01, D-04) and honors the declared multiplier (CR-01 fix, 13-03 deferred
+        // item).
         string freq_str = freq_data[freq_idx].GetString();
-        int64_t frequency_micros = ParseFrequencyToMicroseconds(freq_str);
+        auto parsed_freq = ParseFrequencyToMicrosAndType(freq_str);
 
-        // Call Rust FFI function with dates
+        // Call Rust FFI function with dates, frequency type and seasonal_period (D-02)
         TsStatsResult stats_result;
         AnofoxError error;
 
-        bool success = anofox_ts_stats_with_dates(
+        bool success = anofox_ts_stats_with_dates_and_type(
             values.data(),
             validity.empty() ? nullptr : validity.data(),
             timestamps.data(),
             values.size(),
-            frequency_micros,
+            parsed_freq.micros,
+            parsed_freq.type,
+            static_cast<size_t>(seasonal_period),
+            static_cast<size_t>(parsed_freq.period_count),
             &stats_result,
             &error
         );
@@ -345,9 +375,11 @@ static void TsStatsWithDatesFunction(DataChunk &args, ExpressionState &state, Ve
 struct TsStatsByBindData : public TableFunctionData {
     int64_t frequency_micros = 86400LL * 1000000LL;  // Default: 1 day
     FrequencyType frequency_type = FIXED;
+    int64_t frequency_period_count = 1;  // Calendar multiplier, e.g. 2 for '2mo' (CR-01 fix)
     string group_col_name;  // Preserved from input
     LogicalType group_logical_type = LogicalType(LogicalTypeId::VARCHAR);
     DateColumnType date_col_type = DateColumnType::TIMESTAMP;
+    size_t seasonal_period = 0;  // 0 = auto-detect (D-02)
 };
 
 // ============================================================================
@@ -409,9 +441,22 @@ static unique_ptr<FunctionData> TsStatsByBind(
     // Parse frequency from second argument (index 1, since index 0 is TABLE placeholder)
     if (input.inputs.size() >= 2) {
         string freq_str = input.inputs[1].GetValue<string>();
-        auto [micros, ftype] = ParseFrequencyForStats(freq_str);
-        bind_data->frequency_micros = micros;
-        bind_data->frequency_type = ftype;
+        auto parsed_freq = ParseFrequencyToMicrosAndType(freq_str);
+        bind_data->frequency_micros = parsed_freq.micros;
+        bind_data->frequency_type = parsed_freq.type;
+        bind_data->frequency_period_count = parsed_freq.period_count;
+    }
+
+    // seasonal_period (D-02): 3rd positional argument. NULL -> 0 (auto-detect);
+    // negative is a bind-time error naming ts_stats_by.
+    if (input.inputs.size() >= 3 && !input.inputs[2].IsNull()) {
+        int64_t seasonal_period = input.inputs[2].GetValue<int64_t>();
+        if (seasonal_period < 0) {
+            throw InvalidInputException(
+                "ts_stats_by: seasonal_period must be >= 0, got %lld",
+                (long long)seasonal_period);
+        }
+        bind_data->seasonal_period = static_cast<size_t>(seasonal_period);
     }
 
     // Input table must have exactly 3 columns: group, date, value
@@ -516,6 +561,8 @@ static unique_ptr<FunctionData> TsStatsByBind(
     names.push_back("expected_length");
     return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
     names.push_back("n_gaps");
+    return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
+    names.push_back("n_gap_runs");
     return_types.push_back(LogicalType(LogicalTypeId::UBIGINT));
 
     return bind_data;
@@ -686,7 +733,7 @@ static OperatorFinalizeResultType TsStatsByFinalize(
                 }
             }
 
-            // Call Rust FFI function with dates and frequency type
+            // Call Rust FFI function with dates, frequency type and seasonal_period (D-02)
             TsStatsResult stats_result = {};
             AnofoxError error = {};
 
@@ -697,6 +744,8 @@ static OperatorFinalizeResultType TsStatsByFinalize(
                 sorted_values.size(),
                 bind_data.frequency_micros,
                 bind_data.frequency_type,
+                bind_data.seasonal_period,
+                static_cast<size_t>(bind_data.frequency_period_count),
                 &stats_result,
                 &error
             );
@@ -767,18 +816,38 @@ static OperatorFinalizeResultType TsStatsByFinalize(
         FlatVector::GetData<double>(output.data[28])[out_idx] = stats.q3;
         FlatVector::GetData<double>(output.data[29])[out_idx] = stats.iqr;
         FlatVector::GetData<double>(output.data[30])[out_idx] = stats.autocorr_lag1;
-        FlatVector::GetData<double>(output.data[31])[out_idx] = stats.trend_strength;
-        FlatVector::GetData<double>(output.data[32])[out_idx] = stats.seasonality_strength;
-        FlatVector::GetData<double>(output.data[33])[out_idx] = stats.entropy;
         FlatVector::GetData<double>(output.data[34])[out_idx] = stats.stability;
 
-        // expected_length and n_gaps - handle NULL if no date metrics
+        // trend_strength / seasonality_strength - NULL when the Rust side has no value
+        // (D-02: interior-missing series, or -- for seasonality_strength -- no usable
+        // period / zero seasonal variance).
+        if (stats.has_trend_strength) {
+            FlatVector::GetData<double>(output.data[31])[out_idx] = stats.trend_strength;
+        } else {
+            FlatVector::SetNull(output.data[31], out_idx, true);
+        }
+        if (stats.has_seasonality_strength) {
+            FlatVector::GetData<double>(output.data[32])[out_idx] = stats.seasonality_strength;
+        } else {
+            FlatVector::SetNull(output.data[32], out_idx, true);
+        }
+
+        // entropy - NULL when the Rust side has no entropy value (D-03)
+        if (stats.has_entropy) {
+            FlatVector::GetData<double>(output.data[33])[out_idx] = stats.entropy;
+        } else {
+            FlatVector::SetNull(output.data[33], out_idx, true);
+        }
+
+        // expected_length, n_gaps, n_gap_runs - handle NULL if no date metrics
         if (stats.has_date_metrics) {
             FlatVector::GetData<uint64_t>(output.data[35])[out_idx] = stats.expected_length;
             FlatVector::GetData<uint64_t>(output.data[36])[out_idx] = stats.n_gaps;
+            FlatVector::GetData<uint64_t>(output.data[37])[out_idx] = stats.n_gap_runs;
         } else {
             FlatVector::SetNull(output.data[35], out_idx, true);
             FlatVector::SetNull(output.data[36], out_idx, true);
+            FlatVector::SetNull(output.data[37], out_idx, true);
         }
 
         output_count++;
@@ -795,12 +864,13 @@ static OperatorFinalizeResultType TsStatsByFinalize(
 }
 
 void RegisterTsStatsByFunction(ExtensionLoader &loader) {
-    // Internal native table function: _ts_stats_by_native(TABLE, frequency)
+    // Internal native table function: _ts_stats_by_native(TABLE, frequency, seasonal_period)
     // Input table must have 3 columns: group_col, date_col, value_col
-    // Called by ts_stats_by SQL macro to preserve column names and handle calendar frequencies
+    // Called by ts_stats_by SQL macro to preserve column names and handle calendar
+    // frequencies; seasonal_period (D-02) is always passed by the macro (default 0).
     // This is an internal function - users should call ts_stats_by() instead
     TableFunction func("_ts_stats_by_native",
-        {LogicalType::TABLE, LogicalType(LogicalTypeId::VARCHAR)},
+        {LogicalType::TABLE, LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::INTEGER)},
         nullptr,  // No execute function - use in_out_function
         TsStatsByBind,
         TsStatsByInitGlobal,
@@ -834,14 +904,15 @@ void RegisterTsStatsFunction(ExtensionLoader &loader) {
     info.internal = true;
     loader.RegisterFunction(info);
 
-    // Internal scalar function with dates and frequency support
-    // _ts_stats_with_dates(values[], dates[], frequency)
+    // Internal scalar function with dates, frequency and seasonal_period support (D-02)
+    // _ts_stats_with_dates(values[], dates[], frequency, seasonal_period)
     ScalarFunctionSet ts_stats_with_dates_set("_ts_stats_with_dates");
 
     ScalarFunction ts_stats_with_dates_func(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)),
          LogicalType::LIST(LogicalType(LogicalTypeId::TIMESTAMP)),
-         LogicalType(LogicalTypeId::VARCHAR)},
+         LogicalType(LogicalTypeId::VARCHAR),
+         LogicalType(LogicalTypeId::INTEGER)},
         GetTsStatsResultType(),
         TsStatsWithDatesFunction
     );

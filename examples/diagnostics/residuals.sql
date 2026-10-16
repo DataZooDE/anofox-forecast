@@ -39,3 +39,28 @@ ORDER BY series_id;
 SELECT series_id, (rd).lb_p_value, (rd).dw_interpretation, (rd).adequate
 FROM ts_residual_diagnostics_by('resids', series_id, ds, e) AS t(series_id, rd)
 ORDER BY series_id;
+
+-- ============================================================================
+-- fitted_params (D-06/DIAG-04): model-aware Ljung-Box degrees of freedom
+--
+-- ts_ljung_box's default df == lags treats the input as raw residuals (0
+-- fitted parameters). If the residuals instead come from a fitted model --
+-- e.g. an AR(1) with 1 estimated parameter -- pass fitted_params := 1 so
+-- df = lags - fitted_params matches R Box.test(fitdf = 1), the convention
+-- used when testing model residuals (as opposed to raw data).
+-- ============================================================================
+
+.print '--- ts_ljung_box fitted_params: df = lags - fitted_params ---'
+SELECT series_id, (lb).p_value, (lb).df
+FROM ts_ljung_box_by('resids', series_id, ds, e, lags := 10, fitted_params := 1) AS t(series_id, lb)
+ORDER BY series_id;
+
+SELECT series_id, (lb0).df AS df_fitted_params_0, (lb1).df AS df_fitted_params_1
+FROM (
+    SELECT series_id,
+           ts_ljung_box(LIST(e ORDER BY ds), 10, 0) AS lb0,
+           ts_ljung_box(LIST(e ORDER BY ds), 10, 1) AS lb1
+    FROM resids
+    GROUP BY series_id
+) t
+ORDER BY series_id;

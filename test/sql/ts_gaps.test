@@ -38,8 +38,11 @@ SELECT count(*) FROM ts_fill_gaps_by('test_gaps', grp, dt, val, '1 day');
 3
 
 # Test ts_fill_gaps_operator preserves existing values
+# ts_fill_gaps_by/ts_fill_forward_by output the source value column under its ORIGINAL
+# name (not a generic value_col alias) since commit ca7d4f6 "refactor: ts_fill_gaps_by
+# and ts_fill_forward_by now use native streaming (#113)" (Phase 18, 18-01, class A).
 query I
-SELECT count(*) FROM ts_fill_gaps_by('test_gaps', grp, dt, val, '1 day') WHERE value_col IS NOT NULL;
+SELECT count(*) FROM ts_fill_gaps_by('test_gaps', grp, dt, val, '1 day') WHERE val IS NOT NULL;
 ----
 2
 
@@ -61,13 +64,13 @@ SELECT count(*) FROM ts_fill_forward_by('test_forward', grp, dt, val, '2023-01-0
 
 # Test original values preserved
 query I
-SELECT count(*) FROM ts_fill_forward_by('test_forward', grp, dt, val, '2023-01-05'::TIMESTAMP, '1 day') WHERE value_col IS NOT NULL;
+SELECT count(*) FROM ts_fill_forward_by('test_forward', grp, dt, val, '2023-01-05'::TIMESTAMP, '1 day') WHERE val IS NOT NULL;
 ----
 2
 
 # Test extended values are NULL
 query I
-SELECT count(*) FROM ts_fill_forward_by('test_forward', grp, dt, val, '2023-01-05'::TIMESTAMP, '1 day') WHERE value_col IS NULL;
+SELECT count(*) FROM ts_fill_forward_by('test_forward', grp, dt, val, '2023-01-05'::TIMESTAMP, '1 day') WHERE val IS NULL;
 ----
 3
 

@@ -377,10 +377,17 @@ SELECT * FROM (
     FROM generate_series(0, 3) t(i)
 );
 
+-- overall_score, n_gaps (missing periods), n_gap_runs (gap occurrences), and
+-- is_short (present-value count below n_short=10) are all dates/frequency/n_short-
+-- aware (v2026.10.16, D-05) -- n_gaps is 0 here because every series is a complete daily
+-- grid with no missing dates; the NULLs in FAIR1/POOR1/POOR2 are missing VALUES,
+-- counted separately in structural_score, not gaps in the date grid.
 .print 'Per-series quality with ts_data_quality (detailed):'
 SELECT
     unique_id,
     ROUND(overall_score, 2) AS score,
+    n_gaps,
+    is_short,
     CASE
         WHEN overall_score >= 0.8 THEN 'GOOD'
         WHEN overall_score >= 0.5 THEN 'FAIR'

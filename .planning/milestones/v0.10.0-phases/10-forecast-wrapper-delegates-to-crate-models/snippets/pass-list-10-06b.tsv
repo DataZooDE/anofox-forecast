@@ -1,0 +1,56 @@
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	0	SYNOPSIS	ts_forecast_by(	Parser Error: syntax error at or near "ts_forecast_by"
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	1	SYNOPSIS	ts_forecast_panel_by(	Parser Error: syntax error at or near "ts_forecast_panel_by"
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	2	PASS	CREATE OR REPLACE TABLE panel_sales AS	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	3	SYNOPSIS	ts_forecast_var_by(	Parser Error: syntax error at or near "ts_forecast_var_by"
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	4	PASS	CREATE OR REPLACE TABLE var_src AS	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	5	SYNOPSIS	ts_forecast_exog_by(	Parser Error: syntax error at or near "ts_forecast_exog_by"
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	6	PASS	CREATE TABLE hist AS	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	7	SYNOPSIS	ts_forecast_exog(source, date_col, target_col, xreg_cols,	Parser Error: syntax error at or near "ts_forecast_exog"
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	8	PASS	SELECT * FROM ts_forecast_exog('hist', d, y,	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	9	SYNOPSIS	ts_forecast(source VARCHAR, date_col COLUMN, target_col COLUMN,	Parser Error: syntax error at or near "ts_forecast"
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	10	PASS	CREATE TABLE s AS	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	11	SYNOPSIS	ts_forecast_by(	Parser Error: syntax error at or near "ts_forecast_by"
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	12	PASS	CREATE OR REPLACE TABLE ae_test AS	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	13	SYNOPSIS	ts_forecast_ensemble_by(	Parser Error: syntax error at or near "ts_forecast_ensemble_by"
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	14	PASS	SELECT * FROM ts_forecast_ensemble_by(	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	15	SYNOPSIS	ts_ensemble_inspect_by(	Parser Error: syntax error at or near "ts_ensemble_inspect_by"
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	16	PASS	SELECT * FROM ts_ensemble_inspect_by(	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	17	SYNOPSIS	ts_auto_ensemble_inspect_by(	Parser Error: syntax error at or near "ts_auto_ensemble_inspect_by"
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	18	PASS	SELECT * FROM ts_auto_ensemble_inspect_by(	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	19	PASS	CREATE OR REPLACE TABLE ens_series AS	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	20	SYNOPSIS	ts_forecast_agg(date_col TIMESTAMP, value_col DOUBLE, method VARCHAR, horizon INTEGER, params MAP)	Parser Error: syntax error at or near "ts_forecast_agg"
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	21	PASS	SELECT product_id, ts_forecast_agg(ds, y, 'AutoETS', 12, MAP{}) AS fcst	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	22	PASS	CREATE OR REPLACE TABLE returns AS	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	23	PASS	SELECT * FROM ts_forecast_by('sales', product_id, ds, y, 'Kalman', 14, '1d');	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	24	PASS	SELECT * FROM ts_forecast_by('sales', product_id, ds, y, 'Laplace', 12, '1mo',	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	25	PASS	SET autoinstall_known_extensions = 1;	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	26	PASS	SELECT product_id, (inspection).spec, (inspection).alpha	
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	27	PASS	SELECT product_id, (decomposition).level, (decomposition).trend, (decomposition).seasonal	
+docs/api/08-cross-validation.md	0	PASS	CREATE OR REPLACE TABLE raw_data AS	
+docs/api/08-cross-validation.md	1	PASS	CREATE OR REPLACE TABLE data AS	
+docs/api/08-cross-validation.md	2	SYNOPSIS	ts_cv_folds_by(	Parser Error: syntax error at or near "ts_cv_folds_by"
+docs/api/08-cross-validation.md	3	PASS	CREATE OR REPLACE TABLE sales_data AS	
+docs/api/08-cross-validation.md	4	SYNOPSIS	ts_cv_forecast_by(	Parser Error: syntax error at or near "ts_cv_forecast_by"
+docs/api/08-cross-validation.md	5	PASS	CREATE TABLE folds AS	
+docs/api/08-cross-validation.md	6	SYNOPSIS	ts_cv_hydrate_by(	Parser Error: syntax error at or near "ts_cv_hydrate_by"
+docs/api/08-cross-validation.md	7	PASS	CREATE TABLE cv_folds AS	
+docs/api/08-cross-validation.md	8	PASS	CREATE TABLE cv_folds AS	
+docs/api/08-cross-validation.md	9	SYNOPSIS	ts_cv_split_folds_by(	Parser Error: syntax error at or near "ts_cv_split_folds_by"
+docs/api/08-cross-validation.md	10	PASS	SELECT * FROM ts_cv_split_folds_by(	
+docs/api/08-cross-validation.md	11	SYNOPSIS	ts_cv_split_by(	Parser Error: syntax error at or near "ts_cv_split_by"
+docs/api/08-cross-validation.md	12	PASS	CREATE TABLE cv_splits AS	
+docs/api/08-cross-validation.md	13	SYNOPSIS	ts_cv_split_index_by(	Parser Error: syntax error at or near "ts_cv_split_index_by"
+docs/guides/03-cross-validation.md	0	PASS	CREATE TABLE cv_folds AS	
+docs/guides/03-cross-validation.md	1	PASS	CREATE TABLE cv_folds AS	
+docs/guides/03-cross-validation.md	2	PASS	CREATE TABLE cv_folds AS	
+docs/guides/03-cross-validation.md	3	PASS	CREATE TABLE cv_folds AS	
+docs/guides/03-cross-validation.md	4	PASS	CREATE TABLE cv_folds AS	
+docs/guides/03-cross-validation.md	5	PASS	CREATE TABLE cv_folds AS	
+docs/guides/03-cross-validation.md	6	PASS	CREATE OR REPLACE TABLE cv_folds AS	
+docs/guides/03-cross-validation.md	7	PASS	CREATE OR REPLACE TABLE cv_folds AS	
+docs/guides/03-cross-validation.md	8	PASS	CREATE OR REPLACE TABLE cv_folds AS	
+docs/guides/03-cross-validation.md	9	PASS	CREATE TABLE cv_folds AS	
+README.md	0	PASS	INSTALL anofox_forecast FROM community;	
+README.md	1	EXPECTED-ERROR	INSTALL anofox_forecast FROM 'http://get.erpl.io';	Invalid Input Error: Installing extension 'anofox_forecast' failed. The extension is already installed but the origin is different.
+README.md	2	EXPECTED-ERROR	LOAD httpfs;	IO Error: Extension "/home/simonm/.duckdb/extensions/v1.5.6/linux_amd64/httpfs.duckdb_extension" not found.
+README.md	3	PASS	LOAD 'path/to/anofox_forecast.duckdb_extension';	

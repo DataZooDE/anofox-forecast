@@ -1,0 +1,148 @@
+# name: test/sql/ts_forecast_calendar_surfaces.test
+# description: Natively-run SQL value assertions for _ts_future_dates (the
+#              Rust D-12 calendar rule exposed as a scalar) and for the
+#              ensemble/panel/var forecast surfaces now sharing the same
+#              rule via ComputeFutureDates. No json dependency needed here
+#              (plan 12-06). ts_forecast_exog_by itself needs the json
+#              extension and is proven separately via the CLI example
+#              (SECTION 6 in examples/data_preparation/null_handling_examples.sql).
+# group: [sql]
+
+require anofox_forecast
+
+#######################################
+# _ts_future_dates — direct scalar assertions
+#######################################
+
+# Month-end input + INTERVAL '1 month' -> month-ends, including the
+# 2024-02-29 leap-day case (no 30-day-month drift, RUST-09/D-12).
+query I
+SELECT _ts_future_dates(
+    [TIMESTAMP '2023-09-30', TIMESTAMP '2023-10-31', TIMESTAMP '2023-11-30'], 3, INTERVAL '1 month')
+= [TIMESTAMP '2023-12-31 00:00:00', TIMESTAMP '2024-01-31 00:00:00', TIMESTAMP '2024-02-29 00:00:00'];
+----
+true
+
+# 12 monthly first-of-month dates (2023-01-01 .. 2023-12-01), horizon 12 ->
+# 12 dates, every one day=1, and the 12th (last) forecast date is exactly
+# 12 months after the last observation (2023-12-01 + 12mo = 2024-12-01).
+query I
+SELECT len(x) = 12
+   AND list_bool_and(list_transform(x, d -> day(d) = 1))
+   AND x[12] = TIMESTAMP '2024-12-01 00:00:00'
+FROM (
+    SELECT _ts_future_dates(
+        (SELECT list(DATE '2023-01-01' + INTERVAL (i) MONTH) FROM range(12) t(i)),
+        12, INTERVAL '1 month'
+    ) AS x
+);
+----
+true
+
+# INTERVAL '3 months' on quarter-ends -> quarter-ends.
+query I
+SELECT _ts_future_dates([TIMESTAMP '2022-03-31', TIMESTAMP '2022-06-30'], 2, INTERVAL '3 months')
+= [TIMESTAMP '2022-09-30 00:00:00', TIMESTAMP '2022-12-31 00:00:00'];
+----
+true
+
+# INTERVAL '1 day' -> consecutive days.
+query I
+SELECT _ts_future_dates([TIMESTAMP '2024-01-01', TIMESTAMP '2024-01-02'], 3, INTERVAL '1 day')
+= [TIMESTAMP '2024-01-03 00:00:00', TIMESTAMP '2024-01-04 00:00:00', TIMESTAMP '2024-01-05 00:00:00'];
+----
+true
+
+# A NULL entry inside the dates list is skipped (observed = non-NULL dates
+# only) — the result is identical to the same list with the NULL removed.
+query I
+SELECT _ts_future_dates([TIMESTAMP '2024-01-01', NULL, TIMESTAMP '2024-01-03'], 2, INTERVAL '1 day')
+= [TIMESTAMP '2024-01-04 00:00:00', TIMESTAMP '2024-01-05 00:00:00'];
+----
+true
+
+# NULL interval -> NULL result.
+query I
+SELECT _ts_future_dates([TIMESTAMP '2024-01-01'], 2, NULL) IS NULL;
+----
+true
+
+# NULL dates argument -> NULL result.
+query I
+SELECT _ts_future_dates(NULL, 2, INTERVAL '1 day') IS NULL;
+----
+true
+
+# horizon <= 0 -> empty list, not an error.
+query I
+SELECT len(_ts_future_dates([TIMESTAMP '2024-01-01'], 0, INTERVAL '1 day'));
+----
+0
+
+# A mixed step (INTERVAL with both a month and day/micros component) is
+# rejected by the Rust FFI (anofox_ts_future_dates INVALID_INPUT) — never
+# silently truncated to one component.
+statement error
+SELECT _ts_future_dates([TIMESTAMP '2024-01-01'], 2, INTERVAL '1 month 2 days');
+----
+non-negative
+
+#######################################
+# Shared setup: 11 month-end monthly dates, Jan 2023 .. Nov 2023 (ending
+# 2023-11-30), used by the ensemble/panel/var assertions below. Horizon 3
+# with '1mo' must land on 2023-12-31, 2024-01-31, 2024-02-29 (D-12) on every
+# surface — the same rule ts_forecast_by/ts_forecast_agg already proved in
+# test/sql/ts_forecast_calendar.test (plan 12-05).
+#######################################
+
+statement ok
+CREATE TABLE me3 AS
+SELECT 'A' AS id, last_day(DATE '2023-01-01' + INTERVAL (i) MONTH) AS ds, (100 + i)::DOUBLE AS y
+FROM range(11) t(i);
+
+#######################################
+# ts_forecast_ensemble_by (single series, two identical Naive members)
+#######################################
+
+query I
+SELECT list(ds ORDER BY forecast_step) = [DATE '2023-12-31', DATE '2024-01-31', DATE '2024-02-29']
+FROM ts_forecast_ensemble_by('me3', id, ds, y, ['Naive', 'Naive'], 3, '1mo', combination_method := 'mean');
+----
+true
+
+#######################################
+# ts_forecast_panel_by (3 series — panel needs >= 3 kept series for
+# cross-series global learning; each series has the same 11-point month-end
+# date grid so none is DROPPED for < 10 valid observations)
+#######################################
+
+statement ok
+CREATE TABLE panel_me3 AS
+SELECT s.sid::VARCHAR AS id, last_day(DATE '2023-01-01' + INTERVAL (i) MONTH) AS ds,
+       (s.sid * 10 + i)::DOUBLE AS y
+FROM (VALUES (1), (2), (3)) AS s(sid)
+CROSS JOIN range(11) t(i);
+
+query I
+SELECT list(ds ORDER BY forecast_step) = [DATE '2023-12-31', DATE '2024-01-31', DATE '2024-02-29']
+FROM ts_forecast_panel_by('panel_me3', id, ds, y, 'GlobalETS', 3, '1mo', MAP{})
+WHERE id = '1';
+----
+true
+
+#######################################
+# ts_forecast_var_by (2 value columns on the same month-end date grid)
+#######################################
+
+statement ok
+CREATE TABLE var_me3 AS
+SELECT last_day(DATE '2023-01-01' + INTERVAL (i) MONTH) AS ds,
+       (100 + i)::DOUBLE AS y1, (200 + i * 2)::DOUBLE AS y2
+FROM range(11) t(i);
+
+query I
+SELECT list(ds ORDER BY forecast_step) = [DATE '2023-12-31', DATE '2024-01-31', DATE '2024-02-29']
+FROM ts_forecast_var_by('var_me3', 'ds', ['y1', 'y2'], 3, '1mo')
+WHERE variable = 'y1';
+----
+true

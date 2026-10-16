@@ -1,0 +1,352 @@
+# name: test/sql/correctness/metrics.test
+# description: Correctness-suite value pins for the 11 ts_*_by metric macros plus their
+#   scalar counterparts -- Phase 18, 18-02, D-08, TEST-03. Not json-gated (D-02): runs on
+#   every native build.
+# group: [sql]
+#
+# D-08 live-matrix finding (Phase 18 Task 1 SUMMARY has the full 11x2 table): on a fresh
+# post-18-01 build, EVERY one of the 11 metric _by macros works in the documented
+# subquery-source form and EVERY one fails identically in the bare-table-name form (the
+# same Binder Error naming the TABLE-typed native-function parameter). The Phase 16
+# deferred-items.md report that only ts_coverage_by/ts_quantile_loss_by were broken was a
+# stale-build artifact (RESEARCH.md Pitfall 3) -- no macro body changed.
+#
+# MASE literal below is copied from validation/reference/fixtures/r_mase/accuracy_mase.json
+# ("det_m4" case) via:
+#   python3 -c "import json; d=json.load(open('validation/reference/fixtures/r_mase/accuracy_mase.json')); print(d['cases']['det_m4']['mase_accuracy'], d['tolerance'])"
+
+require anofox_forecast
+
+# =============================================================================
+# D-08: subquery-form value pins for ts_coverage_by / ts_quantile_loss_by, on a
+# hand-checkable 10-row table: id='A', y=i, forecast=i+1, lower=i-1, upper=i+2
+# for i in 1..10.
+# =============================================================================
+
+statement ok
+CREATE TABLE probe10 AS
+SELECT 'A' AS id, i AS ds, i::DOUBLE AS y, (i + 1)::DOUBLE AS f, (i - 1)::DOUBLE AS lo, (i + 2)::DOUBLE AS hi
+FROM range(1, 11) t(i);
+
+# coverage = share of actuals inside [lower, upper]. Here lower = y-1 <= y <= y+2 =
+# upper for every row, so coverage = 10/10 = 1.0 (closed form).
+query II
+SELECT id, coverage FROM ts_coverage_by((SELECT id, ds, y, lo, hi FROM probe10), 'ds', 'y', 'lo', 'hi');
+----
+A	1.0
+
+# pinball (quantile) loss at q=0.5 is half the MAE: |y - f| = 1 for every row, so
+# quantile_loss = 0.5 * 1 = 0.5 (closed form).
+query II
+SELECT id, quantile_loss FROM ts_quantile_loss_by((SELECT id, ds, y, f FROM probe10), 'ds', 'y', 'f', 0.5);
+----
+A	0.5
+
+# The bare table-name form fails identically for the whole family (not just
+# coverage/quantile_loss) -- pinned as a statement error documenting the contract,
+# per the macro descriptions updated in src/macros/ts_macros.cpp this plan.
+statement error
+SELECT * FROM ts_coverage_by('probe10', 'ds', 'y', 'lo', 'hi');
+----
+Binder Error
+
+statement error
+SELECT * FROM ts_quantile_loss_by('probe10', 'ds', 'y', 'f', 0.5);
+----
+Binder Error
+
+statement error
+SELECT * FROM ts_mae_by('probe10', 'ds', 'y', 'f');
+----
+Binder Error
+
+# =============================================================================
+# Core scalar/_by metrics on probe10 (closed form): MAE 1.0, MSE 1.0, RMSE 1.0,
+# BIAS 1.0 (f - y = 1 for every row), R2 (variance-explained closed form).
+# =============================================================================
+
+query II
+SELECT id, mae FROM ts_mae_by((SELECT id, ds, y, f FROM probe10), 'ds', 'y', 'f');
+----
+A	1.0
+
+query II
+SELECT id, mse FROM ts_mse_by((SELECT id, ds, y, f FROM probe10), 'ds', 'y', 'f');
+----
+A	1.0
+
+query II
+SELECT id, rmse FROM ts_rmse_by((SELECT id, ds, y, f FROM probe10), 'ds', 'y', 'f');
+----
+A	1.0
+
+query II
+SELECT id, bias FROM ts_bias_by((SELECT id, ds, y, f FROM probe10), 'ds', 'y', 'f');
+----
+A	1.0
+
+# Scalar forms agree with their _by counterparts on the same data (parity pin).
+query I
+SELECT abs(ts_mae([1.0,2.0,3.0], [2.0,3.0,5.0])
+         - (SELECT mae FROM ts_mae_by((SELECT 1 AS id, ds, y, f FROM
+               (VALUES (1,1.0,2.0),(2,2.0,3.0),(3,3.0,5.0)) t(ds,y,f)), 'ds', 'y', 'f'))) < 1e-9;
+----
+true
+
+# =============================================================================
+# MAPE zero-actual NULL policy (D-07): a single zero actual makes the whole
+# pairwise-complete result NULL, not a silent per-pair exclusion.
+# =============================================================================
+
+query I
+SELECT ts_mape([0.0, 100.0, 200.0], [10.0, 110.0, 180.0]) IS NULL;
+----
+true
+
+query I
+SELECT abs(ts_mape([100.0, 200.0, 300.0], [110.0, 180.0, 330.0]) - 10.0) < 0.1;
+----
+true
+
+# =============================================================================
+# Pairwise-complete NULL handling: a NULL in either actual or forecast drops
+# that row from the group's computation rather than propagating NaN/erroring.
+# Rows (ds=1: y=10,f=11 -> err 1), (ds=2: y=NULL), (ds=3: f=NULL), (ds=4:
+# y=30,f=33 -> err 3) -- complete pairs are (1,2) and err mean = (1+3)/2 = 2.0.
+# =============================================================================
+
+statement ok
+CREATE TABLE pairwise_nulls AS
+SELECT * FROM (VALUES
+('A', 1, 10.0, 11.0),
+('A', 2, NULL::DOUBLE, 12.0),
+('A', 3, 20.0, NULL::DOUBLE),
+('A', 4, 30.0, 33.0)
+) t(id, ds, actual, forecast);
+
+query II
+SELECT id, mae FROM ts_mae_by((SELECT id, ds, actual, forecast FROM pairwise_nulls), 'ds', 'actual', 'forecast');
+----
+A	2.0
+
+statement ok
+DROP TABLE pairwise_nulls;
+
+# =============================================================================
+# MASE (Hyndman-Koehler): fixture-sourced value from r_mase/accuracy_mase.json
+# "det_m4" (40 in-sample history rows with forecast NULL, 8 out-of-sample
+# evaluation rows, seasonal_period 4). Tolerance mase_abs 1e-12 (fixture); the
+# SQL path agrees to within 1e-9 (double-precision summation-order noise).
+# =============================================================================
+
+statement ok
+CREATE TABLE det_m4 AS
+SELECT * FROM (VALUES
+(1, 1, 11.7767104331365, NULL),
+(1, 2, 9.40903228808558, NULL),
+(1, 3, 9.13471278483916, NULL),
+(1, 4, 10.6512598425823, NULL),
+(1, 5, 11.5028278438036, NULL),
+(1, 6, 10.9934908663479, NULL),
+(1, 7, 9.44274917270367, NULL),
+(1, 8, 9.92626301698892, NULL),
+(1, 9, 12.7221909288769, NULL),
+(1, 10, 11.9887046181867, NULL),
+(1, 11, 8.63853329558409, NULL),
+(1, 12, 10.5096701237984, NULL),
+(1, 13, 14.2078195977562, NULL),
+(1, 14, 11.503352667104, NULL),
+(1, 15, 8.52535472427934, NULL),
+(1, 16, 12.1268326309626, NULL),
+(1, 17, 14.3340062895737, NULL),
+(1, 18, 10.8632321315473, NULL),
+(1, 19, 9.87168826731369, NULL),
+(1, 20, 12.9550736440473, NULL),
+(1, 21, 13.5107810432727, NULL),
+(1, 22, 11.625903038569, NULL),
+(1, 23, 11.2604180727247, NULL),
+(1, 24, 12.353110675953, NULL),
+(1, 25, 13.5698995857987, NULL),
+(1, 26, 13.2482728441404, NULL),
+(1, 27, 11.2109407202182, NULL),
+(1, 28, 11.821363547595, NULL),
+(1, 29, 15.0218251894115, NULL),
+(1, 30, 13.8998668269692, NULL),
+(1, 31, 10.3963396971371, NULL),
+(1, 32, 12.755105242094, NULL),
+(1, 33, 16.2913199700294, NULL),
+(1, 34, 13.2039279504381, NULL),
+(1, 35, 10.6354561259244, NULL),
+(1, 36, 14.3550680787307, NULL),
+(1, 37, 16.076332609825, NULL),
+(1, 38, 12.8016031084154, NULL),
+(1, 39, 12.1692099874515, NULL),
+(1, 40, 14.8243313311076, NULL),
+(1, 41, 15.297794574577, 16.1),
+(1, 42, 13.8943579579336, 14.2),
+(1, 43, 13.2998271922129, 12.3),
+(1, 44, 14.0591746422487, 14.4),
+(1, 45, 15.7205433723541, 16.5),
+(1, 46, 15.4448057488323, 14.6),
+(1, 47, 12.9332228583983, 12.7),
+(1, 48, 13.8043972174192, 14.8)
+) t(id, ds, y, forecast);
+
+query I
+SELECT abs(mase - 0.815579185580866) < 1e-9
+FROM ts_mase_by((SELECT id, ds, y, forecast FROM det_m4), 'ds', 'y', 'forecast', seasonal_period := 4);
+----
+true
+
+# The old 5th-argument baseline-column form is a statement error naming
+# ts_rmae_by as the replacement (D-08, Phase 10 removal).
+statement error
+SELECT * FROM ts_mase_by((SELECT id, ds, y, forecast, 9.0 AS baseline FROM det_m4), 'ds', 'y', 'forecast', 'baseline');
+----
+ts_mase_by no longer takes a baseline column
+
+statement ok
+DROP TABLE det_m4;
+
+# =============================================================================
+# RMAE (Relative MAE, two-model comparison) and SMAPE parity.
+# =============================================================================
+
+# RMAE = MAE(y,f) / MAE(y,pred2) = 1 / 2 = 0.5 (f = y+1 so MAE(y,f)=1; hi = y+2
+# so MAE(y,hi)=2; closed form).
+query II
+SELECT id, rmae FROM ts_rmae_by(
+    (SELECT id, ds, y, f, hi AS pred2 FROM probe10), 'ds', 'y', 'f', 'pred2'
+);
+----
+A	0.5
+
+query I
+SELECT abs(ts_smape([10.0, 20.0, 30.0], [10.0, 20.0, 30.0]));
+----
+0.0
+
+statement ok
+DROP TABLE probe10;
+
+# =============================================================================
+# Remaining scalar-only forms (closed form, independently hand-derived):
+# ts_bias/ts_mse/ts_rmse/ts_r2/ts_coverage/ts_quantile_loss/ts_rmae/ts_mase.
+# =============================================================================
+
+# bias = mean(forecast - actual): errors 1, 1, 2 -> mean 4/3.
+query I
+SELECT abs(ts_bias([1.0,2.0,3.0],[2.0,3.0,5.0]) - 4.0/3.0) < 1e-9;
+----
+true
+
+# mse = mean(error^2): 1^2 + 1^2 + 2^2 = 6 -> mean 2.0.
+query I
+SELECT abs(ts_mse([1.0,2.0,3.0],[2.0,3.0,5.0]) - 2.0) < 1e-9;
+----
+true
+
+# rmse = sqrt(mse) = sqrt(2).
+query I
+SELECT abs(ts_rmse([1.0,2.0,3.0],[2.0,3.0,5.0]) - sqrt(2.0)) < 1e-9;
+----
+true
+
+# r2 = 1 - SS_res/SS_tot: actual mean 2, SS_tot = 1+0+1 = 2;
+# residuals -0.1,-0.1,0.1 -> SS_res = 0.03; r2 = 1 - 0.03/2 = 0.985.
+query I
+SELECT abs(ts_r2([1.0,2.0,3.0],[1.1,2.1,2.9]) - 0.985) < 1e-9;
+----
+true
+
+# coverage: actual in [lower, upper] for every row -> 1.0.
+query I
+SELECT abs(ts_coverage([1.0,2.0,3.0],[0.0,1.0,2.0],[2.0,3.0,4.0]) - 1.0) < 1e-9;
+----
+true
+
+# quantile_loss (pinball, q=0.5) = half the MAE: |1-1.1|=0.1, |2-2.2|=0.2 ->
+# mean 0.15; half -> 0.075.
+query I
+SELECT abs(ts_quantile_loss([1.0,2.0],[1.1,2.2],0.5) - 0.075) < 1e-9;
+----
+true
+
+# rmae: MAE(actual,pred1) = mean(.1,.2,.3) = 0.2; MAE(actual,pred2) =
+# mean(.2,.4,.6) = 0.4; rmae = 0.2/0.4 = 0.5.
+query I
+SELECT abs(ts_rmae([1.0,2.0,3.0],[1.1,2.2,3.3],[1.2,2.4,3.6]) - 0.5) < 1e-9;
+----
+true
+
+# mase: MAE(actual,forecast) = mean(1,1) = 1; in-sample seasonal-naive
+# (lag 1) MAE = mean(|diff([10,11,12,13])|) = mean(1,1,1) = 1; mase = 1/1 = 1.
+query I
+SELECT abs(ts_mase([15.0,20.0],[16.0,19.0],[10.0,11.0,12.0,13.0],1) - 1.0) < 1e-9;
+----
+true
+
+# ts_mape_by (the _by form, pairwise-complete, no zero actuals): same probe
+# data as the earlier scalar ts_mape pin -- 10%/10%/10% errors -> MAPE ~10%.
+statement ok
+CREATE TABLE mape_probe AS
+SELECT * FROM (VALUES
+('A', 1, 100.0, 110.0), ('A', 2, 200.0, 180.0), ('A', 3, 300.0, 330.0)
+) t(id, ds, y, forecast);
+
+query I
+SELECT abs(mape - 10.0) < 0.1
+FROM ts_mape_by((SELECT id, ds, y, forecast FROM mape_probe), 'ds', 'y', 'forecast');
+----
+true
+
+statement ok
+DROP TABLE mape_probe;
+
+# ts_mqloss (multi-quantile loss, averaged pinball across levels): a single
+# level 0.5 reduces to the ts_quantile_loss closed form above (0.075).
+query I
+SELECT abs(ts_mqloss([1.0,2.0], [[1.1,2.2]], [0.5]) - 0.075) < 1e-9;
+----
+true
+
+# _ts_metrics_native (the table function backing ts_mae_by/ts_mse_by/.../
+# ts_bias_by): parity with ts_mae_by on a single-row group.
+statement ok
+CREATE TABLE mm2 AS SELECT 'A' id, 1 ds, 10.0 y, 11.0 f;
+
+query I
+SELECT (SELECT mae FROM _ts_metrics_native((SELECT id, ds, y, f FROM mm2), 'ds', 'y', 'f', 'mae'))
+     = (SELECT mae FROM ts_mae_by((SELECT id, ds, y, f FROM mm2), 'ds', 'y', 'f'));
+----
+true
+
+statement ok
+DROP TABLE mm2;
+
+# =============================================================================
+# ts_smape_by / ts_r2_by (closed form, Phase 18 18-04 close-out: both are named in
+# the v2026.10.16 CHANGELOG metric _by subquery-source contract). Same 10-row probe:
+# y = i, f = i + 1 for i in 1..10.
+#   sMAPE = mean_i 2|f-y|/(|y|+|f|) * 100 = mean_i 2/(2i+1) * 100 = 23.617491555572...
+#   R2    = 1 - SS_res/SS_tot = 1 - 10/82.5 = 0.878787878787...
+# =============================================================================
+
+statement ok
+CREATE TABLE probe10b AS
+SELECT 'A' AS id, i AS ds, i::DOUBLE AS y, (i + 1)::DOUBLE AS f FROM range(1, 11) t(i);
+
+query I
+SELECT abs(smape - 23.617491555572052) < 1e-9
+FROM ts_smape_by((SELECT id, ds, y, f FROM probe10b), 'ds', 'y', 'f');
+----
+true
+
+query I
+SELECT abs(r2 - (1 - 10.0 / 82.5)) < 1e-12
+FROM ts_r2_by((SELECT id, ds, y, f FROM probe10b), 'ds', 'y', 'f');
+----
+true
+
+statement ok
+DROP TABLE probe10b;

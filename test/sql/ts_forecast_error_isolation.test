@@ -90,9 +90,15 @@ SELECT _ts_forecast([1.0, 2.0], 3) IS NULL;
 ----
 true
 
-# Three values - still too short for reliable forecasting
+# Three values - still too short for reliable forecasting. Re-pinned (Phase 18,
+# 18-01): the default model (AutoETS, selected when no model string is given)
+# requires at least 4 observations ("AutoETS requires at least 4 observations for
+# model selection", an anofox-forecast crate-level validation message, confirmed
+# directly), so 3 values correctly return NULL -- matching the sibling "two values"
+# assertion immediately above, not an isolated case. Not attributable to any
+# Phase 9-17 change.
 query I
-SELECT _ts_forecast([1.0, 2.0, 3.0], 3) IS NOT NULL;
+SELECT _ts_forecast([1.0, 2.0, 3.0], 3) IS NULL;
 ----
 true
 
@@ -106,19 +112,26 @@ SELECT _ts_forecast([1.0, NULL, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3) IS 
 ----
 true
 
-# All-NULL series produces NaN values (not NULL struct)
+# Re-pinned (Phase 18, 18-01, class D): an all-NULL series now correctly returns a
+# NULL struct, not a fabricated "NaN values" result -- the removed comment described
+# exactly the kind of fabricated-output behavior this milestone eliminated
+# ("no fabricated ... stand-in residuals", PROJECT.md, FCST-01..08); confirmed
+# directly against the query output.
 query I
-SELECT _ts_forecast([NULL, NULL, NULL, NULL, NULL]::DOUBLE[], 3) IS NOT NULL;
+SELECT _ts_forecast([NULL, NULL, NULL, NULL, NULL]::DOUBLE[], 3) IS NULL;
 ----
 true
 
-# Verify all-NULL produces NaN forecasts
+# Re-pinned (Phase 18, 18-01, class D): since the whole struct is now NULL (not a
+# fabricated NaN-filled struct), .point is also NULL rather than a NaN-valued array.
 query I
-SELECT isnan((_ts_forecast([NULL, NULL, NULL, NULL, NULL]::DOUBLE[], 3)).point[1]);
+SELECT (_ts_forecast([NULL, NULL, NULL, NULL, NULL]::DOUBLE[], 3)).point IS NULL;
 ----
 true
 
-# Batch mixing series with NULLs (all-NULL produces result with NaN values)
+# Batch mixing series with NULLs. Re-pinned (Phase 18, 18-01, class D): series 2
+# (all-NULL) now correctly returns NULL (not a fabricated result), matching the
+# re-pinned assertions above -- the other two series are unaffected.
 query II
 SELECT
     series_id,
@@ -131,7 +144,7 @@ FROM (VALUES
 ORDER BY series_id;
 ----
 1	true
-2	true
+2	false
 3	true
 
 #######################################
@@ -166,13 +179,16 @@ SELECT * FROM (VALUES
     (6, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 'valid_trend_2')
 ) AS t(series_id, values, description);
 
-# Count forecasts that return non-NULL (includes all_null which returns NaN values)
+# Count forecasts that return non-NULL. Re-pinned (Phase 18, 18-01, class D):
+# all_null now correctly returns NULL instead of a fabricated NaN-filled result
+# (see the re-pinned assertions earlier in this file), so only 3 of 6 rows produce
+# a result, not 4.
 query I
 SELECT COUNT(*)
 FROM comprehensive_batch
 WHERE _ts_forecast(values, 3) IS NOT NULL;
 ----
-4
+3
 
 query III
 SELECT
@@ -184,7 +200,7 @@ ORDER BY series_id;
 ----
 1	valid_trend	true
 2	empty	false
-3	all_null	true
+3	all_null	false
 4	single_value	false
 5	constant	true
 6	valid_trend_2	true
@@ -268,11 +284,13 @@ SELECT COUNT(*) FROM large_mixed_batch WHERE length(values) = 10;
 ----
 80
 
-# Core isolation test: all 100 series processed, valid ones succeed
+# Core isolation test: all 100 series processed, valid ones succeed. Re-pinned
+# (Phase 18, 18-01, class D): the 5 all-NULL series (5%) now correctly return NULL
+# instead of a fabricated NaN-filled result, so 80 of 100 succeed, not 85.
 query I
 SELECT COUNT(*) FROM large_mixed_batch WHERE _ts_forecast(values, 3) IS NOT NULL;
 ----
-85
+80
 
 # Verify errors are isolated - empty and single-value return NULL
 query I
@@ -332,22 +350,27 @@ WITH series_data AS (
 )
 SELECT * FROM series_data;
 
-# Verify batch completed without crash (core resilience test)
+# Verify batch completed without crash (core resilience test). Re-pinned (Phase 18,
+# 18-01, class D): the 40 three-value "sparse" series (default model AutoETS requires
+# at least 4 observations) now correctly return NULL instead of succeeding, so 920 of
+# 1000 series succeed, not >= 950 (confirmed directly via the per-length breakdown:
+# 920 length-10 rows all succeed, 0/20/40 of the length-0/1/3 rows do).
 query I
-SELECT COUNT(*) >= 950
+SELECT COUNT(*) >= 900
 FROM simulated_scale_batch
 WHERE _ts_forecast(values, 5) IS NOT NULL;
 ----
 true
 
-# Count successful forecasts (should be ~95%+)
+# Count successful forecasts. Re-pinned (Phase 18, 18-01, class D): same re-pin as
+# above -- 920 of 1000, not 960.
 query I
 SELECT COUNT(*)
 FROM simulated_scale_batch
 WHERE _ts_forecast(values, 5) IS NOT NULL
   AND length((_ts_forecast(values, 5)).point) = 5;
 ----
-960
+920
 
 # Verify errors didn't corrupt valid results - spot check first and last
 query I
@@ -479,9 +502,11 @@ SELECT _ts_forecast([1.0, 2.0], 3) IS NULL;
 ----
 true
 
-# Three values - minimum threshold, should work
+# Three values - minimum threshold. Re-pinned (Phase 18, 18-01): same re-pin as the
+# earlier "three values" assertion in this file -- the default model (AutoETS)
+# requires at least 4 observations, so 3 values correctly return NULL.
 query I
-SELECT _ts_forecast([1.0, 2.0, 3.0], 3) IS NOT NULL;
+SELECT _ts_forecast([1.0, 2.0, 3.0], 3) IS NULL;
 ----
 true
 
@@ -497,9 +522,11 @@ SELECT _ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0], 3) IS NOT NULL;
 ----
 true
 
-# Verify short series that work produce correct forecast length
+# Verify short series that work produce correct forecast length. Re-pinned
+# (Phase 18, 18-01): 3 values is below AutoETS's minimum of 4, so this now returns
+# NULL -- lengthened to match the "comfortable minimum" fixture used just above.
 query I
-SELECT length((_ts_forecast([1.0, 2.0, 3.0], 5)).point);
+SELECT length((_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0], 5)).point);
 ----
 5
 
@@ -528,14 +555,16 @@ SELECT length((_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0], 100)).point);
 # NULL Value Pattern Tests
 #---------------------------------------
 
-# All NULLs - produces NaN values (not NULL struct)
+# All NULLs. Re-pinned (Phase 18, 18-01, class D): now correctly returns a NULL
+# struct instead of a fabricated "NaN values" result -- same re-pin as the earlier
+# all-NULL assertions in this file.
 query I
-SELECT _ts_forecast([NULL, NULL, NULL, NULL, NULL]::DOUBLE[], 3) IS NOT NULL;
+SELECT _ts_forecast([NULL, NULL, NULL, NULL, NULL]::DOUBLE[], 3) IS NULL;
 ----
 true
 
 query I
-SELECT isnan((_ts_forecast([NULL, NULL, NULL, NULL, NULL]::DOUBLE[], 3)).point[1]);
+SELECT (_ts_forecast([NULL, NULL, NULL, NULL, NULL]::DOUBLE[], 3)).point IS NULL;
 ----
 true
 
@@ -563,15 +592,19 @@ SELECT _ts_forecast([1.0, NULL, 3.0, NULL, 5.0, NULL, 7.0, NULL, 9.0, NULL], 3) 
 ----
 true
 
-# Single valid value among NULLs - may produce NaN
+# Single valid value among NULLs. Re-pinned (Phase 18, 18-01, class D): effectively
+# a 1-observation series after NULL removal, well below AutoETS's minimum of 4 --
+# now correctly returns NULL rather than a fabricated result (the removed comment's
+# own "may produce NaN" hedge already anticipated the ambiguity here).
 query I
-SELECT _ts_forecast([NULL, NULL, 5.0, NULL, NULL]::DOUBLE[], 3) IS NOT NULL;
+SELECT _ts_forecast([NULL, NULL, 5.0, NULL, NULL]::DOUBLE[], 3) IS NULL;
 ----
 true
 
-# Two valid values among NULLs
+# Two valid values among NULLs. Re-pinned (Phase 18, 18-01, class D): effectively a
+# 2-observation series after NULL handling, below AutoETS's minimum of 4.
 query I
-SELECT _ts_forecast([NULL, 2.0, NULL, 4.0, NULL]::DOUBLE[], 3) IS NOT NULL;
+SELECT _ts_forecast([NULL, 2.0, NULL, 4.0, NULL]::DOUBLE[], 3) IS NULL;
 ----
 true
 
@@ -684,15 +717,18 @@ true
 # Combined Edge Cases
 #---------------------------------------
 
-# Short constant series
+# Short constant series. Re-pinned (Phase 18, 18-01, class D): 3 values is below
+# AutoETS's minimum of 4; lengthened to 4 (confirmed directly: 4 constant values
+# succeeds with model AutoETS(A,N,N)).
 query I
-SELECT _ts_forecast([5.0, 5.0, 5.0], 3) IS NOT NULL;
+SELECT _ts_forecast([5.0, 5.0, 5.0, 5.0], 3) IS NOT NULL;
 ----
 true
 
-# Short series with NULL
+# Short series with NULL. Re-pinned (Phase 18, 18-01, class D): 3 elements (2 valid
+# after NULL handling) is below AutoETS's minimum of 4.
 query I
-SELECT _ts_forecast([1.0, NULL, 3.0], 3) IS NOT NULL;
+SELECT _ts_forecast([1.0, NULL, 3.0], 3) IS NULL;
 ----
 true
 
@@ -728,34 +764,39 @@ SELECT * FROM (VALUES
     ('valid_trend', [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]::DOUBLE[])
 ) AS t(scenario, values);
 
-# Count scenarios that produce results (not NULL)
+# Count scenarios that produce results (not NULL). Re-pinned (Phase 18, 18-01,
+# class D): triple/all_null/mostly_null now all correctly return NULL (below
+# AutoETS's minimum of 4 observations, or a fabricated-NaN result eliminated by this
+# milestone) -- only the three constant-series scenarios and valid_trend succeed.
 query I
 SELECT COUNT(*) FROM all_error_scenarios WHERE _ts_forecast(values, 3) IS NOT NULL;
 ----
-7
+4
 
-# List scenarios that fail (return NULL)
+# List scenarios that fail (return NULL). Re-pinned (Phase 18, 18-01, class D):
+# triple/all_null/mostly_null join the always-failing double/empty/single scenarios.
 query I
 SELECT scenario FROM all_error_scenarios
 WHERE _ts_forecast(values, 3) IS NULL
 ORDER BY scenario;
 ----
+all_null
 double
 empty
+mostly_null
 single
+triple
 
-# List scenarios that succeed (note: all_null produces NaN values, not NULL)
+# List scenarios that succeed. Re-pinned (Phase 18, 18-01, class D): only series with
+# >= 4 real observations now succeed.
 query I
 SELECT scenario FROM all_error_scenarios
 WHERE _ts_forecast(values, 3) IS NOT NULL
 ORDER BY scenario;
 ----
-all_null
 constant_neg
 constant_pos
 constant_zero
-mostly_null
-triple
 valid_trend
 
 statement ok
@@ -906,27 +947,46 @@ SELECT * FROM (VALUES
     (5, [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0])   -- constant (degenerate seasonal)
 ) AS t(series_id, values);
 
-# HoltWinters model batch isolation (needs seasonal data)
+# HoltWinters model batch isolation (needs seasonal data). Re-pinned (Phase 18,
+# 18-01, class D): series 5 (constant, no seasonality) is EXCLUDED here -- a seasonal
+# model's "no period detected" failure now throws a catchable SQL error rather than
+# being isolated per-row as NULL ("silent model/parameter fallbacks become errors",
+# PROJECT.md, FCST-01..08), so including it in a batch SELECT aborts the whole query;
+# true isolation only applies to insufficient-data/empty-input failures (rows 2/4),
+# which still return NULL. Demonstrated separately below as a statement error.
 query II
 SELECT series_id, _ts_forecast(values, 4, 'HoltWinters') IS NOT NULL as has_result
-FROM seasonal_batch_data ORDER BY series_id;
+FROM seasonal_batch_data WHERE series_id != 5 ORDER BY series_id;
 ----
 1	true
 2	false
 3	true
 4	false
-5	true
 
-# MSTL model batch isolation
+# Constant (degenerate seasonal) series: no seasonal period can be detected, so
+# HoltWinters now raises an explicit error rather than returning a silently-wrong
+# result -- confirmed this is NOT isolated per-row within a batch SELECT (see above).
+statement error
+SELECT _ts_forecast([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 4, 'HoltWinters');
+----
+no seasonal period could be detected
+
+# MSTL model batch isolation. Same re-pin as HoltWinters above: series 5 excluded,
+# demonstrated separately as a statement error.
 query II
 SELECT series_id, _ts_forecast(values, 4, 'MSTL') IS NOT NULL as has_result
-FROM seasonal_batch_data ORDER BY series_id;
+FROM seasonal_batch_data WHERE series_id != 5 ORDER BY series_id;
 ----
 1	true
 2	false
 3	true
 4	false
-5	true
+
+# Constant (degenerate seasonal) series: same re-pin as HoltWinters above.
+statement error
+SELECT _ts_forecast([5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0], 4, 'MSTL');
+----
+no seasonal period could be detected
 
 statement ok
 DROP TABLE seasonal_batch_data;
@@ -962,33 +1022,46 @@ ORDER BY series_id;
 # Invalid Model Name Test
 #---------------------------------------
 
-# Invalid model name falls back to default (Naive) - doesn't crash
-query I
+# Re-pinned (Phase 18, 18-01, class D): an invalid model name now raises an explicit
+# error instead of silently falling back to Naive -- the removed comment described
+# exactly the kind of silent substitution this milestone eliminated ("silent
+# model/parameter fallbacks become errors", PROJECT.md, FCST-01..08).
+statement error
 SELECT _ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0], 3, 'INVALID_MODEL') IS NOT NULL;
 ----
-true
+Unknown model
 
-# Verify invalid model falls back to Naive
-query I
+# Re-pinned (Phase 18, 18-01, class D): same re-pin as above -- no silent Naive
+# fallback for an invalid model name.
+statement error
 SELECT (_ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0], 3, 'INVALID_MODEL')).model;
 ----
-Naive
+Unknown model
 
-# Batch with invalid model names mixed with valid - all should produce results
+# Batch with valid model names. Re-pinned (Phase 18, 18-01, class D): series 2
+# (invalid model name 'NOT_A_MODEL') is EXCLUDED here -- an invalid model name now
+# raises a catchable SQL error rather than being isolated per-row (same re-pin as
+# above), so including it in a batch SELECT aborts the whole query. Demonstrated
+# separately below as a statement error.
 query II
 SELECT
     series_id,
     _ts_forecast(values, 3, model_name) IS NOT NULL as has_result
 FROM (VALUES
     (1, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 'NAIVE'),
-    (2, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 'NOT_A_MODEL'),
     (3, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 'SES')
 ) AS t(series_id, values, model_name)
 ORDER BY series_id;
 ----
 1	true
-2	true
 3	true
+
+# Invalid model name within a batch context raises the same error as the single-row
+# case above (not isolated per-row).
+statement error
+SELECT _ts_forecast([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], 3, 'NOT_A_MODEL') IS NOT NULL;
+----
+Unknown model
 
 #######################################
 # Extreme Value Batch Tests
@@ -1111,15 +1184,19 @@ ORDER BY series_id;
 # Special Floating Point Values
 #---------------------------------------
 
-# Infinity handling - should return NULL or handle gracefully
+# Infinity handling. Re-pinned (Phase 18, 18-01, class D): an infinite value in the
+# input series now correctly returns NULL rather than a fabricated result -- the
+# removed comment's own "should return NULL or handle gracefully" hedge already
+# allowed this outcome.
 query I
-SELECT _ts_forecast([1.0, 2.0, 'inf'::DOUBLE, 4.0, 5.0], 3) IS NOT NULL;
+SELECT _ts_forecast([1.0, 2.0, 'inf'::DOUBLE, 4.0, 5.0], 3) IS NULL;
 ----
 true
 
-# Negative infinity
+# Negative infinity. Re-pinned (Phase 18, 18-01, class D): same as positive infinity
+# above.
 query I
-SELECT _ts_forecast([1.0, 2.0, '-inf'::DOUBLE, 4.0, 5.0], 3) IS NOT NULL;
+SELECT _ts_forecast([1.0, 2.0, '-inf'::DOUBLE, 4.0, 5.0], 3) IS NULL;
 ----
 true
 
@@ -1129,7 +1206,9 @@ SELECT _ts_forecast([1.0, 2.0, 'nan'::DOUBLE, 4.0, 5.0], 3) IS NOT NULL;
 ----
 true
 
-# Batch with special values
+# Batch with special values. Re-pinned (Phase 18, 18-01, class D): series 2 (an
+# infinite value) now correctly returns NULL (no throw, isolation still holds for
+# this case); NaN (series 4) is unaffected.
 query II
 SELECT
     series_id,
@@ -1144,7 +1223,7 @@ FROM (VALUES
 ORDER BY series_id;
 ----
 1	true
-2	true
+2	false
 3	true
 4	true
 5	true
@@ -1216,13 +1295,16 @@ SELECT * FROM (VALUES
     ('large_neg', [-1e100, -2e100, -3e100, -4e100, -5e100, -6e100, -7e100, -8e100, -9e100, -1e101]::DOUBLE[])
 ) AS t(scenario, values);
 
-# Count successful forecasts
+# Count successful forecasts. Re-pinned (Phase 18, 18-01, class D): with_inf now
+# also fails (an infinite value correctly returns NULL -- see the re-pinned
+# assertions earlier in this file), so 7 of 10 scenarios succeed, not 8.
 query I
 SELECT COUNT(*) FROM extreme_value_batch WHERE _ts_forecast(values, 3) IS NOT NULL;
 ----
-8
+7
 
-# List scenarios that fail
+# List scenarios that fail. Re-pinned (Phase 18, 18-01, class D): with_inf joins
+# empty/single.
 query I
 SELECT scenario FROM extreme_value_batch
 WHERE _ts_forecast(values, 3) IS NULL
@@ -1230,14 +1312,16 @@ ORDER BY scenario;
 ----
 empty
 single
+with_inf
 
-# Verify all successful scenarios produce correct forecast length
+# Verify all successful scenarios produce correct forecast length. Re-pinned
+# (Phase 18, 18-01, class D): 7, matching the re-pinned count above.
 query I
 SELECT COUNT(*) FROM extreme_value_batch
 WHERE _ts_forecast(values, 3) IS NOT NULL
   AND length((_ts_forecast(values, 3)).point) = 3;
 ----
-8
+7
 
 statement ok
 DROP TABLE extreme_value_batch;

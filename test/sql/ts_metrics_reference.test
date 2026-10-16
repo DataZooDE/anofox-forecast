@@ -1,0 +1,174 @@
+# name: test/sql/ts_metrics_reference.test
+# description: ts_mase (Hyndman-Koehler) scalar value assertions against R forecast::accuracy
+#   fixtures (Phase 13 plan 13-04, D-08, STAT-06), the removed 3-list ts_mase error, and the
+#   ts_mape/ts_mase_by MAPE/MASE NULL policy (D-07/D-08).
+# group: [sql]
+#
+# Non-json-gated so it runs on every native build. det_m4/det_m1/insample_na_m4/
+# constant_insample literals below are copied from
+# validation/reference/fixtures/r_mase/accuracy_mase.json via:
+#   python3 -c "import json; d=json.load(open('validation/reference/fixtures/r_mase/accuracy_mase.json')); print(d['cases']['det_m4'])"
+
+require anofox_forecast
+
+# --- det_m4: seasonal_period=4, matches R forecast::accuracy() to 1e-10 ---
+query I
+SELECT ABS(ts_mase(
+    [15.297794574577, 13.8943579579336, 13.2998271922129, 14.0591746422487, 15.7205433723541, 15.4448057488323, 12.9332228583983, 13.8043972174192],
+    [16.1, 14.2, 12.3, 14.4, 16.5, 14.6, 12.7, 14.8],
+    [11.7767104331365, 9.40903228808558, 9.13471278483916, 10.6512598425823, 11.5028278438036, 10.9934908663479, 9.44274917270367, 9.92626301698892, 12.7221909288769, 11.9887046181867, 8.63853329558409, 10.5096701237984, 14.2078195977562, 11.503352667104, 8.52535472427934, 12.1268326309626, 14.3340062895737, 10.8632321315473, 9.87168826731369, 12.9550736440473, 13.5107810432727, 11.625903038569, 11.2604180727247, 12.353110675953, 13.5698995857987, 13.2482728441404, 11.2109407202182, 11.821363547595, 15.0218251894115, 13.8998668269692, 10.3963396971371, 12.755105242094, 16.2913199700294, 13.2039279504381, 10.6354561259244, 14.3550680787307, 16.076332609825, 12.8016031084154, 12.1692099874515, 14.8243313311076],
+    4
+) - 0.815579185580866) < 1e-10;
+----
+true
+
+# --- det_m1: same series/formula, seasonal_period=1, matches R to 1e-10 ---
+query I
+SELECT ABS(ts_mase(
+    [15.297794574577, 13.8943579579336, 13.2998271922129, 14.0591746422487, 15.7205433723541, 15.4448057488323, 12.9332228583983, 13.8043972174192],
+    [16.1, 14.2, 12.3, 14.4, 16.5, 14.6, 12.7, 14.8],
+    [11.7767104331365, 9.40903228808558, 9.13471278483916, 10.6512598425823, 11.5028278438036, 10.9934908663479, 9.44274917270367, 9.92626301698892, 12.7221909288769, 11.9887046181867, 8.63853329558409, 10.5096701237984, 14.2078195977562, 11.503352667104, 8.52535472427934, 12.1268326309626, 14.3340062895737, 10.8632321315473, 9.87168826731369, 12.9550736440473, 13.5107810432727, 11.625903038569, 11.2604180727247, 12.353110675953, 13.5698995857987, 13.2482728441404, 11.2109407202182, 11.821363547595, 15.0218251894115, 13.8998668269692, 10.3963396971371, 12.755105242094, 16.2913199700294, 13.2039279504381, 10.6354561259244, 14.3550680787307, 16.076332609825, 12.8016031084154, 12.1692099874515, 14.8243313311076],
+    1
+) - 0.329220956103501) < 1e-10;
+----
+true
+
+# --- insample_na_m4: an interior NULL at in-sample position 10 is skipped
+# (not spliced out and re-paired) for the lag pair(s) it touches, equals
+# the fixture to 1e-10 ---
+query I
+SELECT ABS(ts_mase(
+    [15.297794574577, 13.8943579579336, 13.2998271922129, 14.0591746422487, 15.7205433723541, 15.4448057488323, 12.9332228583983, 13.8043972174192],
+    [16.1, 14.2, 12.3, 14.4, 16.5, 14.6, 12.7, 14.8],
+    [11.7767104331365, 9.40903228808558, 9.13471278483916, 10.6512598425823, 11.5028278438036, 10.9934908663479, 9.44274917270367, 9.92626301698892, 12.7221909288769, NULL, 8.63853329558409, 10.5096701237984, 14.2078195977562, 11.503352667104, 8.52535472427934, 12.1268326309626, 14.3340062895737, 10.8632321315473, 9.87168826731369, 12.9550736440473, 13.5107810432727, 11.625903038569, 11.2604180727247, 12.353110675953, 13.5698995857987, 13.2482728441404, 11.2109407202182, 11.821363547595, 15.0218251894115, 13.8998668269692, 10.3963396971371, 12.755105242094, 16.2913199700294, 13.2039279504381, 10.6354561259244, 14.3550680787307, 16.076332609825, 12.8016031084154, 12.1692099874515, 14.8243313311076],
+    4
+) - 0.811334559459172) < 1e-10;
+----
+true
+
+# --- constant in-sample (scale 0) -> NULL (D-08: MASE undefined, not R's Inf) ---
+query I
+SELECT ts_mase([5.0, 6.0], [4.0, 5.0], [3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0], 1) IS NULL;
+----
+true
+
+# --- seasonal_period < 1 errors ---
+statement error
+SELECT ts_mase([1.0, 2.0], [1.0, 2.0], [1.0, 2.0, 3.0], -1);
+----
+seasonal_period
+
+# --- the removed 3-list ts_mase(actual, forecast, baseline) form errors naming ts_rmae ---
+statement error
+SELECT ts_mase([1.0, 2.0, 3.0], [1.1, 2.1, 3.1], [1.5, 2.5, 3.5]);
+----
+ts_rmae
+
+#######################################
+# MAPE NULL policy (D-07, STAT-05), plan 13-04 task 2
+#######################################
+
+# any pairwise-complete actual exactly 0 -> NULL
+query I
+SELECT ts_mape([0.0, 2.0, 4.0], [1.0, 2.0, 5.0]) IS NULL;
+----
+true
+
+# a zero actual paired with a NULL forecast is dropped FIRST (complete_cases)
+# and does not trigger the NULL policy -- the remaining complete pair (2.0,3.0)
+# gives a real value.
+query I
+SELECT ts_mape([0.0, 2.0]::DOUBLE[], [NULL, 3.0]::DOUBLE[]);
+----
+50.0
+
+# ts_mape_by: a two-group table where one group has a zero actual -> NULL for
+# that group only, the exact value for the other.
+statement ok
+CREATE TABLE mape_two_groups AS
+SELECT 'zero' AS id, i AS ds, (CASE WHEN i = 1 THEN 0.0 ELSE i * 1.0 END) AS y, (i * 1.0 + 0.5) AS forecast
+FROM generate_series(1, 5) t(i)
+UNION ALL
+SELECT 'ok' AS id, i AS ds, i * 1.0 AS y, (i * 1.0 + 0.5) AS forecast
+FROM generate_series(1, 5) t(i);
+
+query II
+SELECT id, mape FROM ts_mape_by((SELECT id, ds, y, forecast FROM mape_two_groups), 'ds', 'y', 'forecast') ORDER BY id;
+----
+ok	22.833333333333332
+zero	NULL
+
+statement ok
+DROP TABLE mape_two_groups;
+
+#######################################
+# ts_mase_by (Hyndman-Koehler, D-08, STAT-06), plan 13-04 task 2
+#######################################
+
+# det_m4/det_m1 built in SQL from the deterministic formula (40 history rows
+# with NULL forecast, 8 evaluation rows): ts_mase_by equals the R fixture to
+# 1e-8 AND equals the scalar ts_mase call on the same data.
+statement ok
+CREATE TABLE ts_mase_by_det AS
+SELECT
+    t AS ds,
+    (10 + 2 * sin(2 * pi() * t / 4) + 0.1 * t + cos(1.9 * t))::DOUBLE AS y,
+    CASE WHEN t > 40 THEN (10 + 2 * sin(2 * pi() * t / 4) + 0.1 * t)::DOUBLE ELSE NULL END AS forecast
+FROM generate_series(1, 48) t(t);
+
+# det_m4: seasonal_period=4, matches the r_mase fixture's det_m4 case
+query I
+SELECT ABS(mase - 0.815579185580866) < 1e-8
+FROM ts_mase_by((SELECT ds, y, forecast FROM ts_mase_by_det), 'ds', 'y', 'forecast', seasonal_period := 4);
+----
+true
+
+# det_m1: seasonal_period=1 (default), matches the r_mase fixture's det_m1 case
+query I
+SELECT ABS(mase - 0.329220956103501) < 1e-8
+FROM ts_mase_by((SELECT ds, y, forecast FROM ts_mase_by_det), 'ds', 'y', 'forecast');
+----
+true
+
+# ts_mase_by(..., seasonal_period := 4) equals the scalar on the same data
+query I
+SELECT ABS(
+    (SELECT mase FROM ts_mase_by((SELECT ds, y, forecast FROM ts_mase_by_det), 'ds', 'y', 'forecast', seasonal_period := 4))
+    - ts_mase(
+        (SELECT LIST(y ORDER BY ds) FROM ts_mase_by_det WHERE forecast IS NOT NULL),
+        (SELECT LIST(forecast ORDER BY ds) FROM ts_mase_by_det WHERE forecast IS NOT NULL),
+        (SELECT LIST(y ORDER BY ds) FROM ts_mase_by_det WHERE forecast IS NULL),
+        4
+    )
+) < 1e-10;
+----
+true
+
+statement ok
+DROP TABLE ts_mase_by_det;
+
+# a group with only history rows (no forecast at all) -> NULL
+statement ok
+CREATE TABLE ts_mase_by_history_only AS SELECT 1 AS ds, 5.0 AS y, CAST(NULL AS DOUBLE) AS forecast;
+
+query I
+SELECT mase IS NULL FROM ts_mase_by((SELECT ds, y, forecast FROM ts_mase_by_history_only), 'ds', 'y', 'forecast');
+----
+true
+
+statement ok
+DROP TABLE ts_mase_by_history_only;
+
+# the old 5-argument column-name form (a VARCHAR literal) errors naming ts_rmae_by
+statement ok
+CREATE TABLE ts_mase_by_old_form AS SELECT 1 AS ds, 5.0 AS y, 6.0 AS forecast, 4.0 AS naive_forecast;
+
+statement error
+SELECT * FROM ts_mase_by(
+    (SELECT ds, y, forecast FROM ts_mase_by_old_form), 'ds', 'y', 'forecast', 'naive_forecast'
+);
+----
+ts_rmae_by
+
+statement ok
+DROP TABLE ts_mase_by_old_form;

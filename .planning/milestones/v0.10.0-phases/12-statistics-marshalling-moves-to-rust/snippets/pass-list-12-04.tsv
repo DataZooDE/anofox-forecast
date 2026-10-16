@@ -1,0 +1,2 @@
+docs/api/11-conformal-prediction.md	17	PASS	SELECT ts_conformal_quantile([1, NULL, 2, 3]::DOUBLE[], 0.1) = ts_conformal_quantile([1, 2, 3]::DOUB	
+docs/api/11-conformal-prediction.md	18	EXPECTED-ERROR	SELECT ts_conformal_predict_per_step(	Invalid Input Error: ts_conformal_predict_per_step: Invalid input: per-step conformal: residual count 7 is not a multiple of horizon 3

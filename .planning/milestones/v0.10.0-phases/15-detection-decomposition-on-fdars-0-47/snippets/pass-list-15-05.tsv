@@ -1,0 +1,9 @@
+docs/api/04-data-preparation.md	19	PASS	-- [NULL, 1, NULL, 3, NULL] -> forward: [NULL, 1, 1, 3, 3]; backward: [1, 1, 3, 3, NULL]	
+docs/api/05a-decomposition.md	2	PASS	SELECT * FROM ts_mstl_decomposition_by(	
+docs/api/05a-decomposition.md	5	SYNOPSIS	ts_decompose_seasonal(values DOUBLE[], period DOUBLE[, method VARCHAR]) → STRUCT(trend DOUBLE[], sea	Parser Error: syntax error at or near "ts_decompose_seasonal"
+docs/api/05a-decomposition.md	6	PASS	SELECT (ts_decompose_seasonal(LIST(quantity ORDER BY date), 12.0)).trend[1:5]	
+docs/api/05a-decomposition.md	11	SYNOPSIS	ts_seasonal_strength(values LIST(DOUBLE), period DOUBLE[, method VARCHAR]) → DOUBLE	Parser Error: syntax error at or near "ts_seasonal_strength"
+docs/api/05a-decomposition.md	12	PASS	SELECT ts_seasonal_strength(list_transform(range(28), i -> sin(2 * pi() * i / 7)), 7.0);	
+docs/api/05b-peak-detection.md	0	PASS	SELECT ts_detect_peaks([0, 1, 1, 1, 0, 2, 2, 0, 3, 3, 3, 3, 1, 0]::DOUBLE[]);	
+plugins/anofox-forecast/skills/anofox-forecast-detection/SKILL.md	14	PASS	SELECT product_id, trend, seasonal, remainder, periods	
+plugins/anofox-forecast/skills/anofox-forecast-detection/SKILL.md	16	PASS	CREATE OR REPLACE TABLE detected AS	

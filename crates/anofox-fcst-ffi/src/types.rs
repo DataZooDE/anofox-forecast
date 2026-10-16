@@ -219,9 +219,9 @@ pub struct TsStatsResult {
     pub iqr: c_double,
     /// Autocorrelation at lag 1
     pub autocorr_lag1: c_double,
-    /// Trend strength (0-1)
+    /// Trend strength (D-02, STAT-02); valid only when `has_trend_strength`
     pub trend_strength: c_double,
-    /// Seasonality strength (0-1)
+    /// Seasonality strength (D-02, STAT-02); valid only when `has_seasonality_strength`
     pub seasonality_strength: c_double,
     /// Approximate entropy
     pub entropy: c_double,
@@ -229,10 +229,18 @@ pub struct TsStatsResult {
     pub stability: c_double,
     /// Expected number of observations based on date range and frequency
     pub expected_length: size_t,
-    /// Number of gaps (missing time periods) in the series
+    /// Number of missing periods (D-04; was "gap occurrences" pre-v2026.10.16)
     pub n_gaps: size_t,
-    /// Whether date-based metrics (expected_length, n_gaps) are valid
+    /// Number of gap runs/intervals (D-04; the pre-v2026.10.16 meaning of `n_gaps`)
+    pub n_gap_runs: size_t,
+    /// Whether date-based metrics (expected_length, n_gaps, n_gap_runs) are valid
     pub has_date_metrics: bool,
+    /// Whether `entropy` is valid (None in Rust -> false here, D-03)
+    pub has_entropy: bool,
+    /// Whether `trend_strength` is valid (None in Rust -> false here, D-02)
+    pub has_trend_strength: bool,
+    /// Whether `seasonality_strength` is valid (None in Rust -> false here, D-02)
+    pub has_seasonality_strength: bool,
 }
 
 impl Default for TsStatsResult {
@@ -274,7 +282,11 @@ impl Default for TsStatsResult {
             stability: f64::NAN,
             expected_length: 0,
             n_gaps: 0,
+            n_gap_runs: 0,
             has_date_metrics: false,
+            has_entropy: false,
+            has_trend_strength: false,
+            has_seasonality_strength: false,
         }
     }
 }
@@ -312,13 +324,22 @@ impl From<anofox_fcst_core::TsStats> for TsStatsResult {
             q3: stats.q3,
             iqr: stats.iqr,
             autocorr_lag1: stats.autocorr_lag1,
-            trend_strength: stats.trend_strength,
-            seasonality_strength: stats.seasonality_strength,
-            entropy: stats.entropy,
+            trend_strength: stats.trend_strength.unwrap_or(f64::NAN),
+            seasonality_strength: stats.seasonality_strength.unwrap_or(f64::NAN),
+            // WR-03 fix: NaN (not 0.0) for "no value", consistent with
+            // trend_strength/seasonality_strength above -- 0.0 is a legitimate
+            // entropy value (a genuinely constant series reports Some(0.0)), so it
+            // must not double as the "entropy not computed" sentinel. Callers must
+            // still check `has_entropy` before reading this field either way.
+            entropy: stats.entropy.unwrap_or(f64::NAN),
             stability: stats.stability,
             expected_length: stats.expected_length.unwrap_or(0),
             n_gaps: stats.n_gaps.unwrap_or(0),
+            n_gap_runs: stats.n_gap_runs.unwrap_or(0),
             has_date_metrics: stats.expected_length.is_some(),
+            has_entropy: stats.entropy.is_some(),
+            has_trend_strength: stats.trend_strength.is_some(),
+            has_seasonality_strength: stats.seasonality_strength.is_some(),
         }
     }
 }
@@ -348,6 +369,15 @@ pub struct ForecastResult {
     pub bic: c_double,
     /// Mean Squared Error
     pub mse: c_double,
+    /// Number of residuals.
+    ///
+    /// Appended additively (plan 10-02) to fix a pre-existing correctness gap:
+    /// `fitted_values` and `residuals` used to share the single `n_fitted`
+    /// length field, which silently truncated `residuals` to length 0 whenever
+    /// a crate model's `fitted_values()` was `None` while `residuals()` was
+    /// `Some` (e.g. GARCH always, by crate design; AutoARIMA on some series).
+    /// Callers reading `residuals` MUST use `n_residuals`, not `n_fitted`.
+    pub n_residuals: size_t,
 }
 
 impl Default for ForecastResult {
@@ -364,6 +394,7 @@ impl Default for ForecastResult {
             aic: f64::NAN,
             bic: f64::NAN,
             mse: f64::NAN,
+            n_residuals: 0,
         }
     }
 }
@@ -419,6 +450,16 @@ pub struct ForecastOptions {
     /// "horizon_adaptive" (and common aliases). Empty = "mean" (Phase 4 default).
     /// Only consulted when model is "AutoEnsemble".
     pub ensemble_method: [c_char; 32],
+    /// ARIMA non-seasonal order as a string, e.g. "[1,1,1]". Empty = unset
+    /// (D-08/D-09: "ARIMA" without this is an error naming "AutoARIMA").
+    /// Only consulted when model is "ARIMA"; parsed and bounds-checked by
+    /// `anofox_fcst_core::parse_order_triplet`.
+    pub arima_order_str: [c_char; 32],
+    /// ARIMA seasonal order as a string, e.g. "[0,1,1]". Empty = unset
+    /// (non-seasonal). Requires `seasonal_period > 1` when non-zero. Only
+    /// consulted when model is "ARIMA"; parsed and bounds-checked by
+    /// `anofox_fcst_core::parse_order_triplet`.
+    pub seasonal_order_str: [c_char; 32],
 }
 
 /// Panel forecast result — returned by `anofox_ts_forecast_panel`.
@@ -504,6 +545,8 @@ impl Default for ForecastOptions {
             kalman_model: [0; 32],
             ensemble_top_k: 0,
             ensemble_method: [0; 32],
+            arima_order_str: [0; 32],
+            seasonal_order_str: [0; 32],
         }
     }
 }
@@ -521,6 +564,16 @@ pub struct ExogenousRegressor {
     pub future_values: *const c_double,
     /// Number of future values (must match horizon)
     pub n_future: size_t,
+    /// Validity bitmask for `values` (D-12, FCST-08). `null` = every
+    /// historical value is valid; otherwise `ceil(n_values / 64)` words,
+    /// where bit `i` (`word i/64`, bit `i % 64`) set means `values[i]` is
+    /// valid. Added in plan 10-04 Task 1; read by the FFI boundary starting
+    /// in Task 2 — until then every caller must pass `null` here.
+    pub validity: *const u64,
+    /// Validity bitmask for `future_values`, same encoding as `validity`
+    /// but sized `ceil(n_future / 64)` words. `null` = every future value
+    /// is valid.
+    pub future_validity: *const u64,
 }
 
 /// Exogenous data containing multiple regressors.
@@ -588,6 +641,10 @@ pub struct ForecastOptionsExog {
     /// "horizon_adaptive" (and common aliases). Empty = "mean" (Phase 4 default).
     /// Only consulted when model is "AutoEnsemble".
     pub ensemble_method: [c_char; 32],
+    /// ARIMA non-seasonal order string. See [`ForecastOptions::arima_order_str`].
+    pub arima_order_str: [c_char; 32],
+    /// ARIMA seasonal order string. See [`ForecastOptions::seasonal_order_str`].
+    pub seasonal_order_str: [c_char; 32],
 }
 
 impl Default for ForecastOptionsExog {
@@ -617,6 +674,8 @@ impl Default for ForecastOptionsExog {
             kalman_model: [0; 32],
             ensemble_top_k: 0,
             ensemble_method: [0; 32],
+            arima_order_str: [0; 32],
+            seasonal_order_str: [0; 32],
         }
     }
 }
@@ -765,12 +824,19 @@ pub struct DataQualityResult {
     pub behavioral_score: c_double,
     /// Overall quality score
     pub overall_score: c_double,
-    /// Number of gaps
+    /// Number of missing periods (D-04/D-05: expected timestamps absent under the
+    /// declared/detected frequency) -- matches `TsStatsResult::n_gaps`'s meaning, not
+    /// the pre-v2026.10.16 "gap occurrence count" (see `n_gap_runs`).
     pub n_gaps: size_t,
-    /// Number of missing values
+    /// Number of gap occurrences/runs (D-05): the pre-v2026.10.16 `n_gaps` meaning.
+    pub n_gap_runs: size_t,
+    /// Number of missing values (NULL or NaN)
     pub n_missing: size_t,
     /// Is constant series
     pub is_constant: bool,
+    /// Whether the present-value count is below the caller's `n_short` threshold
+    /// (D-05, WRAP-02).
+    pub is_short: bool,
 }
 
 impl Default for DataQualityResult {
@@ -782,8 +848,27 @@ impl Default for DataQualityResult {
             behavioral_score: f64::NAN,
             overall_score: f64::NAN,
             n_gaps: 0,
+            n_gap_runs: 0,
             n_missing: 0,
             is_constant: false,
+            is_short: false,
+        }
+    }
+}
+
+impl From<anofox_fcst_core::DataQuality> for DataQualityResult {
+    fn from(quality: anofox_fcst_core::DataQuality) -> Self {
+        Self {
+            structural_score: quality.structural_score,
+            temporal_score: quality.temporal_score,
+            magnitude_score: quality.magnitude_score,
+            behavioral_score: quality.behavioral_score,
+            overall_score: quality.overall_score,
+            n_gaps: quality.n_gaps,
+            n_gap_runs: quality.n_gap_runs,
+            n_missing: quality.n_missing,
+            is_constant: quality.is_constant,
+            is_short: quality.is_short,
         }
     }
 }
@@ -1532,12 +1617,22 @@ pub struct ConformalResultFFI {
     pub upper: *mut c_double,
     /// Number of forecasts
     pub n_forecasts: size_t,
-    /// Nominal coverage level (1 - alpha)
+    /// Empirical coverage on the calibration residuals (Phase 16 D-02) --
+    /// NOT the requested level; see `nominal_level` for that.
     pub coverage: c_double,
+    /// The requested coverage level (1 - alpha) (Phase 16 D-02).
+    pub nominal_level: c_double,
     /// The computed conformity score (quantile threshold)
     pub conformity_score: c_double,
+    /// Number of calibration residuals actually used (Phase 16 D-02).
+    pub n_calibration: size_t,
     /// Method used for conformal prediction
     pub method: [c_char; 32],
+    /// `true` when no finite-sample interval exists at this
+    /// `(n_calibration, alpha)` (Phase 16 D-05/G12). When set,
+    /// `conformity_score`/`coverage` are NaN and every `lower`/`upper`
+    /// entry is NaN (unbounded).
+    pub calibration_insufficient: bool,
 }
 
 impl Default for ConformalResultFFI {
@@ -1548,8 +1643,45 @@ impl Default for ConformalResultFFI {
             upper: std::ptr::null_mut(),
             n_forecasts: 0,
             coverage: 0.0,
+            nominal_level: 0.0,
             conformity_score: 0.0,
+            n_calibration: 0,
             method: [0; 32],
+            calibration_insufficient: false,
+        }
+    }
+}
+
+/// Result of calibrating a conformal predictor from per-row `(actual,
+/// forecast)` pairs, without applying it to any point forecasts yet
+/// (Phase 16 D-03).
+#[repr(C)]
+pub struct ConformalCalibrationFFI {
+    /// Empirical coverage on the calibration residuals.
+    pub coverage: c_double,
+    /// The requested coverage level (1 - alpha).
+    pub nominal_level: c_double,
+    /// The computed conformity score (quantile threshold).
+    pub conformity_score: c_double,
+    /// Number of calibration residuals actually used.
+    pub n_calibration: size_t,
+    /// Method used for calibration ("symmetric" or "adaptive").
+    pub method: [c_char; 32],
+    /// `true` when no finite-sample interval exists at this
+    /// `(n_calibration, alpha)` (Phase 16 D-05/G12); see
+    /// `ConformalResultFFI::calibration_insufficient`.
+    pub calibration_insufficient: bool,
+}
+
+impl Default for ConformalCalibrationFFI {
+    fn default() -> Self {
+        Self {
+            coverage: 0.0,
+            nominal_level: 0.0,
+            conformity_score: 0.0,
+            n_calibration: 0,
+            method: [0; 32],
+            calibration_insufficient: false,
         }
     }
 }
@@ -1643,6 +1775,12 @@ impl From<ConformalMethodFFI> for anofox_fcst_core::ConformalMethod {
 /// Conformal strategy enumeration for FFI.
 ///
 /// The strategy determines how residuals are used for calibration.
+///
+/// D-09/G15 (Phase 16): a `JackknifePlus` enumerator existed here before
+/// Phase 16 but is removed outright, not kept as a permanently-unreachable
+/// slot -- `anofox_ts_conformal_parse_strategy` is the only path C++ uses to
+/// produce a `ConformalStrategyFFI` from a string, and it never returns this
+/// type for a jackknife+ alias (it reports an error instead).
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ConformalStrategyFFI {
@@ -1651,8 +1789,6 @@ pub enum ConformalStrategyFFI {
     Split = 0,
     /// Cross-validation conformal - uses CV residuals
     CrossVal = 1,
-    /// Jackknife+ conformal - stores full residual distribution
-    JackknifePlus = 2,
 }
 
 impl From<anofox_fcst_core::ConformalStrategy> for ConformalStrategyFFI {
@@ -1660,7 +1796,6 @@ impl From<anofox_fcst_core::ConformalStrategy> for ConformalStrategyFFI {
         match strategy {
             anofox_fcst_core::ConformalStrategy::Split => Self::Split,
             anofox_fcst_core::ConformalStrategy::CrossVal => Self::CrossVal,
-            anofox_fcst_core::ConformalStrategy::JackknifePlus => Self::JackknifePlus,
         }
     }
 }
@@ -1670,7 +1805,6 @@ impl From<ConformalStrategyFFI> for anofox_fcst_core::ConformalStrategy {
         match strategy {
             ConformalStrategyFFI::Split => Self::Split,
             ConformalStrategyFFI::CrossVal => Self::CrossVal,
-            ConformalStrategyFFI::JackknifePlus => Self::JackknifePlus,
         }
     }
 }
@@ -1682,13 +1816,11 @@ impl From<ConformalStrategyFFI> for anofox_fcst_core::ConformalStrategy {
 pub struct CalibrationProfileFFI {
     /// Method used (symmetric, asymmetric, adaptive)
     pub method: ConformalMethodFFI,
-    /// Strategy used (split, crossval, jackknife+)
+    /// Strategy used (split, crossval)
     pub strategy: ConformalStrategyFFI,
     /// Alpha values (miscoverage rates)
     pub alphas: *mut c_double,
-    /// State vector (strategy-specific):
-    /// - Split/CrossVal: [lower_q1, ..., upper_q1, ...]
-    /// - JackknifePlus: sorted absolute residuals
+    /// State vector: [lower_q1, ..., upper_q1, ...]
     pub state_vector: *mut c_double,
     /// Length of state_vector
     pub state_vector_len: size_t,
@@ -1779,19 +1911,28 @@ pub struct ConformalEvaluationFFI {
 ///   statistic, p_value, lags, is_stationary, cv_1pct, cv_5pct, cv_10pct
 #[repr(C)]
 pub struct AnofoxStationarityResult {
-    /// ADF t-statistic (negative; more negative → stronger evidence of stationarity)
+    /// ADF t-statistic (negative; more negative → stronger evidence of
+    /// stationarity) or KPSS statistic (positive; larger → stronger evidence
+    /// AGAINST stationarity). `NaN` when the input is degenerate (too short,
+    /// or an exactly-collinear regression) — see `cv_1pct` below.
     pub statistic: c_double,
-    /// Approximate p-value (MacKinnon 9-point lookup table)
+    /// p-value from MacKinnon (1994) (ADF) or the `tseries` table (KPSS),
+    /// clamped to `[0.01, 0.10]` for KPSS. `NaN` iff `statistic` is `NaN`.
     pub p_value: c_double,
-    /// Number of lags used (AIC-selected or override)
+    /// Number of lags used (AIC-selected or override, ADF) or the Bartlett
+    /// bandwidth (KPSS).
     pub lags: size_t,
-    /// `true` if series is stationary at the 5% level (`statistic < cv_5pct`)
+    /// `true` if series is stationary at the 5% level (`statistic < cv_5pct`
+    /// for ADF and KPSS alike); forced `false` whenever `statistic` is `NaN`.
     pub is_stationary: bool,
-    /// Critical value at 1% significance (constant regression: -3.43)
+    /// Critical value at 1% significance. Depends on the `regression`
+    /// ("c" / "ct") and, for ADF, the effective sample size (MacKinnon
+    /// finite-sample surface) — never a single hardcoded constant. `NaN`
+    /// when `statistic` is `NaN` (never the crate's raw `0.0` default).
     pub cv_1pct: c_double,
-    /// Critical value at 5% significance (constant regression: -2.86)
+    /// Critical value at 5% significance. See `cv_1pct`.
     pub cv_5pct: c_double,
-    /// Critical value at 10% significance (constant regression: -2.57)
+    /// Critical value at 10% significance. See `cv_1pct`.
     pub cv_10pct: c_double,
 }
 
@@ -1843,8 +1984,11 @@ pub struct AnofoxCombinedStationarityResult {
     pub adf_is_stationary: bool,
     /// `true` if KPSS alone judges the series stationary
     pub kpss_is_stationary: bool,
-    /// Four-way verdict, NUL-terminated:
-    /// `stationary` / `trend_stationary` / `difference_stationary` / `non_stationary`
+    /// D-04 four-way verdict, NUL-terminated: `stationary` / `non_stationary`
+    /// / `trend_stationary` / `difference_stationary` / `constant`. An
+    /// EMPTY string (NUL at index 0) means SQL NULL -- either test's
+    /// statistic was `NaN` (too-short series, or a collinear regression
+    /// under `regression`).
     pub verdict: [c_char; 32],
 }
 
@@ -1973,5 +2117,54 @@ impl Default for AnofoxResidualDiagnosticsResult {
             jb_excess_kurtosis: f64::NAN,
             adequate: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod ts_stats_result_sentinel_tests {
+    use super::*;
+
+    /// WR-03 fix: when `trend_strength`/`seasonality_strength`/`entropy` are all
+    /// `None` on the core `TsStats`, the corresponding `TsStatsResult` fields must
+    /// all be `NaN` (not `0.0`) -- `has_*` is the only reliable "was this computed"
+    /// signal, but a defense-in-depth NaN sentinel means a caller that forgets to
+    /// check `has_entropy` gets an obviously-wrong NaN rather than a
+    /// indistinguishable-from-real-zero value.
+    #[test]
+    fn none_optional_fields_convert_to_nan_not_zero() {
+        let stats = anofox_fcst_core::TsStats::default();
+        assert!(stats.trend_strength.is_none());
+        assert!(stats.seasonality_strength.is_none());
+        assert!(stats.entropy.is_none());
+
+        let result: TsStatsResult = stats.into();
+
+        assert!(!result.has_trend_strength);
+        assert!(result.trend_strength.is_nan(), "trend_strength sentinel");
+
+        assert!(!result.has_seasonality_strength);
+        assert!(
+            result.seasonality_strength.is_nan(),
+            "seasonality_strength sentinel"
+        );
+
+        assert!(!result.has_entropy);
+        assert!(result.entropy.is_nan(), "entropy sentinel");
+    }
+
+    /// A genuinely constant series' entropy is `Some(0.0)` (per
+    /// `anofox_fcst_core`'s own doc comment) -- the real-zero case must still
+    /// round-trip as `0.0`, not get confused with the `None` sentinel.
+    #[test]
+    fn some_zero_entropy_round_trips_as_zero_not_sentinel() {
+        let stats = anofox_fcst_core::TsStats {
+            entropy: Some(0.0),
+            ..Default::default()
+        };
+
+        let result: TsStatsResult = stats.into();
+
+        assert!(result.has_entropy);
+        assert_eq!(result.entropy, 0.0);
     }
 }

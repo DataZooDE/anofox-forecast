@@ -1,17 +1,68 @@
 # Feature Extraction
 
-> Extract tsfresh-compatible time series features
+> Extract tsfresh-inspired time series features
 
 ## Overview
 
-Feature extraction functions compute 117 statistical features from time series data, compatible with tsfresh.
+Feature extraction functions compute 117 statistical features from time series data, inspired by tsfresh's feature catalogue; a documented subset deviates from tsfresh's exact formulas (see docs/api/21-feature-reference.md).
 
 **Use this document to:**
-- Extract 117 tsfresh-compatible features for machine learning pipelines
+- Extract 117 tsfresh-inspired features for machine learning pipelines
 - Compute features per series for clustering, classification, or anomaly detection
 - Access individual features (mean, std, trend_strength, entropy, etc.) from result structs
 - Build feature tables for downstream ML models outside DuckDB
 - Filter series by feature values (e.g., high trend strength, sufficient length)
+
+**NULL handling (Phase 12, D-03/D-04/D-11):** `ts_features_agg`, `ts_features` (the same
+aggregate under a second name) and `ts_features_by` share one Rust single-series NULL
+policy — no NULL-valued row is spliced out independently of the others. Leading/trailing
+`NULL` values are trimmed before extraction; an interior `NULL` that survives trimming is a
+hard error naming its 1-based position (e.g. `ts_features_agg: interior NULL at position
+11`); a series with no non-NULL value returns `NULL` feature values (the whole struct for
+`ts_features_agg`, a row of `NULL` feature columns for `ts_features_by`) instead of an
+error. The three surfaces agree on the same input series.
+
+```sql
+-- ts_features_agg equals both the trimmed series and ts_features_by on the same table.
+CREATE OR REPLACE TABLE fx AS
+SELECT 'A' AS id, (DATE '2024-01-01' + i * INTERVAL 1 DAY)::TIMESTAMP AS ds,
+       CASE WHEN i IN (0, 9) THEN NULL ELSE (10 + i)::DOUBLE END AS y
+FROM range(10) t(i);
+
+SELECT (SELECT (ts_features_agg(ds, y)).mean FROM fx) =
+       (SELECT mean FROM ts_features_by('fx', id, ds, y));
+-- true
+```
+
+## tsfresh parity
+
+All 117 features are verified against tsfresh 0.21.2 (or, for 9 features with no tsfresh
+counterpart, a direct numpy/scipy reference) on a fixture suite of 9 series — white noise,
+random walk, seasonal AR(12), trend+season, intermittent/many-zeros, a short series, plus
+constant/all-zero/tiny-length edge cases (`validation/reference/fixtures/tsfresh_features/`).
+Every feature matches within `abs <= 1e-9 + 1e-9*|ref|`, or carries a documented, intentional
+deviation. The parity gate runs in `cargo test` (`tsfresh_features_reference.rs`) and is
+enforced on every change to the feature set.
+
+- **9 features have no tsfresh counterpart** and are checked against a direct numpy/scipy
+  formula instead: `range`, `first_value`, `last_value`, `zero_crossing_rate`,
+  `percentage_above_mean`, `count_unique`, `number_peaks_threshold_1`/`_2`,
+  `linear_trend_r_squared`.
+- **2 features carry a documented intentional deviation** from tsfresh/pandas on
+  zero-variance series: `skewness`/`kurtosis` return `NaN` (matching `scipy.stats.skew`/
+  `kurtosis(bias=False)` and `ts_stats`) where tsfresh/pandas return `0` by convention — an
+  undefined moment is `NaN`, not `0`, by this project's own choice (D-03).
+- **Fixed parameter choices** (not configurable at the SQL layer): `sample_entropy`/
+  `approximate_entropy` use `m=2, r=0.2*population std`; `binned_entropy` uses numpy
+  `np.histogram`'s exact 10-bin algorithm; `permutation_entropy` uses `dimension=3, tau=1`,
+  unnormalised (not divided by `ln(dimension!)`); `lempel_ziv_complexity` uses `bins=2`
+  range-midpoint quantisation with tsfresh's own dictionary-growth algorithm;
+  `agg_linear_trend_*` uses `chunk_len=max(length/10, 2), f_agg=mean`.
+
+See [Feature Reference](21-feature-reference.md) for the full per-feature Definition /
+tsfresh equivalent / Deviation table, and
+[`validation/reference/README.md`](../../validation/reference/README.md) for the complete
+intentional-deviation and tolerance-override list.
 
 ---
 
@@ -49,7 +100,7 @@ ts_features_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLU
 | `date_col` | COLUMN | Date/timestamp column |
 | `value_col` | COLUMN | Value column |
 
-**Returns:** TABLE with the original group column (preserving its name) and 116 feature columns including `mean`, `standard_deviation`, `skewness`, `kurtosis`, `length`, `linear_trend_slope`, `autocorrelation_lag1`, etc.
+**Returns:** TABLE with the original group column (preserving its name) and 117 feature columns including `mean`, `standard_deviation`, `skewness`, `kurtosis`, `length`, `linear_trend_slope`, `autocorrelation_lag1`, etc.
 
 **Example:**
 ```sql
@@ -108,8 +159,8 @@ ts_features_config_template() → STRUCT
 
 **Example:**
 ```sql
--- Get template to customize
-SELECT ts_features_config_template();
+-- Get template to customize (table function, call from FROM not SELECT)
+SELECT * FROM ts_features_config_template();
 ```
 
 ---

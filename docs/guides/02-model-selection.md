@@ -4,7 +4,7 @@
 
 ## Overview
 
-The extension provides 33 forecasting models. This guide helps you select the right one.
+The extension provides 36 forecasting models. This guide helps you select the right one.
 
 **Use this guide to:**
 - Analyze your data's characteristics (trend, seasonality, intermittency)
@@ -18,20 +18,14 @@ The extension provides 33 forecasting models. This guide helps you select the ri
 ### Step 1: Understand Your Data
 
 ```sql
--- Check basic statistics and patterns
-SELECT
-    product_id,
-    (ts_stats(LIST(quantity ORDER BY date))).*
-FROM sales
-GROUP BY product_id;
+-- Check basic statistics and patterns (ts_stats is a table macro, not a scalar
+-- function -- call it with FROM, not inline in a SELECT list)
+SELECT * FROM ts_stats('sales', product_id, date, quantity, '1d');
 
--- Detect seasonality
-SELECT
-    product_id,
-    (ts_detect_periods(LIST(quantity ORDER BY date))).primary_period AS detected_period,
-    (ts_stats(LIST(quantity ORDER BY date))).trend_strength AS trend
-FROM sales
-GROUP BY product_id;
+-- Decomposition-based trend/seasonal strength with an explicit weekly period
+-- (seasonal_period := 0, the default, auto-detects the period instead)
+SELECT product_id, trend_strength, seasonality_strength
+FROM ts_stats('sales', product_id, date, quantity, '1d', seasonal_period := 7);
 ```
 
 ### Step 2: Match Characteristics to Models
@@ -54,10 +48,10 @@ Start here to establish a benchmark:
 
 ```sql
 -- Naive: repeats last value
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'Naive', 12, '1d');
+SELECT * FROM ts_forecast_by('sales', product_id, date, val, 'Naive', 12, '1d');
 
 -- Seasonal Naive: repeats last seasonal cycle
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'SeasonalNaive', 12, '1d',
+SELECT * FROM ts_forecast_by('sales', product_id, date, val, 'SeasonalNaive', 12, '1d',
     MAP{'seasonal_period': '7'});
 ```
 
@@ -67,13 +61,13 @@ Good default choice for most business data:
 
 ```sql
 -- Simple Exponential Smoothing (no trend, no seasonality)
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'SES', 12, '1d');
+SELECT * FROM ts_forecast_by('sales', product_id, date, val, 'SES', 12, '1d');
 
 -- Holt (trend, no seasonality)
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'Holt', 12, '1d');
+SELECT * FROM ts_forecast_by('sales', product_id, date, val, 'Holt', 12, '1d');
 
 -- Holt-Winters (trend + seasonality)
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'HoltWinters', 12, '1d',
+SELECT * FROM ts_forecast_by('sales', product_id, date, val, 'HoltWinters', 12, '1d',
     MAP{'seasonal_period': '7'});
 ```
 
@@ -83,13 +77,13 @@ Let the algorithm choose:
 
 ```sql
 -- AutoETS automatically selects error, trend, and seasonal components
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'AutoETS', 12, '1d');
+SELECT * FROM ts_forecast_by('sales', product_id, date, val, 'AutoETS', 12, '1d');
 
 -- AutoARIMA finds optimal ARIMA parameters
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'AutoARIMA', 12, '1d');
+SELECT * FROM ts_forecast_by('sales', product_id, date, val, 'AutoARIMA', 12, '1d');
 
 -- AutoTheta selects best theta variant
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'AutoTheta', 12, '1d');
+SELECT * FROM ts_forecast_by('sales', product_id, date, val, 'AutoTheta', 12, '1d');
 ```
 
 ### Multiple Seasonality
@@ -98,11 +92,11 @@ For data with complex patterns (e.g., hourly data with daily and weekly cycles):
 
 ```sql
 -- MSTL handles multiple seasonal periods
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'MSTL', 24, '1h',
+SELECT * FROM ts_forecast_by('sales', product_id, date, val, 'MSTL', 24, '1h',
     MAP{'seasonal_periods': '[24, 168]'});  -- daily (24h) and weekly (168h)
 
 -- MFLES is faster for high-frequency data
-SELECT * FROM ts_forecast_by('sales', id, date, val, 'MFLES', 24, '1h',
+SELECT * FROM ts_forecast_by('sales', product_id, date, val, 'MFLES', 24, '1h',
     MAP{'seasonal_periods': '[24, 168]'});
 ```
 
@@ -111,11 +105,21 @@ SELECT * FROM ts_forecast_by('sales', id, date, val, 'MFLES', 24, '1h',
 For data with many zeros (spare parts, slow-moving inventory):
 
 ```sql
+-- Setup: inventory(product_id, date, demand), 2 groups x 130 daily rows, intermittent
+-- (many zeros).
+CREATE TABLE inventory AS
+SELECT
+    product_id,
+    (DATE '2020-01-01' + INTERVAL (i) DAY) AS date,
+    CASE WHEN (i + product_id) % 6 = 0 THEN 2.0 + (i % 4) ELSE 0.0 END AS demand
+FROM range(0, 130) t(i)
+CROSS JOIN (SELECT unnest([1, 2]) AS product_id);
+
 -- Croston's method for intermittent demand
-SELECT * FROM ts_forecast_by('inventory', id, date, demand, 'CrostonSBA', 12, '1d');
+SELECT * FROM ts_forecast_by('inventory', product_id, date, demand, 'CrostonSBA', 12, '1d');
 
 -- TSB for better bias correction
-SELECT * FROM ts_forecast_by('inventory', id, date, demand, 'TSB', 12, '1d');
+SELECT * FROM ts_forecast_by('inventory', product_id, date, demand, 'TSB', 12, '1d');
 ```
 
 ### Distributional (Laplace)
@@ -124,20 +128,20 @@ Streaming likelihood-weighted mixture — one call, three zero-config selectors.
 
 ```sql
 -- Default: auto — balanced for smooth / continuous series
-SELECT * FROM ts_forecast_by('sales', id, ds, y, 'Laplace', 12, '1mo',
+SELECT * FROM ts_forecast_by('sales', product_id, ds, y, 'Laplace', 12, '1mo',
     MAP{'seasonal_period': '12'});
 
 -- Retail / intermittent counts — AID-based leaf selection
-SELECT * FROM ts_forecast_by('sales', id, ds, y, 'Laplace', 12, '1mo',
+SELECT * FROM ts_forecast_by('sales', product_id, ds, y, 'Laplace', 12, '1mo',
     MAP{'seasonal_period': '12', 'laplace_variant': 'auto_aid'});
 
 -- Fuller ensemble — slower, more robust
-SELECT * FROM ts_forecast_by('sales', id, ds, y, 'Laplace', 12, '1mo',
+SELECT * FROM ts_forecast_by('sales', product_id, ds, y, 'Laplace', 12, '1mo',
     MAP{'seasonal_period': '12', 'laplace_variant': 'skaters'});
 
 -- Opt-in batch init — helps on stationary / amplitude-declining series
 -- (avoid on growing amplitude / phase-shifted seasonality — collapses the forecast)
-SELECT * FROM ts_forecast_by('sales', id, ds, y, 'Laplace', 12, '1mo',
+SELECT * FROM ts_forecast_by('sales', product_id, ds, y, 'Laplace', 12, '1mo',
     MAP{'seasonal_period': '12', 'laplace_seasonal_batch_init': '1'});
 ```
 
@@ -150,18 +154,18 @@ Always compare multiple models using cross-validation:
 ```sql
 -- Step 1: Build the cross-validation folds once (3 folds, horizon 7)
 CREATE TABLE cv_folds AS
-SELECT * FROM ts_cv_folds_by('sales', id, date, val, 3, 7, MAP{});
+SELECT * FROM ts_cv_folds_by('sales', product_id, date, val, 3, 7, MAP{});
 
 -- Step 2: Forecast each candidate model over the same folds
 WITH model_comparison AS (
     SELECT 'AutoETS' AS model_tested, *
-    FROM ts_cv_forecast_by('cv_folds', id, date, val, 'AutoETS', MAP{})
+    FROM ts_cv_forecast_by('cv_folds', product_id, date, val, 'AutoETS', MAP{})
     UNION ALL
     SELECT 'Theta' AS model_tested, *
-    FROM ts_cv_forecast_by('cv_folds', id, date, val, 'Theta', MAP{})
+    FROM ts_cv_forecast_by('cv_folds', product_id, date, val, 'Theta', MAP{})
     UNION ALL
     SELECT 'Naive' AS model_tested, *
-    FROM ts_cv_forecast_by('cv_folds', id, date, val, 'Naive', MAP{})
+    FROM ts_cv_forecast_by('cv_folds', product_id, date, val, 'Naive', MAP{})
 )
 -- Step 3: Aggregate accuracy metrics per model (actual is 'y', forecast is 'yhat')
 SELECT

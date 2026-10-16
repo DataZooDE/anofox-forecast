@@ -87,6 +87,10 @@ SELECT
 
 #######################################
 # Forecast with NAIVE model
+#
+# ts_forecast_by's output date column is named `ds`, not `date` (Phase 18, 18-01, class
+# A). Aliased back to `date` at every SELECT site below to keep downstream joins/column
+# references in this file unchanged.
 #######################################
 
 # Generate forecasts on calibration period using NAIVE
@@ -94,7 +98,7 @@ statement ok
 CREATE TABLE naive_calibration_forecasts AS
 SELECT
     series_id,
-    date,
+    ds AS date,
     forecast_step,
     yhat AS forecast
 FROM ts_forecast_by(
@@ -152,7 +156,7 @@ statement ok
 CREATE TABLE naive_validation_forecasts AS
 SELECT
     series_id,
-    date,
+    ds AS date,
     forecast_step,
     yhat AS forecast
 FROM ts_forecast_by(
@@ -204,6 +208,11 @@ true
 
 #######################################
 # Forecast with SNAIVE model (Seasonal Naive)
+#
+# ts_forecast_by's params MAP no longer accepts a `period` key -- the registered
+# parameter is `seasonal_period` (or `seasonal_periods`), per the Invalid Input Error
+# "Unknown parameter(s): 'period'. Valid parameters are: ... seasonal_period,
+# seasonal_periods ..." (Phase 18, 18-01, class A).
 #######################################
 
 # Generate forecasts on calibration period using SNAIVE
@@ -211,11 +220,11 @@ statement ok
 CREATE TABLE snaive_calibration_forecasts AS
 SELECT
     series_id,
-    date,
+    ds AS date,
     forecast_step,
     yhat AS forecast
 FROM ts_forecast_by(
-    'training_data', series_id, date, value, 'snaive', 15, '1d', MAP{'period': '7'}
+    'training_data', series_id, date, value, 'snaive', 15, '1d', MAP{'seasonal_period': '7'}
 );
 
 # Join forecasts with actuals for calibration
@@ -250,11 +259,11 @@ statement ok
 CREATE TABLE snaive_validation_forecasts AS
 SELECT
     series_id,
-    date,
+    ds AS date,
     forecast_step,
     yhat AS forecast
 FROM ts_forecast_by(
-    'train_plus_calib', series_id, date, value, 'snaive', 15, '1d', MAP{'period': '7'}
+    'train_plus_calib', series_id, date, value, 'snaive', 15, '1d', MAP{'seasonal_period': '7'}
 );
 
 #######################################

@@ -139,11 +139,6 @@ static void TsClassifySeasonalityAggFinalize(Vector &state_vector, AggregateInpu
         auto &data = *state.data;
         double period = data.period;
 
-        if (period <= 0 || data.values.size() < static_cast<size_t>(2 * period)) {
-            FlatVector::SetNull(result, row, true);
-            continue;
-        }
-
         // Sort by timestamp
         vector<pair<int64_t, double>> sorted_pairs;
         for (size_t j = 0; j < data.timestamps.size(); j++) {
@@ -172,6 +167,22 @@ static void TsClassifySeasonalityAggFinalize(Vector &state_vector, AggregateInpu
         );
 
         if (!success) {
+            // CR-07: this backend used to re-implement the scalar sibling's
+            // pre-CR-03 `period <= 0` pre-check inline (no isfinite guard
+            // at all, so a NaN period reached a `static_cast<size_t>(2 *
+            // period)` UB cast directly). Deleting that duplicated check
+            // and delegating to the already-fixed core-level validation
+            // (crates/anofox-fcst-core/src/seasonality.rs ::
+            // classify_seasonality, mapped to INVALID_INPUT at the FFI
+            // boundary per 86802cc) mirrors CR-06's fix in the scalar
+            // ts_classify_seasonality and removes the second, independent
+            // copy of the defect. Insufficient-data failures (error.code
+            // != INVALID_INPUT) keep returning a NULL row, matching the
+            // scalar function and every other period-validating function.
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_classify_seasonality_by: %s",
+                    error.message ? error.message : "invalid input");
+            }
             FlatVector::SetNull(result, row, true);
             continue;
         }

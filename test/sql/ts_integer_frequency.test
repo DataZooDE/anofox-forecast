@@ -19,11 +19,16 @@ UNION ALL SELECT 'A', '2023-01-05'::DATE, 40.0;
 
 #######################################
 # Current supported frequency formats
+#
+# ts_fill_gaps_by/ts_fill_forward_by output the group/date/value columns under their
+# ORIGINAL names (id/date/val here), not generic group_col/date_col/value_col aliases,
+# since commit ca7d4f6 "refactor: ts_fill_gaps_by and ts_fill_forward_by now use native
+# streaming (#113)" (Phase 18, 18-01, class A).
 #######################################
 
 # Polars-style frequency works
 query III
-SELECT group_col, date_col::DATE AS dt, value_col FROM ts_fill_gaps_by('freq_test', id, date, val, '1d') ORDER BY dt;
+SELECT id, date::DATE AS dt, val FROM ts_fill_gaps_by('freq_test', id, date, val, '1d') ORDER BY dt;
 ----
 A	2023-01-01	10.0
 A	2023-01-02	20.0
@@ -33,7 +38,7 @@ A	2023-01-05	40.0
 
 # DuckDB INTERVAL style works
 query III
-SELECT group_col, date_col::DATE AS dt, value_col FROM ts_fill_gaps_by('freq_test', id, date, val, '1 day') ORDER BY dt;
+SELECT id, date::DATE AS dt, val FROM ts_fill_gaps_by('freq_test', id, date, val, '1 day') ORDER BY dt;
 ----
 A	2023-01-01	10.0
 A	2023-01-02	20.0
@@ -48,7 +53,7 @@ A	2023-01-05	40.0
 
 # Integer literal frequency works (interpreted as 1 day)
 query III
-SELECT group_col, date_col::DATE AS dt, value_col FROM ts_fill_gaps_by('freq_test', id, date, val, 1) ORDER BY dt;
+SELECT id, date::DATE AS dt, val FROM ts_fill_gaps_by('freq_test', id, date, val, 1) ORDER BY dt;
 ----
 A	2023-01-01	10.0
 A	2023-01-02	20.0
@@ -58,7 +63,7 @@ A	2023-01-05	40.0
 
 # String integer frequency works (interpreted as 1 day)
 query III
-SELECT group_col, date_col::DATE AS dt, value_col FROM ts_fill_gaps_by('freq_test', id, date, val, '1') ORDER BY dt;
+SELECT id, date::DATE AS dt, val FROM ts_fill_gaps_by('freq_test', id, date, val, '1') ORDER BY dt;
 ----
 A	2023-01-01	10.0
 A	2023-01-02	20.0
@@ -66,11 +71,22 @@ A	2023-01-03	NULL
 A	2023-01-04	30.0
 A	2023-01-05	40.0
 
-# Multi-day integer frequency (7 = weekly)
+# Multi-day integer frequency (7 = weekly): fill_gaps inserts filler rows only where the
+# gap between two CONSECUTIVE actual dates exceeds the frequency, not via an absolute
+# downsampling grid from a fixed anchor. None of this fixture's gaps (1, 2, 1 days)
+# reach 7 days, so all 4 original rows pass through unfilled and unchanged. Re-pinned
+# (Phase 18, 18-01): the original "1 row" expectation assumed grid-snap/downsample
+# semantics that ts_fill_gaps_by/_ts_fill_gaps_native has never implemented (confirmed
+# against docs/api/04-data-preparation.md's "Raw integer ... Interpreted as days" and
+# every other frequency value in this same file, which all use consecutive-gap filling);
+# not attributable to any Phase 9-17 code change.
 query II
-SELECT group_col, date_col::DATE AS dt FROM ts_fill_gaps_by('freq_test', id, date, val, 7) ORDER BY dt;
+SELECT id, date::DATE AS dt FROM ts_fill_gaps_by('freq_test', id, date, val, 7) ORDER BY dt;
 ----
 A	2023-01-01
+A	2023-01-02
+A	2023-01-04
+A	2023-01-05
 
 #######################################
 # ts_fill_forward with various frequencies

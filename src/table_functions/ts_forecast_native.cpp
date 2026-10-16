@@ -1,5 +1,6 @@
 #include "ts_forecast_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // For ParseFrequencyToSeconds, etc.
+#include "ts_future_dates.hpp"     // StepFromFrequency, ComputeFutureDates (D-12)
 #include "anofox_fcst_ffi.h"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -54,6 +55,9 @@ struct TsForecastNativeBindData : public TableFunctionData {
     // AutoEnsemble params (Phase 4)
     int64_t ensemble_top_k = 0;
     string ensemble_method = "";
+    // ARIMA order params (D-08/D-09, plan 10-02)
+    string arima_order = "";
+    string seasonal_order = "";
 
     // Type preservation
     DateColumnType date_col_type = DateColumnType::TIMESTAMP;
@@ -279,7 +283,8 @@ static void ValidateParamKeys(const Value &params_value) {
         "model", "seasonal_period", "seasonal_periods", "confidence_level", "window", "model_pool",
         "laplace_variant", "laplace_seasonal_batch_init",
         "garch_p", "garch_q", "kalman_model",
-        "top_k", "combination_method"   // Phase 4: AutoEnsemble params
+        "top_k", "combination_method",   // Phase 4: AutoEnsemble params
+        "arima_order", "seasonal_order"  // D-08/D-09, plan 10-02
     };
 
     vector<string> unknown_keys;
@@ -309,7 +314,7 @@ static void ValidateParamKeys(const Value &params_value) {
             unknown_list += "'" + unknown_keys[i] + "'";
         }
         throw InvalidInputException(
-            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init, garch_p, garch_q, kalman_model, top_k, combination_method",
+            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init, garch_p, garch_q, kalman_model, top_k, combination_method, arima_order, seasonal_order",
             unknown_list);
     }
 }
@@ -368,6 +373,25 @@ static unique_ptr<FunctionData> TsForecastNativeBind(
         // AutoEnsemble params (Phase 4)
         bind_data->ensemble_top_k = ParseInt64FromParams(params, "top_k", 0);
         bind_data->ensemble_method = ParseStringFromParams(params, "combination_method", "");
+        // ARIMA order params (D-08/D-09, plan 10-02)
+        bind_data->arima_order = ParseStringFromParams(params, "arima_order", "");
+        bind_data->seasonal_order = ParseStringFromParams(params, "seasonal_order", "");
+
+        // WR-03: reject arima_order/seasonal_order strings that would
+        // silently truncate when copied into the fixed 32-byte
+        // ForecastOptions::arima_order_str/seasonal_order_str buffers,
+        // instead of letting strncpy truncate into a different,
+        // possibly-still-parseable triplet.
+        if (bind_data->arima_order.size() > sizeof(ForecastOptions::arima_order_str) - 1) {
+            throw InvalidInputException(
+                "arima_order value is too long (max %d characters): '%s'",
+                (int)(sizeof(ForecastOptions::arima_order_str) - 1), bind_data->arima_order);
+        }
+        if (bind_data->seasonal_order.size() > sizeof(ForecastOptions::seasonal_order_str) - 1) {
+            throw InvalidInputException(
+                "seasonal_order value is too long (max %d characters): '%s'",
+                (int)(sizeof(ForecastOptions::seasonal_order_str) - 1), bind_data->seasonal_order);
+        }
 
         // Validate confidence_level range
         if (bind_data->confidence_level <= 0.0 || bind_data->confidence_level >= 1.0) {
@@ -614,11 +638,11 @@ static OperatorFinalizeResultType TsForecastNativeFinalize(
 
             vector<double> sorted_values(grp.values.size());
             vector<bool> sorted_validity(grp.validity.size());
-            int64_t last_date = 0;
+            vector<int64_t> sorted_dates(grp.dates.size());
             for (size_t i = 0; i < indices.size(); i++) {
                 sorted_values[i] = grp.values[indices[i]];
                 sorted_validity[i] = grp.validity[indices[i]];
-                last_date = grp.dates[indices[i]];
+                sorted_dates[i] = grp.dates[indices[i]];
             }
 
             // Build validity bitmask for Rust
@@ -679,6 +703,17 @@ static OperatorFinalizeResultType TsForecastNativeFinalize(
                         sizeof(opts.ensemble_method) - 1);
                 opts.ensemble_method[sizeof(opts.ensemble_method) - 1] = '\0';
             }
+            // ARIMA order params (D-08/D-09, plan 10-02)
+            if (!bind_data.arima_order.empty()) {
+                strncpy(opts.arima_order_str, bind_data.arima_order.c_str(),
+                        sizeof(opts.arima_order_str) - 1);
+                opts.arima_order_str[sizeof(opts.arima_order_str) - 1] = '\0';
+            }
+            if (!bind_data.seasonal_order.empty()) {
+                strncpy(opts.seasonal_order_str, bind_data.seasonal_order.c_str(),
+                        sizeof(opts.seasonal_order_str) - 1);
+                opts.seasonal_order_str[sizeof(opts.seasonal_order_str) - 1] = '\0';
+            }
 
             // Call Rust FFI
             ForecastResult fcst_result;
@@ -702,61 +737,26 @@ static OperatorFinalizeResultType TsForecastNativeFinalize(
                 continue;
             }
 
-            // Generate output rows with calendar-aware date arithmetic
+            // Forecast dates computed via the Rust D-12 calendar rule
+            // (StepFromFrequency + ComputeFutureDates, plan 12-05/12-06)
+            // instead of this file's own month arithmetic and the
+            // day-of-month clamp it used to replicate per-call. Anchored on
+            // sorted_dates (every entry a real observation — NULL dates were
+            // skipped on ingestion).
+            int64_t step_months = 0;
+            int64_t step_micros = 0;
+            StepFromFrequency(bind_data.frequency_type, bind_data.frequency_seconds, bind_data.frequency_is_raw,
+                               bind_data.date_col_type, step_months, step_micros);
+            vector<int64_t> future_ts =
+                ComputeFutureDates(sorted_dates, fcst_result.n_forecasts, step_months, step_micros);
+
+            // Generate output rows
             for (size_t i = 0; i < fcst_result.n_forecasts; i++) {
                 ForecastOutputRow row;
                 row.group_key = group_key;
                 row.group_value = grp.group_value;
                 row.forecast_step = static_cast<int64_t>(i + 1);
-
-                // Compute forecast date based on frequency type
-                int64_t steps = static_cast<int64_t>(i + 1);
-                if (bind_data.frequency_type == FrequencyType::MONTHLY ||
-                    bind_data.frequency_type == FrequencyType::QUARTERLY ||
-                    bind_data.frequency_type == FrequencyType::YEARLY) {
-                    // Calendar-aware date arithmetic for monthly/quarterly/yearly
-                    date_t base_date = MicrosecondsToDate(last_date);
-                    int32_t year, month, day;
-                    Date::Convert(base_date, year, month, day);
-
-                    // Calculate months to add
-                    int64_t months_to_add = steps * bind_data.frequency_seconds;
-                    if (bind_data.frequency_type == FrequencyType::QUARTERLY) {
-                        months_to_add *= 3;
-                    } else if (bind_data.frequency_type == FrequencyType::YEARLY) {
-                        months_to_add *= 12;
-                    }
-
-                    // Add months with proper year/month rollover
-                    int64_t total_months = static_cast<int64_t>(year) * 12 + (month - 1) + months_to_add;
-                    int32_t new_year = static_cast<int32_t>(total_months / 12);
-                    int32_t new_month = static_cast<int32_t>((total_months % 12) + 1);
-
-                    // Handle month overflow for months < 1
-                    if (new_month < 1) {
-                        new_month += 12;
-                        new_year -= 1;
-                    }
-
-                    // Clamp day to valid range for the new month
-                    int32_t max_day = Date::MonthDays(new_year, new_month);
-                    int32_t new_day = std::min(day, max_day);
-
-                    date_t new_date = Date::FromDate(new_year, new_month, new_day);
-                    row.date = DateToMicroseconds(new_date);
-                } else {
-                    // Fixed frequency (days, hours, etc.) - simple arithmetic
-                    int64_t freq_micros;
-                    if (bind_data.date_col_type == DateColumnType::INTEGER ||
-                        bind_data.date_col_type == DateColumnType::BIGINT) {
-                        freq_micros = bind_data.frequency_seconds;
-                    } else {
-                        freq_micros = bind_data.frequency_is_raw
-                            ? bind_data.frequency_seconds * 86400LL * 1000000LL
-                            : bind_data.frequency_seconds * 1000000LL;
-                    }
-                    row.date = last_date + freq_micros * steps;
-                }
+                row.date = future_ts[i];
 
                 row.point_forecast = fcst_result.point_forecasts[i];
                 // lower_bounds / upper_bounds are null when the model does not provide

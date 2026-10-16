@@ -1,0 +1,15 @@
+docs/reference/models/multi-seasonal/auto_tbats.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'AutoTBATS', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/multi-seasonal/auto_tbats.md	1	PASS	SELECT region_id, ts_detect_periods_agg(timestamp, demand, 'fft').primary_period AS period	
+docs/reference/models/multi-seasonal/auto_tbats.md	2	SYNOPSIS	CREATE OR REPLACE TABLE trend_only_tbats AS	Invalid Input Error: Invalid input: no seasonal period could be detected for model 'AutoTBATS'; pass seasonal_period (or seasonal_periods) explicitly
+docs/reference/models/intermittent/imapa.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'IMAPA', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/intermittent/imapa.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/intermittent/tsb.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'TSB', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/intermittent/tsb.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/intermittent/global_croston.md	0	SYNOPSIS	SELECT * FROM ts_forecast_panel_by(	Catalog Error: Table with name source_table does not exist!
+docs/reference/models/intermittent/global_croston.md	1	PASS	CREATE OR REPLACE TABLE panel_intermittent AS	
+docs/reference/models/intermittent/global_croston.md	2	PASS	SELECT 'Classic' AS variant, item_id, forecast_step, ROUND(yhat, 4) AS yhat	
+docs/reference/models/intermittent/global_croston.md	3	SYNOPSIS	SELECT * FROM ts_forecast_panel_by(	Invalid Input Error: ts_forecast_panel_by (method='GlobalCroston'): unknown croston_variant 'sab'; expected 'classic' or 'sba'
+docs/reference/models/exponential-smoothing/global_ets.md	0	SYNOPSIS	SELECT * FROM ts_forecast_panel_by(	Catalog Error: Table with name source_table does not exist!
+docs/reference/models/exponential-smoothing/global_ets.md	1	PASS	CREATE OR REPLACE TABLE seasonal_panel AS	
+docs/reference/models/exponential-smoothing/global_ets.md	2	PASS	SELECT * FROM ts_forecast_panel_by('seasonal_panel', uid, ds, y, 'GlobalETS', 14, '1d');	
+docs/reference/models/exponential-smoothing/global_ets.md	3	SYNOPSIS	SELECT * FROM ts_forecast_panel_by(	Invalid Input Error: ts_forecast_panel_by (method='GlobalETS'): unknown model_pool 'compete'; expected 'reduced' or 'complete'

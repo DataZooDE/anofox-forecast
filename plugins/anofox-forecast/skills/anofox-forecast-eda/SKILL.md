@@ -2,43 +2,60 @@
 name: anofox-forecast-eda
 description: >
   Exploratory data analysis, data quality, and statistical diagnostics for
-  the anofox_forecast DuckDB extension — 34 per-series statistics,
-  data-quality scoring, quality-report summaries, 117 tsfresh-compatible
+  the anofox_forecast DuckDB extension — 36 per-series statistics,
+  data-quality scoring, quality-report summaries, 117 tsfresh-inspired
   feature extraction, and 7 diagnostic functions covering stationarity
   (ADF, KPSS, combined verdict) and residual adequacy (Ljung-Box,
   Durbin-Watson, Jarque-Bera, combined report). Use before forecasting to
   understand series characteristics (length, gaps, trend, seasonality
   strength, intermittency) or to validate model residuals after fitting.
-version: 0.15.3
+version: 2026.09.26
 user-invocable: false
 ---
 
 # Anofox Forecast — EDA & Data Quality Cheat Sheet
 
-**Extension:** `anofox_forecast` v0.15.3 | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
+**Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.16.2) | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
 
 Understand your data before modelling it: per-series statistics, data-quality scores, feature vectors for ML.
 
 ## Statistics
 
-### `ts_stats` (table function) — 34 metrics per series
+### `ts_stats` (table function) — 36 metrics per series
 
 ```sql
 ts_stats(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN,
-         frequency VARCHAR) → TABLE
+         frequency VARCHAR, seasonal_period := 0) → TABLE
 ```
 
-Returns 34 columns: `length`, `n_nulls`, `n_nan`, `n_zeros`, `n_positive`, `n_negative`, `n_unique_values`, `is_constant`, `n_zeros_start`, `n_zeros_end`, `plateau_size`, `plateau_size_nonzero`, `mean`, `median`, `std_dev`, `variance`, `min`, `max`, `range`, `sum`, `skewness`, `kurtosis`, `tail_index`, `bimodality_coef`, `trimmed_mean`, `coef_variation`, `q1`, `q3`, `iqr`, `autocorr_lag1`, `trend_strength`, `seasonality_strength`, `entropy`, `stability`, plus date-derived `expected_length` and `n_gaps`.
+Returns 36 columns: `length`, `n_nulls`, `n_nan`, `n_zeros`, `n_positive`, `n_negative`, `n_unique_values`, `is_constant`, `n_zeros_start`, `n_zeros_end`, `plateau_size`, `plateau_size_nonzero`, `mean`, `median`, `std_dev`, `variance`, `min`, `max`, `range`, `sum`, `skewness`, `kurtosis`, `tail_index`, `bimodality_coef`, `trimmed_mean`, `coef_variation`, `q1`, `q3`, `iqr`, `autocorr_lag1`, `trend_strength`, `seasonality_strength`, `entropy`, `stability`, plus date-derived `expected_length`, `n_gaps`, and `n_gap_runs`.
+
+**v2026.10.16:** `skewness`/`kurtosis` are now textbook scipy `bias=False` G1/
+excess-G2 (previously mixed a population moment with a sample std-dev); `bimodality_coef`
+uses the SAS small-sample formula; `entropy` is now Pincus (1991) approximate entropy
+(`m=2`, `r=0.2*sample sd`; `NULL` for an interior-missing or fewer-than-3-present series) —
+previously a 10-bin Shannon entropy; `n_gaps` is now the number of **missing periods**
+(previously gap *occurrences*) — the old occurrence count is the new `n_gap_runs` column.
+`trend_strength`/`seasonality_strength` are now STL-based (`F_T`/`F_S`, Wang/Hyndman) via a
+new `seasonal_period` parameter (see "Strength thresholds" below). `is_constant` (here and in
+`ts_data_quality`) is SCALE-RELATIVE (D-13, G25): `max - min <= 1e-10 * max(1, max|x|)` over
+present (non-NULL, non-NaN) values — NOT the same thing as `n_unique_values == 1`, which stays
+an exact bit-identity count. `[1e12, 1e12 + 0.001]` is now constant; `[1.0, 1.0 + 1e-9]` is
+not (the absolute-epsilon tolerance before this plan was the inverse on both).
 
 ```sql
 -- Every stat for every series
 SELECT * FROM ts_stats('sales', product_id, ds, y, '1d');
 
--- Quick sanity check
-SELECT product_id, length, n_nulls, n_gaps, trend_strength, seasonality_strength
+-- Quick sanity check: n_gaps = missing periods, n_gap_runs = gap occurrences
+SELECT product_id, length, n_nulls, n_gaps, n_gap_runs, trend_strength, seasonality_strength
 FROM ts_stats('sales', product_id, ds, y, '1d')
 WHERE length < 30 OR n_gaps > 0
 ORDER BY n_gaps DESC;
+
+-- Explicit weekly period instead of auto-detection
+SELECT product_id, trend_strength, seasonality_strength
+FROM ts_stats('sales', product_id, ds, y, '1d', seasonal_period := 7);
 ```
 
 ### `ts_stats_agg` (aggregate)
@@ -61,10 +78,13 @@ FROM sales GROUP BY product_id;
 
 ### `ts_stats_summary` — aggregate stats across all groups
 
-Summarise the per-group stats into panel-level statistics (mean, std, min, max of each metric).
+Summarise the per-group stats into panel-level statistics (mean, std, min, max of each metric). Signature is `(stats_table)` — a single argument naming an already-materialized `ts_stats_by` output table, not a raw source:
 
 ```sql
-SELECT * FROM ts_stats_summary('sales', product_id, ds, y, '1d');
+CREATE OR REPLACE TABLE sales_stats AS
+SELECT * FROM ts_stats_by('sales', product_id, ds, y, '1d');
+
+SELECT * FROM ts_stats_summary('sales_stats');
 ```
 
 ## Data quality
@@ -76,15 +96,25 @@ ts_data_quality(source VARCHAR, unique_id_col COLUMN, date_col COLUMN, value_col
                 n_short INTEGER, frequency VARCHAR) → TABLE
 ```
 
-Returns `unique_id` (group column **renamed** — the extension normalises it to `unique_id` in this output, even if the input col was `product_id`), plus `overall_score`, `structural_score`, `temporal_score`, `magnitude_score`, `behavioral_score`, `n_gaps`, `n_missing`, `is_constant`.
+Returns `unique_id` (group column **renamed** — the extension normalises it to `unique_id` in this output, even if the input col was `product_id`), plus `overall_score`, `structural_score`, `temporal_score`, `magnitude_score`, `behavioral_score`, `n_gaps`, `n_gap_runs`, `n_missing`, `is_constant`, `is_short`.
 
-`n_short` is the series-length threshold below which a series is flagged short (typical: 14 for daily, 12 for monthly).
+`n_short` is the minimum "not short" present-value count (typical: 14 for daily, 12 for
+monthly) — it drives `structural_score`'s length factor and the `is_short` flag.
+`frequency` (`'1d'`, `'1mo'`, ... or `NULL`/`''` to auto-detect) is used, together with
+each series' real dates, for `n_gaps`/`n_gap_runs`/`temporal_score`:
+
+- `n_gaps` = missing periods (expected timestamps absent under the frequency) — same
+  meaning as `ts_stats`'s `n_gaps`.
+- `n_gap_runs` = gap occurrences (contiguous runs of missing periods).
+- `temporal_score` = `clamp(1 - 5 * n_gaps / expected_length, 0, 1)`.
+- `behavioral_score` scores constancy, robust (Iglewicz-Hoaglin) outliers, and long
+  zero-runs only — a smooth/predictable series carries no autocorrelation penalty.
 
 ```sql
 SELECT * FROM ts_data_quality('sales', product_id, ds, y, 14, '1d');
 
 -- Rank series by quality (note: output col is `unique_id`, not `product_id`)
-SELECT unique_id, overall_score, structural_score, temporal_score
+SELECT unique_id, overall_score, structural_score, temporal_score, n_gaps, is_short
 FROM ts_data_quality('sales', product_id, ds, y, 14, '1d')
 ORDER BY overall_score;
 ```
@@ -95,7 +125,9 @@ Grouped macro sibling of `ts_data_quality` — same per-series quality scoring b
 
 ### `ts_data_quality_agg` (aggregate)
 
-Same as `ts_stats_agg` — takes `(date, value)`, returns a STRUCT.
+Takes `(date, value)`, returns a STRUCT — no `n_short`/`frequency` arguments: `n_short`
+is always `30` and frequency always auto-detects from the group's own timestamps.
+Keeps `NULL`-valued rows (counted in `n_missing`); skips only `NULL`-timestamp rows.
 
 ```sql
 SELECT product_id,
@@ -104,6 +136,11 @@ FROM sales GROUP BY product_id;
 ```
 
 ### `ts_data_quality_summary` — panel-level roll-up
+
+Returns `n_total`, `n_good`/`n_fair`/`n_poor` (`overall_score` buckets: `>=0.8`, `0.5-0.8`,
+`<0.5`), `n_unassessed` (groups with no usable dates, e.g. all-NULL `date_col` — excluded
+from the other buckets and from `avg_score`; D-10) and `avg_score` (mean over assessed
+groups only). Invariant: `n_good + n_fair + n_poor + n_unassessed = n_total`.
 
 ```sql
 SELECT * FROM ts_data_quality_summary('sales', product_id, ds, y, 14);
@@ -128,7 +165,16 @@ Seven functions in two groups. The combined-verdict functions (`ts_stationarity`
 
 ### Stationarity trio
 
-#### `ts_adf` / `ts_adf_by` — Augmented Dickey-Fuller unit-root test
+Full detail in `docs/api/10-diagnostics.md`. `ts_adf`/`ts_kpss`/`ts_stationarity` (and their
+`_by` macros) take a `regression := 'c' | 'ct'` parameter (default `'c'`): `'c'` tests around a
+constant mean (statsmodels/tseries' default), `'ct'` tests around a constant + linear time
+trend. `ts_adf` matches `statsmodels.tsa.stattools.adfuller(autolag="AIC")` exactly (AIC lag
+selection, MacKinnon finite-sample critical values/p-values); `ts_kpss` matches R
+`tseries::kpss.test()` for both `'c'` (`null = "Level"`) and `'ct'` (`null = "Trend"`, a trend
+KPSS implemented in this extension's Rust core since the upstream crate has no trend variant);
+KPSS p-values are bounded to `[0.01, 0.10]`.
+
+#### `ts_adf` / `ts_adf_by` — Dickey-Fuller unit-root test (statsmodels-exact, AIC lag selection)
 
 H0: series has a unit root (non-stationary). Reject H0 (p < 0.05) → stationary.
 
@@ -159,9 +205,10 @@ FROM ts_adf_by('sales_data', product_id, ds, y)
 ORDER BY product_id;
 ```
 
-Optional second arg to scalar form: `ts_adf(LIST(y ORDER BY ds), max_lags INTEGER)` — `-1` = auto (default).
+Optional second/third args to scalar form: `ts_adf(LIST(y ORDER BY ds), max_lags INTEGER, regression VARCHAR)` —
+`max_lags := -1` = auto (default: `⌊(n−1)^(1/3)⌋`, AIC-selected up to that bound); `regression := 'c'` (default) or `'ct'`.
 
-#### `ts_kpss` / `ts_kpss_by` — KPSS level-stationarity test
+#### `ts_kpss` / `ts_kpss_by` — KPSS level/trend-stationarity test
 
 H0: series IS level-stationary (opposite direction from ADF). Fail to reject (p > 0.05) → stationary.
 
@@ -192,7 +239,15 @@ FROM ts_stationarity_by('sales_data', product_id, ds, y)
 ORDER BY product_id;
 ```
 
-Verdict interpretation: `'Stationary'` (both agree), `'NonStationary'` (both agree), `'Trend-Stationary'` (KPSS non-stationary + ADF stationary), `'DifferencStationary'` / `'Inconclusive'` (disagreement).
+Verdict strings (the standard ADF+KPSS four-way mapping): `'stationary'` (ADF rejects the unit
+root AND KPSS fails to reject level-stationarity), `'trend_stationary'` (ADF does NOT reject
+but KPSS fails to reject — stationary only after removing a trend; use `regression := 'ct'` to
+see this), `'non_stationary'` (ADF does NOT reject AND KPSS rejects), `'difference_stationary'`
+(ADF rejects AND KPSS also rejects — conflicting; difference the series). Plus two explicit
+non-ambiguous cases: `'constant'` for a zero-variance series, and SQL `NULL` (never a
+misleading label) for a degenerate or too-short series. `regression := 'ct'` applies to both
+component tests, so a deterministic-trend series that reads `non_stationary` under `'c'`
+typically reads `trend_stationary` under `'ct'`.
 
 ---
 
@@ -200,7 +255,7 @@ Verdict interpretation: `'Stationary'` (both agree), `'NonStationary'` (both agr
 
 Apply to **residuals** from a fitted model (forecast errors), not to the raw series.
 
-#### `ts_ljung_box` / `ts_ljung_box_by` — autocorrelation test (white-noise check)
+#### `ts_ljung_box` / `ts_ljung_box_by` — autocorrelation test (white-noise check, model-aware)
 
 H0: residuals are white noise (no autocorrelation). Reject (p < 0.05) → residuals are correlated; model under-fits.
 
@@ -210,6 +265,20 @@ SELECT series_id, (lb).statistic AS q_stat, (lb).p_value, (lb).lags
 FROM ts_ljung_box_by('resids', series_id, ds, e) AS t(series_id, lb)
 ORDER BY series_id;
 ```
+
+Pass `fitted_params := p + q` for ARMA(p, q) residuals (or any count of estimated model
+parameters): `df = lags - fitted_params`, and the p-value matches R
+`Box.test(type = "Ljung-Box", fitdf = p + q)` exactly (default `fitted_params := 0` keeps
+`df == lags`, correct only for raw/unmodeled residuals).
+
+```sql
+SELECT series_id, (lb).df, (lb).p_value
+FROM ts_ljung_box_by('resids', series_id, ds, e, lags := 10, fitted_params := 1) AS t(series_id, lb)
+ORDER BY series_id;
+```
+
+`fitted_params` at or above the effective (resolved/clamped) lag count is a SQL error naming
+`fitted_params` and "degrees of freedom" — it never silently floors to `df = 1`.
 
 #### `ts_durbin_watson` / `ts_durbin_watson_by` — first-order autocorrelation
 
@@ -253,7 +322,7 @@ ORDER BY series_id;
 
 ---
 
-## Feature extraction (117 tsfresh-compatible features)
+## Feature extraction (117 tsfresh-inspired features)
 
 ### `ts_features_by` — extract all 117 features
 
@@ -261,7 +330,9 @@ ORDER BY series_id;
 ts_features_by(source VARCHAR, group_col COLUMN, date_col COLUMN, value_col COLUMN) → TABLE
 ```
 
-Returns the group column + 116 feature columns: `mean`, `standard_deviation`, `skewness`, `kurtosis`, `length`, `linear_trend_slope`, `autocorrelation_lag1`, …
+Returns the group column + 117 feature columns: `mean`, `standard_deviation`, `skewness`, `kurtosis`, `length`, `linear_trend_slope`, `autocorrelation_lag1`, …
+
+Every feature matches tsfresh 0.21.2 (or a direct numpy/scipy reference for the 9 features with no tsfresh counterpart) on a 9-series fixture suite, or carries a documented, intentional deviation — see [`docs/api/21-feature-reference.md`](../../../../docs/api/21-feature-reference.md)'s Deviation column.
 
 ```sql
 -- Extract all features
@@ -275,7 +346,7 @@ WHERE length > 30 AND autocorrelation_lag1 > 0.5;
 
 ### `ts_features` (scalar)
 
-Scalar over `(date, value)`. Same 116 outputs as struct fields.
+Scalar over `(date, value)`. Same 117 outputs as struct fields.
 
 ### `ts_features_list` / `ts_features_table`
 
@@ -297,34 +368,66 @@ SELECT * FROM ts_features_config_template();
 
 ### Custom feature subsets
 
-Configure via JSON or CSV:
+`ts_features_by`/`ts_features_table` take no config argument (4/3 positional args
+only). Configure via JSON or CSV against the `ts_features_agg` aggregate's
+`feature_selection`/`feature_params` arguments instead, unpacking the config
+scalar's `feature_names`/`overrides` fields:
 
 ```sql
 -- Load a JSON config
-SELECT * FROM ts_features_by('sales', id, ds, y,
-    ts_features_config_from_json('{"features": ["mean", "std", "autocorrelation_lag1"]}'));
+SELECT product_id,
+    ts_features_agg(ds, y,
+        (ts_features_config_from_json('{"features": ["mean", "std", "autocorrelation_lag1"]}')).feature_names,
+        (ts_features_config_from_json('{"features": ["mean", "std", "autocorrelation_lag1"]}')).overrides
+    ) AS feats
+FROM sales GROUP BY product_id;
 
 -- Or CSV
-SELECT * FROM ts_features_by('sales', id, ds, y,
-    ts_features_config_from_csv('mean,std,skewness'));
+SELECT product_id,
+    ts_features_agg(ds, y,
+        (ts_features_config_from_csv('mean,std,skewness')).feature_names,
+        (ts_features_config_from_csv('mean,std,skewness')).overrides
+    ) AS feats
+FROM sales GROUP BY product_id;
 ```
+
+> **Note:** in this build, the `"features"` allow-list in the JSON/CSV config did not
+> actually narrow the returned feature set (every call above still returned all 117
+> features) — logged as a deferred finding, not fixed by this docs sweep.
 
 ### `ts_features_agg` — aggregate variant
 
 For custom GROUP BY:
 
 ```sql
-SELECT id, ts_features_agg(ds, y).mean, ts_features_agg(ds, y).autocorrelation_lag1
-FROM sales GROUP BY id;
+SELECT product_id, ts_features_agg(ds, y).mean, ts_features_agg(ds, y).autocorrelation_lag1
+FROM sales GROUP BY product_id;
 ```
 
 ## Gotchas
 
 - **`ts_stats` and `ts_data_quality` are TABLE functions** — call from FROM, not SELECT. Older docs incorrectly showed them as scalars over `LIST(...)`.
 - **`_agg` variants take `(date, value)` directly** — no `LIST()` wrapping. Wrapping in `LIST(...)` errors as "No function matches …".
-- **Seasonality strength thresholds**: `trend_strength` and `seasonality_strength` in `ts_stats` are ∈ [0, 1] — treat > 0.6 as strong, < 0.2 as weak. Use to gate model selection downstream.
+- **`trend_strength` / `seasonality_strength` formulas (v2026.10.16, STAT-02, D-02)**: both are
+  Wang/Hyndman STL decomposition strengths from an R-faithful STL —
+  `trend_strength = max(0, 1 - Var(R)/Var(T+R))`,
+  `seasonality_strength = max(0, 1 - Var(R)/Var(S+R))` — computed via
+  `stats::stl` (one period), the `forecast::mstl` iteration (several periods,
+  reporting the **maximum** per-period strength), or a `supsmu` trend when no
+  period is usable. The period comes from the new `seasonal_period` parameter
+  (`0` auto-detects, `1` forces non-seasonal, `>= 2` is explicit).
+  `seasonality_strength` is `NULL` when no period is usable (none detected,
+  `seasonal_period := 1`, or `n <= 2 * seasonal_period`) or when the series
+  decomposes to zero seasonal variance (e.g. a constant series).
+  **Rule-of-thumb thresholds** (heuristics, not statistical tests — validate
+  against your own data): **below 0.3** weak, **0.3 to 0.6** moderate, **0.6
+  and above** strong. Example: the audit's 150-point random walk gives
+  `seasonality_strength` about 0.09 (weak, matching "mostly noise");
+  `AirPassengers` gives about 0.94 (strong, matching its well-known yearly
+  cycle).
 - **JSON extension is required** by a subset of quality / feature functions. Enable auto-load once per session: `SET autoinstall_known_extensions=1; SET autoload_known_extensions=1;`.
 - **`ts_r2(DOUBLE[] actual, DOUBLE[] predicted) → DOUBLE`** is a scalar **regression R² metric**, not an EDA statistic — it lives with the scalar metrics family in `anofox-forecast-backtest`. Use it under `GROUP BY` to score fit quality, e.g. `SELECT ts_r2([1.0,2,3,4], [1.1,2.0,2.9,4.2]);`.
+- **`ts_features_agg` / `ts_features` / `ts_features_by` share one Rust NULL policy** (Phase 12, D-11): a NULL-valued row is no longer spliced out independently — leading/trailing NULLs are trimmed, an interior NULL is a hard error naming its 1-based position, and an all-NULL series returns NULL (the whole struct for the aggregate, a row of NULL feature columns for the table function). All three surfaces agree on the same series.
 
 ## Canonical EDA pipeline
 
@@ -341,7 +444,7 @@ SELECT * FROM ts_stats('raw', product_id, ds, y, '1d');
 CREATE OR REPLACE TABLE forecastable AS
 SELECT r.*
 FROM raw r
-JOIN quality q ON r.product_id = q.product_id
+JOIN quality q ON r.product_id = q.unique_id  -- ts_data_quality renames the group col to unique_id
 JOIN stats  s ON r.product_id = s.product_id
 WHERE q.overall_score >= 0.6
   AND s.length >= 30

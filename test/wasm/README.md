@@ -126,8 +126,10 @@ on an unsatisfied `require json`, masking the same failures natively.
 Root causes (a handful of roots cascade into the 184 assertion failures):
 
 - **Stale references to removed/renamed API** — tests call functions absent from
-  the current build *natively too*: `ts_backtest_auto_by` (removed; now the
-  `ts_cv_folds_by` + `ts_cv_forecast_by` two-step), `ts_hydrate_features_by`,
+  the current build *natively too*: `ts_backtest_auto_by` (removed; fixed in
+  v2026.10.16/Phase 12 — the one json-gated test calling it, `ts_varchar_edge_cases.test`,
+  was rewritten onto the `ts_cv_folds_by` + `ts_cv_forecast_by` two-step),
+  `ts_hydrate_features_by`,
   `ts_prepare_regression_input_by`, and `ts_validate_separator` with an
   out-of-date argument signature.
 - **Cascade failures** — one failed `CREATE TABLE … AS SELECT` (because of the

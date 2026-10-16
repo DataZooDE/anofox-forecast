@@ -26,17 +26,21 @@ struct TsTableMacro {
 // clang-format off
 static const TsTableMacro ts_table_macros[] = {
     // ts_stats: Compute statistics for grouped time series
-    // C++ API: ts_stats(table_name, group_col, date_col, value_col, frequency)
+    // C++ API: ts_stats(table_name, group_col, date_col, value_col, frequency, seasonal_period := 0)
     // Returns: TABLE with expanded statistics columns
-    {"ts_stats", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{nullptr, nullptr}},
+    {"ts_stats", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{"seasonal_period", "0"}, {nullptr, nullptr}},
 R"(
 WITH stats_data AS (
     SELECT
         group_col,
         _ts_stats_with_dates(
-            LIST(value_col::DOUBLE ORDER BY date_col),
-            LIST(date_col::TIMESTAMP ORDER BY date_col),
-            frequency::VARCHAR
+            -- CR-02 fix: drop NULL-dated rows (value+date together) before they reach
+            -- the scalar function, matching ts_stats_by's/the aggregates' "drop this
+            -- row" semantics for a NULL date_col, instead of aborting the whole query.
+            LIST(value_col::DOUBLE ORDER BY date_col) FILTER (WHERE date_col IS NOT NULL),
+            LIST(date_col::TIMESTAMP ORDER BY date_col) FILTER (WHERE date_col IS NOT NULL),
+            frequency::VARCHAR,
+            seasonal_period::INTEGER
         ) AS _stats
     FROM query_table(source::VARCHAR)
     GROUP BY group_col
@@ -78,11 +82,12 @@ SELECT
     (_stats).entropy AS entropy,
     (_stats).stability AS stability,
     (_stats).expected_length AS expected_length,
-    (_stats).n_gaps AS n_gaps
+    (_stats).n_gaps AS n_gaps,
+    (_stats).n_gap_runs AS n_gap_runs
 FROM stats_data
 )",
-    "Computes 34 time series statistics per group. Returns a wide table with one column per statistic.",
-    "SELECT * FROM ts_stats('sales', product_id, date, qty, '1d')",
+    "Computes 36 time series statistics per group (including n_gap_runs). trend_strength/seasonality_strength are STL-based (D-02); seasonal_period (default 0) selects 0=auto-detect, 1=non-seasonal, >=2=explicit period. Returns a wide table with one column per statistic.",
+    "SELECT * FROM ts_stats('sales', product_id, date, qty, '1d', seasonal_period := 12)",
     "statistics"},
 
     // ts_quality_report: Generate quality report from stats table
@@ -121,12 +126,23 @@ FROM query_table(stats_table::VARCHAR)
     // ts_data_quality: Assess data quality per series
     // C++ API: ts_data_quality(table_name, unique_id_col, date_col, value_col, n_short, frequency)
     // Returns: TABLE with expanded quality columns
+    // D-05/WRAP-02: passes dates and frequency through to _ts_data_quality so
+    // gap/temporal scoring reflects real gaps (plan 13-01's shared gap counter);
+    // n_short drives the structural length factor and the new is_short flag.
     {"ts_data_quality", {"source", "unique_id_col", "date_col", "value_col", "n_short", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH quality_data AS (
     SELECT
         unique_id_col AS unique_id,
-        _ts_data_quality(LIST(value_col::DOUBLE ORDER BY date_col)) AS _quality
+        _ts_data_quality(
+            -- CR-02 fix: drop NULL-dated rows (value+date together) before they reach
+            -- the scalar function, matching ts_stats_by's/the aggregates' "drop this
+            -- row" semantics for a NULL date_col, instead of aborting the whole query.
+            LIST(value_col::DOUBLE ORDER BY date_col) FILTER (WHERE date_col IS NOT NULL),
+            LIST(date_col::TIMESTAMP ORDER BY date_col) FILTER (WHERE date_col IS NOT NULL),
+            frequency::VARCHAR,
+            n_short::INTEGER
+        ) AS _quality
     FROM query_table(source::VARCHAR)
     GROUP BY unique_id_col
 )
@@ -138,22 +154,33 @@ SELECT
     (_quality).behavioral_score AS behavioral_score,
     (_quality).overall_score AS overall_score,
     (_quality).n_gaps AS n_gaps,
+    (_quality).n_gap_runs AS n_gap_runs,
     (_quality).n_missing AS n_missing,
-    (_quality).is_constant AS is_constant
+    (_quality).is_constant AS is_constant,
+    (_quality).is_short AS is_short
 FROM quality_data
 )",
-    "Assesses time series data quality per group, returning null rate, gap rate, duplicate count, and quality score.",
-    "SELECT * FROM ts_data_quality('sales', product_id, date, qty)",
+    "Assesses time series data quality per group (dates/frequency-aware gap and temporal scoring; n_short drives is_short), returning null rate, gap rate (n_gaps = missing periods, n_gap_runs = gap occurrences), duplicate count, and quality score.",
+    "SELECT * FROM ts_data_quality('sales', product_id, date, qty, 10, '1d')",
     "data-quality"},
 
     // ts_data_quality_summary: Summarize data quality across series
     // C++ API: ts_data_quality_summary(table_name, unique_id_col, date_col, value_col, n_short)
+    // No frequency parameter: auto-detects frequency per series (NULL passed to _ts_data_quality).
     {"ts_data_quality_summary", {"source", "unique_id_col", "date_col", "value_col", "n_short", nullptr}, {{nullptr, nullptr}},
 R"(
 WITH quality_data AS (
     SELECT
         unique_id_col AS unique_id,
-        _ts_data_quality(LIST(value_col::DOUBLE ORDER BY date_col)) AS _quality
+        _ts_data_quality(
+            -- CR-02 fix: drop NULL-dated rows (value+date together) before they reach
+            -- the scalar function, matching ts_stats_by's/the aggregates' "drop this
+            -- row" semantics for a NULL date_col, instead of aborting the whole query.
+            LIST(value_col::DOUBLE ORDER BY date_col) FILTER (WHERE date_col IS NOT NULL),
+            LIST(date_col::TIMESTAMP ORDER BY date_col) FILTER (WHERE date_col IS NOT NULL),
+            NULL::VARCHAR,
+            n_short::INTEGER
+        ) AS _quality
     FROM query_table(source::VARCHAR)
     GROUP BY unique_id_col
 )
@@ -162,14 +189,25 @@ SELECT
     SUM(CASE WHEN (_quality).overall_score >= 0.8 THEN 1 ELSE 0 END) AS n_good,
     SUM(CASE WHEN (_quality).overall_score >= 0.5 AND (_quality).overall_score < 0.8 THEN 1 ELSE 0 END) AS n_fair,
     SUM(CASE WHEN (_quality).overall_score < 0.5 THEN 1 ELSE 0 END) AS n_poor,
-    AVG((_quality).overall_score) AS avg_score
+    AVG((_quality).overall_score) AS avg_score,
+    -- WR-05 (Phase 18, D-10): a group whose dates are all NULL has an empty
+    -- FILTERed LIST, so _ts_data_quality returns a NULL struct for it; every
+    -- CASE WHEN above takes its ELSE 0 branch (NULL >= x is NULL, not TRUE) and
+    -- AVG() skips it, silently excluding the group from every bucket while
+    -- COUNT(*) still counts it toward n_total. n_unassessed makes that group
+    -- visible instead of silently dropped, restoring the invariant
+    -- n_good + n_fair + n_poor + n_unassessed = n_total. avg_score remains the
+    -- mean over assessed (non-NULL-struct) groups only.
+    SUM(CASE WHEN (_quality).overall_score IS NULL THEN 1 ELSE 0 END) AS n_unassessed
 FROM quality_data
 )",
-    "Summarizes ts_data_quality output across all groups into aggregate quality metrics.",
-    "SELECT * FROM ts_data_quality_summary('sales', product_id, date, qty)",
+    "Summarizes ts_data_quality output across all groups into aggregate quality metrics (auto-detected frequency per series). "
+    "n_unassessed counts groups whose quality struct is NULL (e.g. all dates NULL after filtering), so that "
+    "n_good + n_fair + n_poor + n_unassessed = n_total; avg_score is the mean overall_score over assessed groups only.",
+    "SELECT * FROM ts_data_quality_summary('sales', product_id, date, qty, 10)",
     "data-quality"},
 
-    // ts_drop_constant_by: Filter out constant series (table-based)
+    // ts_drop_constant_by: Filter out constant series (table-based), Rust is_constant (D-09)
     // C++ API: ts_drop_constant_by(table_name, group_col, value_col)
     {"ts_drop_constant_by", {"source", "group_col", "value_col", nullptr}, {{nullptr, nullptr}},
 R"(
@@ -179,10 +217,13 @@ WHERE group_col IN (
     SELECT group_col
     FROM query_table(source::VARCHAR)
     GROUP BY group_col
-    HAVING MIN(value_col) != MAX(value_col) OR MIN(value_col) IS NULL OR MAX(value_col) IS NULL
+    HAVING NOT _ts_is_constant(LIST(value_col::DOUBLE))
 )
 )",
-    "Removes groups whose time series values are all constant (zero variance).",
+    "Removes groups whose time series classify as constant under the Rust is_constant tolerance "
+    "(scale-relative: max - min <= 1e-10 * max(1, max|x|) over non-NULL/non-NaN values, D-13): "
+    "fewer than two present values (including an all-NULL group), or all present values within "
+    "that scale-relative tolerance of each other.",
     "SELECT * FROM ts_drop_constant_by('sales', product_id, date, qty)",
     "data-preparation"},
 
@@ -300,39 +341,77 @@ ORDER BY group_col, date_col
     "SELECT * FROM ts_fill_nulls_backward_by('sales', product_id, date, qty)",
     "data-preparation"},
 
-    // ts_fill_nulls_mean_by: Fill with series mean (table-based)
+    // ts_fill_nulls_mean_by: Fill with series mean via the Rust fill_nulls_mean (table-based)
     // C++ API: ts_fill_nulls_mean_by(table_name, group_col, date_col, value_col)
     // Note: All input columns are preserved; filled value is added as 'filled_value' column
     {"ts_fill_nulls_mean_by", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
 R"(
-WITH with_mean AS (
-    SELECT *,
-           AVG(value_col) OVER (PARTITION BY group_col) AS _mean_val
+WITH _src AS (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY group_col ORDER BY date_col) AS __ts_rn
     FROM query_table(source::VARCHAR)
+),
+_filled AS (
+    SELECT
+        group_col AS __ts_g,
+        _ts_fill_nulls_mean(LIST(value_col::DOUBLE ORDER BY __ts_rn)) AS __ts_list
+    FROM _src
+    GROUP BY group_col
+),
+_unnested AS (
+    SELECT
+        __ts_g,
+        UNNEST(range(1, len(__ts_list) + 1)) AS __ts_rn2,
+        UNNEST(__ts_list) AS __ts_v
+    FROM _filled
 )
-SELECT * EXCLUDE (_mean_val), COALESCE(value_col, _mean_val) AS filled_value
-FROM with_mean
+SELECT _src.* EXCLUDE (__ts_rn), __ts_v AS filled_value
+FROM _src
+JOIN _unnested ON group_col IS NOT DISTINCT FROM __ts_g AND __ts_rn = __ts_rn2
 ORDER BY group_col, date_col
 )",
-    "Fills NULL values in each group's time series with the group mean.",
+    "Fills NULL values in each group's time series with the group mean, computed in Rust "
+    "(fill_nulls_mean): NaN counts as missing; an all-NULL/all-NaN group keeps every value NULL. "
+    "All input columns are preserved.",
     "SELECT * FROM ts_fill_nulls_mean_by('sales', product_id, date, qty)",
     "data-preparation"},
 
-    // ts_diff_by: Compute differences (table-based)
-    // C++ API: ts_diff_by(table_name, group_col, date_col, value_col, diff_order)
-    {"ts_diff_by", {"source", "group_col", "date_col", "value_col", "diff_order", nullptr}, {{nullptr, nullptr}},
+    // ts_diff_by: d-th order differences computed in Rust (Phase 12 D-05/D-06)
+    // C++ API: ts_diff_by(table_name, group_col, date_col, value_col, diff_order, seasonal_lag := 1)
+    {"ts_diff_by", {"source", "group_col", "date_col", "value_col", "diff_order", nullptr},
+     {{"seasonal_lag", "1"}, {nullptr, nullptr}},
 R"(
+WITH _src AS (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY group_col ORDER BY date_col) AS __ts_rn
+    FROM query_table(source::VARCHAR)
+),
+_diffed AS (
+    SELECT
+        group_col AS __ts_g,
+        _ts_diff(LIST(value_col::DOUBLE ORDER BY __ts_rn), diff_order::INTEGER, seasonal_lag::INTEGER) AS __ts_list
+    FROM _src
+    GROUP BY group_col
+),
+_unnested AS (
+    SELECT
+        __ts_g,
+        UNNEST(range(1, len(__ts_list) + 1)) AS __ts_rn2,
+        UNNEST(__ts_list) AS __ts_v
+    FROM _diffed
+)
 SELECT
     group_col,
     date_col,
-    value_col - LAG(value_col, diff_order) OVER (
-        PARTITION BY group_col ORDER BY date_col
-    ) AS diff_value
-FROM query_table(source::VARCHAR)
+    __ts_v AS diff_value
+FROM _src
+JOIN _unnested ON group_col IS NOT DISTINCT FROM __ts_g AND __ts_rn = __ts_rn2
 ORDER BY group_col, date_col
 )",
-    "Computes first-order differences for each group's time series (value[t] - value[t-1]).",
-    "SELECT * FROM ts_diff_by('sales', product_id, date, qty)",
+    "Computes d-th order differences for each group's time series in Rust (numpy diff(n=diff_order)): "
+    "value[t] - value[t-1] applied diff_order times. seasonal_lag (default 1) sets the lag-k difference "
+    "step for the old lag-based semantics (R diff(x, lag=seasonal_lag, differences=diff_order)). One row "
+    "per input row; the first diff_order*seasonal_lag rows per group are NULL. Any difference touching a "
+    "NULL input is NULL (never an error).",
+    "SELECT * FROM ts_diff_by('sales', product_id, date, qty, 2) -- or: ..., 1, seasonal_lag := 2)",
     "data-preparation"},
 
     // ts_fill_gaps_by: Fill date gaps with NULL values at specified frequency
@@ -349,7 +428,7 @@ ORDER BY group_col, date_col
 R"(
 SELECT * FROM _ts_fill_gaps_native(
     (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
-    frequency
+    frequency::VARCHAR
 )
 )",
     "Fills missing timestamps in each group's time series to create a regular frequency grid.",
@@ -371,7 +450,7 @@ R"(
 SELECT * FROM _ts_fill_forward_native(
     (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
     target_date,
-    frequency
+    frequency::VARCHAR
 )
 )",
     "Forward-fills missing timestamps in each group's time series using the last known value.",
@@ -420,16 +499,19 @@ WHERE group_col IN (
 R"(
 SELECT * FROM _ts_mstl_decomposition_native(
     (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
-    COALESCE(json_extract_string(to_json(params), '$.insufficient_data'), 'fail')
+    COALESCE(json_extract_string(to_json(params), '$.insufficient_data'), 'fail'),
+    CAST(COALESCE(json_extract_string(to_json(params), '$.seasonal_periods'), json_extract_string(to_json(params), '$.periods'), '[]') AS INTEGER[])
 )
 )",
-    "Decomposes each group's time series into trend, seasonal, and remainder components using MSTL.",
-    "SELECT * FROM ts_mstl_decomposition_by('sales', product_id, date, qty, '[7,365]')",
+    "Decomposes each group's time series into trend, seasonal, and remainder components using MSTL. params: seasonal_periods (alias periods) is a list of seasonal periods to extract, e.g. '[7, 365]' or [7, 365]; insufficient_data is 'fail' (default), 'trend', or 'none'.",
+    "SELECT * FROM ts_mstl_decomposition_by('sales', product_id, date, qty, MAP{'seasonal_periods': '[7, 365]'})",
     "decomposition"},
 
     // ts_detrend_by: Remove trend from grouped time series
     // C++ API: ts_detrend_by(table_name, group_col, date_col, value_col, method)
-    // method: 'linear', 'quadratic', 'cubic', 'auto' (default: 'auto')
+    // method: 'linear', 'quadratic' (alias 'polynomial', 'poly'), 'cubic',
+    //   'diff' (alias 'diff1', 'difference'), 'diff2', 'loess' (alias 'lowess'),
+    //   'auto' (default); an unknown method raises an error naming these choices.
     // Returns: TABLE(id, trend[], detrended[], method, coefficients[], rss, n_params)
     {"ts_detrend_by", {"source", "group_col", "date_col", "value_col", "method", nullptr}, {{nullptr, nullptr}},
 R"(
@@ -451,7 +533,7 @@ SELECT
 FROM detrend_data
 )",
     "Removes the trend component from each group's time series.",
-    "SELECT * FROM ts_detrend_by('sales', product_id, date, qty, 7)",
+    "SELECT * FROM ts_detrend_by('sales', product_id, date, qty, 'cubic')",
     "decomposition"},
 
     // ts_classify_seasonality_by: Classify seasonality type per group
@@ -495,6 +577,16 @@ WITH ordered_data AS (
         ROW_NUMBER() OVER (ORDER BY date_col) AS _idx
     FROM query_table(source::VARCHAR)
 ),
+lead_count AS (
+    -- Phase 12 D-03: _ts_detect_changepoints_bocpd trims leading NULL/NaN
+    -- values before analysis (plan 12-03). _lead = number of leading rows
+    -- (ordered by date_col) before the first non-NULL value; if every value
+    -- is NULL, _lead = row count (every row falls outside the trimmed range
+    -- below, so every flag is NULL).
+    SELECT COALESCE(MIN(_idx), (SELECT COUNT(*) FROM ordered_data) + 1) - 1 AS _lead
+    FROM ordered_data
+    WHERE _val IS NOT NULL
+),
 cp_result AS (
     SELECT _ts_detect_changepoints_bocpd(
         LIST(value_col::DOUBLE ORDER BY date_col),
@@ -506,9 +598,13 @@ cp_result AS (
 SELECT
     od._dt AS date_col,
     od._val AS value_col,
-    (cp.cp).is_changepoint[od._idx] AS is_changepoint,
-    (cp.cp).changepoint_probability[od._idx] AS changepoint_probability
-FROM ordered_data od, cp_result cp
+    CASE WHEN (od._idx - lc._lead) BETWEEN 1 AND len((cp.cp).is_changepoint)
+         THEN (cp.cp).is_changepoint[od._idx - lc._lead]
+         ELSE NULL END AS is_changepoint,
+    CASE WHEN (od._idx - lc._lead) BETWEEN 1 AND len((cp.cp).changepoint_probability)
+         THEN (cp.cp).changepoint_probability[od._idx - lc._lead]
+         ELSE NULL END AS changepoint_probability
+FROM ordered_data od, cp_result cp, lead_count lc
 ORDER BY od._dt
 )",
     "Detects structural changepoints in a single time series using Bayesian Online Changepoint Detection.",
@@ -581,7 +677,7 @@ FROM (
                LIST(date_col ORDER BY date_col),
                LIST(target_col::DOUBLE ORDER BY date_col),
                horizon,
-               frequency,
+               frequency::VARCHAR,
                method,
                params
            ), recursive := true)
@@ -603,10 +699,11 @@ FROM (
     //   GARCH, Laplace, ARIMA, MFLES, AutoMFLES, MSTL, AutoMSTL, TBATS, AutoTBATS, AutoEnsemble.
     // Combination methods: 'mean' (default), 'median', 'weighted_mse',
     //   'inverse_aic', 'stacking', 'horizon_adaptive'.
-    // Prediction intervals (yhat_lower / yhat_upper) are NULL in Phase 5 — see Phase 6 (EPI-01).
+    // yhat_lower / yhat_upper are the crate Ensemble's own prediction
+    // interval at confidence_level (default 0.90) — D-01, plan 10-03.
     {"ts_forecast_ensemble_by",
      {"source", "group_col", "date_col", "target_col", "members", "horizon", "frequency", nullptr},
-     {{"combination_method", "''"}, {"seasonal_period", "0"}, {nullptr, nullptr}},
+     {{"combination_method", "''"}, {"seasonal_period", "0"}, {"confidence_level", "0.90"}, {nullptr, nullptr}},
 R"(
 SELECT group_col, forecast_step, ds, yhat, yhat_lower, yhat_upper, model_name
 FROM (
@@ -618,7 +715,8 @@ FROM (
                horizon,
                frequency,
                combination_method,
-               seasonal_period
+               seasonal_period,
+               confidence_level
            ), recursive := true)
     FROM query_table(source::VARCHAR)
     GROUP BY group_col
@@ -627,7 +725,7 @@ FROM (
     "Generates ensemble forecasts from explicitly named member models per series. "
     "members is a VARCHAR[] list (e.g. ['AutoARIMA','AutoETS','Naive']). "
     "combination_method: 'mean' (default), 'median', 'weighted_mse', 'inverse_aic', 'stacking', 'horizon_adaptive'. "
-    "yhat_lower and yhat_upper are NULL in Phase 5 (ensemble prediction intervals deferred to Phase 6, EPI-01).",
+    "yhat_lower / yhat_upper are the crate Ensemble's own prediction interval at confidence_level (default 0.90).",
     "SELECT * FROM ts_forecast_ensemble_by('sales', product_id, date, qty, ['AutoARIMA','AutoETS','Naive'], 12, '1d')",
     "forecasting"},
 
@@ -989,7 +1087,8 @@ forecast_result AS (
         COALESCE((SELECT xreg_list FROM _xreg_list), []::DOUBLE[][]),
         COALESCE((SELECT future_xreg_list FROM _future_xreg_list), []::DOUBLE[][]),
         horizon,
-        method
+        method,
+        params
     ) AS fcst
 )
 SELECT
@@ -1059,7 +1158,7 @@ _xreg_lists AS (
 grouped_historical AS (
     SELECT
         __exog_grp__,
-        date_trunc('second', MAX(__exog_dt__)::TIMESTAMP) AS last_date,
+        LIST(__exog_dt__::TIMESTAMP ORDER BY __exog_dt__) AS _dates,
         LIST(__exog_tgt__::DOUBLE ORDER BY __exog_dt__) AS _y_list
     FROM src
     GROUP BY __exog_grp__
@@ -1092,13 +1191,14 @@ _future_xreg_lists AS (
 forecast_data AS (
     SELECT
         h.__exog_grp__,
-        h.last_date,
+        h._dates,
         _ts_forecast_exog(
             h._y_list,
             COALESCE(x._xreg_list, []::DOUBLE[][]),
             COALESCE(fx._future_xreg_list, []::DOUBLE[][]),
             horizon,
-            method
+            method,
+            params
         ) AS fcst
     FROM grouped_historical h
     LEFT JOIN _xreg_lists x ON h.__exog_grp__ = x.__exog_grp__
@@ -1107,7 +1207,7 @@ forecast_data AS (
 SELECT
     __exog_grp__ AS id,
     UNNEST(generate_series(1, len((fcst).point)))::INTEGER AS forecast_step,
-    UNNEST(generate_series(last_date + (SELECT _interval FROM _freq), last_date + (len((fcst).point)::INTEGER * EXTRACT(EPOCH FROM (SELECT _interval FROM _freq)) || ' seconds')::INTERVAL, (SELECT _interval FROM _freq)))::TIMESTAMP AS date,
+    UNNEST(_ts_future_dates(_dates, len((fcst).point)::INTEGER, (SELECT _interval FROM _freq))) AS date,
     UNNEST((fcst).point) AS yhat,
     UNNEST((fcst).lower) AS yhat_lower,
     UNNEST((fcst).upper) AS yhat_upper,
@@ -1625,68 +1725,68 @@ SELECT * FROM _ts_cv_hydrate_native(
     "SELECT * FROM ts_cv_hydrate_by('cv_splits', product_id, date, qty, 'features', unknown_cols)",
     "cross-validation"},
 
-    // ts_conformal_by: Compute conformal prediction intervals for grouped series
-    // C++ API: ts_conformal_by(backtest_results, group_col, actual_col, forecast_col, point_forecast_col, params)
-    // backtest_results: Table with backtest residuals (actual - forecast)
-    // params MAP supports:
+    // ts_conformal_by: Compute conformal prediction intervals, one row per (group, forecast row)
+    // C++ API: ts_conformal_by(backtest_results, group_col, date_col, actual_col, forecast_col, point_forecast_col, params := MAP{})
+    // backtest_results: table holding BOTH calibration rows (actual_col/forecast_col set,
+    //   point_forecast_col NULL) and future rows (actual_col/forecast_col NULL, point_forecast_col set),
+    //   all ordered/paired by date_col (Phase 16 D-01). Residuals and empirical coverage are
+    //   computed in Rust, never subtracted in SQL (D-02).
+    // params MAP supports (read json-free; CAST, not TRY_CAST, so a malformed value errors):
     //   alpha (DOUBLE) - miscoverage rate (default 0.1 for 90% coverage)
-    //   method (VARCHAR) - 'symmetric' or 'asymmetric' (default 'symmetric')
-    // Returns: group_col, point, lower, upper, coverage, conformity_score, method
-    {"ts_conformal_by", {"backtest_results", "group_col", "actual_col", "forecast_col", "point_forecast_col", "params", nullptr}, {{nullptr, nullptr}},
+    //   method (VARCHAR) - 'symmetric' (alias 'split'), 'asymmetric', or 'adaptive' (default 'symmetric')
+    // difficulty_col (Phase 16 D-08, plan 16-02): named, default NULL. Carried as `d` in the
+    // same date-ordered STRUCT lists as actual/forecast/point; only method 'adaptive' may use
+    // it (any present value with another method is an SQL error).
+    // Returns: group_col, date_col, point, lower, upper, coverage, nominal_level,
+    //          conformity_score, n_calibration, calibration_insufficient, method
+    {"ts_conformal_by", {"backtest_results", "group_col", "date_col", "actual_col", "forecast_col", "point_forecast_col", nullptr}, {{"params", "MAP{}"}, {"difficulty_col", "NULL"}, {nullptr, nullptr}},
 R"(
 WITH _params AS (
     SELECT
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.alpha') AS DOUBLE), 0.1) AS _alpha,
-        COALESCE(json_extract_string(to_json(params), '$.method'), 'symmetric') AS _method
+        CAST(COALESCE((params::MAP(VARCHAR, VARCHAR))['alpha'], '0.1') AS DOUBLE) AS _alpha,
+        COALESCE((params::MAP(VARCHAR, VARCHAR))['method'], 'symmetric') AS _method
 ),
-residuals AS (
+per_group AS (
     SELECT
         group_col AS _grp,
-        (actual_col - forecast_col)::DOUBLE AS residual
+        LIST({a: actual_col::DOUBLE, f: forecast_col::DOUBLE, d: difficulty_col::DOUBLE} ORDER BY date_col) AS _pairs,
+        LIST({t: date_col, p: point_forecast_col::DOUBLE, d: difficulty_col::DOUBLE} ORDER BY date_col)
+            FILTER (WHERE point_forecast_col IS NOT NULL) AS _points
     FROM query_table(backtest_results::VARCHAR)
-    WHERE actual_col IS NOT NULL AND forecast_col IS NOT NULL
-),
-point_forecasts AS (
-    SELECT
-        group_col AS _grp,
-        LIST(point_forecast_col::DOUBLE ORDER BY point_forecast_col) AS _forecasts
-    FROM query_table(backtest_results::VARCHAR)
-    WHERE point_forecast_col IS NOT NULL
     GROUP BY group_col
 ),
 conformal_calc AS (
     SELECT
-        r._grp,
-        CASE (SELECT _method FROM _params)
-            WHEN 'asymmetric' THEN
-                ts_conformal_predict_asymmetric(
-                    LIST(r.residual),
-                    pf._forecasts,
-                    (SELECT _alpha FROM _params)
-                )
-            ELSE
-                ts_conformal_predict(
-                    LIST(r.residual),
-                    pf._forecasts,
-                    (SELECT _alpha FROM _params)
-                )
-        END AS conf_result
-    FROM residuals r
-    JOIN point_forecasts pf ON r._grp = pf._grp
-    GROUP BY r._grp, pf._forecasts
+        _grp,
+        _points,
+        _ts_conformal_from_pairs(
+            [pr.a FOR pr IN _pairs],
+            [pr.f FOR pr IN _pairs],
+            [pr.d FOR pr IN _pairs],
+            [pt.p FOR pt IN _points],
+            [pt.d FOR pt IN _points],
+            (SELECT _alpha FROM _params),
+            (SELECT _method FROM _params)
+        ) AS conf_result
+    FROM per_group
+    WHERE len(_points) > 0
 )
 SELECT
     _grp AS group_col,
-    (conf_result).point AS point,
-    (conf_result).lower AS lower,
-    (conf_result).upper AS upper,
+    UNNEST(_points).t AS date_col,
+    UNNEST((conf_result).point) AS point,
+    UNNEST((conf_result).lower) AS lower,
+    UNNEST((conf_result).upper) AS upper,
     (conf_result).coverage AS coverage,
+    (conf_result).nominal_level AS nominal_level,
     (conf_result).conformity_score AS conformity_score,
+    (conf_result).n_calibration AS n_calibration,
+    (conf_result).calibration_insufficient AS calibration_insufficient,
     (conf_result).method AS method
 FROM conformal_calc
 )",
-    "One-step conformal prediction: calibrates on backtest residuals and applies to new forecasts.",
-    "SELECT * FROM ts_conformal_by('backtest', product_id, actual, forecast, point_forecast)",
+    "One-step conformal prediction: calibrates on backtest residuals and applies to new forecasts, one row per (group, date).",
+    "SELECT * FROM ts_conformal_by('backtest', product_id, date, actual, forecast, point_forecast)",
     "conformal-prediction"},
 
     // ts_conformal_calibrate: Compute conformal quantile from backtest residuals
@@ -1694,75 +1794,172 @@ FROM conformal_calc
     // Returns a single row with the calibrated conformity score
     // params MAP supports:
     //   alpha (DOUBLE) - miscoverage rate (default 0.1 for 90% coverage)
-    // Returns: conformity_score, coverage, n_residuals
-    {"ts_conformal_calibrate", {"backtest_results", "actual_col", "forecast_col", "params", nullptr}, {{nullptr, nullptr}},
+    // ts_conformal_calibrate: Calibrate a conformal predictor PER GROUP by default (Phase 16 D-03)
+    // C++ API: ts_conformal_calibrate(backtest_results, group_col, actual_col, forecast_col, params := MAP{})
+    // Residuals are computed in Rust (D-02), never subtracted in SQL. No date column: the split
+    // quantile is order-invariant over calibration pairs (D-01 names only the three macros that
+    // order/pair forecasts; calibration pairing is row-inherent, one STRUCT per row).
+    // params MAP supports (read json-free; CAST, not TRY_CAST):
+    //   alpha (DOUBLE) - miscoverage rate (default 0.1)
+    //   method (VARCHAR) - 'symmetric' (alias 'split') or 'adaptive' (default 'symmetric';
+    //     'asymmetric' errors -- two margins cannot collapse into one conformity_score, use
+    //     ts_conformal_by instead)
+    //   pooled (BOOLEAN) - false (default): one row per group_col value. true: pool every row
+    //     into ONE row with group_col = NULL.
+    // difficulty_col (Phase 16 D-08, plan 16-02): named, default NULL. Only method 'adaptive'
+    // may use it.
+    // Returns: group_col, method, conformity_score, coverage, nominal_level, n_calibration,
+    //          calibration_insufficient
+    {"ts_conformal_calibrate", {"backtest_results", "group_col", "actual_col", "forecast_col", nullptr}, {{"params", "MAP{}"}, {"difficulty_col", "NULL"}, {nullptr, nullptr}},
 R"(
 WITH _params AS (
     SELECT
-        COALESCE(TRY_CAST(json_extract_string(to_json(params), '$.alpha') AS DOUBLE), 0.1) AS _alpha
+        CAST(COALESCE((params::MAP(VARCHAR, VARCHAR))['alpha'], '0.1') AS DOUBLE) AS _alpha,
+        COALESCE((params::MAP(VARCHAR, VARCHAR))['method'], 'symmetric') AS _method,
+        CAST(COALESCE((params::MAP(VARCHAR, VARCHAR))['pooled'], 'false') AS BOOLEAN) AS _pooled
 ),
-residuals AS (
+per_key AS (
     SELECT
-        (actual_col - forecast_col)::DOUBLE AS residual
+        CASE WHEN (SELECT _pooled FROM _params) THEN NULL ELSE group_col END AS _grp,
+        LIST({a: actual_col::DOUBLE, f: forecast_col::DOUBLE, d: difficulty_col::DOUBLE}) AS _pairs
     FROM query_table(backtest_results::VARCHAR)
-    WHERE actual_col IS NOT NULL AND forecast_col IS NOT NULL
+    GROUP BY CASE WHEN (SELECT _pooled FROM _params) THEN NULL ELSE group_col END
+),
+calibrated AS (
+    SELECT
+        _grp,
+        _ts_conformal_calibrate(
+            [pr.a FOR pr IN _pairs],
+            [pr.f FOR pr IN _pairs],
+            [pr.d FOR pr IN _pairs],
+            (SELECT _alpha FROM _params),
+            (SELECT _method FROM _params)
+        ) AS cal_result
+    FROM per_key
 )
 SELECT
-    ts_conformal_quantile(LIST(residual), (SELECT _alpha FROM _params)) AS conformity_score,
-    1.0 - (SELECT _alpha FROM _params) AS coverage,
-    COUNT(*)::BIGINT AS n_residuals
-FROM residuals
+    _grp AS group_col,
+    (cal_result).method AS method,
+    (cal_result).conformity_score AS conformity_score,
+    (cal_result).coverage AS coverage,
+    (cal_result).nominal_level AS nominal_level,
+    (cal_result).n_calibration AS n_calibration,
+    (cal_result).calibration_insufficient AS calibration_insufficient
+FROM calibrated
 )",
-    "Calibrates a conformal predictor from backtest residuals and returns the calibration profile for reuse.",
+    "Calibrates a conformal predictor per group (or pooled on request) and returns the calibration profile for reuse.",
     "SELECT * FROM ts_conformal_calibrate('backtest', product_id, actual, forecast)",
     "conformal-prediction"},
 
-    // ts_conformal_apply_by: Apply pre-computed conformity score to forecasts
-    // C++ API: ts_conformal_apply_by(forecast_results, group_col, forecast_col, conformity_score)
-    // forecast_results: Table with point forecasts
-    // conformity_score: Pre-computed score from ts_conformal_calibrate
-    // Returns: group_col, forecast, lower, upper
-    {"ts_conformal_apply_by", {"forecast_results", "group_col", "forecast_col", "conformity_score", nullptr}, {{nullptr, nullptr}},
+    // ts_conformal_apply_by: Apply a calibration TABLE (ts_conformal_calibrate output) to new
+    // forecasts, one row per (group, forecast row) (Phase 16 D-01/D-03/D-14)
+    // C++ API: ts_conformal_apply_by(forecast_results, group_col, date_col, forecast_col, calibration)
+    // `calibration` names a table holding ts_conformal_calibrate's output columns (group_col,
+    // method, conformity_score); it must hold at MOST one row per group_col value. Per forecast
+    // group: the calibration row whose group_col matches is used if one exists, otherwise bounds
+    // come back NULL for that group's rows.
+    // Phase 16 WR-03 fix: a NULL group_col row is treated as the pooled fallback ONLY when it is
+    // the SOLE row of the calibration table -- exactly the shape ts_conformal_calibrate(params :=
+    // {'pooled': true}) and the literal-score one-row wrapper (D-14) both produce. A per-group
+    // calibration table that happens to also contain a row with a genuine NULL group_col (e.g. an
+    // ungrouped segment in the caller's own backtest data) no longer silently applies that row's
+    // score to every other, unrelated group -- it is just an unmatched extra row.
+    // Phase 16 WR-04 fix: more than one calibration row sharing the same group_col value
+    // (including more than one row with group_col = NULL) raises a clear SQL error instead of
+    // silently fanning the join out into duplicate output rows per forecast point.
+    // difficulty_col (Phase 16 D-08, plan 16-02): named, default NULL. Bounds are computed via
+    // ts_conformal_intervals(points, conformity_score, method, difficulties) using the matched
+    // calibration row's OWN method, so the method/difficulty strictness rules (difficulty only
+    // for 'adaptive', 'adaptive' requires difficulty) are enforced in Rust, not duplicated here.
+    // Returns: group_col, date_col, point, lower, upper, method, conformity_score
+    {"ts_conformal_apply_by", {"forecast_results", "group_col", "date_col", "forecast_col", "calibration", nullptr}, {{"difficulty_col", "NULL"}, {nullptr, nullptr}},
 R"(
-WITH intervals AS (
+WITH cal AS (
+    SELECT * FROM query_table(calibration::VARCHAR)
+),
+cal_dupe_check AS (
+    -- NOTE: `cal.group_col` must stay qualified (never a bare `group_col`)
+    -- here -- a bare `group_col` is textually identical to this macro's own
+    -- `group_col` parameter name and would be substituted with the caller's
+    -- argument (e.g. a plain column name like `g`), breaking the binder.
+    SELECT CASE WHEN COUNT(*) > 0 THEN
+        error('ts_conformal_apply_by: calibration table has more than one row for the same group_col value (it must hold at most one row per group_col value, including at most one pooled row with group_col = NULL)')
+    ELSE NULL END AS _err
+    FROM (SELECT cal.group_col FROM cal GROUP BY cal.group_col HAVING COUNT(*) > 1) _dupes
+),
+cal_pooled_eligible AS (
+    SELECT (COUNT(*) = 1) AS _eligible FROM cal
+),
+per_group AS (
     SELECT
         group_col AS _grp,
-        ts_conformal_intervals(
-            LIST(forecast_col::DOUBLE ORDER BY forecast_col),
-            conformity_score::DOUBLE
-        ) AS interval_result
+        LIST({t: date_col, p: forecast_col::DOUBLE, d: difficulty_col::DOUBLE} ORDER BY date_col)
+            FILTER (WHERE forecast_col IS NOT NULL) AS _points
     FROM query_table(forecast_results::VARCHAR)
-    WHERE forecast_col IS NOT NULL
+    GROUP BY group_col
+),
+matched AS (
+    SELECT
+        pg._grp AS _grp,
+        pg._points AS _points,
+        COALESCE(direct.conformity_score, pooled.conformity_score, dupe_check._err) AS _score,
+        COALESCE(direct.method, pooled.method) AS _method
+    FROM per_group pg
+    CROSS JOIN cal_pooled_eligible eligible
+    CROSS JOIN cal_dupe_check dupe_check
+    LEFT JOIN cal direct ON direct.group_col = pg._grp
+    LEFT JOIN cal pooled ON pooled.group_col IS NULL AND eligible._eligible
+),
+applied AS (
+    SELECT
+        _grp,
+        _points,
+        _method,
+        _score,
+        ts_conformal_intervals([pt.p FOR pt IN _points], _score, _method, [pt.d FOR pt IN _points]) AS _bounds
+    FROM matched
+)
+SELECT
+    _grp AS group_col,
+    UNNEST(_points).t AS date_col,
+    UNNEST(_points).p AS point,
+    UNNEST((_bounds).lower) AS lower,
+    UNNEST((_bounds).upper) AS upper,
+    _method AS method,
+    _score AS conformity_score
+FROM applied
+)",
+    "Applies a calibration table (from ts_conformal_calibrate) to new point forecasts, matching each group to its own row or a pooled row.",
+    "SELECT * FROM ts_conformal_apply_by('forecasts', product_id, date, point_forecast, 'calibration_profile')",
+    "conformal-prediction"},
+
+    // ts_interval_width_by: Compute mean interval width for grouped series, pairing lower/upper
+    // by date_col (Phase 16 D-01/D5) -- lower and upper are read from ONE date-ordered LIST of
+    // per-row STRUCTs, never sorted independently, and Rust drops incomplete (lower, upper)
+    // pairs pairwise (ts_mean_interval_width's existing complete_cases behavior).
+    // C++ API: ts_interval_width_by(results, group_col, date_col, lower_col, upper_col)
+    // Returns: group_col, mean_width, n_intervals
+    {"ts_interval_width_by", {"results", "group_col", "date_col", "lower_col", "upper_col", nullptr}, {{nullptr, nullptr}},
+R"(
+WITH per_group AS (
+    SELECT
+        group_col AS _grp,
+        LIST({l: lower_col::DOUBLE, u: upper_col::DOUBLE} ORDER BY date_col) AS _pairs,
+        COUNT(*) FILTER (WHERE lower_col IS NOT NULL AND upper_col IS NOT NULL) AS _n_intervals
+    FROM query_table(results::VARCHAR)
     GROUP BY group_col
 )
 SELECT
     _grp AS group_col,
-    (interval_result).lower AS lower,
-    (interval_result).upper AS upper
-FROM intervals
-)",
-    "Applies a pre-calibrated conformal profile to new point forecasts to generate prediction intervals.",
-    "SELECT * FROM ts_conformal_apply_by('forecasts', product_id, date, point_forecast, calibration_profile)",
-    "conformal-prediction"},
-
-    // ts_interval_width_by: Compute mean interval width for grouped series
-    // C++ API: ts_interval_width_by(results, group_col, lower_col, upper_col)
-    // Returns: group_col, mean_width, n_intervals
-    {"ts_interval_width_by", {"results", "group_col", "lower_col", "upper_col", nullptr}, {{nullptr, nullptr}},
-R"(
-SELECT
-    group_col AS group_col,
     ts_mean_interval_width(
-        LIST(lower_col::DOUBLE ORDER BY lower_col),
-        LIST(upper_col::DOUBLE ORDER BY upper_col)
+        [pr.l FOR pr IN _pairs],
+        [pr.u FOR pr IN _pairs]
     ) AS mean_width,
-    COUNT(*)::BIGINT AS n_intervals
-FROM query_table(results::VARCHAR)
-WHERE lower_col IS NOT NULL AND upper_col IS NOT NULL
-GROUP BY group_col
+    _n_intervals::BIGINT AS n_intervals
+FROM per_group
 )",
-    "Computes the mean width of prediction intervals for each group.",
-    "SELECT * FROM ts_interval_width_by('forecasts', product_id, lower, upper)",
+    "Computes the mean width of prediction intervals for each group, pairing lower/upper by date_col.",
+    "SELECT * FROM ts_interval_width_by('forecasts', product_id, date, lower, upper)",
     "conformal-prediction"},
 
     // ================================================================================
@@ -1773,7 +1970,7 @@ GROUP BY group_col
     // See: ts_validate_separator.cpp, ts_aggregate_hierarchy.cpp, ts_combine_keys.cpp, ts_split_keys.cpp
 
     // ts_stats_by: Compute time series statistics grouped by a unique ID column
-    // C++ API: ts_stats_by(table_name, group_col, date_col, value_col, frequency)
+    // C++ API: ts_stats_by(table_name, group_col, date_col, value_col, frequency, seasonal_period := 0)
     // Returns: TABLE with group column (preserving original name!) and 36 statistics columns
     //
     // This macro is a thin wrapper around the native streaming implementation (_ts_stats_by_native)
@@ -1781,15 +1978,18 @@ GROUP BY group_col
     // - Bug 1: Preserves the input group column name (was hardcoded as 'id')
     // - Bug 2: Correctly calculates expected_length for monthly/quarterly/yearly frequencies
     // - Bug 3: Correctly detects gaps for calendar frequencies
-    {"ts_stats_by", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{nullptr, nullptr}},
+    // seasonal_period (D-02, Phase 13 plan 13-02): 0 auto-detects, 1 means non-seasonal,
+    // >= 2 is used explicitly for the STL-based trend_strength/seasonality_strength.
+    {"ts_stats_by", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{"seasonal_period", "0"}, {nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_stats_by_native(
     (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
-    frequency
+    frequency,
+    seasonal_period::INTEGER
 )
 )",
-    "Alias for ts_stats. Computes 34 time series statistics per group.",
-    "SELECT * FROM ts_stats_by('sales', product_id, date, qty, '1d')",
+    "Alias for ts_stats. Computes 36 time series statistics per group (including n_gap_runs). seasonal_period (default 0) selects 0=auto-detect, 1=non-seasonal, >=2=explicit period for the STL-based trend_strength/seasonality_strength.",
+    "SELECT * FROM ts_stats_by('sales', product_id, date, qty, '1d', seasonal_period := 12)",
     "statistics"},
 
     // ts_data_quality_by: Alias for ts_data_quality (for API consistency with _by naming pattern)
@@ -1800,7 +2000,15 @@ R"(
 WITH quality_data AS (
     SELECT
         unique_id_col AS unique_id,
-        _ts_data_quality(LIST(value_col::DOUBLE ORDER BY date_col)) AS _quality
+        _ts_data_quality(
+            -- CR-02 fix: drop NULL-dated rows (value+date together) before they reach
+            -- the scalar function, matching ts_stats_by's/the aggregates' "drop this
+            -- row" semantics for a NULL date_col, instead of aborting the whole query.
+            LIST(value_col::DOUBLE ORDER BY date_col) FILTER (WHERE date_col IS NOT NULL),
+            LIST(date_col::TIMESTAMP ORDER BY date_col) FILTER (WHERE date_col IS NOT NULL),
+            frequency::VARCHAR,
+            n_short::INTEGER
+        ) AS _quality
     FROM query_table(source::VARCHAR)
     GROUP BY unique_id_col
 )
@@ -1812,12 +2020,14 @@ SELECT
     (_quality).behavioral_score AS behavioral_score,
     (_quality).overall_score AS overall_score,
     (_quality).n_gaps AS n_gaps,
+    (_quality).n_gap_runs AS n_gap_runs,
     (_quality).n_missing AS n_missing,
-    (_quality).is_constant AS is_constant
+    (_quality).is_constant AS is_constant,
+    (_quality).is_short AS is_short
 FROM quality_data
 )",
-    "Alias for ts_data_quality. Assesses time series data quality per group.",
-    "SELECT * FROM ts_data_quality_by('sales', product_id, date, qty)",
+    "Alias for ts_data_quality. Assesses time series data quality per group (dates/frequency-aware).",
+    "SELECT * FROM ts_data_quality_by('sales', product_id, date, qty, 10, '1d')",
     "data-quality"},
 
     // ts_features_table: Extract features from a single-series table
@@ -1846,6 +2056,7 @@ SELECT
     (_feat).autocorrelation_lag7 AS autocorrelation_lag7,
     (_feat).autocorrelation_lag8 AS autocorrelation_lag8,
     (_feat).autocorrelation_lag9 AS autocorrelation_lag9,
+    (_feat).autocorrelation_lag10 AS autocorrelation_lag10,
     (_feat).benford_correlation AS benford_correlation,
     (_feat).binned_entropy AS binned_entropy,
     (_feat).c3_lag1 AS c3_lag1,
@@ -2012,7 +2223,7 @@ WITH periods_data AS (
             COALESCE(json_extract_string(to_json(params), '$.method'), 'fft'),
             COALESCE(CAST(json_extract(to_json(params), '$.max_period') AS BIGINT), 0),
             COALESCE(CAST(json_extract(to_json(params), '$.min_confidence') AS DOUBLE), -1.0),
-            COALESCE(CAST(json_extract(to_json(params), '$.expected_periods') AS DOUBLE[]), NULL),
+            COALESCE(CAST(json_extract_string(to_json(params), '$.expected_periods') AS DOUBLE[]), NULL),
             COALESCE(CAST(json_extract(to_json(params), '$.tolerance') AS DOUBLE), -1.0)
         ) AS _periods
     FROM query_table(source::VARCHAR)
@@ -2047,7 +2258,7 @@ WITH periods_data AS (
             COALESCE(json_extract_string(to_json(params), '$.method'), 'fft'),
             COALESCE(CAST(json_extract(to_json(params), '$.max_period') AS BIGINT), 0),
             COALESCE(CAST(json_extract(to_json(params), '$.min_confidence') AS DOUBLE), -1.0),
-            COALESCE(CAST(json_extract(to_json(params), '$.expected_periods') AS DOUBLE[]), NULL),
+            COALESCE(CAST(json_extract_string(to_json(params), '$.expected_periods') AS DOUBLE[]), NULL),
             COALESCE(CAST(json_extract(to_json(params), '$.tolerance') AS DOUBLE), -1.0)
         ) AS _periods
     FROM query_table(source::VARCHAR)
@@ -2200,8 +2411,11 @@ FROM timing_data
 R"(
 SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'mae')
 )",
-    "Computes Mean Absolute Error between actual and forecast columns per group.",
-    "SELECT * FROM ts_mae_by('results', product_id, date, actual, forecast)",
+    "Computes Mean Absolute Error between actual and forecast columns per group. "
+    "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
+    "(the first native-function parameter is TABLE-typed); date_col/actual_col/forecast_col "
+    "are quoted column-name string literals.",
+    "SELECT * FROM ts_mae_by((SELECT product_id, date, actual, forecast FROM results), 'date', 'actual', 'forecast')",
     "metrics"},
 
     // ts_mse_by: Compute Mean Squared Error grouped by selected columns
@@ -2210,8 +2424,11 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'ma
 R"(
 SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'mse')
 )",
-    "Computes Mean Squared Error between actual and forecast columns per group.",
-    "SELECT * FROM ts_mse_by('results', product_id, date, actual, forecast)",
+    "Computes Mean Squared Error between actual and forecast columns per group. "
+    "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
+    "(the first native-function parameter is TABLE-typed); date_col/actual_col/forecast_col "
+    "are quoted column-name string literals.",
+    "SELECT * FROM ts_mse_by((SELECT product_id, date, actual, forecast FROM results), 'date', 'actual', 'forecast')",
     "metrics"},
 
     // ts_rmse_by: Compute Root Mean Squared Error grouped by selected columns
@@ -2220,8 +2437,11 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'ms
 R"(
 SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'rmse')
 )",
-    "Computes Root Mean Squared Error between actual and forecast columns per group.",
-    "SELECT * FROM ts_rmse_by('results', product_id, date, actual, forecast)",
+    "Computes Root Mean Squared Error between actual and forecast columns per group. "
+    "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
+    "(the first native-function parameter is TABLE-typed); date_col/actual_col/forecast_col "
+    "are quoted column-name string literals.",
+    "SELECT * FROM ts_rmse_by((SELECT product_id, date, actual, forecast FROM results), 'date', 'actual', 'forecast')",
     "metrics"},
 
     // ts_mape_by: Compute Mean Absolute Percentage Error grouped by selected columns
@@ -2230,8 +2450,11 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'rm
 R"(
 SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'mape')
 )",
-    "Computes Mean Absolute Percentage Error between actual and forecast columns per group.",
-    "SELECT * FROM ts_mape_by('results', product_id, date, actual, forecast)",
+    "Computes Mean Absolute Percentage Error between actual and forecast columns per group. "
+    "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
+    "(the first native-function parameter is TABLE-typed); date_col/actual_col/forecast_col "
+    "are quoted column-name string literals.",
+    "SELECT * FROM ts_mape_by((SELECT product_id, date, actual, forecast FROM results), 'date', 'actual', 'forecast')",
     "metrics"},
 
     // ts_smape_by: Compute Symmetric Mean Absolute Percentage Error grouped by selected columns
@@ -2240,8 +2463,11 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'ma
 R"(
 SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'smape')
 )",
-    "Computes Symmetric Mean Absolute Percentage Error between actual and forecast columns per group.",
-    "SELECT * FROM ts_smape_by('results', product_id, date, actual, forecast)",
+    "Computes Symmetric Mean Absolute Percentage Error between actual and forecast columns per group. "
+    "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
+    "(the first native-function parameter is TABLE-typed); date_col/actual_col/forecast_col "
+    "are quoted column-name string literals.",
+    "SELECT * FROM ts_smape_by((SELECT product_id, date, actual, forecast FROM results), 'date', 'actual', 'forecast')",
     "metrics"},
 
     // ts_r2_by: Compute R-squared (coefficient of determination) grouped by selected columns
@@ -2250,8 +2476,11 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'sm
 R"(
 SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'r2')
 )",
-    "Computes R-squared (coefficient of determination) between actual and forecast columns per group.",
-    "SELECT * FROM ts_r2_by('results', product_id, date, actual, forecast)",
+    "Computes R-squared (coefficient of determination) between actual and forecast columns per group. "
+    "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
+    "(the first native-function parameter is TABLE-typed); date_col/actual_col/forecast_col "
+    "are quoted column-name string literals.",
+    "SELECT * FROM ts_r2_by((SELECT product_id, date, actual, forecast FROM results), 'date', 'actual', 'forecast')",
     "metrics"},
 
     // ts_bias_by: Compute bias (mean error) grouped by selected columns
@@ -2260,18 +2489,27 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'r2
 R"(
 SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'bias')
 )",
-    "Computes mean forecast bias between actual and forecast columns per group.",
-    "SELECT * FROM ts_bias_by('results', product_id, date, actual, forecast)",
+    "Computes mean forecast bias between actual and forecast columns per group. "
+    "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
+    "(the first native-function parameter is TABLE-typed); date_col/actual_col/forecast_col "
+    "are quoted column-name string literals.",
+    "SELECT * FROM ts_bias_by((SELECT product_id, date, actual, forecast FROM results), 'date', 'actual', 'forecast')",
     "metrics"},
 
-    // ts_mase_by: Compute Mean Absolute Scaled Error with GROUP BY ALL
-    // C++ API: ts_mase_by(source, date_col, actual_col, forecast_col, baseline_col)
-    {"ts_mase_by", {"source", "date_col", "actual_col", "forecast_col", "baseline_col", nullptr}, {{nullptr, nullptr}},
+    // ts_mase_by: Compute Hyndman-Koehler Mean Absolute Scaled Error with GROUP BY ALL (D-08)
+    // C++ API: ts_mase_by(source, date_col, actual_col, forecast_col, seasonal_period := 1)
+    // Source must include each group's history rows (date < first forecast date,
+    // forecast NULL) -- they supply the in-sample seasonal-naive scale. The old
+    // 5th-argument baseline-column form was removed in v2026.10.16 (see ts_rmae_by).
+    {"ts_mase_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{"seasonal_period", "1"}, {nullptr, nullptr}},
 R"(
-SELECT * FROM _ts_mase_native(source, date_col, actual_col, forecast_col, baseline_col)
+SELECT * FROM _ts_mase_native(source, date_col, actual_col, forecast_col, seasonal_period)
 )",
-    "Computes Mean Absolute Scaled Error comparing forecast to a baseline model per group.",
-    "SELECT * FROM ts_mase_by('results', product_id, date, actual, forecast, baseline)",
+    "Computes Hyndman-Koehler Mean Absolute Scaled Error (MASE) per group: the out-of-sample forecast MAE scaled by the in-sample seasonal-naive MAE at lag seasonal_period (default 1). Source rows dated before each group's first forecast (forecast NULL) supply the in-sample scale. The old baseline-column form was removed in v2026.10.16 -- use ts_rmae_by for a relative-MAE comparison. "
+    "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
+    "(the first native-function parameter is TABLE-typed); date_col/actual_col/forecast_col "
+    "are quoted column-name string literals.",
+    "SELECT * FROM ts_mase_by((SELECT product_id, date, actual, forecast FROM results), 'date', 'actual', 'forecast', seasonal_period := 4)",
     "metrics"},
 
     // ts_rmae_by: Compute Relative Mean Absolute Error with GROUP BY ALL
@@ -2280,8 +2518,11 @@ SELECT * FROM _ts_mase_native(source, date_col, actual_col, forecast_col, baseli
 R"(
 SELECT * FROM _ts_rmae_native(source, date_col, actual_col, pred1_col, pred2_col)
 )",
-    "Computes Relative MAE (MAE ratio between two models) per group.",
-    "SELECT * FROM ts_rmae_by('results', product_id, date, actual, pred1, pred2)",
+    "Computes Relative MAE (MAE ratio between two models) per group. "
+    "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
+    "(the first native-function parameter is TABLE-typed); date_col/actual_col/pred1_col/pred2_col "
+    "are quoted column-name string literals.",
+    "SELECT * FROM ts_rmae_by((SELECT product_id, date, actual, pred1, pred2 FROM results), 'date', 'actual', 'pred1', 'pred2')",
     "metrics"},
 
     // ts_coverage_by: Compute prediction interval coverage with GROUP BY ALL
@@ -2290,8 +2531,11 @@ SELECT * FROM _ts_rmae_native(source, date_col, actual_col, pred1_col, pred2_col
 R"(
 SELECT * FROM _ts_coverage_native(source, date_col, actual_col, lower_col, upper_col)
 )",
-    "Computes prediction interval coverage rate per group.",
-    "SELECT * FROM ts_coverage_by('results', product_id, date, actual, lower, upper)",
+    "Computes prediction interval coverage rate per group. "
+    "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
+    "(the first native-function parameter is TABLE-typed); date_col/actual_col/lower_col/upper_col "
+    "are quoted column-name string literals.",
+    "SELECT * FROM ts_coverage_by((SELECT product_id, date, actual, lower, upper FROM results), 'date', 'actual', 'lower', 'upper')",
     "metrics"},
 
     // ts_quantile_loss_by: Compute quantile loss with GROUP BY ALL
@@ -2300,8 +2544,11 @@ SELECT * FROM _ts_coverage_native(source, date_col, actual_col, lower_col, upper
 R"(
 SELECT * FROM _ts_quantile_loss_native(source, date_col, actual_col, forecast_col, quantile)
 )",
-    "Computes quantile (pinball) loss at a specified quantile level per group.",
-    "SELECT * FROM ts_quantile_loss_by('results', product_id, date, actual, forecast, 0.9)",
+    "Computes quantile (pinball) loss at a specified quantile level per group. "
+    "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
+    "(the first native-function parameter is TABLE-typed); date_col/actual_col/forecast_col "
+    "are quoted column-name string literals.",
+    "SELECT * FROM ts_quantile_loss_by((SELECT product_id, date, actual, forecast FROM results), 'date', 'actual', 'forecast', 0.9)",
     "metrics"},
 
     // ================================================================================
@@ -2309,64 +2556,68 @@ SELECT * FROM _ts_quantile_loss_native(source, date_col, actual_col, forecast_co
     // ================================================================================
 
     // ts_adf_by: ADF stationarity test per group (STAT-01)
-    // C++ API: ts_adf_by(source, group_col, date_col, value_col [, max_lags:=-1])
+    // C++ API: ts_adf_by(source, group_col, date_col, value_col [, max_lags:=-1] [, regression:='c'])
     // Returns: TABLE(group_col, adf STRUCT(statistic, p_value, lags, is_stationary, cv_1pct, cv_5pct, cv_10pct))
     {"ts_adf_by", {"source", "group_col", "date_col", "value_col", nullptr},
-     {{"max_lags", "-1"}, {nullptr, nullptr}},
+     {{"max_lags", "-1"}, {"regression", "'c'"}, {nullptr, nullptr}},
 R"(
-SELECT group_col, ts_adf(LIST(value_col::DOUBLE ORDER BY date_col), max_lags::INTEGER) AS adf
+SELECT group_col, ts_adf(LIST(value_col::DOUBLE ORDER BY date_col), max_lags::INTEGER, regression::VARCHAR) AS adf
 FROM query_table(source::VARCHAR)
 GROUP BY group_col
 )",
     "ADF stationarity test per group. Returns STRUCT(statistic, p_value, lags, is_stationary, cv_1pct, cv_5pct, cv_10pct) per group. "
-    "Uses constant-only ('c') regression and AIC lag selection. "
-    "Pass max_lags:=N to override automatic lag selection.",
-    "SELECT group_col, (adf).statistic, (adf).p_value FROM ts_adf_by('sales', product_id, ds, y)",
+    "AIC lag selection; pass max_lags:=N to override automatic lag selection. "
+    "regression:='c' (constant, default) or regression:='ct' (constant + trend).",
+    "SELECT group_col, (adf).statistic, (adf).p_value FROM ts_adf_by('sales', product_id, ds, y, regression := 'ct')",
     "diagnostics"},
 
-    // ts_kpss_by: KPSS stationarity test per group (STAT-02)
-    // C++ API: ts_kpss_by(source, group_col, date_col, value_col [, lags:=-1])
+    // ts_kpss_by: KPSS stationarity test per group (STAT-02, D-05a)
+    // C++ API: ts_kpss_by(source, group_col, date_col, value_col [, lags:=-1] [, regression:='c'])
     // Returns: TABLE(group_col, kpss STRUCT(statistic, p_value, lags, is_stationary, cv_1pct, cv_5pct, cv_10pct))
     {"ts_kpss_by", {"source", "group_col", "date_col", "value_col", nullptr},
-     {{"lags", "-1"}, {nullptr, nullptr}},
+     {{"lags", "-1"}, {"regression", "'c'"}, {nullptr, nullptr}},
 R"(
-SELECT group_col, ts_kpss(LIST(value_col::DOUBLE ORDER BY date_col), lags::INTEGER) AS kpss
+SELECT group_col, ts_kpss(LIST(value_col::DOUBLE ORDER BY date_col), lags::INTEGER, regression::VARCHAR) AS kpss
 FROM query_table(source::VARCHAR)
 GROUP BY group_col
 )",
     "KPSS stationarity test per group. Returns STRUCT(statistic, p_value, lags, is_stationary, cv_1pct, cv_5pct, cv_10pct) per group. "
-    "Null hypothesis is level-stationarity; is_stationary=true means the null is not rejected at 5%. "
-    "Pass lags:=N to override the automatic bandwidth.",
-    "SELECT group_col, (kpss).statistic, (kpss).is_stationary FROM ts_kpss_by('sales', product_id, ds, y)",
+    "Pass lags:=N to override the automatic bandwidth. "
+    "regression:='c' (level, null hypothesis is level-stationarity, default) or regression:='ct' (trend). "
+    "is_stationary=true means the null is not rejected at 5%.",
+    "SELECT group_col, (kpss).statistic, (kpss).is_stationary FROM ts_kpss_by('sales', product_id, ds, y, regression := 'ct')",
     "diagnostics"},
 
-    // ts_stationarity_by: combined ADF + KPSS four-way verdict per group (STAT-03)
-    // C++ API: ts_stationarity_by(source, group_col, date_col, value_col)
+    // ts_stationarity_by: combined ADF + KPSS D-04 four-way verdict per group (STAT-03, D-04, D-05)
+    // C++ API: ts_stationarity_by(source, group_col, date_col, value_col [, regression:='c'])
     // Returns: TABLE(group_col, stationarity STRUCT(adf_statistic, adf_p_value, kpss_statistic, kpss_p_value, adf_is_stationary, kpss_is_stationary, verdict))
     {"ts_stationarity_by", {"source", "group_col", "date_col", "value_col", nullptr},
-     {{nullptr, nullptr}},
+     {{"regression", "'c'"}, {nullptr, nullptr}},
 R"(
-SELECT group_col, ts_stationarity(LIST(value_col::DOUBLE ORDER BY date_col)) AS stationarity
+SELECT group_col, ts_stationarity(LIST(value_col::DOUBLE ORDER BY date_col), regression::VARCHAR) AS stationarity
 FROM query_table(source::VARCHAR)
 GROUP BY group_col
 )",
-    "Combined ADF + KPSS stationarity verdict per group. Returns STRUCT(adf_statistic, adf_p_value, kpss_statistic, kpss_p_value, "
+    "Combined ADF + KPSS stationarity verdict per group (D-04). Returns STRUCT(adf_statistic, adf_p_value, kpss_statistic, kpss_p_value, "
     "adf_is_stationary, kpss_is_stationary, verdict) per group. verdict is one of "
-    "'stationary', 'trend_stationary', 'difference_stationary', 'non_stationary'.",
-    "SELECT group_col, (stationarity).verdict FROM ts_stationarity_by('sales', product_id, ds, y)",
+    "'stationary', 'non_stationary', 'trend_stationary', 'difference_stationary', 'constant', or NULL (degenerate series). "
+    "regression:='c' (default, applies to both tests) or regression:='ct'.",
+    "SELECT group_col, (stationarity).verdict FROM ts_stationarity_by('sales', product_id, ds, y, regression := 'ct')",
     "diagnostics"},
 
-    // ts_ljung_box_by: Ljung-Box residual white-noise test per group (RESID-01)
+    // ts_ljung_box_by: Ljung-Box residual white-noise test per group (RESID-01, D-06/DIAG-04)
     {"ts_ljung_box_by", {"source", "group_col", "date_col", "value_col", nullptr},
-     {{"lags", "-1"}, {nullptr, nullptr}},
+     {{"lags", "-1"}, {"fitted_params", "0"}, {nullptr, nullptr}},
 R"(
-SELECT group_col, ts_ljung_box(LIST(value_col::DOUBLE ORDER BY date_col), lags::INTEGER) AS ljung_box
+SELECT group_col, ts_ljung_box(LIST(value_col::DOUBLE ORDER BY date_col), lags::INTEGER, fitted_params::INTEGER) AS ljung_box
 FROM query_table(source::VARCHAR)
 GROUP BY group_col
 )",
     "Ljung-Box white-noise test on residuals per group. Returns STRUCT(statistic, p_value, lags, df). "
-    "value_col should be model residuals; default lags = min(10, n/5). Pass lags:=N to override.",
-    "SELECT group_col, (ljung_box).p_value FROM ts_ljung_box_by('resids', product_id, ds, e)",
+    "value_col should be model residuals; default lags = min(10, n/5). Pass lags:=N to override. "
+    "df = lags - fitted_params; pass fitted_params := p + q for ARMA(p, q) residuals to get "
+    "R Box.test(fitdf = p + q)-matching p-values (fitted_params >= the effective lags is a SQL error).",
+    "SELECT group_col, (ljung_box).p_value FROM ts_ljung_box_by('resids', product_id, ds, e, fitted_params := 2)",
     "diagnostics"},
 
     // ts_durbin_watson_by: Durbin-Watson statistic per group (RESID-02)

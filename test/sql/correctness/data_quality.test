@@ -1,0 +1,158 @@
+# name: test/sql/correctness/data_quality.test
+# description: Correctness-suite value pins for the data-quality functions fixed this
+#   milestone (ts_data_quality / _by / _agg / _summary) -- Phase 18, 18-02, D-08/D-10
+#   (WR-05), TEST-03. Not json-gated (D-02): runs on every native build.
+# group: [sql]
+#
+# Literals below are copied from validation/reference/fixtures/quality_scores/cases.json
+# (the "daily_gap20" and "constant10" cases) via:
+#   python3 -c "import json; d=json.load(open('validation/reference/fixtures/quality_scores/cases.json')); print(d['cases']['daily_gap20'])"
+# Calendar-multiplier ('2mo'/'3q'/'5y') coverage already lives in
+# test/sql/ts_data_quality_reference.test (CR-01, Phase 13 13-03) -- cited, not duplicated.
+
+require anofox_forecast
+
+# =============================================================================
+# D-10 / WR-05: ts_data_quality_summary n_unassessed bucket
+# =============================================================================
+# Before the fix: a group whose dates are all NULL silently vanished from every
+# bucket (n_good + n_fair + n_poor < n_total) because _ts_data_quality returns a
+# NULL struct for it and every `CASE WHEN (_quality).overall_score ... THEN 1
+# ELSE 0 END` branch takes ELSE (NULL >= x is NULL, not TRUE). n_unassessed makes
+# the group visible: n_good + n_fair + n_poor + n_unassessed = n_total always.
+
+statement ok
+CREATE TABLE wr05_mixed AS
+SELECT 'ok' AS id, (DATE '2024-01-01' + INTERVAL (i) DAY)::TIMESTAMP AS ds, (10 + i % 3)::DOUBLE AS v
+FROM range(20) t(i)
+UNION ALL
+SELECT 'nodates' AS id, NULL::TIMESTAMP AS ds, 1.0::DOUBLE AS v
+FROM range(5);
+
+# n_total 2 (one assessed 'ok' group, one all-NULL-dated 'nodates' group);
+# n_unassessed 1; the four buckets always sum back to n_total.
+query III
+SELECT n_total, n_good + n_fair + n_poor + n_unassessed, n_unassessed
+FROM ts_data_quality_summary('wr05_mixed', id, ds, v, 10);
+----
+2	2	1
+
+# avg_score covers assessed groups only: with exactly one assessed group, it
+# equals that group's own ts_data_quality overall_score (not diluted by the
+# unassessed group, and not NULL/0 either).
+query I
+SELECT abs(
+    (SELECT avg_score FROM ts_data_quality_summary('wr05_mixed', id, ds, v, 10))
+    - (SELECT overall_score FROM ts_data_quality_by('wr05_mixed', id, ds, v, 10, NULL) WHERE unique_id = 'ok')
+) < 1e-9;
+----
+true
+
+# A source with no all-NULL-dated group still has n_unassessed = 0 (no
+# regression for the common case).
+statement ok
+CREATE TABLE wr05_all_dated AS
+SELECT 'a' AS id, (DATE '2024-01-01' + INTERVAL (i) DAY)::TIMESTAMP AS ds, i::DOUBLE AS v FROM range(10) t(i)
+UNION ALL
+SELECT 'b' AS id, (DATE '2024-01-01' + INTERVAL (i) DAY)::TIMESTAMP AS ds, (i * 2)::DOUBLE AS v FROM range(10) t(i);
+
+query II
+SELECT n_unassessed, n_good + n_fair + n_poor = n_total
+FROM ts_data_quality_summary('wr05_all_dated', id, ds, v, 5);
+----
+0	true
+
+statement ok
+DROP TABLE wr05_mixed;
+
+statement ok
+DROP TABLE wr05_all_dated;
+
+# =============================================================================
+# ts_data_quality / ts_data_quality_by: fixture-pinned scores (quality_scores,
+# "daily_gap20" case: 40 daily values, days 21..30 of month 1 missing (20 missing
+# days once the Feb-start offset is accounted for), n_short=10, frequency='1d')
+# =============================================================================
+
+statement ok
+CREATE TABLE dq_gap20_fixture AS
+SELECT * FROM (VALUES
+('g20', DATE '2024-01-01', 0.0),
+('g20', DATE '2024-01-02', 1.1),
+('g20', DATE '2024-01-03', 2.2),
+('g20', DATE '2024-01-04', 3.3),
+('g20', DATE '2024-01-05', 4.4),
+('g20', DATE '2024-01-06', 5.5),
+('g20', DATE '2024-01-07', 6.6),
+('g20', DATE '2024-01-08', 0.7000000000000001),
+('g20', DATE '2024-01-09', 1.8),
+('g20', DATE '2024-01-10', 2.9),
+('g20', DATE '2024-01-11', 4.0),
+('g20', DATE '2024-01-12', 5.1),
+('g20', DATE '2024-01-13', 6.2),
+('g20', DATE '2024-01-14', 7.3),
+('g20', DATE '2024-01-15', 1.4000000000000001),
+('g20', DATE '2024-01-16', 2.5),
+('g20', DATE '2024-01-17', 3.6),
+('g20', DATE '2024-01-18', 4.7),
+('g20', DATE '2024-01-19', 5.8),
+('g20', DATE '2024-01-20', 6.9),
+('g20', DATE '2024-02-10', 9.0),
+('g20', DATE '2024-02-11', 10.100000000000001),
+('g20', DATE '2024-02-12', 4.2),
+('g20', DATE '2024-02-13', 5.3),
+('g20', DATE '2024-02-14', 6.4),
+('g20', DATE '2024-02-15', 7.5),
+('g20', DATE '2024-02-16', 8.600000000000001),
+('g20', DATE '2024-02-17', 9.7),
+('g20', DATE '2024-02-18', 10.8),
+('g20', DATE '2024-02-19', 4.9),
+('g20', DATE '2024-02-20', 6.0),
+('g20', DATE '2024-02-21', 7.1000000000000005),
+('g20', DATE '2024-02-22', 8.2),
+('g20', DATE '2024-02-23', 9.3),
+('g20', DATE '2024-02-24', 10.4),
+('g20', DATE '2024-02-25', 11.5),
+('g20', DATE '2024-02-26', 5.6000000000000005),
+('g20', DATE '2024-02-27', 6.7),
+('g20', DATE '2024-02-28', 7.800000000000001),
+('g20', DATE '2024-02-29', 8.9)
+) t(id, ds, v);
+
+# ts_data_quality_by: structural/temporal/magnitude/behavioral/overall scores and
+# gap counts match the fixture exactly (fixture tolerance score_abs 1e-12; integer
+# counts and booleans compared exactly).
+query IIIIIIIIII
+SELECT structural_score, temporal_score, magnitude_score, behavioral_score, overall_score,
+       n_gaps, n_gap_runs, n_missing, is_constant, is_short
+FROM ts_data_quality_by('dq_gap20_fixture', id, ds, v, 10, '1d');
+----
+1.0	0.0	1.0	0.975	0.74375	20	1	0	false	false
+
+# ts_data_quality (the non-_by name) is byte-identical to ts_data_quality_by for
+# the same arguments (both macros expand to the same body in ts_macros.cpp).
+query I
+SELECT (SELECT overall_score FROM ts_data_quality('dq_gap20_fixture', id, ds, v, 10, '1d'))
+     = (SELECT overall_score FROM ts_data_quality_by('dq_gap20_fixture', id, ds, v, 10, '1d'));
+----
+true
+
+# ts_data_quality_agg: aggregate form over (date, value) per GROUP BY key;
+# n_short is a fixed 30 internally (no n_short parameter on the aggregate), so
+# is_short differs from the table-macro form (len 40 < 30 is false either way
+# here) but every other score must agree with the table-macro form at the same
+# effective n_short semantics being irrelevant to structural_score for this
+# non-short series.
+query I
+SELECT abs((ts_data_quality_agg(ds, v)).overall_score
+         - (SELECT overall_score FROM ts_data_quality_by('dq_gap20_fixture', id, ds, v, 30, '1d'))) < 1e-9
+FROM dq_gap20_fixture;
+----
+true
+
+# Calendar-multiplier gap semantics ('2mo' bi-monthly, '3q' tri-quarterly, '5y')
+# are pinned in test/sql/ts_data_quality_reference.test (CR-01, Phase 13 13-03) --
+# cited here, not duplicated, per D-02.
+
+statement ok
+DROP TABLE dq_gap20_fixture;

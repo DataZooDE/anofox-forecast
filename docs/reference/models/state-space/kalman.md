@@ -73,9 +73,17 @@ params := MAP{'kalman_model': 'local_linear_trend'}
 | `group_col` | ANY | Series identifier |
 | `<date_col>` | (same as input) | Forecast timestamp |
 | `yhat` | DOUBLE | Point forecast (h-step ahead) |
-| `model_name` | VARCHAR | `'Kalman'` |
+| `yhat_lower` | DOUBLE | Lower prediction interval |
+| `yhat_upper` | DOUBLE | Upper prediction interval |
+| `model_name` | VARCHAR | `'Kalman(local_level)'` or `'Kalman(local_linear_trend)'` — always names the spec that actually ran |
 
-Note: `yhat_lower` and `yhat_upper` are not available for Kalman in v1 (prediction intervals deferred).
+`model_name` is strict about `kalman_model`: an unrecognized value (anything other than
+`'local_level'` or `'local_linear_trend'`) is a hard SQL error naming the parameter — there
+is no silent default. `yhat_lower` / `yhat_upper` are now returned (no longer NULL/deferred)
+— they are the crate Kalman model's own prediction interval at `confidence_level`
+(default 0.90); see
+[07-forecasting.md's "Prediction intervals, fitted values and input handling"](../../api/07-forecasting.md#prediction-intervals-fitted-values-and-input-handling)
+for calibration caveats shared across all models.
 
 ## SQL Examples (verified end-to-end)
 
@@ -94,9 +102,12 @@ SELECT
     forecast_step,
     ds,
     ROUND(yhat, 4) AS yhat,
+    yhat_lower,
+    yhat_upper,
     model_name
 FROM ts_forecast_by('sales', product_id, ds, y, 'Kalman', 7, '1d')
 ORDER BY product_id, forecast_step;
+-- model_name = 'Kalman(local_level)'
 ```
 
 ### Local Linear Trend
@@ -114,10 +125,20 @@ FROM ts_forecast_by(
     params := MAP{'kalman_model': 'local_linear_trend'}
 )
 ORDER BY product_id, forecast_step;
+-- model_name = 'Kalman(local_linear_trend)'
 ```
 
 Expected: `local_level` produces a flat forecast; `local_linear_trend` produces an
-increasing or decreasing sequence capturing the trend direction.
+increasing or decreasing sequence capturing the trend direction. An unrecognized
+`kalman_model` value (e.g. `'local_lvl'`) is a hard SQL error:
+
+```sql
+SELECT * FROM ts_forecast_by(
+    'sales', product_id, ds, y, 'Kalman', 7, '1d',
+    params := MAP{'kalman_model': 'local_lvl'}
+);
+-- Invalid Input Error: Invalid parameter 'kalman_model' = 'local_lvl': expected local_level or local_linear_trend
+```
 
 ## Choosing Between Specs
 

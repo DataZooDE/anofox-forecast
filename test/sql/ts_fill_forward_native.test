@@ -137,18 +137,21 @@ G2	2024-01-02	NULL
 G2	2024-01-03	NULL
 G2	2024-01-04	NULL
 
-# Test alias with anofox_fcst prefix
-query III
+# Tombstone (Phase 18, 18-01, class A): _ts_fill_forward_native was renamed from
+# ts_fill_forward_native (a public macro, auto-aliased as anofox_fcst_ts_fill_forward_native)
+# to its current leading-underscore internal name in commit 4477e7b "refactor: Remove
+# ts_fill_gaps_operator_by and internalize native functions". Internal (_-prefixed) table
+# functions are registered directly, not through the ts_table_macros[] array, so they never
+# receive the anofox_fcst_ prefixed alias that RegisterTsTableMacros() generates for public
+# macros (src/macros/ts_macros.cpp:2685-2690) -- no replacement exists, by design.
+statement error
 SELECT * FROM anofox_fcst__ts_fill_forward_native(
     (SELECT group_col, date_col, value FROM test_date ORDER BY group_col, date_col),
     '2024-01-04'::DATE,
     '1d'
 );
 ----
-A	2024-01-01	10.0
-A	2024-01-02	20.0
-A	2024-01-03	NULL
-A	2024-01-04	NULL
+does not exist
 
 # ==============================================================================
 # Test monthly frequency with calendar-aware fill forward
@@ -165,7 +168,10 @@ FROM (VALUES
     ('2023-02-15', 200.0)
 ) AS t(d, v);
 
-# Monthly frequency should correctly extend to May (proper calendar dates)
+# Monthly frequency should correctly extend using calendar dates. D-09/G24 (Phase 13
+# plan 13-03): steps from the LAST OBSERVED DATE (2023-02-15), keeping its
+# day-of-month (15th, not the old start-of-month snapping to the 1st) since it is
+# not month-end; 2023-05-15 would exceed the 2023-05-01 target, so only Mar/Apr fill.
 query III
 SELECT * FROM _ts_fill_forward_native(
     (SELECT group_col, date_col, value FROM test_monthly ORDER BY group_col, date_col),
@@ -175,9 +181,8 @@ SELECT * FROM _ts_fill_forward_native(
 ----
 M	2023-01-15	100.0
 M	2023-02-15	200.0
-M	2023-03-01	NULL
-M	2023-04-01	NULL
-M	2023-05-01	NULL
+M	2023-03-15	NULL
+M	2023-04-15	NULL
 
 # Test monthly with DuckDB interval-style "1 month"
 statement ok
@@ -243,7 +248,8 @@ FROM (VALUES
     ('2020-06-15', 100.0)
 ) AS t(d, v);
 
-# Should extend through 2023
+# Should extend through 2023. D-09/G24: keeps the observed day-of-month (June 15th,
+# not the old start-of-year snapping to Jan 1st) since 2020-06-15 is not month-end.
 query III
 SELECT * FROM _ts_fill_forward_native(
     (SELECT group_col, date_col, value FROM test_yearly ORDER BY group_col, date_col),
@@ -252,9 +258,9 @@ SELECT * FROM _ts_fill_forward_native(
 );
 ----
 Y	2020-06-15	100.0
-Y	2021-01-01	NULL
-Y	2022-01-01	NULL
-Y	2023-01-01	NULL
+Y	2021-06-15	NULL
+Y	2022-06-15	NULL
+Y	2023-06-15	NULL
 
 # ==============================================================================
 # Test duplicate (group, date) pair detection
@@ -284,3 +290,18 @@ Duplicate (group, date) pair detected
 
 statement ok
 DROP TABLE dup_ff_test;
+
+# ==============================================================================
+# WR-01 (Phase 18 review): target_date digit-string that overflows int64_t must
+# raise a clean DuckDB InvalidInputException naming target_date, not a leaked
+# raw std::out_of_range ("Invalid Error: stoll").
+# ==============================================================================
+
+statement error
+SELECT * FROM _ts_fill_forward_native(
+    (SELECT group_col, date_col, value FROM test_date ORDER BY group_col, date_col),
+    '99999999999999999999',
+    '1d'
+);
+----
+target_date value '99999999999999999999' is out of range for a raw integer day-offset

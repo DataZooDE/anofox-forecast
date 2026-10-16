@@ -1,0 +1,272 @@
+# name: test/sql/correctness/data_prep.test
+# description: Correctness-suite value pins for data-preparation functions fixed this
+#   milestone (ts_diff_by, ts_fill_* family, ts_drop_constant_by/_ts_is_constant,
+#   ts_aggregate_hierarchy, ts_interval_width_by/ts_mean_interval_width,
+#   _ts_future_dates, ts_estimate_backtest_memory) -- Phase 18, 18-02, RUST-03/05/07/09,
+#   DET-07, WRAP-03, TEST-03. Not json-gated (D-02): runs on every native build.
+# group: [sql]
+#
+# Closed-form assertions throughout (quadratic second-difference, scale-relative
+# constant tolerance, SQL SUM NULL semantics) -- reused from test/sql/
+# ts_series_transforms_rust.test (Phase 12 12-07), ts_detection_reference.test
+# (Phase 15 15-05), ts_aggregate_hierarchy.test, ts_conformal_reference.test (16-01),
+# and ts_forecast_calendar_surfaces.test, cited inline where reused.
+
+require anofox_forecast
+
+# =============================================================================
+# ts_diff_by (RUST-03): d-th order differencing. Group A is quadratic
+# [1,4,9,16,25]; the constant second derivative is 2.0 once two rows available.
+# =============================================================================
+
+statement ok
+CREATE TABLE dd AS
+SELECT 'A' AS id, ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::DATE AS ds, ((i+1)*(i+1))::DOUBLE AS y
+FROM generate_series(0, 4) AS t(i);
+
+query R
+SELECT diff_value FROM ts_diff_by('dd', id, ds, y, 2) ORDER BY ds;
+----
+NULL
+NULL
+2.0
+2.0
+2.0
+
+query R
+SELECT diff_value FROM ts_diff_by('dd', id, ds, y, 1) ORDER BY ds;
+----
+NULL
+3.0
+5.0
+7.0
+9.0
+
+statement error
+SELECT * FROM ts_diff_by('dd', id, ds, y, 1, seasonal_lag := 0);
+----
+seasonal_lag must be >= 1
+
+statement ok
+DROP TABLE dd;
+
+# =============================================================================
+# ts_fill_nulls_mean_by (RUST-05): mean of present values fills NULL/NaN.
+# =============================================================================
+
+statement ok
+CREATE TABLE fm AS
+SELECT 'A' AS id, ('2024-01-01'::DATE + (i || ' day')::INTERVAL)::DATE AS ds, v AS y
+FROM (VALUES (0, 1.0), (1, NULL), (2, 3.0), (3, NULL), (4, 5.0)) AS t(i, v);
+
+# mean of [1,3,5] = 3; NULLs filled with 3.
+query R
+SELECT filled_value FROM ts_fill_nulls_mean_by('fm', id, ds, y) ORDER BY ds;
+----
+1.0
+3.0
+3.0
+3.0
+5.0
+
+query I
+SELECT (SELECT list(filled_value ORDER BY ds) FROM ts_fill_nulls_mean_by('fm', id, ds, y))
+     = _ts_fill_nulls_mean([1.0, NULL, 3.0, NULL, 5.0]::DOUBLE[]);
+----
+true
+
+statement ok
+DROP TABLE fm;
+
+# =============================================================================
+# ts_fill_nulls_forward_by (LOCF) / ts_fill_nulls_backward_by (NOCB): edge
+# NULLs are NOT filled by the opposite direction (D-14, cited from
+# ts_detection_reference.test 15-05).
+# =============================================================================
+
+statement ok
+CREATE TABLE edge_null_t AS
+SELECT 'a' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, v
+FROM (SELECT unnest(range(5)) AS i, unnest([NULL, 1.0, NULL, 3.0, NULL]) AS v);
+
+query I
+SELECT list(filled_value ORDER BY ds) FROM ts_fill_nulls_forward_by('edge_null_t', id, ds, v);
+----
+[NULL, 1.0, 1.0, 3.0, 3.0]
+
+query I
+SELECT list(filled_value ORDER BY ds) FROM ts_fill_nulls_backward_by('edge_null_t', id, ds, v);
+----
+[1.0, 1.0, 3.0, 3.0, NULL]
+
+statement ok
+DROP TABLE edge_null_t;
+
+# =============================================================================
+# ts_drop_constant_by / _ts_is_constant (RUST-09/DET-07): scale-relative
+# tolerance (max - min <= 1e-10 * max(1, max|x|)), not absolute f64::EPSILON.
+# =============================================================================
+
+query I
+SELECT _ts_is_constant([1e12, 1e12 + 0.001]::DOUBLE[]);
+----
+true
+
+query I
+SELECT _ts_is_constant([1.0, 1.0 + 1e-9]::DOUBLE[]);
+----
+false
+
+query I
+SELECT _ts_is_constant([5.0, NULL, 5.0, 'NaN'::DOUBLE]::DOUBLE[]);
+----
+true
+
+statement ok
+CREATE TABLE const_scale_t AS
+SELECT 'const_at_scale' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds,
+       (1e12 + (i % 2) * 0.0001)::DOUBLE AS v
+FROM range(10) r(i)
+UNION ALL
+SELECT 'real_series' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, i::DOUBLE AS v
+FROM range(10) r(i);
+
+query I
+SELECT list(DISTINCT id ORDER BY id) FROM ts_drop_constant_by('const_scale_t', id, v);
+----
+[real_series]
+
+statement ok
+DROP TABLE const_scale_t;
+
+# =============================================================================
+# ts_aggregate_hierarchy SQL SUM NULL semantics (D-08, RUST-07): sum of
+# present values at each rollup level, NULL (not 0) when every leaf is NULL.
+# =============================================================================
+
+statement ok
+CREATE TABLE hier_nulls AS SELECT * FROM (VALUES
+    ('EU', 'S1', 'A', DATE '2024-01-01', 10.0),
+    ('EU', 'S1', 'B', DATE '2024-01-01', NULL),
+    ('EU', 'S2', 'C', DATE '2024-01-01', NULL)
+) AS t(region, store, item, ds, qty);
+
+# Partially-NULL group: EU|S1 has A=10.0, B=NULL -> sum of present values = 10.0
+query R
+SELECT qty FROM ts_aggregate_hierarchy(
+    (SELECT ds, qty, region, store, item FROM hier_nulls), MAP{}
+) WHERE unique_id = 'EU|S1|AGGREGATED' AND ds = DATE '2024-01-01';
+----
+10.0
+
+# All-NULL group: EU|S2 has only C=NULL -> NULL (no NULL->0 imputation)
+query R
+SELECT qty FROM ts_aggregate_hierarchy(
+    (SELECT ds, qty, region, store, item FROM hier_nulls), MAP{}
+) WHERE unique_id = 'EU|S2|AGGREGATED' AND ds = DATE '2024-01-01';
+----
+NULL
+
+# Grand total rolls up to the only present leaf value.
+query R
+SELECT qty FROM ts_aggregate_hierarchy(
+    (SELECT ds, qty, region, store, item FROM hier_nulls), MAP{}
+) WHERE unique_id = 'AGGREGATED|AGGREGATED|AGGREGATED' AND ds = DATE '2024-01-01';
+----
+10.0
+
+statement ok
+DROP TABLE hier_nulls;
+
+# =============================================================================
+# ts_interval_width_by / ts_mean_interval_width: pairwise-complete mean
+# interval width (cited from ts_conformal_reference.test 16-01).
+# =============================================================================
+
+statement ok
+CREATE TABLE iw(grp VARCHAR, ds DATE, lo DOUBLE, up DOUBLE);
+
+statement ok
+INSERT INTO iw VALUES
+  ('g1', DATE '2024-03-01', 1.0, NULL),
+  ('g1', DATE '2024-03-02', NULL, 5.0),
+  ('g1', DATE '2024-03-03', 2.0, 4.0),
+  ('g1', DATE '2024-03-04', 3.0, 9.0);
+
+# rows 3-4: widths 2.0 and 6.0 -> mean 4.0, n_intervals 2 (rows 1-2 excluded,
+# pairwise-incomplete).
+query I
+SELECT ABS(mean_width - 4.0) < 1e-12 AND n_intervals = 2
+FROM ts_interval_width_by('iw', grp, ds, lo, up);
+----
+true
+
+# ts_mean_interval_width (scalar form): [0,NULL,4] vs [2,3,5] -> present pairs
+# (0,2)->2 and (4,5)->1, mean 1.5.
+query I
+SELECT ts_mean_interval_width([0, NULL, 4]::DOUBLE[], [2, 3, 5]::DOUBLE[]) = 1.5;
+----
+true
+
+statement ok
+DROP TABLE iw;
+
+# =============================================================================
+# _ts_future_dates: calendar-aware step generation (month-end preserved across
+# a leap-day boundary, RUST-09/D-12; cited from ts_forecast_calendar_surfaces.test).
+# =============================================================================
+
+query I
+SELECT _ts_future_dates(
+    [TIMESTAMP '2023-09-30', TIMESTAMP '2023-10-31', TIMESTAMP '2023-11-30'], 3, INTERVAL '1 month')
+= [TIMESTAMP '2023-12-31 00:00:00', TIMESTAMP '2024-01-31 00:00:00', TIMESTAMP '2024-02-29 00:00:00'];
+----
+true
+
+# =============================================================================
+# ts_estimate_backtest_memory: deterministic closed-form byte-count arithmetic
+# (no fixture needed -- the function IS the closed form).
+# cv_splits = 100*365*3*40 = 4,380,000; list_agg = 100*3*182*8 = 436,800;
+# output = 100*3*30*88 = 792,000; total/1048576 = 5 (integer MB).
+# =============================================================================
+
+query I
+SELECT ts_estimate_backtest_memory(100, 365, 3, 30);
+----
+5
+
+# =============================================================================
+# ts_fill_gaps_by / ts_fill_forward_by (WRAP-03): calendar gap filling inserts
+# a NULL-valued row at the missing grid point (ts_fill_gaps_by) / extends the
+# series with NULL-valued rows out to target_date (ts_fill_forward_by); the
+# original value column name is preserved (not a generic "value_col" alias,
+# since commit ca7d4f6, Phase 18 18-01 class A).
+# =============================================================================
+
+statement ok
+CREATE TABLE gaps_t AS SELECT * FROM (VALUES
+  ('a', DATE '2024-01-01', 1.0),
+  ('a', DATE '2024-01-03', 3.0)
+) t(grp, dt, val);
+
+query I
+SELECT list(val ORDER BY dt) FROM ts_fill_gaps_by('gaps_t', grp, dt, val, '1 day');
+----
+[1.0, NULL, 3.0]
+
+statement ok
+DROP TABLE gaps_t;
+
+statement ok
+CREATE TABLE ff_t AS SELECT * FROM (VALUES
+  ('a', DATE '2024-01-01', 1.0),
+  ('a', DATE '2024-01-02', 2.0)
+) t(grp, dt, val);
+
+query I
+SELECT list(val ORDER BY dt) FROM ts_fill_forward_by('ff_t', grp, dt, val, '2024-01-05'::TIMESTAMP, '1 day');
+----
+[1.0, 2.0, NULL, NULL, NULL]
+
+statement ok
+DROP TABLE ff_t;

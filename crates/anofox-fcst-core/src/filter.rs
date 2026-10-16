@@ -17,7 +17,7 @@
 //! assert!(!is_constant(&trimmed));
 //! ```
 
-use crate::error::Result;
+use crate::error::{ForecastError, Result};
 
 /// Checks if a series is constant (all non-NULL values are the same).
 ///
@@ -37,14 +37,44 @@ use crate::error::Result;
 /// assert!(!is_constant(&[Some(1.0), Some(2.0), Some(3.0)]));
 /// ```
 pub fn is_constant(values: &[Option<f64>]) -> bool {
-    let non_null: Vec<f64> = values.iter().filter_map(|v| *v).collect();
+    // Keep NaN and infinite entries here -- is_constant_slice ignores NaN
+    // but must see an infinity to correctly report "not constant" (D-13).
+    let present: Vec<f64> = values.iter().filter_map(|v| *v).collect();
+    is_constant_slice(&present)
+}
 
-    if non_null.len() < 2 {
+/// Scale-relative constant check shared by [`is_constant`], `quality.rs`'s
+/// `compute_data_quality`, and `stats.rs`'s `compute_ts_stats` (D-13, G25):
+/// `values` is constant if `max - min <= 1e-10 * max(1, max|x|)` over its
+/// present (non-`NaN`) entries, else not constant. Fewer than 2 present
+/// values is constant (vacuously, or trivially for a single value). `NaN`
+/// entries are ignored; an infinite present value makes the range
+/// non-finite, which is never `<=` a finite tolerance, so a series
+/// containing `+-inf` is never constant (even alongside only one other
+/// finite value).
+///
+/// # Example
+/// ```
+/// use anofox_fcst_core::filter::is_constant_slice;
+/// assert!(is_constant_slice(&[1e12, 1e12 + 0.001])); // scale-relative: still constant
+/// assert!(!is_constant_slice(&[1.0, 1.0 + 1e-9])); // tiny but relatively significant at this scale
+/// assert!(!is_constant_slice(&[f64::INFINITY, 1.0]));
+/// ```
+pub fn is_constant_slice(values: &[f64]) -> bool {
+    let present: Vec<f64> = values.iter().copied().filter(|v| !v.is_nan()).collect();
+    if present.len() < 2 {
         return true;
     }
-
-    let first = non_null[0];
-    non_null.iter().all(|v| (v - first).abs() < f64::EPSILON)
+    let min = present.iter().cloned().fold(f64::INFINITY, f64::min);
+    let max = present.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let range = max - min;
+    if !range.is_finite() {
+        // An infinite (or NaN-from-inf-minus-inf) range can never satisfy a
+        // finite tolerance -- treat as "not constant".
+        return false;
+    }
+    let scale = 1.0f64.max(present.iter().fold(0.0f64, |acc, v| acc.max(v.abs())));
+    range <= 1e-10 * scale
 }
 
 /// Checks if a series is too short for analysis.
@@ -130,8 +160,34 @@ pub fn drop_edge_zeros(values: &[Option<f64>]) -> Vec<Option<f64>> {
     drop_trailing_zeros(&trimmed)
 }
 
-/// Compute difference of a series at given order.
-pub fn diff(values: &[f64], order: usize) -> Result<Vec<f64>> {
+/// Compute the lag-`lag` difference of a series, applied `order` times
+/// (R's `diff(x, lag = k, differences = d)`; numpy's `diff(x, n=order)` is
+/// `diff_lag(x, order, 1)`).
+///
+/// # Arguments
+/// * `values` - Input series
+/// * `order` - Number of times the lag-`lag` difference is applied (d-th order)
+/// * `lag` - Step between the two values differenced at each pass; must be >= 1
+///
+/// # Returns
+/// `Err` if `lag == 0`. Output length is `values.len() - order * lag` (empty,
+/// never an error, if the series is too short for the requested order/lag).
+///
+/// # Example
+/// ```
+/// use anofox_fcst_core::filter::diff_lag;
+/// assert_eq!(diff_lag(&[1.0, 4.0, 9.0, 16.0, 25.0], 2, 1).unwrap(), vec![2.0, 2.0, 2.0]);
+/// assert_eq!(diff_lag(&[1.0, 4.0, 9.0, 16.0, 25.0], 1, 2).unwrap(), vec![8.0, 12.0, 16.0]);
+/// ```
+pub fn diff_lag(values: &[f64], order: usize, lag: usize) -> Result<Vec<f64>> {
+    if lag == 0 {
+        return Err(ForecastError::InvalidParameter {
+            param: "lag".to_string(),
+            value: "0".to_string(),
+            reason: "lag must be >= 1".to_string(),
+        });
+    }
+
     if order == 0 {
         return Ok(values.to_vec());
     }
@@ -139,12 +195,65 @@ pub fn diff(values: &[f64], order: usize) -> Result<Vec<f64>> {
     let mut result = values.to_vec();
 
     for _ in 0..order {
-        if result.len() < 2 {
+        if result.len() <= lag {
             return Ok(vec![]);
         }
 
-        result = result.windows(2).map(|w| w[1] - w[0]).collect();
+        result = (lag..result.len())
+            .map(|i| result[i] - result[i - lag])
+            .collect();
     }
+
+    Ok(result)
+}
+
+/// Compute the d-th order difference of a series (numpy `diff(x, n=order)`).
+/// Equivalent to `diff_lag(values, order, 1)`.
+pub fn diff(values: &[f64], order: usize) -> Result<Vec<f64>> {
+    diff_lag(values, order, 1)
+}
+
+/// Option-aware, row-aligned d-th order lag-`lag` difference.
+///
+/// Unlike [`diff_lag`]/[`diff`], the output has the SAME length as `values`:
+/// the first `min(values.len(), order * lag)` entries are `None` (so the
+/// series stays aligned with its original index/dates), and any difference
+/// touching a missing (`None` or `NaN`) input anywhere along the way is
+/// `None` rather than an error — this is the SQL row-wise-transform policy
+/// (Phase 12 orchestrator decision), not the single-series interior-NULL
+/// error rule (D-03).
+///
+/// # Arguments
+/// * `values` - Input series, `None` marking a missing observation
+/// * `order` - Number of times the lag-`lag` difference is applied
+/// * `lag` - Step between the two values differenced at each pass; must be >= 1
+///
+/// # Returns
+/// `Err` if `lag == 0`.
+///
+/// # Example
+/// ```
+/// use anofox_fcst_core::filter::diff_aligned;
+/// let values = vec![Some(1.0), Some(4.0), Some(9.0), Some(16.0), Some(25.0)];
+/// assert_eq!(
+///     diff_aligned(&values, 2, 1).unwrap(),
+///     vec![None, None, Some(2.0), Some(2.0), Some(2.0)]
+/// );
+/// ```
+pub fn diff_aligned(values: &[Option<f64>], order: usize, lag: usize) -> Result<Vec<Option<f64>>> {
+    // NaN-encode missing values so the ordinary diff_lag arithmetic
+    // naturally propagates missingness (NaN - x == NaN, x - NaN == NaN).
+    let nan_encoded: Vec<f64> = values.iter().map(|v| v.unwrap_or(f64::NAN)).collect();
+    let diffed = diff_lag(&nan_encoded, order, lag)?;
+
+    let pad = values.len().saturating_sub(diffed.len());
+    let mut result = Vec::with_capacity(values.len());
+    result.extend(std::iter::repeat_n(None, pad));
+    result.extend(
+        diffed
+            .into_iter()
+            .map(|v| if v.is_nan() { None } else { Some(v) }),
+    );
 
     Ok(result)
 }
@@ -158,6 +267,39 @@ mod tests {
         assert!(is_constant(&[Some(1.0), Some(1.0), Some(1.0)]));
         assert!(!is_constant(&[Some(1.0), Some(2.0), Some(1.0)]));
         assert!(is_constant(&[Some(1.0), None, Some(1.0)]));
+    }
+
+    /// D-13, G25: scale-relative is_constant. [1e12, 1e12 + 0.001] is NOW
+    /// constant (previously not, absolute f64::EPSILON); [1.0, 1.0 + 1e-9]
+    /// is NOT constant at that much smaller scale.
+    #[test]
+    fn test_is_constant_scale_relative() {
+        assert!(is_constant_slice(&[1e12, 1e12 + 0.001]));
+        assert!(!is_constant_slice(&[1.0, 1.0 + 1e-9]));
+        assert!(is_constant_slice(&[5.0, 5.0]));
+        assert!(!is_constant_slice(&[1.0, 2.0, 3.0]));
+    }
+
+    #[test]
+    fn test_is_constant_nan_null_ignored() {
+        assert!(is_constant(&[Some(5.0), None, Some(5.0), Some(f64::NAN)]));
+        assert!(is_constant_slice(&[5.0, f64::NAN, 5.0]));
+    }
+
+    #[test]
+    fn test_is_constant_edge_cases() {
+        assert!(is_constant(&[Some(1.0)]));
+        assert!(is_constant_slice(&[1.0]));
+        assert!(is_constant(&[]));
+        assert!(is_constant_slice(&[]));
+    }
+
+    /// An infinite value makes the range non-finite -- never constant,
+    /// even alongside a single other finite value.
+    #[test]
+    fn test_is_constant_infinite_is_not_constant() {
+        assert!(!is_constant(&[Some(f64::INFINITY), Some(1.0)]));
+        assert!(!is_constant_slice(&[f64::INFINITY, 1.0]));
     }
 
     #[test]
@@ -255,5 +397,65 @@ mod tests {
         let values = vec![1.0];
         let result = diff(&values, 2).unwrap();
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_diff_lag_matches_diff_for_lag_one() {
+        let values = vec![1.0, 4.0, 9.0, 16.0, 25.0];
+        assert_eq!(diff_lag(&values, 2, 1).unwrap(), diff(&values, 2).unwrap());
+        assert_eq!(diff_lag(&values, 2, 1).unwrap(), vec![2.0, 2.0, 2.0]);
+    }
+
+    #[test]
+    fn test_diff_lag_seasonal() {
+        let values = vec![1.0, 4.0, 9.0, 16.0, 25.0];
+        assert_eq!(diff_lag(&values, 1, 2).unwrap(), vec![8.0, 12.0, 16.0]);
+        assert_eq!(diff_lag(&values, 2, 2).unwrap(), vec![8.0]);
+    }
+
+    #[test]
+    fn test_diff_lag_zero_is_error() {
+        let values = vec![1.0, 2.0, 3.0];
+        assert!(diff_lag(&values, 1, 0).is_err());
+    }
+
+    #[test]
+    fn test_diff_aligned_basic() {
+        let values = vec![Some(1.0), Some(4.0), Some(9.0), Some(16.0), Some(25.0)];
+        assert_eq!(
+            diff_aligned(&values, 2, 1).unwrap(),
+            vec![None, None, Some(2.0), Some(2.0), Some(2.0)]
+        );
+    }
+
+    #[test]
+    fn test_diff_aligned_interior_null_propagates() {
+        let values = vec![Some(1.0), None, Some(9.0), Some(16.0), Some(25.0)];
+        assert_eq!(
+            diff_aligned(&values, 1, 1).unwrap(),
+            vec![None, None, None, Some(7.0), Some(9.0)]
+        );
+        assert_eq!(
+            diff_aligned(&values, 2, 1).unwrap(),
+            vec![None, None, None, None, Some(2.0)]
+        );
+    }
+
+    #[test]
+    fn test_diff_aligned_order_zero_passthrough() {
+        let values = vec![Some(1.0), Some(4.0), Some(9.0)];
+        assert_eq!(diff_aligned(&values, 0, 1).unwrap(), values);
+    }
+
+    #[test]
+    fn test_diff_aligned_single_element() {
+        let values = vec![Some(1.0)];
+        assert_eq!(diff_aligned(&values, 1, 1).unwrap(), vec![None]);
+    }
+
+    #[test]
+    fn test_diff_aligned_lag_zero_is_error() {
+        let values = vec![Some(1.0), Some(2.0)];
+        assert!(diff_aligned(&values, 1, 0).is_err());
     }
 }

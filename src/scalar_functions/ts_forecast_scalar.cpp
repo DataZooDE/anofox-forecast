@@ -1,11 +1,16 @@
 #include "anofox_forecast_extension.hpp"
 #include "anofox_fcst_ffi.h"
 #include "ts_fill_gaps_native.hpp"
+#include "ts_forecast_params.hpp"
+#include "ts_future_dates.hpp"
+#include "ts_list_marshal.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/scalar_function.hpp"
+#include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include "duckdb/planner/expression/bound_function_expression.hpp"
 #include "duckdb/common/types/date.hpp"
+#include "duckdb/common/types/interval.hpp"
 #include "duckdb/common/types/timestamp.hpp"
 #include "duckdb/common/types/vector.hpp"
 #include <algorithm>
@@ -54,6 +59,9 @@ struct TsForecastScalarBindData : public FunctionData {
     // AutoEnsemble params (Phase 4)
     int64_t ensemble_top_k = 0;
     string ensemble_method = "";
+    // ARIMA order params (D-08/D-09, plan 10-02)
+    string arima_order = "";
+    string seasonal_order = "";
 
     DateColumnType date_col_type = DateColumnType::DATE;
 
@@ -77,6 +85,8 @@ struct TsForecastScalarBindData : public FunctionData {
         copy->kalman_model = kalman_model;
         copy->ensemble_top_k = ensemble_top_k;
         copy->ensemble_method = ensemble_method;
+        copy->arima_order = arima_order;
+        copy->seasonal_order = seasonal_order;
         copy->date_col_type = date_col_type;
         return std::move(copy);
     }
@@ -88,87 +98,6 @@ struct TsForecastScalarBindData : public FunctionData {
                confidence_level == other.confidence_level;
     }
 };
-
-// ============================================================================
-// Parameter Parsing Helpers (shared with ts_forecast_native.cpp)
-// ============================================================================
-
-static string ParseStringParam(const Value &params_value, const string &key, const string &default_val) {
-    if (params_value.IsNull()) return default_val;
-    if (params_value.type().id() == LogicalTypeId::MAP) {
-        auto &map_children = MapValue::GetChildren(params_value);
-        for (auto &child : map_children) {
-            auto &k = StructValue::GetChildren(child)[0];
-            auto &v = StructValue::GetChildren(child)[1];
-            if (k.ToString() == key && !v.IsNull()) return v.ToString();
-        }
-    } else if (params_value.type().id() == LogicalTypeId::STRUCT) {
-        // Mirrors ts_forecast_native.cpp — accept typed STRUCT params too,
-        // so `{seasonal_period: 7, laplace_variant: 'auto'}` behaves the same
-        // as the equivalent MAP.
-        auto &struct_children = StructValue::GetChildren(params_value);
-        auto &child_types = StructType::GetChildTypes(params_value.type());
-        for (idx_t i = 0; i < child_types.size(); i++) {
-            if (child_types[i].first == key && !struct_children[i].IsNull()) {
-                return struct_children[i].ToString();
-            }
-        }
-    }
-    return default_val;
-}
-
-static int64_t ParseInt64Param(const Value &params_value, const string &key, int64_t default_val) {
-    string str = ParseStringParam(params_value, key, "");
-    if (str.empty()) return default_val;
-    try { return std::stoll(str); } catch (...) { return default_val; }
-}
-
-static double ParseDoubleParam(const Value &params_value, const string &key, double default_val) {
-    string str = ParseStringParam(params_value, key, "");
-    if (str.empty()) return default_val;
-    try { return std::stod(str); } catch (...) { return default_val; }
-}
-
-static void ValidateParams(const Value &params_value, const string &method) {
-    static const unordered_set<string> valid_keys = {
-        "model", "seasonal_period", "seasonal_periods", "confidence_level", "window", "model_pool",
-        "laplace_variant", "laplace_seasonal_batch_init",
-        "garch_p", "garch_q", "kalman_model",
-        "top_k", "combination_method"   // Phase 4: AutoEnsemble params
-    };
-
-    if (params_value.IsNull()) return;
-
-    vector<string> unknown_keys;
-    if (params_value.type().id() == LogicalTypeId::MAP) {
-        auto &map_children = MapValue::GetChildren(params_value);
-        for (auto &child : map_children) {
-            auto &key = StructValue::GetChildren(child)[0];
-            string key_str = key.ToString();
-            if (valid_keys.find(key_str) == valid_keys.end()) {
-                unknown_keys.push_back(key_str);
-            }
-        }
-    } else if (params_value.type().id() == LogicalTypeId::STRUCT) {
-        auto &child_types = StructType::GetChildTypes(params_value.type());
-        for (idx_t i = 0; i < child_types.size(); i++) {
-            if (valid_keys.find(child_types[i].first) == valid_keys.end()) {
-                unknown_keys.push_back(child_types[i].first);
-            }
-        }
-    }
-
-    if (!unknown_keys.empty()) {
-        string unknown_list;
-        for (size_t i = 0; i < unknown_keys.size(); i++) {
-            if (i > 0) unknown_list += ", ";
-            unknown_list += "'" + unknown_keys[i] + "'";
-        }
-        throw InvalidInputException(
-            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init, garch_p, garch_q, kalman_model, top_k, combination_method",
-            unknown_list);
-    }
-}
 
 // ============================================================================
 // Bind Function
@@ -257,56 +186,15 @@ static Value MicrosToDateValue(int64_t micros, DateColumnType date_col_type) {
 }
 
 // ============================================================================
-// Compute Forecast Date (calendar-aware)
-// ============================================================================
-
-static int64_t ComputeForecastDate(int64_t last_date, int64_t step,
-                                    const TsForecastScalarBindData &bind_data) {
-    if (bind_data.frequency_type == FrequencyType::MONTHLY ||
-        bind_data.frequency_type == FrequencyType::QUARTERLY ||
-        bind_data.frequency_type == FrequencyType::YEARLY) {
-        date_t base_date = MicrosecondsToDate(last_date);
-        int32_t year, month, day;
-        Date::Convert(base_date, year, month, day);
-
-        int64_t months_to_add = step * bind_data.frequency_seconds;
-        if (bind_data.frequency_type == FrequencyType::QUARTERLY) {
-            months_to_add *= 3;
-        } else if (bind_data.frequency_type == FrequencyType::YEARLY) {
-            months_to_add *= 12;
-        }
-
-        int64_t total_months = static_cast<int64_t>(year) * 12 + (month - 1) + months_to_add;
-        int32_t new_year = static_cast<int32_t>(total_months / 12);
-        int32_t new_month = static_cast<int32_t>((total_months % 12) + 1);
-
-        if (new_month < 1) {
-            new_month += 12;
-            new_year -= 1;
-        }
-
-        int32_t max_day = Date::MonthDays(new_year, new_month);
-        int32_t new_day = std::min(day, max_day);
-
-        date_t new_date = Date::FromDate(new_year, new_month, new_day);
-        return DateToMicroseconds(new_date);
-    } else {
-        int64_t freq_micros;
-        if (bind_data.date_col_type == DateColumnType::INTEGER ||
-            bind_data.date_col_type == DateColumnType::BIGINT) {
-            freq_micros = bind_data.frequency_seconds;
-        } else {
-            freq_micros = bind_data.frequency_is_raw
-                ? bind_data.frequency_seconds * 86400LL * 1000000LL
-                : bind_data.frequency_seconds * 1000000LL;
-        }
-        return last_date + freq_micros * step;
-    }
-}
-
-// ============================================================================
 // Execute Function
 // ============================================================================
+//
+// Forecast dates are computed via the Rust D-12 calendar rule
+// (crates/anofox-fcst-core/src/calendar.rs future_dates, reached through
+// ts_future_dates.hpp's StepFromFrequency + ComputeFutureDates) instead of
+// this file's own month arithmetic — the month-end-preserving /
+// day-of-month-clamp rule now matches ts_forecast_agg exactly (D-11
+// parity), including on month-end series ending in a short month.
 
 static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vector &result) {
     auto &bind_data = state.expr.Cast<BoundFunctionExpression>().bind_info->Cast<TsForecastScalarBindData>();
@@ -362,14 +250,21 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
         auto &date_entry = date_entries[date_idx];
         auto &date_child = ListVector::GetEntry(date_list_vec);
 
-        // Build sorted index by date
+        // Build sorted index by date. date_is_null tracks which entries had
+        // a NULL date (date_micros[i]=0 is a placeholder, not a real
+        // 1970-01-01 observation) so the calendar `observed` series below
+        // (used for frequency/month-end detection) never includes a NULL
+        // date disguised as epoch zero.
         vector<int64_t> date_micros(n);
+        vector<bool> date_is_null(n);
         for (idx_t i = 0; i < n; i++) {
             Value dv = date_child.GetValue(date_entry.offset + i);
             if (dv.IsNull()) {
                 date_micros[i] = 0;
+                date_is_null[i] = true;
             } else {
                 date_micros[i] = ExtractDateMicros(dv, bind_data.date_col_type);
+                date_is_null[i] = false;
             }
         }
 
@@ -378,11 +273,14 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
         std::sort(indices.begin(), indices.end(),
             [&date_micros](size_t a, size_t b) { return date_micros[a] < date_micros[b]; });
 
-        // Build sorted values + validity
+        // Build sorted values + validity, and the NON-NULL-date `observed`
+        // series (D-12) in the same ascending order — a subsequence of the
+        // already-sorted `indices`, so it stays ascending without a second sort.
         vector<double> sorted_values(n);
         size_t validity_words = (n + 63) / 64;
         vector<uint64_t> validity(validity_words, 0);
-        int64_t last_date = 0;
+        vector<int64_t> observed;
+        observed.reserve(n);
 
         for (size_t i = 0; i < n; i++) {
             idx_t src = indices[i];
@@ -395,7 +293,13 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
             } else {
                 sorted_values[i] = 0.0;
             }
-            last_date = date_micros[indices[i]];
+            if (!date_is_null[src]) {
+                observed.push_back(date_micros[src]);
+            }
+        }
+
+        if (observed.empty()) {
+            throw InvalidInputException("ts_forecast_by: all date values are NULL for this group");
         }
 
         // --- Parse per-row parameters ---
@@ -423,86 +327,25 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
             freq_parsed = parsed.type;
         }
 
-        // Parse MAP params
-        int64_t seasonal_period = bind_data.seasonal_period;
-        double confidence_level = bind_data.confidence_level;
-        int64_t window_param = bind_data.window;
-        string model_spec = bind_data.model_spec;
-        string seasonal_periods_str = bind_data.seasonal_periods_str;
-        string model_pool = bind_data.model_pool;
-        string laplace_variant = bind_data.laplace_variant;
-        bool laplace_seasonal_batch_init = bind_data.laplace_seasonal_batch_init;
-        int64_t garch_p = bind_data.garch_p;
-        int64_t garch_q = bind_data.garch_q;
-        string kalman_model = bind_data.kalman_model;
-        int64_t ensemble_top_k = bind_data.ensemble_top_k;
-        string ensemble_method = bind_data.ensemble_method;
-
+        // Parse MAP params via the shared header (ts_forecast_params.hpp) —
+        // the exact helper ts_forecast_agg.cpp now also uses, so this scalar
+        // (ts_forecast_by's path) and the aggregate cannot drift (10-10,
+        // FCST-06). A missing/NULL per-row params value falls back to a
+        // fresh ForecastParamSet(), which carries the same defaults
+        // TsForecastScalarBindData's unused-by-bind fields previously did.
+        ForecastParamSet p;
         auto p_idx = params_data.sel->get_index(row_idx);
         if (params_data.validity.RowIsValid(p_idx)) {
-            Value params_val = params_vec.GetValue(row_idx);
-            ValidateParams(params_val, method);
-            model_spec = ParseStringParam(params_val, "model", "");
-            seasonal_period = ParseInt64Param(params_val, "seasonal_period", 0);
-            confidence_level = ParseDoubleParam(params_val, "confidence_level", 0.90);
-            window_param = ParseInt64Param(params_val, "window", 0);
-            seasonal_periods_str = ParseStringParam(params_val, "seasonal_periods", "");
-            model_pool = ParseStringParam(params_val, "model_pool", "");
-            laplace_variant = ParseStringParam(params_val, "laplace_variant", "");
-            laplace_seasonal_batch_init =
-                ParseInt64Param(params_val, "laplace_seasonal_batch_init", 0) != 0;
-            garch_p = ParseInt64Param(params_val, "garch_p", 0);
-            garch_q = ParseInt64Param(params_val, "garch_q", 0);
-            kalman_model = ParseStringParam(params_val, "kalman_model", "");
-            ensemble_top_k = ParseInt64Param(params_val, "top_k", 0);
-            ensemble_method = ParseStringParam(params_val, "combination_method", "");
+            p = ParseForecastParamSet(params_vec.GetValue(row_idx));
         }
 
         // --- Build ForecastOptions ---
         ForecastOptions opts;
         memset(&opts, 0, sizeof(opts));
-        strncpy(opts.model, method.c_str(), sizeof(opts.model) - 1);
-        opts.model[sizeof(opts.model) - 1] = '\0';
-        if (!model_spec.empty()) {
-            strncpy(opts.ets_model, model_spec.c_str(), sizeof(opts.ets_model) - 1);
-            opts.ets_model[sizeof(opts.ets_model) - 1] = '\0';
-        }
+        ApplyForecastParamSet(p, method, opts);
         opts.horizon = static_cast<int>(horizon);
-        opts.confidence_level = confidence_level;
-        opts.seasonal_period = static_cast<int>(seasonal_period);
-        opts.auto_detect_seasonality = (seasonal_period == 0 && seasonal_periods_str.empty());
         opts.include_fitted = false;
         opts.include_residuals = false;
-        opts.window = static_cast<int>(window_param);
-        if (!seasonal_periods_str.empty()) {
-            strncpy(opts.seasonal_periods_str, seasonal_periods_str.c_str(),
-                    sizeof(opts.seasonal_periods_str) - 1);
-            opts.seasonal_periods_str[sizeof(opts.seasonal_periods_str) - 1] = '\0';
-        }
-        if (!model_pool.empty()) {
-            strncpy(opts.model_pool, model_pool.c_str(), sizeof(opts.model_pool) - 1);
-            opts.model_pool[sizeof(opts.model_pool) - 1] = '\0';
-        }
-        if (!laplace_variant.empty()) {
-            strncpy(opts.laplace_variant, laplace_variant.c_str(),
-                    sizeof(opts.laplace_variant) - 1);
-            opts.laplace_variant[sizeof(opts.laplace_variant) - 1] = '\0';
-        }
-        opts.laplace_seasonal_batch_init = laplace_seasonal_batch_init;
-        opts.garch_p = static_cast<int>(garch_p);
-        opts.garch_q = static_cast<int>(garch_q);
-        if (!kalman_model.empty()) {
-            strncpy(opts.kalman_model, kalman_model.c_str(),
-                    sizeof(opts.kalman_model) - 1);
-            opts.kalman_model[sizeof(opts.kalman_model) - 1] = '\0';
-        }
-        // AutoEnsemble params (Phase 4)
-        opts.ensemble_top_k = static_cast<int>(ensemble_top_k);
-        if (!ensemble_method.empty()) {
-            strncpy(opts.ensemble_method, ensemble_method.c_str(),
-                    sizeof(opts.ensemble_method) - 1);
-            opts.ensemble_method[sizeof(opts.ensemble_method) - 1] = '\0';
-        }
 
         // --- Call Rust FFI ---
         ForecastResult fcst_result;
@@ -527,19 +370,22 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
         }
 
         // --- Build LIST(STRUCT(...)) result ---
-        // Use a temporary bind_data copy with the per-row frequency for date computation
-        TsForecastScalarBindData row_bind;
-        row_bind.frequency_seconds = freq_seconds;
-        row_bind.frequency_is_raw = freq_is_raw;
-        row_bind.frequency_type = freq_parsed;
-        row_bind.date_col_type = bind_data.date_col_type;
+        // Map this row's per-row frequency to a (step_months, step_micros)
+        // pair and compute every forecast date in one Rust call (D-12,
+        // D-11 parity with ts_forecast_agg) instead of the old per-step
+        // ComputeForecastDate month arithmetic.
+        int64_t step_months = 0;
+        int64_t step_micros = 0;
+        StepFromFrequency(freq_parsed, freq_seconds, freq_is_raw, bind_data.date_col_type, step_months,
+                           step_micros);
+        vector<int64_t> future_ts = ComputeFutureDates(observed, fcst_result.n_forecasts, step_months, step_micros);
 
         vector<Value> forecast_structs;
         forecast_structs.reserve(fcst_result.n_forecasts);
 
         for (size_t i = 0; i < fcst_result.n_forecasts; i++) {
             int64_t step = static_cast<int64_t>(i + 1);
-            int64_t forecast_date = ComputeForecastDate(last_date, step, row_bind);
+            int64_t forecast_date = future_ts[i];
 
             child_list_t<Value> struct_values;
             struct_values.push_back(make_pair("forecast_step", Value::INTEGER(static_cast<int32_t>(step))));
@@ -568,6 +414,102 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
 }
 
 // ============================================================================
+// _ts_future_dates — Rust D-12 calendar rule exposed directly to SQL macros
+//
+// Signature: _ts_future_dates(dates LIST(TIMESTAMP), horizon INTEGER, step
+// INTERVAL) -> LIST(TIMESTAMP)
+//
+// Marshals (dates, horizon, step) into StepFromFrequency's (step_months,
+// step_micros) pair and calls ComputeFutureDates — the same Rust calendar
+// rule ts_forecast_by/ts_forecast_agg already use (plan 12-05), but reachable
+// from a macro (ts_forecast_exog_by) instead of a table/aggregate function.
+// Any NULL argument (dates/horizon/step) yields a NULL row; NULL entries
+// inside `dates` are skipped (observed = non-NULL dates only). An empty
+// observed list yields a NULL row. horizon <= 0 yields an empty list;
+// horizon > 100000 throws before any allocation (T-12-21). A mixed step
+// (INTERVAL with both months and days/micros non-zero) is rejected by the
+// Rust FFI (anofox_ts_future_dates INVALID_INPUT), surfaced here as
+// InvalidInputException via ComputeFutureDates.
+// ============================================================================
+
+static constexpr int64_t kMaxFutureDatesHorizon = 100000;
+
+static void TsFutureDatesExecute(DataChunk &args, ExpressionState &state, Vector &result) {
+    idx_t count = args.size();
+
+    auto &dates_vec = args.data[0];    // LIST(TIMESTAMP)
+    auto &horizon_vec = args.data[1];  // INTEGER
+    auto &step_vec = args.data[2];     // INTERVAL
+
+    result.SetVectorType(VectorType::FLAT_VECTOR);
+
+    UnifiedVectorFormat dates_list_data, dates_child_data;
+    dates_vec.ToUnifiedFormat(count, dates_list_data);
+    auto &dates_child = ListVector::GetEntry(dates_vec);
+    dates_child.ToUnifiedFormat(ListVector::GetListSize(dates_vec), dates_child_data);
+    auto dates_entries = UnifiedVectorFormat::GetData<list_entry_t>(dates_list_data);
+    auto dates_values = UnifiedVectorFormat::GetData<timestamp_t>(dates_child_data);
+
+    ScalarArgReader<int32_t> horizon_reader(horizon_vec, count);
+    ScalarArgReader<interval_t> step_reader(step_vec, count);
+
+    for (idx_t row_idx = 0; row_idx < count; row_idx++) {
+        auto dates_idx = dates_list_data.sel->get_index(row_idx);
+        if (!dates_list_data.validity.RowIsValid(dates_idx) || horizon_reader.IsNull(row_idx) ||
+            step_reader.IsNull(row_idx)) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+
+        int32_t horizon = horizon_reader.Get(row_idx);
+        if (horizon <= 0) {
+            auto list_entries = FlatVector::GetData<list_entry_t>(result);
+            list_entries[row_idx].offset = ListVector::GetListSize(result);
+            list_entries[row_idx].length = 0;
+            continue;
+        }
+        if (horizon > kMaxFutureDatesHorizon) {
+            throw InvalidInputException("_ts_future_dates: horizon %d exceeds %lld", horizon,
+                                         (long long)kMaxFutureDatesHorizon);
+        }
+
+        interval_t step = step_reader.Get(row_idx);
+        int64_t step_months = step.months;
+        int64_t step_micros = static_cast<int64_t>(step.days) * 86400LL * 1000000LL + step.micros;
+
+        auto &dates_entry = dates_entries[dates_idx];
+        vector<int64_t> observed;
+        observed.reserve(dates_entry.length);
+        for (idx_t i = 0; i < dates_entry.length; i++) {
+            idx_t child_idx = dates_entry.offset + i;
+            auto unified_idx = dates_child_data.sel->get_index(child_idx);
+            if (dates_child_data.validity.RowIsValid(unified_idx)) {
+                observed.push_back(TimestampToMicroseconds(dates_values[unified_idx]));
+            }
+        }
+
+        if (observed.empty()) {
+            FlatVector::SetNull(result, row_idx, true);
+            continue;
+        }
+
+        vector<int64_t> future_ts = ComputeFutureDates(observed, horizon, step_months, step_micros);
+
+        idx_t offset = ListVector::GetListSize(result);
+        ListVector::Reserve(result, offset + future_ts.size());
+        ListVector::SetListSize(result, offset + future_ts.size());
+        auto &result_child = ListVector::GetEntry(result);
+        auto result_child_data = FlatVector::GetData<timestamp_t>(result_child);
+        for (size_t i = 0; i < future_ts.size(); i++) {
+            result_child_data[offset + i] = MicrosecondsToTimestamp(future_ts[i]);
+        }
+        auto list_entries = FlatVector::GetData<list_entry_t>(result);
+        list_entries[row_idx].offset = offset;
+        list_entries[row_idx].length = future_ts.size();
+    }
+}
+
+// ============================================================================
 // Registration
 // ============================================================================
 
@@ -589,6 +531,18 @@ void RegisterTsForecastScalarFunction(ExtensionLoader &loader) {
     func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
 
     loader.RegisterFunction(func);
+
+    // _ts_future_dates(dates LIST(TIMESTAMP), horizon INTEGER, step INTERVAL)
+    // -> LIST(TIMESTAMP) — internal scalar backing ts_forecast_exog_by's
+    // future-date computation (plan 12-06).
+    ScalarFunction future_dates_func("_ts_future_dates",
+        {LogicalType::LIST(LogicalType::TIMESTAMP), LogicalType::INTEGER, LogicalType::INTERVAL},
+        LogicalType::LIST(LogicalType::TIMESTAMP), TsFutureDatesExecute);
+    future_dates_func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+
+    CreateScalarFunctionInfo future_dates_info(future_dates_func);
+    future_dates_info.internal = true;
+    loader.RegisterFunction(future_dates_info);
 }
 
 } // namespace duckdb

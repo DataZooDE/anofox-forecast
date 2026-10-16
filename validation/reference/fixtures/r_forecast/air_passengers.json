@@ -1,0 +1,944 @@
+{
+  "family": "r_forecast",
+  "generator": "validation/reference/r/gen_forecast_reference.R",
+  "tool_versions": {
+    "R": "R version 4.6.1 (2026-06-24)",
+    "forecast": "9.0.2",
+    "tseries": "0.10.63",
+    "urca": "1.3.4",
+    "jsonlite": "2.0.0",
+    "rng_kind": "Mersenne-Twister/Inversion/Rejection"
+  },
+  "tolerance": {
+    "closed_form_abs": 1e-08,
+    "model_point_rel": 0.01,
+    "interval_rel": 0.05,
+    "root_causes": [
+      {
+        "id": "RC-01",
+        "checks": [
+          "air/holt/Holt",
+          "rw/holt/Holt",
+          "trend/holt/Holt"
+        ],
+        "location": "extension",
+        "cause": "Wrapper's SQL 'Holt' dispatched to HoltLinearTrend::auto() (SSE objective, trend seeded from a single first difference) instead of ETS(A,A,N), R holt()'s actual definition; the R-faithful ETS(A,A,N) construction cuts the point deviation 6.86x on AirPassengers and 13.41x on rw, and brings trend into the parity tier (3.01x cut).",
+        "evidence": "E4 mapping check (diagnosis/harness-output.txt): air HoltLinearTrend point_dev=1.155e-1 interval_dev=2.312e-1 -> ETS(A,A,N) R-faithful point_dev=1.684e-2 interval_dev=3.334e-2 (cut 6.86x); rw HoltLinearTrend point_dev=7.517e-2 interval_dev=3.262e-1 -> ETS(A,A,N) R-faithful point_dev=5.604e-3 interval_dev=1.960e-2 (cut 13.41x); trend HoltLinearTrend point_dev=1.653e-3 interval_dev=2.483e-1 -> ETS(A,A,N) R-faithful point_dev=5.495e-4 interval_dev=6.532e-3 (cut 3.01x, parity tier).",
+        "resolution": "fixed: forecast() dispatch and build_forecaster remapped SQL 'Holt' from HoltLinearTrend::auto() to ETS::new(ETSSpec::aan(), 1), matching R's holt() definition; model_name stays 'Holt' (17-03 Task 1).",
+        "upstream": ""
+      },
+      {
+        "id": "RC-02",
+        "checks": [
+          "air/holt/ETS:AAN",
+          "rw/holt/ETS:AAN",
+          "air/hw_additive/HoltWinters",
+          "air/hw_additive/ETS:AAA",
+          "air/ets_AAA/ETS:AAA",
+          "air/ets_MAM/ETS:MAM",
+          "air/hw_multiplicative/ETS:MAM"
+        ],
+        "location": "reference",
+        "cause": "At R's own fitted parameters the crate's ETS recursion, likelihood and bounds agree with R to floating-point precision (E5); the residual gap is R's own Nelder-Mead optimiser stopping at an inferior, in-bounds local optimum relative to the crate's own optimiser on the identical objective (E6).",
+        "evidence": "E5 (diagnosis/harness-output.txt): loglik_rel_dev <= 8.3e-16, point_rel_dev <= 1.4e-15 on every check in this row (bit-identical recursion). E6: air/holt crate_loglik=-863.582556 > r_loglik=-863.647300 (gap 0.0647); rw/holt crate_loglik=-515.765392 > r_loglik=-516.366200 (gap 0.6008); air/hw_additive & air/ets_AAA crate_loglik=-718.500709 > r_loglik=-765.935848 (gap 47.44); air/ets_MAM & air/hw_multiplicative crate_loglik=-681.105288 > r_loglik=-682.403619 / -685.827096 (gap 1.30 / 4.72); in every case the crate's own parameters stay within R's documented bounds (alpha/beta/gamma in [1e-4,0.9999], beta<=alpha, gamma<=1-alpha).",
+        "resolution": "known gap: the crate reaches a better-scoring, in-bounds optimum than R on these AirPassengers / rw fits; nothing to fix extension- or crate-side (R itself is the looser optimum).",
+        "upstream": ""
+      },
+      {
+        "id": "RC-03",
+        "checks": [
+          "air/ets_auto/AutoETS"
+        ],
+        "location": "crate",
+        "cause": "AutoETS's model pool selects ETS(M,A,M) instead of R's ETS(M,Ad,M) because the crate's own optimiser, at R's selected (M,Ad,M) spec, reaches a worse log-likelihood than R under the same objective -- the crate's Nelder-Mead multi-start misses an optimum R's optimiser finds.",
+        "evidence": "E7 (diagnosis/harness-output.txt): crate_aicc=1409.4003 vs r_aicc=1400.6384 for MAdM (diff +8.76, worse), while crate_aicc=1401.0677 for MAM beats r_aicc=1403.6644 for the same spec. E6 at R's (M,Ad,M) parameters: crate_loglik=-683.964133 < r_loglik=-679.583216 (gap -4.3809, crate strictly worse under its own objective), with alpha=0.8024 beta=0.0197 gamma=0.1976 phi=0.98 all inside R's bounds. Reproduced standalone in repro_rc_03 (r_parity_diagnosis.rs).",
+        "resolution": "known gap: upstream optimiser issue, drafted.",
+        "upstream": "draft: RC-03-autoets-madm-optimum.md"
+      },
+      {
+        "id": "RC-04",
+        "checks": [
+          "inter/ses/SESOptimized"
+        ],
+        "location": "crate",
+        "cause": "SimpleExponentialSmoothing::auto() on the zero-inflated intermittent series converges to a different (alpha, l0) optimum than R's ses(): the crate's own optimiser, evaluated at R's fitted parameters, finds a strictly better log-likelihood than its own converged fit, so the crate's optimiser is missing an optimum its own objective scores higher.",
+        "evidence": "E5 at R's params (alpha=0.0001, l0=1.2417): loglik_rel_dev=0.000e0, point_rel_dev=6.437e-15 (bit-identical recursion/likelihood formula). E6: crate's own fit alpha=0.139114 l0 fixed to values[0]=4 gives crate_loglik=-380.625612, which is WORSE than r_loglik=-374.538408 at R's own parameters (gap -6.087205), so the crate's optimiser converges to a lower-likelihood point than one it can itself evaluate as better. Reproduced standalone in repro_rc_04 (r_parity_diagnosis.rs).",
+        "resolution": "known gap: upstream optimiser issue (likely the crate's fixed-l0-to-first-observation heuristic for SES on intermittent/zero-inflated series), drafted.",
+        "upstream": "draft: RC-04-ses-optimized-intermittent-optimum.md"
+      },
+      {
+        "id": "RC-05",
+        "checks": [
+          "air/auto_arima/AutoARIMA"
+        ],
+        "location": "crate",
+        "cause": "SARIMA prediction variance differs from R stats::arima KalmanForecast: at R's exact selected order (2,1,1)(0,1,0)[12], explicit ARIMA construction reproduces R's point forecast (rel dev 6.9e-3) but its 95% half-widths are systematically narrower than R's state-space prediction-error variance, especially at longer horizons.",
+        "evidence": "D-15 Miss E8 (diagnosis/harness-output.txt, autoarima_air_explicit_arima_e8_probe): explicit ARIMA(2,1,1)(0,1,0)[12] at R's order gives point_dev=6.883204e-3, interval_dev=2.489813e-1, with crate/R half-width ratio falling from 1.040 (h=1) to 0.818 (h=6) and recovering only to 0.879 (h=12) -- a systematic underestimate of multi-step SARIMA forecast variance, not a one-off numerical difference (0.16.1). E3 (autoarima_air_e3_timestamp_probe): synthetic-hourly and real-monthly timestamps give bit-identical intervals (same_bits=true), ruling out the wrapper's synthetic index as the cause. AutoARIMA's own selection path (autoarima_air_interval_e8_probe) matches the explicit-order call closely (point ratios near 1.0, interval ratios following the same h-dependent pattern), so this is an estimation/variance- formula difference, not a selection difference. Reproduced standalone in repro_rc_05 (r_parity_diagnosis.rs), which asserted the discrepancy on 0.16.1. RESOLVED on 0.16.2: re-running the same repro gives a worst crate/R half-width ratio of 0.9951 (was 0.818), and the AutoARIMA interval re-measured via autoarima_report is interval_dev=4.592775e-3 (down from 1.846662e-1) -- inside the parity tier. repro_rc_05 is inverted (asserts ratio >= 0.90, i.e. the fix holds) rather than deleted, to keep a standing regression guard against this exact defect re-appearing in a future crate bump.",
+        "resolution": "resolved: fixed in anofox-forecast 0.16.2 (upstream PR #230, shipping the SARIMA/ARIMA/AutoARIMA KalmanForecast prediction- interval fix from PR #229). D-16's one-allowed-AutoARIMA-gap exception (user decision 2026-10-15) is retired now that the AirPassengers 95% interval is at hard parity; order identity and point forecasts were already hard parity on every series and are unaffected. air/auto_arima/AutoARIMA's parity_checks row moves to status=parity (tol = 1.5x measured per the D-15 tolerance rule, rounded up to 1 significant digit).",
+        "upstream": "fixed: anofox-forecast 0.16.2 (upstream PR #230 / #229, https://github.com/sipemu/anofox-forecast/releases/tag/v0.16.2); draft RC-05-autoarima-sarima-interval-variance.md retained (marked resolved) for historical record"
+      }
+    ],
+    "auto_arima_selection": {
+      "share_abs": 0.1,
+      "exact_agreement_min": 0.9,
+      "note": "UPST-01 (D-15): share_abs bounds |crate share - R share| for the rw (0,1,0) share and the ar07 d>=1 share (the UPST-01 claim); exact_agreement_min is the stricter per-series (p,d,q) agreement check over all 60 series."
+    },
+    "notes": "closed_form_abs is exact (naive/snaive/rwf drift are closed-form); model_point_rel and interval_rel are parity targets for later phases (Phase 10 FCST-01, Phase 17 FCST-09), not asserted in Phase 9.",
+    "parity_checks": [
+      {
+        "series": "air",
+        "r_key": "naive",
+        "surface": "Naive",
+        "ets_spec": "",
+        "seasonal_period": 0,
+        "point_tol_kind": "abs",
+        "point_tol": 1e-08,
+        "interval_tol": 0.0005,
+        "status": "parity",
+        "cause": "",
+        "reason": "Naive is closed-form; bounds use the crate's Abramowitz-Stegun 26.2.23 normal-quantile approximation (constant ~2.2e-4 relative half-width error on every series).",
+        "follow_up": "",
+        "measured_point": 0,
+        "measured_interval": 0.00022
+      },
+      {
+        "series": "air",
+        "r_key": "snaive",
+        "surface": "SeasonalNaive",
+        "ets_spec": "",
+        "seasonal_period": 12,
+        "point_tol_kind": "abs",
+        "point_tol": 1e-08,
+        "interval_tol": 0.0005,
+        "status": "parity",
+        "cause": "",
+        "reason": "SeasonalNaive is closed-form; same z approximation as Naive.",
+        "follow_up": "",
+        "measured_point": 0,
+        "measured_interval": 0.00022
+      },
+      {
+        "series": "air",
+        "r_key": "rwf_drift",
+        "surface": "RandomWalkDrift",
+        "ets_spec": "",
+        "seasonal_period": 0,
+        "point_tol_kind": "abs",
+        "point_tol": 1e-08,
+        "interval_tol": 0.005,
+        "status": "parity",
+        "cause": "",
+        "reason": "RandomWalkDrift is closed-form; bounds combine the z approximation with the crate's drift-interval formula, which differs slightly from R's rwf().",
+        "follow_up": "",
+        "measured_point": 4.5e-13,
+        "measured_interval": 0.00328
+      },
+      {
+        "series": "air",
+        "r_key": "ses",
+        "surface": "SESOptimized",
+        "ets_spec": "",
+        "seasonal_period": 0,
+        "point_tol_kind": "rel",
+        "point_tol": 1e-06,
+        "interval_tol": 1e-06,
+        "status": "parity",
+        "cause": "",
+        "reason": "SimpleExponentialSmoothing::auto() on AirPassengers converges to R ses()'s optimum.",
+        "follow_up": "",
+        "measured_point": 1.65e-09,
+        "measured_interval": 2.12e-08
+      },
+      {
+        "series": "air",
+        "r_key": "ses",
+        "surface": "ETS:ANN",
+        "ets_spec": "ANN",
+        "seasonal_period": 0,
+        "point_tol_kind": "rel",
+        "point_tol": 1e-06,
+        "interval_tol": 1e-06,
+        "status": "parity",
+        "cause": "",
+        "reason": "Same ETS(A,N,N) construction as SESOptimized above.",
+        "follow_up": "",
+        "measured_point": 1.65e-09,
+        "measured_interval": 1.56e-08
+      },
+      {
+        "series": "air",
+        "r_key": "holt",
+        "surface": "ETS:AAN",
+        "ets_spec": "AAN",
+        "seasonal_period": 0,
+        "point_tol_kind": "rel",
+        "point_tol": 0.025,
+        "interval_tol": 0.05,
+        "status": "known_gap",
+        "cause": "RC-02",
+        "reason": "RC-02: R's own Nelder-Mead optimiser stops at an inferior, in-bounds optimum relative to the crate's (E6: crate_loglik=-863.582556 > r_loglik=-863.647300); measured point=1.68e-2 interval=3.33e-2.",
+        "follow_up": "known gap: nothing to fix, R itself is the looser optimum.",
+        "measured_point": 0.0168,
+        "measured_interval": 0.0333
+      },
+      {
+        "series": "air",
+        "r_key": "holt",
+        "surface": "Holt",
+        "ets_spec": "",
+        "seasonal_period": 0,
+        "point_tol_kind": "rel",
+        "point_tol": 0.03,
+        "interval_tol": 0.05,
+        "status": "known_gap",
+        "cause": "RC-01,RC-02",
+        "reason": "D-12/D-13 fix (RC-01) remapped SQL 'Holt' to ETS(A,A,N), cutting the deviation 6.86x; the residual (identical to the ETS:AAN row above) is RC-02's R-optimum-is-looser cause, still outside the parity tier. tol = 1.5x post-fix measured (1.68e-2/3.33e-2), capped at the pre-fix planned tolerance (rel 0.15/0.3).",
+        "follow_up": "fixed: forecast() dispatch and build_forecaster remapped SQL 'Holt' to ETS::new(ETSSpec::aan(), 1) (17-03 Task 1); residual tracked as RC-02.",
+        "measured_point": 0.0168,
+        "measured_interval": 0.0333
+      },
+      {
+        "series": "air",
+        "r_key": "hw_additive",
+        "surface": "HoltWinters",
+        "ets_spec": "",
+        "seasonal_period": 12,
+        "point_tol_kind": "rel",
+        "point_tol": 0.3,
+        "interval_tol": 2.5,
+        "status": "known_gap",
+        "cause": "RC-02",
+        "reason": "RC-02: the E4 R-faithful ETS(A,A,A) mapping cuts the deviation only 1.04x (not >= 2x), so no extension fix applies; the residual is R's own optimiser reaching a looser, in-bounds optimum (E6: crate_loglik=-718.500709 > r_loglik=-765.935848). measured point=2.15e-1 interval=1.86.",
+        "follow_up": "known gap: nothing to fix, R itself is the looser optimum.",
+        "measured_point": 0.215,
+        "measured_interval": 1.86
+      },
+      {
+        "series": "air",
+        "r_key": "hw_additive",
+        "surface": "ETS:AAA",
+        "ets_spec": "AAA",
+        "seasonal_period": 12,
+        "point_tol_kind": "rel",
+        "point_tol": 0.3,
+        "interval_tol": 2.5,
+        "status": "known_gap",
+        "cause": "RC-02",
+        "reason": "RC-02: same cause as HoltWinters above (identical ETS(A,A,A) construction); measured point=2.06e-1 interval=1.87.",
+        "follow_up": "known gap: nothing to fix, R itself is the looser optimum.",
+        "measured_point": 0.206,
+        "measured_interval": 1.87
+      },
+      {
+        "series": "air",
+        "r_key": "hw_multiplicative",
+        "surface": "ETS:MAM",
+        "ets_spec": "MAM",
+        "seasonal_period": 12,
+        "point_tol_kind": "rel",
+        "point_tol": 0.08,
+        "interval_tol": 1.4,
+        "status": "known_gap",
+        "cause": "RC-02",
+        "reason": "RC-02: R's own optimiser stops at an inferior, in-bounds optimum (E6: crate_loglik=-681.105288 > r_loglik=-685.827096); measured point=5.94e-2 interval=1.10.",
+        "follow_up": "known gap: nothing to fix, R itself is the looser optimum.",
+        "measured_point": 0.0594,
+        "measured_interval": 1.1
+      },
+      {
+        "series": "air",
+        "r_key": "ets_auto",
+        "surface": "AutoETS",
+        "ets_spec": "",
+        "seasonal_period": 12,
+        "point_tol_kind": "rel",
+        "point_tol": 0.07,
+        "interval_tol": 0.7,
+        "status": "known_gap",
+        "cause": "RC-03",
+        "reason": "RC-03: the crate's own optimiser scores R's selected ETS(M,Ad,M) worse than R does (E6: crate_loglik=-683.964133 < r_loglik=-679.583216), so AutoETS selects ETS(M,A,M) instead; measured point=5.14e-2 interval=5.16e-1.",
+        "follow_up": "draft: RC-03-autoets-madm-optimum.md (pending user filing).",
+        "measured_point": 0.0514,
+        "measured_interval": 0.516
+      },
+      {
+        "series": "air",
+        "r_key": "ets_MAM",
+        "surface": "ETS:MAM",
+        "ets_spec": "MAM",
+        "seasonal_period": 12,
+        "point_tol_kind": "rel",
+        "point_tol": 0.1,
+        "interval_tol": 1.2,
+        "status": "known_gap",
+        "cause": "RC-02",
+        "reason": "RC-02: same construction/cause as hw_multiplicative/ETS:MAM above; measured point=7.26e-2 interval=9.03e-1.",
+        "follow_up": "known gap: nothing to fix, R itself is the looser optimum.",
+        "measured_point": 0.0726,
+        "measured_interval": 0.903
+      },
+      {
+        "series": "air",
+        "r_key": "ets_AAA",
+        "surface": "ETS:AAA",
+        "ets_spec": "AAA",
+        "seasonal_period": 12,
+        "point_tol_kind": "rel",
+        "point_tol": 0.3,
+        "interval_tol": 2.5,
+        "status": "known_gap",
+        "cause": "RC-02",
+        "reason": "RC-02: same construction/cause as hw_additive/ETS:AAA above; measured point=2.06e-1 interval=1.87.",
+        "follow_up": "known gap: nothing to fix, R itself is the looser optimum.",
+        "measured_point": 0.206,
+        "measured_interval": 1.87
+      },
+      {
+        "series": "air",
+        "r_key": "auto_arima",
+        "surface": "AutoARIMA",
+        "ets_spec": "",
+        "seasonal_period": 12,
+        "point_tol_kind": "rel",
+        "point_tol": 0.0006,
+        "interval_tol": 0.007,
+        "status": "parity",
+        "cause": "",
+        "reason": "RESOLVED on anofox-forecast 0.16.2 (upstream PR #230/#229, RC-05): order_match=true (R ARIMA(2,1,1)(0,1,0)[12]), point forecast in parity (3.982169e-4, unchanged from 0.16.1), and the 95% interval is now in parity too (4.592775e-3, down from the 0.16.1 known-gap measurement of 1.846662e-1). tol = max(1e-6, 1.5x measured, rounded up to 1 significant digit) = 7e-3, the D-15 tolerance rule applied the same as every other parity-tier AutoARIMA row. D-16's one-allowed-AutoARIMA-gap exception (user decision 2026-10-15) is retired.",
+        "follow_up": "none -- resolved. Historical record: draft/RC-05-autoarima-sarima-interval-variance.md (marked resolved), repro_rc_05 (r_parity_diagnosis.rs) inverted to assert the fix holds.",
+        "measured_point": 0.0003982169,
+        "measured_interval": 0.004592775
+      },
+      {
+        "series": "air",
+        "r_key": "thetaf",
+        "surface": "Theta",
+        "ets_spec": "",
+        "seasonal_period": 12,
+        "point_tol_kind": "rel",
+        "point_tol": 1e-05,
+        "interval_tol": 0.0005,
+        "status": "parity",
+        "cause": "",
+        "reason": "Theta matches R thetaf() to numerical precision on AirPassengers.",
+        "follow_up": "",
+        "measured_point": 3.27e-06,
+        "measured_interval": 0.00018
+      }
+    ]
+  },
+  "inputs": {
+    "name": "AirPassengers",
+    "frequency": 12,
+    "start": "1949-01",
+    "values": [112, 118, 132, 129, 121, 135, 148, 148, 136, 119, 104, 118, 115, 126, 141, 135, 125, 149, 170, 170, 158, 133, 114, 140, 145, 150, 178, 163, 172, 178, 199, 199, 184, 162, 146, 166, 171, 180, 193, 181, 183, 218, 230, 242, 209, 191, 172, 194, 196, 196, 236, 235, 229, 243, 264, 272, 237, 211, 180, 201, 204, 188, 235, 227, 234, 264, 302, 293, 259, 229, 203, 229, 242, 233, 267, 269, 270, 315, 364, 347, 312, 274, 237, 278, 284, 277, 317, 313, 318, 374, 413, 405, 355, 306, 271, 306, 315, 301, 356, 348, 355, 422, 465, 467, 404, 347, 305, 336, 340, 318, 362, 348, 363, 435, 491, 505, 404, 359, 310, 337, 360, 342, 406, 396, 420, 472, 548, 559, 463, 407, 362, 405, 417, 391, 419, 461, 472, 535, 622, 606, 508, 461, 390, 432]
+  },
+  "parameters": {
+    "horizon": 12,
+    "levels": [80, 95]
+  },
+  "models": {
+    "naive": {
+      "r_call": "naive(air, h = 12, level = c(80, 95))",
+      "point": [432, 432, 432, 432, 432, 432, 432, 432, 432, 432, 432, 432],
+      "lower_80": [388.798373836008, 370.90367436231, 357.172588514369, 345.596747672016, 335.39822715878, 326.178059839748, 317.699240936496, 309.80734872462, 302.395121508024, 295.384462698662, 288.716415680837, 282.345177028737],
+      "upper_80": [475.201626163992, 493.09632563769, 506.827411485631, 518.403252327984, 528.60177284122, 537.821940160252, 546.300759063504, 554.19265127538, 561.604878491976, 568.615537301338, 575.283584319163, 581.654822971263],
+      "lower_95": [365.928814390699, 338.561233229256, 317.561349608377, 299.857628781398, 284.260337623597, 270.159308556493, 257.1920740506, 245.122466458512, 233.786443172097, 223.064565766868, 212.866667880019, 203.122699216753],
+      "upper_95": [498.071185609301, 525.438766770744, 546.438650391623, 564.142371218602, 579.739662376403, 593.840691443507, 606.8079259494, 618.877533541488, 630.213556827904, 640.935434233132, 651.133332119981, 660.877300783246]
+    },
+    "snaive": {
+      "r_call": "snaive(air, h = 12, level = c(80, 95))",
+      "point": [417, 391, 419, 461, 472, 535, 622, 606, 508, 461, 390, 432],
+      "lower_80": [370.459500169063, 344.459500169063, 372.459500169063, 414.459500169063, 425.459500169063, 488.459500169063, 575.459500169063, 559.459500169063, 461.459500169063, 414.459500169063, 343.459500169063, 385.459500169063],
+      "upper_80": [463.540499830937, 437.540499830937, 465.540499830937, 507.540499830937, 518.540499830937, 581.540499830937, 668.540499830937, 652.540499830937, 554.540499830937, 507.540499830937, 436.540499830937, 478.540499830937],
+      "lower_95": [345.822447770672, 319.822447770672, 347.822447770672, 389.822447770672, 400.822447770672, 463.822447770672, 550.822447770672, 534.822447770672, 436.822447770672, 389.822447770672, 318.822447770672, 360.822447770672],
+      "upper_95": [488.177552229328, 462.177552229328, 490.177552229328, 532.177552229328, 543.177552229328, 606.177552229328, 693.177552229328, 677.177552229328, 579.177552229328, 532.177552229328, 461.177552229328, 503.177552229328]
+    },
+    "rwf_drift": {
+      "r_call": "rwf(air, h = 12, drift = TRUE, level = c(80, 95))",
+      "point": [434.237762237762, 436.475524475524, 438.713286713287, 440.951048951049, 443.188811188811, 445.426573426573, 447.664335664336, 449.902097902098, 452.13986013986, 454.377622377622, 456.615384615385, 458.853146853147],
+      "lower_80": [390.828922169774, 374.873365374318, 363.006643480037, 353.23367970643, 344.784801521618, 337.26681850914, 330.447070456298, 324.174562510134, 318.344829355986, 312.882115088479, 307.729461448014, 302.842798268117],
+      "upper_80": [477.646602305751, 498.077683576731, 514.419929946537, 528.668418195668, 541.592820856004, 553.586328344007, 564.881600872373, 575.629633294062, 585.934890923734, 595.873129666766, 605.501307782756, 614.863495438177],
+      "lower_95": [367.849670309708, 342.263152180569, 322.929967401795, 306.798909341282, 292.692865440371, 280.01050284906, 268.39599847776, 257.618425626674, 247.518018384016, 237.97891809053, 228.914014605323, 220.25590842501],
+      "upper_95": [500.625854165816, 530.68789677048, 554.496606024779, 575.103188560816, 593.684756937252, 610.842644004086, 626.932672850911, 642.185770177522, 656.761701895704, 670.776326664714, 684.316754625446, 697.450385281284]
+    },
+    "ses": {
+      "r_call": "ses(air, h = 12, level = c(80, 95))",
+      "point": [431.995799995499, 431.995799995499, 431.995799995499, 431.995799995499, 431.995799995499, 431.995799995499, 431.995799995499, 431.995799995499, 431.995799995499, 431.995799995499, 431.995799995499, 431.995799995499],
+      "lower_80": [388.640998341034, 370.685917594249, 356.908087727697, 345.292700932263, 335.059273130099, 325.807509236661, 317.299610225129, 309.380634532993, 301.942958215879, 294.908220293645, 288.217264177147, 281.824130844403],
+      "upper_80": [475.350601649965, 493.30568239675, 507.083512263302, 518.698899058736, 528.9323268609, 538.184090754338, 546.69198976587, 554.610965458006, 562.04864177512, 569.083379697353, 575.774335813852, 582.167469146596],
+      "lower_95": [365.690352689117, 338.230426339409, 317.159053911187, 299.394852768115, 283.744175518847, 269.594823661202, 256.583114967592, 244.472086766834, 233.097142439865, 222.338439209382, 212.105504879578, 202.328051191855],
+      "upper_95": [498.301247301882, 525.761173651589, 546.832546079812, 564.596747222884, 580.247424472152, 594.396776329797, 607.408485023407, 619.519513224165, 630.894457551134, 641.653160781617, 651.886095111421, 661.663548799143]
+    },
+    "holt": {
+      "r_call": "holt(air, h = 12, level = c(80, 95))",
+      "point": [433.600409807631, 435.204859002509, 436.809308197386, 438.413757392264, 440.018206587141, 441.622655782018, 443.227104976896, 444.831554171773, 446.436003366651, 448.040452561528, 449.644901756405, 451.249350951283],
+      "lower_80": [390.011577155144, 373.560940594953, 361.30871836734, 351.229552778388, 342.538915847772, 334.834459480278, 327.877177316993, 321.51134906996, 315.62881536458, 310.150829351085, 305.017946133726, 300.183985027408],
+      "upper_80": [477.189242460119, 496.848777410064, 512.309898027432, 525.597962006139, 537.49749732651, 548.410852083759, 558.577032636799, 568.151759273586, 577.243191368721, 585.930075771971, 594.271857379085, 602.314716875158],
+      "lower_95": [366.937042976415, 340.928621359748, 321.341120371844, 305.077022719904, 290.936496397444, 278.304203093413, 266.814614125124, 256.229575863602, 246.383672819912, 237.156472080089, 228.457060521421, 220.214810880835],
+      "upper_95": [500.263776638848, 529.481096645269, 552.277496022928, 571.750492064623, 589.099916776838, 604.941108470624, 619.639595828667, 633.433532479944, 646.488333913389, 658.924433042968, 670.83274299139, 682.283891021731],
+      "fit": {
+        "method": "Holt's method",
+        "par": {
+          "alpha": 0.999899996178322,
+          "beta": 0.000100007143855809,
+          "l": 119.751690163472,
+          "b": 1.59627323372179
+        },
+        "loglik": -863.647299732795,
+        "aic": 1737.29459946559,
+        "aicc": 1737.72938207429,
+        "bic": 1752.14366596347,
+        "sigma2": 1156.85334262424
+      }
+    },
+    "hw_additive": {
+      "r_call": "hw(air, h = 12, level = c(80, 95), seasonal = \"additive\")",
+      "point": [437.286272641522, 429.584964935952, 461.537120014742, 458.65869024419, 463.938949341851, 503.181111509628, 537.238415828024, 537.585480745367, 488.926581619227, 454.547540236735, 422.299549311654, 448.949332011566],
+      "lower_80": [414.158011089673, 396.979996067016, 421.644078485701, 412.614919503807, 412.472394971931, 446.809248087384, 476.353514875098, 472.498164063327, 419.890722015253, 381.775673706298, 345.97299578562, 369.225153778876],
+      "upper_80": [460.41453419337, 462.189933804888, 501.430161543783, 504.702460984574, 515.40550371177, 559.552974931872, 598.12331678095, 602.672797427407, 557.962441223201, 527.319406767172, 498.626102837688, 528.673510244255],
+      "lower_95": [401.914648989857, 379.719968147463, 400.525977948481, 388.240819602191, 385.227646819624, 416.967786178425, 444.122995209493, 438.043019890161, 383.345345480631, 343.252574570018, 305.56815902107, 327.021723139485],
+      "upper_95": [472.657896293187, 479.449961724441, 522.548262081003, 529.07656088619, 542.650251864078, 589.394436840831, 630.353836446556, 637.127941600573, 594.507817757824, 565.842505903452, 539.030939602238, 570.876940883646],
+      "fit": {
+        "method": "Holt-Winters' additive method",
+        "par": {
+          "alpha": 0.993480362872374,
+          "beta": 0.000191179159524254,
+          "gamma": 0.000580032514321104,
+          "l": 120.960762545579,
+          "b": 1.39339982901592,
+          "s0": -29.181569592927,
+          "s1": -54.3841662192089,
+          "s2": -20.7168716370162,
+          "s3": 15.0726618966834,
+          "s4": 65.1553960287441,
+          "s5": 66.1846393963355,
+          "s6": 33.5822290602453,
+          "s7": -4.23202989396608,
+          "s8": -8.0946070079278,
+          "s9": -3.82047037350508,
+          "s10": -34.3364218104466
+        },
+        "loglik": -765.93584751167,
+        "aic": 1565.87169502334,
+        "aicc": 1570.72883788048,
+        "bic": 1616.35852111613,
+        "sigma2": 325.697038066638
+      }
+    },
+    "hw_multiplicative": {
+      "r_call": "hw(air, h = 12, level = c(80, 95), seasonal = \"multiplicative\")",
+      "point": [445.890090235985, 418.947795041204, 466.4297995165, 496.129112109032, 507.146326611667, 575.628050339526, 666.657268277947, 658.496999816791, 550.09071479461, 491.712976488141, 418.808600523159, 463.718805366666],
+      "lower_80": [422.657680139922, 396.028844075327, 439.718212634888, 466.462729854241, 475.554583954157, 538.347824351611, 621.849369139485, 612.638617743922, 510.455926332523, 455.106932341229, 386.632995524833, 426.994799484208],
+      "upper_80": [469.122500332048, 441.86674600708, 493.141386398112, 525.795494363823, 538.738069269178, 612.90827632744, 711.46516741641, 704.355381889659, 589.725503256697, 528.319020635053, 450.984205521485, 500.442811249125],
+      "lower_95": [410.359185131127, 383.896284306661, 425.577952688453, 450.758295721883, 458.830925591292, 518.612864812617, 598.129500144817, 588.362656674769, 489.474536710864, 435.728863110743, 369.600259108736, 407.554285082952],
+      "upper_95": [481.420995340844, 453.999305775747, 507.281646344547, 541.499928496182, 555.461727632043, 632.643235866434, 735.185036411077, 728.631342958812, 610.706892878356, 547.69708986554, 468.016941937581, 519.883325650381],
+      "fit": {
+        "method": "Holt-Winters' multiplicative method",
+        "par": {
+          "alpha": 0.314610942059728,
+          "beta": 0.00705354953598918,
+          "gamma": 0.597720311360263,
+          "l": 120.379601479621,
+          "b": 1.77572737201835,
+          "s0": 0.929759419987479,
+          "s1": 0.794600725331044,
+          "s2": 0.902445465634974,
+          "s3": 1.04510220208267,
+          "s4": 1.13375241548739,
+          "s5": 1.13877992952706,
+          "s6": 1.05287912841346,
+          "s7": 0.963846445621548,
+          "s8": 1.03491798578542,
+          "s9": 1.0806974077887,
+          "s10": 0.985418661814932
+        },
+        "loglik": -685.827096075375,
+        "aic": 1405.65419215075,
+        "aicc": 1410.51133500789,
+        "bic": 1456.14101824354,
+        "sigma2": 0.00165295381292717
+      }
+    },
+    "ets_auto": {
+      "r_call": "forecast(ets(air), h = 12, level = c(80, 95))",
+      "point": [441.801847278479, 434.118620068782, 496.630046776999, 483.23747944576, 483.991353446536, 551.024400008046, 613.179679246499, 609.364830849264, 530.540834527191, 463.03321448673, 402.747800050565, 451.969373093448],
+      "lower_80": [419.625648784376, 407.166812603512, 460.62910301506, 443.621017432038, 440.023558154982, 496.33675462445, 547.386534446339, 539.244662846525, 465.487248272402, 402.849625141887, 347.499494440477, 386.774966668546],
+      "upper_80": [463.978045772582, 461.070427534053, 532.630990538937, 522.853941459483, 527.959148738089, 605.712045391642, 678.972824046659, 679.484998852004, 595.59442078198, 523.216803831573, 457.996105660653, 517.163779518351],
+      "lower_95": [407.886278423485, 392.899387561552, 441.571354579259, 422.649329246124, 416.748413273111, 467.386863889398, 512.557747437502, 502.125288118212, 431.049959908834, 370.990357415962, 318.25280810959, 352.263132609887],
+      "upper_95": [475.717416133473, 475.337852576012, 551.688738974738, 543.825629645397, 551.23429361996, 634.661936126694, 713.801611055496, 716.604373580317, 630.031709145547, 555.076071557498, 487.24279199154, 551.67561357701],
+      "fit": {
+        "method": "ETS(M,Ad,M)",
+        "par": {
+          "alpha": 0.709551916208791,
+          "beta": 0.0204089193322359,
+          "gamma": 0.000100468309718653,
+          "phi": 0.979999926683986,
+          "l": 120.993935507203,
+          "b": 1.77054019711165,
+          "s0": 0.894447475688874,
+          "s1": 0.799322028291066,
+          "s2": 0.921659598397272,
+          "s3": 1.05920192983827,
+          "s4": 1.22030069724042,
+          "s5": 1.23179850716711,
+          "s6": 1.11050018094692,
+          "s7": 0.978612760760472,
+          "s8": 0.980382073471814,
+          "s9": 1.01103008804154,
+          "s10": 0.886892287222608
+        },
+        "loglik": -679.583216236956,
+        "aic": 1395.16643247391,
+        "aicc": 1400.63843247391,
+        "bic": 1448.62307186628,
+        "sigma2": 0.00153407634959019
+      }
+    },
+    "ets_MAM": {
+      "r_call": "forecast(ets(air, model = \"MAM\", damped = FALSE), h = 12, level = c(80, 95))",
+      "point": [448.9737671674, 425.227817273056, 484.213711484926, 504.611072287966, 519.142264717416, 593.587326036826, 680.464428317188, 670.022471315659, 555.315068262266, 491.265325530934, 420.702922801188, 466.317755681308],
+      "lower_80": [426.087201703905, 401.854506379651, 455.726433336664, 473.024308336687, 484.734759735153, 552.101389930519, 630.487631671465, 618.463408074696, 510.659001100134, 450.075438644733, 383.999792616853, 424.063039126759],
+      "upper_80": [471.860332630895, 448.601128166461, 512.700989633189, 536.197836239246, 553.549769699678, 635.073262143133, 730.441224962911, 721.581534556621, 599.971135424398, 532.455212417134, 457.406052985523, 508.572472235858],
+      "lower_95": [413.971785784617, 389.481422994287, 440.64617921443, 456.303285541697, 466.520526836381, 530.140061939623, 604.031513620795, 591.169688684187, 487.019507098649, 428.270829644282, 364.570329142647, 401.694743349634],
+      "upper_95": [483.975748550184, 460.974211551825, 527.781243755422, 552.918859034235, 571.76400259845, 657.034590134029, 756.897343013581, 748.87525394713, 623.610629425883, 554.259821417585, 476.835516459729, 530.940768012983],
+      "fit": {
+        "method": "ETS(M,A,M)",
+        "par": {
+          "alpha": 0.394996850495014,
+          "beta": 0.0107004419033437,
+          "gamma": 0.399539202400559,
+          "l": 122.375426016476,
+          "b": 1.10736658208357,
+          "s0": 0.900041119946844,
+          "s1": 0.782669107068064,
+          "s2": 0.901368043868854,
+          "s3": 1.04761776976081,
+          "s4": 1.15370679906182,
+          "s5": 1.18303140196783,
+          "s6": 1.08399512146252,
+          "s7": 0.978658898783285,
+          "s8": 1.03316164257634,
+          "s9": 1.08075690990109,
+          "s10": 0.952247884186815
+        },
+        "loglik": -682.403619057806,
+        "aic": 1398.80723811561,
+        "aicc": 1403.66438097275,
+        "bic": 1449.2940642084,
+        "sigma2": 0.00158214813524167
+      }
+    },
+    "ets_AAA": {
+      "r_call": "forecast(ets(air, model = \"AAA\", damped = FALSE), h = 12, level = c(80, 95))",
+      "point": [437.286272641522, 429.584964935952, 461.537120014742, 458.65869024419, 463.938949341851, 503.181111509628, 537.238415828024, 537.585480745367, 488.926581619227, 454.547540236735, 422.299549311654, 448.949332011566],
+      "lower_80": [414.158011089673, 396.979996067016, 421.644078485701, 412.614919503807, 412.472394971931, 446.809248087384, 476.353514875098, 472.498164063327, 419.890722015253, 381.775673706298, 345.97299578562, 369.225153778876],
+      "upper_80": [460.41453419337, 462.189933804888, 501.430161543783, 504.702460984574, 515.40550371177, 559.552974931872, 598.12331678095, 602.672797427407, 557.962441223201, 527.319406767172, 498.626102837688, 528.673510244255],
+      "lower_95": [401.914648989857, 379.719968147463, 400.525977948481, 388.240819602191, 385.227646819624, 416.967786178425, 444.122995209493, 438.043019890161, 383.345345480631, 343.252574570018, 305.56815902107, 327.021723139485],
+      "upper_95": [472.657896293187, 479.449961724441, 522.548262081003, 529.07656088619, 542.650251864078, 589.394436840831, 630.353836446556, 637.127941600573, 594.507817757824, 565.842505903452, 539.030939602238, 570.876940883646],
+      "fit": {
+        "method": "ETS(A,A,A)",
+        "par": {
+          "alpha": 0.993480362872374,
+          "beta": 0.000191179159524254,
+          "gamma": 0.000580032514321104,
+          "l": 120.960762545579,
+          "b": 1.39339982901592,
+          "s0": -29.181569592927,
+          "s1": -54.3841662192089,
+          "s2": -20.7168716370162,
+          "s3": 15.0726618966834,
+          "s4": 65.1553960287441,
+          "s5": 66.1846393963355,
+          "s6": 33.5822290602453,
+          "s7": -4.23202989396608,
+          "s8": -8.0946070079278,
+          "s9": -3.82047037350508,
+          "s10": -34.3364218104466
+        },
+        "loglik": -765.93584751167,
+        "aic": 1565.87169502334,
+        "aicc": 1570.72883788048,
+        "bic": 1616.35852111613,
+        "sigma2": 325.697038066638
+      }
+    },
+    "auto_arima": {
+      "r_call": "forecast(auto.arima(air), h = 12, level = c(80, 95))",
+      "point": [445.634887784004, 420.394974836189, 449.198286908251, 491.839912726707, 503.394438676722, 566.862409535257, 654.260131942912, 638.597441074953, 540.883692604289, 494.12656975935, 423.332656278755, 465.507522264099],
+      "lower_80": [430.890335016227, 403.090685323311, 429.772552013821, 471.026931060049, 481.555884140078, 544.263695554394, 631.081977593955, 614.970366637046, 516.902778428927, 469.862354208805, 398.838094178553, 440.822828999103],
+      "upper_80": [460.37944055178, 437.699264349068, 468.624021802681, 512.652894393366, 525.232993213366, 589.461123516121, 677.438286291869, 662.22451551286, 564.86460677965, 518.390785309896, 447.827218378958, 490.192215529094],
+      "lower_95": [423.085040263267, 393.930347789455, 419.489189131817, 460.009204096417, 469.995251693523, 532.300659005467, 618.812203842758, 602.462948945746, 504.208049295249, 457.01765438615, 385.871456258235, 427.755541719914],
+      "upper_95": [468.18473530474, 446.859601882924, 478.907384684684, 523.670621356998, 536.793625659921, 601.424160065048, 689.708060043067, 674.73193320416, 577.559335913328, 531.23548513255, 460.793856299275, 503.259502808284],
+      "fit": {
+        "order": {
+          "p": 2,
+          "d": 1,
+          "q": 1,
+          "P": 0,
+          "D": 1,
+          "Q": 0,
+          "Frequency": 12
+        },
+        "coef": {
+          "ar1": 0.595980721466155,
+          "ar2": 0.214274548840812,
+          "ma1": -0.981877460164289
+        },
+        "loglik": -504.923852561241,
+        "aicc": 1018.16516543994,
+        "sigma2": 132.34473673628
+      }
+    },
+    "arima_airline": {
+      "r_call": "forecast(Arima(air, order = c(0,1,1), seasonal = c(0,1,1)), h = 12, level = c(80, 95))",
+      "point": [447.053211074412, 421.877427957911, 453.52620219413, 489.900824318081, 502.183491675, 564.224620230391, 649.795269734021, 636.71464217539, 538.920898406675, 491.06721997947, 422.824267320501, 464.752553525088],
+      "lower_80": [432.024329010124, 403.606781356199, 432.507977759439, 466.454822750023, 476.538526853972, 536.554899382249, 620.239175896092, 605.385551634826, 505.913912097089, 456.463602012795, 386.694506630372, 427.158553489599],
+      "upper_80": [462.0820931387, 440.148074559623, 474.54442662882, 513.346825886139, 527.828456496027, 591.894341078533, 679.351363571951, 668.043732715953, 571.927884716261, 525.670837946144, 458.954028010629, 502.346553560576],
+      "lower_95": [424.068519419507, 393.934885280437, 421.3816018374, 454.043259245906, 462.962902519345, 521.907433951905, 604.593124924959, 588.800932903921, 488.441068999651, 438.145553171123, 367.568566631929, 407.257492003281],
+      "upper_95": [470.037902729318, 449.819970635386, 485.670802550859, 525.758389390256, 541.404080830654, 606.541806508876, 694.997414543084, 684.628351446858, 589.400727813699, 543.988886787816, 478.079968009072, 522.247615046895],
+      "fit": {
+        "order": {
+          "p": 0,
+          "d": 1,
+          "q": 1,
+          "P": 0,
+          "D": 1,
+          "Q": 1,
+          "Frequency": 12
+        },
+        "coef": {
+          "ma1": -0.308673666075597,
+          "sma1": -0.107447034926172
+        },
+        "loglik": -507.50144324099,
+        "aicc": 1021.19186285993,
+        "sigma2": 137.524850617982
+      }
+    },
+    "thetaf": {
+      "r_call": "thetaf(air, h = 12, level = c(80, 95))",
+      "point": [440.078191081586, 428.384280556983, 489.707098669638, 475.704627661373, 479.670388669209, 545.366272154216, 602.752001822396, 601.100763091486, 523.951492158653, 456.62714491283, 397.953734665557, 447.644908742896],
+      "lower_80": [426.293757125054, 410.401914200672, 468.33608137885, 451.413162898751, 452.773731988791, 516.095381821756, 571.285513281005, 567.582189413657, 488.499416596472, 419.341698128097, 358.920935352571, 406.939696515488],
+      "upper_80": [453.862625038118, 446.366646913293, 511.078115960426, 499.996092423996, 506.567045349628, 574.637162486676, 634.218490363787, 634.619336769315, 559.403567720835, 493.912591697564, 436.986533978542, 488.350120970305],
+      "lower_95": [418.996718569325, 400.882624468571, 457.022948199947, 438.554038214564, 438.535502008791, 500.600308466549, 554.628160441999, 549.838528322353, 469.732221434623, 399.60397486621, 338.258219536815, 385.3916587811],
+      "upper_95": [461.159663593848, 455.885936645395, 522.391249139328, 512.855217108183, 520.805275329628, 590.132235841883, 650.875843202793, 652.362997860619, 578.170762882684, 513.650314959451, 457.649249794299, 509.898158704693]
+    }
+  },
+  "diagnosis": {
+    "ets_defaults": {
+      "allow.multiplicative.trend": false,
+      "restrict": true,
+      "bounds": ["both", "usual", "admissible"],
+      "opt.crit": ["lik", "amse", "mse", "sigma", "mae"],
+      "nmse": 3,
+      "ic": ["aicc", "aic", "bic"],
+      "lower": [0.0001, 0.0001, 0.0001, 0.8],
+      "upper": [0.9999, 0.9999, 0.9999, 0.98]
+    },
+    "ets_candidates": [
+      {
+        "spec": "ANN",
+        "fitted": true,
+        "aicc": 1733.95818376993,
+        "loglik": -863.893377599251,
+        "par": {
+          "alpha": 0.999899807696804,
+          "l": 112.094750851185
+        }
+      },
+      {
+        "spec": "ANA",
+        "fitted": true,
+        "aicc": 1568.60907792965,
+        "loglik": -767.429538964823,
+        "par": {
+          "alpha": 0.999899619706658,
+          "gamma": 0.000100251318452054,
+          "l": 145.083933643626,
+          "s0": -27.5186689013655,
+          "s1": -54.0748852160522,
+          "s2": -22.2641673927058,
+          "s3": 15.2236784398659,
+          "s4": 63.4573511850154,
+          "s5": 64.4077613089562,
+          "s6": 33.0625040121633,
+          "s7": -2.51960633142259,
+          "s8": -8.19979764061126,
+          "s9": -1.80599503178572,
+          "s10": -35.8384036230587
+        }
+      },
+      {
+        "spec": "ANM",
+        "fitted": false,
+        "error": "Forbidden model combination"
+      },
+      {
+        "spec": "AAN",
+        "fitted": true,
+        "aicc": 1737.72938759826,
+        "loglik": -863.647302494784,
+        "par": {
+          "alpha": 0.999899949464774,
+          "beta": 0.000100018831458306,
+          "l": 119.751689594513,
+          "b": 1.59627428315099
+        }
+      },
+      {
+        "spec": "AAA",
+        "fitted": true,
+        "aicc": 1570.72883788048,
+        "loglik": -765.93584751167,
+        "par": {
+          "alpha": 0.993480362872374,
+          "beta": 0.000191179159524254,
+          "gamma": 0.000580032514321104,
+          "l": 120.960762545579,
+          "b": 1.39339982901592,
+          "s0": -29.181569592927,
+          "s1": -54.3841662192089,
+          "s2": -20.7168716370162,
+          "s3": 15.0726618966834,
+          "s4": 65.1553960287441,
+          "s5": 66.1846393963355,
+          "s6": 33.5822290602453,
+          "s7": -4.23202989396608,
+          "s8": -8.0946070079278,
+          "s9": -3.82047037350508,
+          "s10": -34.3364218104466
+        }
+      },
+      {
+        "spec": "AAM",
+        "fitted": false,
+        "error": "Forbidden model combination"
+      },
+      {
+        "spec": "AAdN",
+        "fitted": true,
+        "aicc": 1740.20527482081,
+        "loglik": -863.796068067338,
+        "par": {
+          "alpha": 0.999899475835426,
+          "beta": 0.000100015563586359,
+          "phi": 0.979999688964894,
+          "l": 118.471909466453,
+          "b": 1.95160849634788
+        }
+      },
+      {
+        "spec": "AAdA",
+        "fitted": true,
+        "aicc": 1576.7028912419,
+        "loglik": -767.615445620952,
+        "par": {
+          "alpha": 0.999897421093044,
+          "beta": 0.00217480508804134,
+          "gamma": 0.000101025742930126,
+          "phi": 0.979969612148248,
+          "l": 120.593931483887,
+          "b": 1.73811793061669,
+          "s0": -28.309526828782,
+          "s1": -53.7485729930368,
+          "s2": -20.6675466650366,
+          "s3": 16.5117839016359,
+          "s4": 62.6834724066656,
+          "s5": 65.3757672164667,
+          "s6": 35.2401220687056,
+          "s7": -4.40379741950637,
+          "s8": -7.96980607122696,
+          "s9": -2.3577338973258,
+          "s10": -35.8864675465944
+        }
+      },
+      {
+        "spec": "AAdM",
+        "fitted": false,
+        "error": "Forbidden model combination"
+      },
+      {
+        "spec": "MNN",
+        "fitted": true,
+        "aicc": 1674.07168976361,
+        "loglik": -833.950130596089,
+        "par": {
+          "alpha": 0.999899789664489,
+          "l": 110.816010416505
+        }
+      },
+      {
+        "spec": "MNA",
+        "fitted": true,
+        "aicc": 1584.54230673654,
+        "loglik": -775.396153368271,
+        "par": {
+          "alpha": 0.999852634047113,
+          "gamma": 0.000147067012572784,
+          "l": 144.461329095883,
+          "s0": -32.4972977330358,
+          "s1": -48.0824957190688,
+          "s2": -17.9371972972372,
+          "s3": 23.2205034719317,
+          "s4": 63.5151557339372,
+          "s5": 65.2157672095625,
+          "s6": 27.2636888876536,
+          "s7": -4.30458731378524,
+          "s8": -8.21741840600371,
+          "s9": -1.37288599082433,
+          "s10": -35.7959367638258
+        }
+      },
+      {
+        "spec": "MNM",
+        "fitted": true,
+        "aicc": 1465.06439379569,
+        "loglik": -715.657196897844,
+        "par": {
+          "alpha": 0.407252818635288,
+          "gamma": 0.592661612133222,
+          "l": 143.417667540516,
+          "s0": 0.911395391371543,
+          "s1": 0.75198882618171,
+          "s2": 0.903461944835152,
+          "s3": 1.04482964985632,
+          "s4": 1.13911808208676,
+          "s5": 1.16522338565598,
+          "s6": 1.08702897474375,
+          "s7": 0.952375606565727,
+          "s8": 1.04725872981192,
+          "s9": 1.0634862360025,
+          "s10": 0.987276617092316
+        }
+      },
+      {
+        "spec": "MAN",
+        "fitted": true,
+        "aicc": 1674.2299366641,
+        "loglik": -831.8975770277,
+        "par": {
+          "alpha": 0.999899775552225,
+          "beta": 0.000100010571663727,
+          "l": 118.102668727193,
+          "b": 3.9825256644052
+        }
+      },
+      {
+        "spec": "MAA",
+        "fitted": true,
+        "aicc": 1575.32396296534,
+        "loglik": -768.233410054099,
+        "par": {
+          "alpha": 0.968959707756299,
+          "beta": 0.000550425644114662,
+          "gamma": 0.0127569364222142,
+          "l": 120.577616127258,
+          "b": 4.09282232657,
+          "s0": -30.4557185467196,
+          "s1": -48.0824027971992,
+          "s2": -20.3083196236479,
+          "s3": 18.3438371889485,
+          "s4": 58.2275801132103,
+          "s5": 62.3900850914009,
+          "s6": 36.1634764530946,
+          "s7": 0.544267844328886,
+          "s8": -5.40657460272329,
+          "s9": -4.78710830697504,
+          "s10": -35.2010972953825
+        }
+      },
+      {
+        "spec": "MAM",
+        "fitted": true,
+        "aicc": 1403.66438097275,
+        "loglik": -682.403619057806,
+        "par": {
+          "alpha": 0.394996850495014,
+          "beta": 0.0107004419033437,
+          "gamma": 0.399539202400559,
+          "l": 122.375426016476,
+          "b": 1.10736658208357,
+          "s0": 0.900041119946844,
+          "s1": 0.782669107068064,
+          "s2": 0.901368043868854,
+          "s3": 1.04761776976081,
+          "s4": 1.15370679906182,
+          "s5": 1.18303140196783,
+          "s6": 1.08399512146252,
+          "s7": 0.978658898783285,
+          "s8": 1.03316164257634,
+          "s9": 1.08075690990109,
+          "s10": 0.952247884186815
+        }
+      },
+      {
+        "spec": "MAdN",
+        "fitted": true,
+        "aicc": 1679.43658994996,
+        "loglik": -833.411725631912,
+        "par": {
+          "alpha": 0.999899495284674,
+          "beta": 0.000100125096452219,
+          "phi": 0.979999830096382,
+          "l": 118.430338371364,
+          "b": 1.98225369353771
+        }
+      },
+      {
+        "spec": "MAdA",
+        "fitted": true,
+        "aicc": 1588.68194358721,
+        "loglik": -773.604971793606,
+        "par": {
+          "alpha": 0.980466632280952,
+          "beta": 0.000261964957073329,
+          "gamma": 0.0185018785050926,
+          "phi": 0.979836843633367,
+          "l": 122.520503563485,
+          "b": 3.60551405820773,
+          "s0": -28.8216642458035,
+          "s1": -47.3814312559171,
+          "s2": -19.632685505152,
+          "s3": 19.1994364316305,
+          "s4": 62.2961676217149,
+          "s5": 60.3479973121578,
+          "s6": 36.3336715249008,
+          "s7": -3.30961616646527,
+          "s8": -8.62836148414407,
+          "s9": -1.11091782061509,
+          "s10": -36.1858647961644
+        }
+      },
+      {
+        "spec": "MAdM",
+        "fitted": true,
+        "aicc": 1400.63843247391,
+        "loglik": -679.583216236956,
+        "par": {
+          "alpha": 0.709551916208791,
+          "beta": 0.0204089193322359,
+          "gamma": 0.000100468309718653,
+          "phi": 0.979999926683986,
+          "l": 120.993935507203,
+          "b": 1.77054019711165,
+          "s0": 0.894447475688874,
+          "s1": 0.799322028291066,
+          "s2": 0.921659598397272,
+          "s3": 1.05920192983827,
+          "s4": 1.22030069724042,
+          "s5": 1.23179850716711,
+          "s6": 1.11050018094692,
+          "s7": 0.978612760760472,
+          "s8": 0.980382073471814,
+          "s9": 1.01103008804154,
+          "s10": 0.886892287222608
+        }
+      }
+    ],
+    "selected": {
+      "method": "ETS(M,Ad,M)",
+      "aicc": 1400.63843247391
+    }
+  }
+}

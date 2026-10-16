@@ -4,6 +4,10 @@
 
 This folder contains runnable SQL examples demonstrating period detection with the anofox-forecast extension.
 
+**Phase 15 (D-11):** `'fft'` now linearly detrends the series first and only considers bins
+`3 <= k <= floor(n/2)`, so it never reports a period equal to the series length; `'acf'` can
+now return lag 2 and requires statistical significance (`1.96/sqrt(n)`).
+
 ## Function
 
 | Function | Description |

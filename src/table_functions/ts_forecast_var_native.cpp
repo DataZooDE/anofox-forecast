@@ -1,5 +1,6 @@
 #include "ts_forecast_var_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // ParseFrequencyWithType, date helpers, DateColumnType
+#include "ts_future_dates.hpp"     // StepFromFrequency, ComputeFutureDates (D-12)
 #include "anofox_fcst_ffi.h"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -433,8 +434,6 @@ static OperatorFinalizeResultType TsForecastVarNativeFinalize(
             }
         }
 
-        int64_t last_obs_date = sorted_dates.back();
-
         // ------------------------------------------------------------------
         // 2. Verify equal-length alignment (all columns have same n_obs after collect)
         //    and check for under-determination
@@ -532,42 +531,23 @@ static OperatorFinalizeResultType TsForecastVarNativeFinalize(
         // ------------------------------------------------------------------
         size_t horizon = static_cast<size_t>(bind_data.horizon);
 
+        // Forecast dates computed via the Rust D-12 calendar rule
+        // (StepFromFrequency + ComputeFutureDates, plan 12-05/12-06) instead
+        // of this file's own month arithmetic + the day-of-month clamp this file used to replicate per-call.
+        // Anchored on sorted_dates (same base the old code used via
+        // last_obs_date), computed once and shared by every variable below.
+        int64_t step_months = 0;
+        int64_t step_micros = 0;
+        StepFromFrequency(bind_data.frequency_type, bind_data.frequency_seconds, bind_data.frequency_is_raw,
+                           bind_data.date_col_type, step_months, step_micros);
+        vector<int64_t> future_ts = ComputeFutureDates(sorted_dates, horizon, step_months, step_micros);
+
         for (size_t v = 0; v < k_vars; v++) {
             for (size_t h = 0; h < horizon; h++) {
                 VarOutputRow row;
                 row.variable = bind_data.value_col_names[v];
                 row.forecast_step = static_cast<int64_t>(h + 1);
-
-                // Calendar-aware forecast date arithmetic anchored at last observation date
-                int64_t steps = static_cast<int64_t>(h + 1);
-                if (bind_data.frequency_type == FrequencyType::MONTHLY ||
-                    bind_data.frequency_type == FrequencyType::QUARTERLY ||
-                    bind_data.frequency_type == FrequencyType::YEARLY) {
-                    date_t base_date = MicrosecondsToDate(last_obs_date);
-                    int32_t year, month, day;
-                    Date::Convert(base_date, year, month, day);
-                    int64_t months_to_add = steps * bind_data.frequency_seconds;
-                    if (bind_data.frequency_type == FrequencyType::QUARTERLY) months_to_add *= 3;
-                    else if (bind_data.frequency_type == FrequencyType::YEARLY) months_to_add *= 12;
-                    int64_t total_months = static_cast<int64_t>(year) * 12 + (month - 1) + months_to_add;
-                    int32_t new_year = static_cast<int32_t>(total_months / 12);
-                    int32_t new_month = static_cast<int32_t>((total_months % 12) + 1);
-                    if (new_month < 1) { new_month += 12; new_year -= 1; }
-                    int32_t max_day = Date::MonthDays(new_year, new_month);
-                    int32_t new_day = std::min(day, max_day);
-                    row.date = DateToMicroseconds(Date::FromDate(new_year, new_month, new_day));
-                } else {
-                    int64_t freq_micros;
-                    if (bind_data.date_col_type == DateColumnType::INTEGER ||
-                        bind_data.date_col_type == DateColumnType::BIGINT) {
-                        freq_micros = bind_data.frequency_seconds;
-                    } else {
-                        freq_micros = bind_data.frequency_is_raw
-                            ? bind_data.frequency_seconds * 86400LL * 1000000LL
-                            : bind_data.frequency_seconds * 1000000LL;
-                    }
-                    row.date = last_obs_date + freq_micros * steps;
-                }
+                row.date = future_ts[h];
                 row.date_null = false;
                 row.forecast_value = var_result.forecasts[v * horizon + h];
                 gstate.results.push_back(std::move(row));

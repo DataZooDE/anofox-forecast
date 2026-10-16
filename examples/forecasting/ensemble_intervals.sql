@@ -16,14 +16,20 @@
 --   (1) ts_cv_forecast_by IGNORES top_k/combination_method for AutoEnsemble:
 --       The CV native (ts_cv_forecast_native.cpp:380-388) does NOT parse
 --       ensemble-specific params. It zeroes ensemble_top_k / ensemble_method
---       in ForecastOptions, so the backtest always runs with top_k=3, Mean —
---       regardless of what you pass in the params MAP. As a result:
---         • ts_cv_forecast_by('folds', id, ds, y, 'AutoEnsemble', MAP{})
---           crashes at runtime in this build (segfault — known limitation).
---         • Section 1 therefore uses the SAME manual per-fold loop as Section 2,
---           with _ts_forecast_scalar('AutoEnsemble') per fold. The calibration
---           and the final forecast both use the same default AutoEnsemble config
---           (top_k=3, Mean), so coverage is internally consistent.
+--       in ForecastOptions, so a backtest run through it always uses
+--       top_k=3, Mean — regardless of what you pass in the params MAP.
+--         • ts_cv_forecast_by('folds', id, ds, y, 'AutoEnsemble', MAP{}) no
+--           longer crashes (the segfault's root cause — the CV native
+--           dereferencing a null bounds pointer — was fixed in Phase 10
+--           plan 10-02's null-safety pass). It is still NOT usable for a
+--           non-default top_k/combination_method, since those params are
+--           still silently ignored on this path.
+--         • Section 1 therefore still uses the manual per-fold loop (same
+--           pattern as Section 2), with _ts_forecast_scalar('AutoEnsemble')
+--           per fold — this is the only way to control top_k/combination_method
+--           for the backtest. The calibration and the final forecast both use
+--           the same default AutoEnsemble config (top_k=3, Mean), so coverage
+--           is internally consistent either way.
 --
 --   (2) ts_forecast_ensemble_by is a ScalarFunction and CANNOT flow through
 --       ts_cv_forecast_by. Section 2 uses a manual per-fold loop over
@@ -31,14 +37,20 @@
 --       This is more verbose than the AutoEnsemble path but produces identical
 --       conformal guarantees.
 --
---   (3) ts_conformal_calibrate returns a GLOBAL quantile across all series and
---       folds. Per-series calibration requires ts_conformal_by (one-step) with
---       a group_col, which is not currently available in the modular form.
+--   (3) Phase 16 (D-03, D-14): ts_conformal_calibrate now takes a group_col
+--       parameter and calibrates PER SERIES by default -- the modular form no
+--       longer forces a single global quantile across all series and folds.
+--       Both sections below pass the series id as group_col, so series_A and
+--       series_B each get their own conformity_score, and the subsequent
+--       "apply" step joins each forecast row to its own series' calibration
+--       row via ts_conformal_apply_by (a calibration TABLE, not a bare
+--       DOUBLE) instead of hand-written SQL bound arithmetic.
 --
 -- ============================================================================
 
 LOAD anofox_forecast;
-LOAD json;
+-- Phase 16: ts_conformal_calibrate/ts_conformal_apply_by read params json-free;
+-- the json extension is no longer required for this example.
 
 .print '============================================================================='
 .print 'ENSEMBLE PREDICTION INTERVALS — Phase 6 (EPI-01)'
@@ -120,40 +132,39 @@ JOIN ens_forecasts e
 .print 'Backtest residuals (first 5 rows):'
 SELECT * FROM ens_bt LIMIT 5;
 
--- Step 3: Calibrate conformity score from backtest residuals (90% coverage, alpha=0.1)
+-- Step 3: Calibrate PER SERIES (Phase 16 D-03: group_col is now the default,
+-- not an opt-in) conformity score from backtest residuals (90% coverage, alpha=0.1)
 CREATE OR REPLACE TABLE ens_calib AS
-SELECT * FROM ts_conformal_calibrate('ens_bt', y, yhat, MAP{'alpha': '0.1'});
+SELECT * FROM ts_conformal_calibrate('ens_bt', id, y, yhat, MAP{'alpha': '0.1'});
 
 .print ''
-.print 'Calibrated conformity score (90% coverage):'
-SELECT * FROM ens_calib;
+.print 'Calibrated conformity score per series (90% coverage):'
+SELECT * FROM ens_calib ORDER BY group_col;
 
 -- Step 4: Generate final AutoEnsemble point forecasts (same config: top_k=3, Mean)
 CREATE OR REPLACE TABLE ens_fcst AS
 SELECT * FROM ts_forecast_by('ens_series', id, ds, y, 'AutoEnsemble', 5, '1d');
 
--- Step 5: Apply conformal intervals (CROSS JOIN the global quantile)
+-- Step 5: Apply each series' own conformal interval via ts_conformal_apply_by
+-- (Phase 16 D-14: a calibration TABLE, matched per group_col, not a bare score)
 CREATE OR REPLACE TABLE ens_intervals AS
-SELECT f.id, f.ds, f.forecast_step, f.yhat,
-       f.yhat - c.conformity_score AS yhat_lower,
-       f.yhat + c.conformity_score AS yhat_upper
-FROM ens_fcst f CROSS JOIN ens_calib c;
+SELECT * FROM ts_conformal_apply_by('ens_fcst', id, ds, yhat, 'ens_calib');
 
 .print ''
 .print 'AutoEnsemble forecast with 90% conformal intervals:'
-SELECT * FROM ens_intervals ORDER BY id, forecast_step;
+SELECT * FROM ens_intervals ORDER BY group_col, date_col;
 
--- DoD assertion: lower <= yhat <= upper for every horizon step
+-- DoD assertion: lower <= point <= upper for every horizon step
 .print ''
 .print 'DoD assertion — bad_rows (must be 0):'
 SELECT count(*) AS bad_rows
 FROM ens_intervals
-WHERE yhat_lower > yhat OR yhat > yhat_upper;
+WHERE lower > point OR point > upper;
 
 -- Non-degenerate intervals: upper > lower (conformity_score > 0)
 .print ''
 .print 'Interval width (must be > 0):'
-SELECT ROUND(yhat_upper - yhat_lower, 6) AS interval_width FROM ens_intervals LIMIT 1;
+SELECT ROUND(upper - lower, 6) AS interval_width FROM ens_intervals LIMIT 1;
 
 -- ============================================================================
 -- SECTION 2: Explicit-member ensemble conformal intervals (manual fold workaround)
@@ -216,13 +227,13 @@ JOIN ens_forecasts e
 .print 'Explicit-member backtest residuals (first 5 rows):'
 SELECT * FROM exp_bt LIMIT 5;
 
--- Step 3: Calibrate conformity score
+-- Step 3: Calibrate PER SERIES conformity score
 CREATE OR REPLACE TABLE exp_calib AS
-SELECT * FROM ts_conformal_calibrate('exp_bt', y, yhat, MAP{'alpha': '0.1'});
+SELECT * FROM ts_conformal_calibrate('exp_bt', id, y, yhat, MAP{'alpha': '0.1'});
 
 .print ''
-.print 'Calibrated conformity score (90% coverage):'
-SELECT * FROM exp_calib;
+.print 'Calibrated conformity score per series (90% coverage):'
+SELECT * FROM exp_calib ORDER BY group_col;
 
 -- Step 4: Final explicit-member forecast (same member set and method)
 CREATE OR REPLACE TABLE exp_fcst AS
@@ -233,28 +244,25 @@ SELECT * FROM ts_forecast_ensemble_by(
     combination_method := ''  -- '' = mean
 );
 
--- Step 5: Apply conformal intervals
+-- Step 5: Apply each series' own conformal interval via ts_conformal_apply_by
 CREATE OR REPLACE TABLE exp_intervals AS
-SELECT f.id, f.ds, f.forecast_step, f.yhat,
-       f.yhat - c.conformity_score AS yhat_lower,
-       f.yhat + c.conformity_score AS yhat_upper
-FROM exp_fcst f CROSS JOIN exp_calib c;
+SELECT * FROM ts_conformal_apply_by('exp_fcst', id, ds, yhat, 'exp_calib');
 
 .print ''
 .print 'Explicit-member forecast with 90% conformal intervals:'
-SELECT * FROM exp_intervals ORDER BY id, forecast_step;
+SELECT * FROM exp_intervals ORDER BY group_col, date_col;
 
--- DoD assertion: lower <= yhat <= upper for every horizon step
+-- DoD assertion: lower <= point <= upper for every horizon step
 .print ''
 .print 'DoD assertion — bad_rows (must be 0):'
 SELECT count(*) AS bad_rows
 FROM exp_intervals
-WHERE yhat_lower > yhat OR yhat > yhat_upper;
+WHERE lower > point OR point > upper;
 
 -- Non-degenerate intervals: upper > lower
 .print ''
 .print 'Interval width (must be > 0):'
-SELECT ROUND(yhat_upper - yhat_lower, 6) AS interval_width FROM exp_intervals LIMIT 1;
+SELECT ROUND(upper - lower, 6) AS interval_width FROM exp_intervals LIMIT 1;
 
 .print ''
 .print '============================================================================='

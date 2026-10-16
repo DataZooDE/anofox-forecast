@@ -275,6 +275,98 @@ SELECT quantity FROM ts_aggregate_hierarchy(
 350.0
 
 #######################################
+# SQL SUM NULL semantics Tests (D-08, RUST-07)
+#######################################
+
+statement ok
+CREATE TABLE hier_nulls AS SELECT * FROM (VALUES
+    ('EU', 'S1', 'A', DATE '2024-01-01', 10.0),
+    ('EU', 'S1', 'B', DATE '2024-01-01', NULL),
+    ('EU', 'S2', 'C', DATE '2024-01-01', NULL),
+    ('EU', 'S1', 'A', DATE '2024-01-02', NULL),
+    ('EU', 'S1', 'B', DATE '2024-01-02', NULL),
+    ('EU', 'S2', 'C', DATE '2024-01-02', NULL)
+) AS t(region, store, item, ds, qty);
+
+# Partially-NULL group at the store level: EU|S1 has A=10.0, B=NULL -> sum of present values = 10.0
+query R
+SELECT qty FROM ts_aggregate_hierarchy(
+    (SELECT ds, qty, region, store, item FROM hier_nulls), MAP{}
+) WHERE unique_id = 'EU|S1|AGGREGATED' AND ds = DATE '2024-01-01';
+----
+10.0
+
+# All-NULL group at the store level: EU|S2 has only C=NULL -> NULL (no NULL->0 imputation)
+query R
+SELECT qty FROM ts_aggregate_hierarchy(
+    (SELECT ds, qty, region, store, item FROM hier_nulls), MAP{}
+) WHERE unique_id = 'EU|S2|AGGREGATED' AND ds = DATE '2024-01-01';
+----
+NULL
+
+# Leaf-level NULL passthrough: EU|S1|B is itself NULL
+query R
+SELECT qty FROM ts_aggregate_hierarchy(
+    (SELECT ds, qty, region, store, item FROM hier_nulls), MAP{}
+) WHERE unique_id = 'EU|S1|B' AND ds = DATE '2024-01-01';
+----
+NULL
+
+# Region level rolls up the partially-NULL group: EU|AGGREGATED|AGGREGATED = 10.0
+query R
+SELECT qty FROM ts_aggregate_hierarchy(
+    (SELECT ds, qty, region, store, item FROM hier_nulls), MAP{}
+) WHERE unique_id = 'EU|AGGREGATED|AGGREGATED' AND ds = DATE '2024-01-01';
+----
+10.0
+
+# Grand total for 2024-01-01 equals the only present leaf value
+query R
+SELECT qty FROM ts_aggregate_hierarchy(
+    (SELECT ds, qty, region, store, item FROM hier_nulls), MAP{}
+) WHERE unique_id = 'AGGREGATED|AGGREGATED|AGGREGATED' AND ds = DATE '2024-01-01';
+----
+10.0
+
+# 2024-01-02: every leaf is NULL -> every unique_id's qty IS NULL (count of non-NULL = 0)
+query I
+SELECT COUNT(qty) FROM ts_aggregate_hierarchy(
+    (SELECT ds, qty, region, store, item FROM hier_nulls), MAP{}
+) WHERE ds = DATE '2024-01-02';
+----
+0
+
+# ... but the row count for that date is unchanged (one row per unique_id, same as 2024-01-01)
+query I
+SELECT COUNT(*) FROM ts_aggregate_hierarchy(
+    (SELECT ds, qty, region, store, item FROM hier_nulls), MAP{}
+) WHERE ds = DATE '2024-01-02';
+----
+7
+
+# Parity check: at the store level, every (unique_id, ds) value IS NOT DISTINCT FROM the
+# plain SQL SUM(qty) over the matching leaves (exact SQL SUM semantics, no C++/SQL drift).
+query I
+SELECT COUNT(*) FROM (
+    SELECT
+        h.unique_id,
+        h.ds,
+        h.qty AS hier_qty,
+        (SELECT SUM(l.qty) FROM hier_nulls l
+         WHERE l.region = split_part(h.unique_id, '|', 1)
+           AND l.store = split_part(h.unique_id, '|', 2)
+           AND l.ds = h.ds) AS sql_sum_qty
+    FROM ts_aggregate_hierarchy(
+        (SELECT ds, qty, region, store, item FROM hier_nulls), MAP{}
+    ) h
+    WHERE split_part(h.unique_id, '|', 1) != 'AGGREGATED'
+      AND split_part(h.unique_id, '|', 2) != 'AGGREGATED'
+      AND split_part(h.unique_id, '|', 3) = 'AGGREGATED'
+) WHERE hier_qty IS DISTINCT FROM sql_sum_qty;
+----
+0
+
+#######################################
 # Ordering Tests
 #######################################
 

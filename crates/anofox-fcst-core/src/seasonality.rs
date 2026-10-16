@@ -3,6 +3,7 @@
 //! This module provides functions for detecting and analyzing seasonal patterns
 //! in time series data, wrapping both custom implementations and fdars-core functions.
 
+use crate::detrending::{detrend_linear, single_series_matrix};
 use crate::error::{ForecastError, Result};
 use fdars_core::seasonal::{
     classify_seasonality as fdars_classify_seasonality,
@@ -11,7 +12,6 @@ use fdars_core::seasonal::{
     instantaneous_period as fdars_instantaneous_period,
     seasonal_strength_spectral as fdars_seasonal_strength_spectral,
     seasonal_strength_variance as fdars_seasonal_strength_variance,
-    seasonal_strength_wavelet as fdars_seasonal_strength_wavelet,
     seasonal_strength_windowed as fdars_seasonal_strength_windowed,
     ChangeDetectionResult as FdarsChangeDetectionResult, ChangePoint as FdarsChangePoint,
     ChangeType, InstantaneousPeriod as FdarsInstantaneousPeriod, ModulationType,
@@ -45,19 +45,40 @@ pub enum StrengthMethod {
     Variance,
     /// Spectral: power at seasonal frequencies / total power
     Spectral,
-    /// Wavelet-based strength measurement
-    Wavelet,
 }
 
+/// All strength method names accepted by [`StrengthMethod::from_str`], for
+/// the error message naming every valid choice (D-12).
+const VALID_STRENGTH_METHODS: &str = "variance (alias var), spectral (alias spec, fft)";
+
+/// `seasonal_strength_wavelet` is removed (D-12, G19): it returned 1.0 even
+/// for white noise in fdars-core 0.47 (always-maximal strength regardless
+/// of input), so it is strictly worse than reporting nothing. Requesting it
+/// now raises an error naming the two remaining methods instead of
+/// silently falling back to `variance`.
+const WAVELET_REMOVED_MESSAGE: &str = "removed: seasonal_strength_wavelet returned 1.0 even for white noise in fdars-core 0.47; use 'variance' (default) or 'spectral'";
+
 impl FromStr for StrengthMethod {
-    type Err = std::convert::Infallible;
+    type Err = ForecastError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         Ok(match s.to_lowercase().as_str() {
             "variance" | "var" => Self::Variance,
             "spectral" | "spec" | "fft" => Self::Spectral,
-            "wavelet" | "wav" => Self::Wavelet,
-            _ => Self::Variance,
+            "wavelet" | "wav" => {
+                return Err(ForecastError::InvalidParameter {
+                    param: "method".to_string(),
+                    value: s.to_string(),
+                    reason: WAVELET_REMOVED_MESSAGE.to_string(),
+                })
+            }
+            other => {
+                return Err(ForecastError::InvalidParameter {
+                    param: "method".to_string(),
+                    value: other.to_string(),
+                    reason: format!("expected one of: {VALID_STRENGTH_METHODS}"),
+                })
+            }
         })
     }
 }
@@ -67,7 +88,6 @@ impl From<StrengthMethod> for FdarsStrengthMethod {
         match m {
             StrengthMethod::Variance => FdarsStrengthMethod::Variance,
             StrengthMethod::Spectral => FdarsStrengthMethod::Spectral,
-            StrengthMethod::Wavelet => FdarsStrengthMethod::Variance, // Wavelet handled separately
         }
     }
 }
@@ -92,6 +112,9 @@ impl From<FdarsSeasonalType> for SeasonalType {
             FdarsSeasonalType::VariableTiming => Self::VariableTiming,
             FdarsSeasonalType::IntermittentSeasonal => Self::IntermittentSeasonal,
             FdarsSeasonalType::NonSeasonal => Self::NonSeasonal,
+            // fdars-core 0.47 marked this enum #[non_exhaustive]; fall back
+            // to NonSeasonal for any future variant rather than panicking.
+            _ => Self::NonSeasonal,
         }
     }
 }
@@ -155,6 +178,9 @@ impl From<ChangeType> for ChangePointType {
         match t {
             ChangeType::Onset => Self::Onset,
             ChangeType::Cessation => Self::Cessation,
+            // fdars-core 0.47 marked this enum #[non_exhaustive]; fall back
+            // to Cessation for any future variant rather than panicking.
+            _ => Self::Cessation,
         }
     }
 }
@@ -258,6 +284,9 @@ impl From<ModulationType> for AmplitudeModulationType {
             ModulationType::Fading => Self::Fading,
             ModulationType::Oscillating => Self::Oscillating,
             ModulationType::NonSeasonal => Self::NonSeasonal,
+            // fdars-core 0.47 marked this enum #[non_exhaustive]; fall back
+            // to NonSeasonal for any future variant rather than panicking.
+            _ => Self::NonSeasonal,
         }
     }
 }
@@ -432,7 +461,13 @@ pub fn analyze_seasonality(
     })
 }
 
-/// Compute trend strength using linear regression R-squared.
+/// Compute trend strength as `|r|`, the absolute Pearson correlation
+/// between the series and a linear time index (D-12, G22). This is the
+/// SQUARE ROOT of the linear-fit `R^2`, not `R^2` itself -- a prior doc
+/// comment claimed "R-squared" without the square root; the implementation
+/// below is unchanged, only this comment is corrected.
+/// `ts_analyze_seasonality`'s `trend_strength` column documents the same
+/// `|r|` definition.
 fn compute_trend_strength(values: &[f64]) -> f64 {
     if values.len() < 2 {
         return 0.0;
@@ -485,21 +520,26 @@ pub fn seasonal_strength_variance(
         return Err(ForecastError::InsufficientData { needed: 4, got: n });
     }
 
-    if period <= 0.0 {
+    if !period.is_finite() || period <= 0.0 {
         return Err(ForecastError::InvalidParameter {
             param: "period".to_string(),
             value: period.to_string(),
-            reason: "Period must be positive".to_string(),
+            reason: "Period must be a positive finite number".to_string(),
         });
     }
 
     let argvals = make_argvals(n);
     let harmonics = n_harmonics.unwrap_or(3);
 
-    // fdars-core expects: data, n_samples, m_timepoints, argvals, ...
-    // We have 1 sample (our time series) with n time points
+    // D-12, G19: linearly detrend FIRST -- fdars 0.47's own
+    // seasonal_strength_variance measures variance explained on the RAW
+    // series, so a trend inflates total variance and crushes the
+    // seasonal-share ratio (0.5*t + 2*sin(2*pi*t/12), n=120 measured
+    // 0.00296 instead of ~1.0 for the sine alone).
+    let detrended = detrend_linear(values)?.detrended;
+    let mat = single_series_matrix(&detrended)?;
     Ok(fdars_seasonal_strength_variance(
-        values, 1, n, &argvals, period, harmonics,
+        &mat, &argvals, period, harmonics,
     ))
 }
 
@@ -519,54 +559,21 @@ pub fn seasonal_strength_spectral(values: &[f64], period: f64) -> Result<f64> {
         return Err(ForecastError::InsufficientData { needed: 4, got: n });
     }
 
-    if period <= 0.0 {
+    if !period.is_finite() || period <= 0.0 {
         return Err(ForecastError::InvalidParameter {
             param: "period".to_string(),
             value: period.to_string(),
-            reason: "Period must be positive".to_string(),
+            reason: "Period must be a positive finite number".to_string(),
         });
     }
 
     let argvals = make_argvals(n);
 
-    // fdars-core expects: data, n_samples, m_timepoints, argvals, ...
-    // We have 1 sample (our time series) with n time points
-    Ok(fdars_seasonal_strength_spectral(
-        values, 1, n, &argvals, period,
-    ))
-}
-
-/// Compute seasonal strength using wavelet transform.
-///
-/// Uses Morlet wavelet to measure seasonal strength.
-///
-/// # Arguments
-/// * `values` - Time series values
-/// * `period` - Seasonal period
-///
-/// # Returns
-/// Seasonal strength (0 to 1)
-pub fn seasonal_strength_wavelet(values: &[f64], period: f64) -> Result<f64> {
-    let n = values.len();
-    if n < 4 {
-        return Err(ForecastError::InsufficientData { needed: 4, got: n });
-    }
-
-    if period <= 0.0 {
-        return Err(ForecastError::InvalidParameter {
-            param: "period".to_string(),
-            value: period.to_string(),
-            reason: "Period must be positive".to_string(),
-        });
-    }
-
-    let argvals = make_argvals(n);
-
-    // fdars-core expects: data, n_samples, m_timepoints, argvals, ...
-    // We have 1 sample (our time series) with n time points
-    Ok(fdars_seasonal_strength_wavelet(
-        values, 1, n, &argvals, period,
-    ))
+    // D-12, G19: linearly detrend first, same rationale as
+    // seasonal_strength_variance above.
+    let detrended = detrend_linear(values)?.detrended;
+    let mat = single_series_matrix(&detrended)?;
+    Ok(fdars_seasonal_strength_spectral(&mat, &argvals, period))
 }
 
 /// Compute seasonal strength using the specified method.
@@ -582,7 +589,6 @@ pub fn seasonal_strength(values: &[f64], period: f64, method: StrengthMethod) ->
     match method {
         StrengthMethod::Variance => seasonal_strength_variance(values, period, None),
         StrengthMethod::Spectral => seasonal_strength_spectral(values, period),
-        StrengthMethod::Wavelet => seasonal_strength_wavelet(values, period),
     }
 }
 
@@ -607,11 +613,11 @@ pub fn seasonal_strength_windowed(
         return Err(ForecastError::InsufficientData { needed: 4, got: n });
     }
 
-    if period <= 0.0 {
+    if !period.is_finite() || period <= 0.0 {
         return Err(ForecastError::InvalidParameter {
             param: "period".to_string(),
             value: period.to_string(),
-            reason: "Period must be positive".to_string(),
+            reason: "Period must be a positive finite number".to_string(),
         });
     }
 
@@ -619,12 +625,12 @@ pub fn seasonal_strength_windowed(
     let win_size = window_size.unwrap_or(2.0 * period);
     let strength_method: FdarsStrengthMethod = method.unwrap_or(StrengthMethod::Variance).into();
 
-    // fdars-core expects: data, n_samples, m_timepoints, argvals, ...
-    // We have 1 sample (our time series) with n time points
+    // D-12, G19: linearly detrend first, same rationale as
+    // seasonal_strength_variance above.
+    let detrended = detrend_linear(values)?.detrended;
+    let mat = single_series_matrix(&detrended)?;
     Ok(fdars_seasonal_strength_windowed(
-        values,
-        1,
-        n,
+        &mat,
         &argvals,
         period,
         win_size,
@@ -652,6 +658,19 @@ pub fn classify_seasonality(
     timing_threshold: Option<f64>,
 ) -> Result<SeasonalityClassification> {
     let n = values.len();
+
+    // CR-03: validate period before the insufficient-data check below --
+    // `period as usize` saturates to usize::MAX for +infinity, and
+    // `2 * usize::MAX` overflows (panics in debug builds, wraps in
+    // release), so this order is load-bearing, not cosmetic.
+    if !period.is_finite() || period <= 0.0 {
+        return Err(ForecastError::InvalidParameter {
+            param: "period".to_string(),
+            value: period.to_string(),
+            reason: "Period must be a positive finite number".to_string(),
+        });
+    }
+
     if n < 2 * period as usize {
         return Err(ForecastError::InsufficientData {
             needed: 2 * period as usize,
@@ -659,25 +678,14 @@ pub fn classify_seasonality(
         });
     }
 
-    if period <= 0.0 {
-        return Err(ForecastError::InvalidParameter {
-            param: "period".to_string(),
-            value: period.to_string(),
-            reason: "Period must be positive".to_string(),
-        });
-    }
-
     let argvals = make_argvals(n);
 
-    let result = fdars_classify_seasonality(
-        values,
-        n,
-        1,
-        &argvals,
-        period,
-        strength_threshold,
-        timing_threshold,
-    );
+    // fdars 0.47 / B2 fix: classify_seasonality(data: &FdMatrix, argvals, period, ...)
+    // -- the matrix is built once as (1, n), not the swapped (n, 1) this
+    // function used to pass.
+    let mat = single_series_matrix(values)?;
+    let result =
+        fdars_classify_seasonality(&mat, &argvals, period, strength_threshold, timing_threshold);
 
     Ok(result.into())
 }
@@ -704,18 +712,23 @@ pub fn detect_seasonality_changes(
     min_duration: Option<f64>,
 ) -> Result<ChangeDetectionResult> {
     let n = values.len();
+
+    // CR-03: validate period before the insufficient-data check below --
+    // `period as usize` saturates to usize::MAX for +infinity, and
+    // `2 * usize::MAX` overflows (panics in debug builds, wraps in
+    // release), so this order is load-bearing, not cosmetic.
+    if !period.is_finite() || period <= 0.0 {
+        return Err(ForecastError::InvalidParameter {
+            param: "period".to_string(),
+            value: period.to_string(),
+            reason: "Period must be a positive finite number".to_string(),
+        });
+    }
+
     if n < 2 * period as usize {
         return Err(ForecastError::InsufficientData {
             needed: 2 * period as usize,
             got: n,
-        });
-    }
-
-    if period <= 0.0 {
-        return Err(ForecastError::InvalidParameter {
-            param: "period".to_string(),
-            value: period.to_string(),
-            reason: "Period must be positive".to_string(),
         });
     }
 
@@ -724,10 +737,10 @@ pub fn detect_seasonality_changes(
     let win_size = window_size.unwrap_or(2.0 * period);
     let min_dur = min_duration.unwrap_or(period);
 
-    // fdars-core expects: data, n_samples, m_timepoints, argvals, ...
-    // We have 1 sample (our time series) with n time points
+    // fdars 0.47: detect_seasonality_changes(data: &FdMatrix, argvals, period, threshold, window_size, min_duration)
+    let mat = single_series_matrix(values)?;
     let result =
-        fdars_detect_seasonality_changes(values, 1, n, &argvals, period, thresh, win_size, min_dur);
+        fdars_detect_seasonality_changes(&mat, &argvals, period, thresh, win_size, min_dur);
 
     Ok(result.into())
 }
@@ -749,9 +762,9 @@ pub fn instantaneous_period(values: &[f64]) -> Result<InstantaneousPeriodResult>
 
     let argvals = make_argvals(n);
 
-    // fdars-core expects: data, n_samples, m_timepoints, argvals
-    // We have 1 sample (our time series) with n time points
-    let result = fdars_instantaneous_period(values, 1, n, &argvals);
+    // fdars 0.47: instantaneous_period(data: &FdMatrix, argvals)
+    let mat = single_series_matrix(values)?;
+    let result = fdars_instantaneous_period(&mat, &argvals);
 
     Ok(result.into())
 }
@@ -776,6 +789,19 @@ pub fn detect_amplitude_modulation(
     seasonality_threshold: Option<f64>,
 ) -> Result<AmplitudeModulationResult> {
     let n = values.len();
+
+    // CR-03: validate period before the insufficient-data check below --
+    // `period as usize` saturates to usize::MAX for +infinity, and
+    // `2 * usize::MAX` overflows (panics in debug builds, wraps in
+    // release), so this order is load-bearing, not cosmetic.
+    if !period.is_finite() || period <= 0.0 {
+        return Err(ForecastError::InvalidParameter {
+            param: "period".to_string(),
+            value: period.to_string(),
+            reason: "Period must be a positive finite number".to_string(),
+        });
+    }
+
     if n < 2 * period as usize {
         return Err(ForecastError::InsufficientData {
             needed: 2 * period as usize,
@@ -783,27 +809,17 @@ pub fn detect_amplitude_modulation(
         });
     }
 
-    if period <= 0.0 {
-        return Err(ForecastError::InvalidParameter {
-            param: "period".to_string(),
-            value: period.to_string(),
-            reason: "Period must be positive".to_string(),
-        });
-    }
-
     let argvals = make_argvals(n);
     let mod_thresh = modulation_threshold.unwrap_or(0.2);
     let seas_thresh = seasonality_threshold.unwrap_or(0.3);
 
-    let result = fdars_detect_amplitude_modulation_wavelet(
-        values,
-        n,
-        1,
-        &argvals,
-        period,
-        mod_thresh,
-        seas_thresh,
-    );
+    // fdars 0.47 / B2 fix: detect_amplitude_modulation_wavelet(data: &FdMatrix,
+    // argvals, period, modulation_threshold, seasonality_threshold) -- matrix
+    // built once as (1, n); thresholds are now plain f64 (no more Option
+    // wrapping needed on the fdars side).
+    let mat = single_series_matrix(values)?;
+    let result =
+        fdars_detect_amplitude_modulation_wavelet(&mat, &argvals, period, mod_thresh, seas_thresh);
 
     Ok(result.into())
 }
@@ -851,6 +867,9 @@ mod tests {
 
         // Verify function runs without error
         assert!(result.is_ok());
+        // Value check: a clean, noise-free, non-trending sine is nearly
+        // 100% explained by its seasonal component.
+        assert!(result.unwrap() >= 0.99);
     }
 
     #[test]
@@ -860,15 +879,55 @@ mod tests {
 
         // Verify function runs without error
         assert!(result.is_ok());
+        // Value check: same series, spectral method -- also near 100%.
+        assert!(result.unwrap() >= 0.99);
     }
 
     #[test]
-    fn test_seasonal_strength_wavelet() {
-        let values = generate_seasonal_series(120, 12.0, 5.0);
-        let result = seasonal_strength_wavelet(&values, 12.0);
+    fn test_strength_method_from_str_wavelet_removed() {
+        for s in ["wavelet", "wav", "WAVELET"] {
+            let err = s.parse::<StrengthMethod>().unwrap_err();
+            let msg = err.to_string();
+            assert!(msg.contains("variance"), "{s}: {msg}");
+            assert!(msg.contains("spectral"), "{s}: {msg}");
+        }
+    }
 
-        // Verify function runs without error
-        assert!(result.is_ok());
+    #[test]
+    fn test_strength_method_from_str_unknown_lists_choices() {
+        let err = "foo".parse::<StrengthMethod>().unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("variance"), "{msg}");
+        assert!(msg.contains("spec"), "{msg}");
+    }
+
+    #[test]
+    fn test_strength_method_from_str_accepted_aliases() {
+        for (s, want) in [
+            ("variance", StrengthMethod::Variance),
+            ("var", StrengthMethod::Variance),
+            ("VARIANCE", StrengthMethod::Variance),
+            ("spectral", StrengthMethod::Spectral),
+            ("spec", StrengthMethod::Spectral),
+            ("fft", StrengthMethod::Spectral),
+        ] {
+            assert_eq!(s.parse::<StrengthMethod>().unwrap(), want, "{s}");
+        }
+    }
+
+    #[test]
+    fn test_seasonal_strength_variance_detrends_first() {
+        // D-12, G19: a trend + seasonal series must report a HIGH seasonal
+        // strength once detrended, not the crushed ~0.003 fdars-core 0.47
+        // reports on the raw (undetrended) series.
+        let values: Vec<f64> = (0..120)
+            .map(|i| {
+                let t = i as f64;
+                0.5 * t + 2.0 * (2.0 * PI * t / 12.0).sin()
+            })
+            .collect();
+        let strength = seasonal_strength_variance(&values, 12.0, None).unwrap();
+        assert!(strength >= 0.95, "strength = {strength}");
     }
 
     #[test]
@@ -878,15 +937,57 @@ mod tests {
 
         // Just verify function runs without error
         assert!(result.is_ok());
+        // Value check: a clean, noise-free sine's windowed seasonal strength
+        // stays near 1.0 at every window.
+        let strengths = result.unwrap();
+        assert!(!strengths.is_empty());
+        assert!(
+            strengths.iter().all(|&s| (0.98..=1.0).contains(&s)),
+            "{:?}",
+            strengths
+        );
+    }
+
+    /// Deterministic LCG noise in `[-1, 1)` -- never `thread_rng` (the
+    /// result must be byte-reproducible across runs/machines).
+    fn deterministic_noise(n: usize, seed: u64) -> Vec<f64> {
+        let mut state = seed;
+        (0..n)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                ((state >> 11) as f64 / (1u64 << 53) as f64) * 2.0 - 1.0
+            })
+            .collect()
     }
 
     #[test]
-    fn test_classify_seasonality() {
-        let values = generate_seasonal_series(120, 12.0, 5.0);
-        let result = classify_seasonality(&values, 12.0, None, None);
+    fn test_classify_seasonality_strong_sine_is_stable_seasonal() {
+        // Before fdars-core 0.47 (B2), classify_seasonality passed
+        // (values, n, 1, ...) -- backwards for a single series -- and
+        // returned NonSeasonal with NaN strength for this exact input.
+        let values: Vec<f64> = (0..120)
+            .map(|i| 10.0 + 5.0 * (2.0 * PI * i as f64 / 12.0).sin())
+            .collect();
+        let result = classify_seasonality(&values, 12.0, None, None).unwrap();
 
-        // Just verify function runs without error
-        assert!(result.is_ok());
+        assert!(result.is_seasonal);
+        assert_eq!(result.classification, SeasonalType::StableSeasonal);
+        assert!(
+            result.seasonal_strength > 0.99,
+            "seasonal_strength = {}",
+            result.seasonal_strength
+        );
+    }
+
+    #[test]
+    fn test_classify_seasonality_white_noise_is_non_seasonal() {
+        let noise = deterministic_noise(120, 42);
+        let result = classify_seasonality(&noise, 12.0, None, None).unwrap();
+
+        assert!(!result.is_seasonal);
+        assert_eq!(result.classification, SeasonalType::NonSeasonal);
     }
 
     #[test]
@@ -906,6 +1007,25 @@ mod tests {
 
         // Just verify function runs without error
         assert!(result.is_ok());
+        let r = result.unwrap();
+        // Value check: only the AMPLITUDE changes at i=120 (5.0 -> 0.5), not
+        // the seasonal STRENGTH (a pure sine of any amplitude is ~100%
+        // explained by its own seasonal component) -- no change point is
+        // flagged, and the strength curve is ~1.0 away from the transition
+        // (a transient dip near the amplitude-change boundary is expected:
+        // a windowed estimator mixing both amplitude regimes there).
+        assert_eq!(r.change_points.len(), 0);
+        assert_eq!(r.strength_curve.len(), 240);
+        assert!(
+            r.strength_curve[..100].iter().all(|&s| s >= 0.99),
+            "{:?}",
+            &r.strength_curve[..100]
+        );
+        assert!(
+            r.strength_curve[160..].iter().all(|&s| s >= 0.99),
+            "{:?}",
+            &r.strength_curve[160..]
+        );
     }
 
     #[test]
@@ -915,22 +1035,45 @@ mod tests {
 
         // Just verify function runs without error
         assert!(result.is_ok());
+        // Value check: for a clean period-12 sine, the instantaneous period
+        // estimate at every sample is 12.0 (within floating-point noise),
+        // and amplitude is 5.0 (within floating-point noise) everywhere.
+        let r = result.unwrap();
+        assert!(!r.period.is_empty());
+        assert!(
+            r.period.iter().all(|&p| (p - 12.0).abs() < 1e-6),
+            "{:?}",
+            r.period
+        );
+        assert!(
+            r.amplitude.iter().all(|&a| (a - 5.0).abs() < 1e-6),
+            "{:?}",
+            r.amplitude
+        );
     }
 
     #[test]
-    fn test_detect_amplitude_modulation() {
-        // Series with amplitude modulation
+    fn test_detect_amplitude_modulation_constant_amplitude_is_stable() {
+        // Before fdars-core 0.47 (B2), detect_amplitude_modulation passed
+        // (values, n, 1, ...) -- backwards for a single series.
         let values: Vec<f64> = (0..240)
-            .map(|i| {
-                let amp = 3.0 + 2.0 * (2.0 * PI * i as f64 / 60.0).sin(); // Modulated amplitude
-                amp * (2.0 * PI * i as f64 / 12.0).sin()
-            })
+            .map(|i| (2.0 * PI * i as f64 / 12.0).sin())
             .collect();
+        let result = detect_amplitude_modulation(&values, 12.0, None, None).unwrap();
 
-        let result = detect_amplitude_modulation(&values, 12.0, None, None);
+        assert_eq!(result.modulation_type, AmplitudeModulationType::Stable);
+        assert!(!result.has_modulation);
+    }
 
-        // Just verify function runs without error
-        assert!(result.is_ok());
+    #[test]
+    fn test_detect_amplitude_modulation_growing_amplitude_is_emerging() {
+        let values: Vec<f64> = (0..240)
+            .map(|i| (1.0 + i as f64 / 30.0) * (2.0 * PI * i as f64 / 12.0).sin())
+            .collect();
+        let result = detect_amplitude_modulation(&values, 12.0, None, None).unwrap();
+
+        assert_eq!(result.modulation_type, AmplitudeModulationType::Emerging);
+        assert!(result.has_modulation);
     }
 
     #[test]
@@ -939,5 +1082,32 @@ mod tests {
 
         assert!(seasonal_strength_variance(&values, 0.0, None).is_err());
         assert!(seasonal_strength_variance(&values, -5.0, None).is_err());
+    }
+
+    #[test]
+    fn test_invalid_period_rejects_non_finite() {
+        // CR-03: NaN <= 0.0 is false in IEEE-754, so a naive `period <= 0.0`
+        // guard previously let a NaN (or infinite) period sail through and
+        // silently produce a wrong (non-error, non-NULL) result instead of
+        // the documented InvalidParameter error.
+        let values = generate_seasonal_series(120, 12.0, 5.0);
+
+        assert!(seasonal_strength_variance(&values, f64::NAN, None).is_err());
+        assert!(seasonal_strength_variance(&values, f64::INFINITY, None).is_err());
+
+        assert!(seasonal_strength_spectral(&values, f64::NAN).is_err());
+        assert!(seasonal_strength_spectral(&values, f64::INFINITY).is_err());
+
+        assert!(seasonal_strength_windowed(&values, f64::NAN, None, None).is_err());
+        assert!(seasonal_strength_windowed(&values, f64::INFINITY, None, None).is_err());
+
+        assert!(classify_seasonality(&values, f64::NAN, None, None).is_err());
+        assert!(classify_seasonality(&values, f64::INFINITY, None, None).is_err());
+
+        assert!(detect_seasonality_changes(&values, f64::NAN, None, None, None).is_err());
+        assert!(detect_seasonality_changes(&values, f64::INFINITY, None, None, None).is_err());
+
+        assert!(detect_amplitude_modulation(&values, f64::NAN, None, None).is_err());
+        assert!(detect_amplitude_modulation(&values, f64::INFINITY, None, None).is_err());
     }
 }

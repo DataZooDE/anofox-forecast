@@ -1,5 +1,6 @@
 # name: test/sql/ts_hydrate_features.test
-# description: Tests for ts_hydrate_features - CV feature hydration with masking support
+# description: Tests for CV feature hydration with masking support (ported from
+#   ts_hydrate_features_by to ts_cv_hydrate_by, Phase 18, 18-01, class A)
 # group: [sql]
 
 require anofox_forecast
@@ -18,25 +19,41 @@ SELECT
     10.0 + i * 2.0 AS revenue,
     20 + i % 10 AS temperature,
     i % 7 IN (5, 6) AS is_weekend,
-    random() > 0.7 AS has_promotion
+    i % 10 = 0 AS has_promotion
 FROM generate_series(0, 59) AS t(i)
 CROSS JOIN (SELECT UNNEST(['A', 'B']) AS series_id) s;
 
+# ts_cv_split_by's frequency parameter was removed in commit 3032738 ("feat: remove
+# frequency parameter from ts_cv_split_by") -- it was parsed but never used; the
+# native implementation now uses position-based indexing. Current signature:
+# ts_cv_split_by(source, group_col, date_col, target_col, training_end_times, horizon, params)
 statement ok
 CREATE TABLE cv_splits AS
 SELECT * FROM ts_cv_split_by(
     'feature_data', series_id, date, revenue,
-    ['2024-01-30'::DATE, '2024-02-15'::DATE], 7, '1d', MAP{}
+    ['2024-01-30'::DATE, '2024-02-15'::DATE], 7, MAP{}
 );
 
 #######################################
-# ts_hydrate_features - Basic Tests
+# ts_cv_hydrate_by - Basic Tests
+#
+# ts_hydrate_features_by (plus ts_hydrate_split_by/_full_by/_strict_by,
+# ts_prepare_regression_input_by) was removed in commit 88839f1 "refactor:
+# simplify CV feature hydration with ts_cv_hydrate_by" and replaced with a
+# single unified ts_cv_hydrate_by(cv_folds, source, group_col, date_col,
+# unknown_features, params) function. Unlike the old API, masking is applied
+# automatically per a `strategy` param (default 'last_value') and unknown
+# features are returned as direct columns -- there is no caller-visible
+# `_is_test` flag, so masking is verified by requesting strategy='null' and
+# checking which rows go NULL. Values below are measured against a fresh
+# Phase-17-complete build (Phase 18, 18-01, class A port).
 #######################################
 
 # Test returns rows
 query I
-SELECT COUNT(*) FROM ts_hydrate_features_by(
-    'cv_splits', 'feature_data', series_id, date, MAP{}
+SELECT COUNT(*) FROM ts_cv_hydrate_by(
+    'cv_splits', 'feature_data', series_id, date,
+    ['temperature', 'is_weekend', 'has_promotion'], MAP{}
 );
 ----
 180
@@ -44,49 +61,50 @@ SELECT COUNT(*) FROM ts_hydrate_features_by(
 # Test has required columns
 query I
 SELECT COUNT(*) FROM (
-    DESCRIBE SELECT * FROM ts_hydrate_features_by(
-        'cv_splits', 'feature_data', series_id, date, MAP{}
+    DESCRIBE SELECT * FROM ts_cv_hydrate_by(
+        'cv_splits', 'feature_data', series_id, date,
+        ['temperature', 'is_weekend', 'has_promotion'], MAP{}
     )
-) WHERE column_name IN ('fold_id', 'split', 'group_col', 'date_col', 'target_col', '_is_test', '_train_cutoff');
+) WHERE column_name IN ('fold_id', 'split', 'series_id', 'date', 'revenue', 'temperature', 'is_weekend', 'has_promotion');
 ----
-7
+8
 
-# Test _is_test flag is correct
+# Test split counts (train/test), replaces the old _is_test-flag assertion
 query II
-SELECT split, SUM(CASE WHEN _is_test THEN 1 ELSE 0 END) AS test_count
-FROM ts_hydrate_features_by('cv_splits', 'feature_data', series_id, date, MAP{})
+SELECT split, COUNT(*)
+FROM ts_cv_hydrate_by(
+    'cv_splits', 'feature_data', series_id, date,
+    ['temperature', 'is_weekend', 'has_promotion'], MAP{}
+)
 GROUP BY split
 ORDER BY split DESC;
 ----
-train	0
+train	152
 test	28
 
 #######################################
-# ts_hydrate_features - Feature Preservation
+# ts_cv_hydrate_by - Feature Preservation
 #######################################
 
-# Test features are preserved
+# Test features are preserved (default strategy 'last_value' never leaves a NULL)
 query I
-SELECT COUNT(*) FROM ts_hydrate_features_by(
-    'cv_splits', 'feature_data', series_id, date, MAP{}
+SELECT COUNT(*) FROM ts_cv_hydrate_by(
+    'cv_splits', 'feature_data', series_id, date,
+    ['temperature', 'is_weekend', 'has_promotion'], MAP{}
 ) WHERE temperature IS NOT NULL AND is_weekend IS NOT NULL;
 ----
 180
 
 #######################################
-# ts_hydrate_features - Unknown Feature Masking Pattern
+# ts_cv_hydrate_by - Unknown Feature Masking Pattern
 #######################################
 
-# Test masking pattern works: unknown features NULL in test rows
+# Test masking pattern works: unknown features NULL in test rows under strategy 'null'
 query II
-SELECT
-    split,
-    SUM(CASE WHEN temp_masked IS NULL THEN 1 ELSE 0 END) AS null_count
-FROM (
-    SELECT
-        split,
-        CASE WHEN _is_test THEN NULL ELSE temperature END AS temp_masked
-    FROM ts_hydrate_features_by('cv_splits', 'feature_data', series_id, date, MAP{})
+SELECT split, SUM(CASE WHEN temperature IS NULL THEN 1 ELSE 0 END) AS null_count
+FROM ts_cv_hydrate_by(
+    'cv_splits', 'feature_data', series_id, date,
+    ['temperature', 'is_weekend', 'has_promotion'], MAP{'strategy': 'null'}
 )
 GROUP BY split
 ORDER BY split DESC;
@@ -95,24 +113,26 @@ train	0
 test	28
 
 #######################################
-# ts_hydrate_features - Fold Structure
+# ts_cv_hydrate_by - Fold Structure
 #######################################
 
 # Test all folds represented
 query I
-SELECT COUNT(DISTINCT fold_id) FROM ts_hydrate_features_by(
-    'cv_splits', 'feature_data', series_id, date, MAP{}
+SELECT COUNT(DISTINCT fold_id) FROM ts_cv_hydrate_by(
+    'cv_splits', 'feature_data', series_id, date,
+    ['temperature', 'is_weekend', 'has_promotion'], MAP{}
 );
 ----
 2
 
-# Test target_col values match cv_splits
+# Test target column values match cv_splits
 query I
-SELECT COUNT(*) FROM ts_hydrate_features_by(
-    'cv_splits', 'feature_data', series_id, date, MAP{}
+SELECT COUNT(*) FROM ts_cv_hydrate_by(
+    'cv_splits', 'feature_data', series_id, date,
+    ['temperature', 'is_weekend', 'has_promotion'], MAP{}
 ) hf
-JOIN cv_splits cs ON hf.fold_id = cs.fold_id AND hf.group_col = cs.group_col AND hf.date_col = cs.date_col
-WHERE hf.target_col = cs.target_col;
+JOIN cv_splits cs ON hf.fold_id = cs.fold_id AND hf.series_id = cs.series_id AND hf.date = cs.date
+WHERE hf.revenue = cs.revenue;
 ----
 180
 

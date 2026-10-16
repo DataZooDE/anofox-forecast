@@ -1,0 +1,848 @@
+# name: test/sql/ts_features_reference.test
+# description: ts_features value assertions against tsfresh fixtures (Phase 14 plan 14-01, FEAT-01/FEAT-05)
+# group: [sql]
+#
+# Non-json-gated so it runs on every native build (Phase 13 lesson, D-12).
+# Literals below are copied from
+# validation/reference/fixtures/tsfresh_features/short_n20.json via:
+#   python3 -c "import json; d=json.load(open('validation/reference/fixtures/tsfresh_features/short_n20.json')); print(d['expected'])"
+# (short_n20's values are the audit x20 vector, also used by test/sql/ts_stats_reference.test).
+
+require anofox_forecast
+
+# --- tsfresh_features/short_n20.json: series.values (= moments/scipy_moments.json vectors.x20) ---
+statement ok
+CREATE TABLE x20 AS
+SELECT 'x20' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, v
+FROM (SELECT unnest(range(20)) AS i, unnest([
+    3.337, 2.674, 2.292, 3.491, 2.217, 4.765, 3.613, 3.258, 0.928, 0.481,
+    1.015, 3.755, 3.21, 0.738, 3.727, 1.651, 1.653, 6.178, 3.053, 3.501
+]) AS v);
+
+#######################################
+# partial_autocorrelation_lag1..5 (D-06/FEAT-01, Durbin-Levinson)
+# tsfresh (short_n20): lag1 0.026752824669788355, lag2 -0.07488582800969257,
+#   lag3 -0.025999690982590442, lag4 -0.39110953857042163, lag5 0.1107535522386214
+#######################################
+
+# --- ts_features_by('x20', id, ds, v) ---
+
+query I
+SELECT abs(partial_autocorrelation_lag1 - 0.026752824669788355) <= 1e-9 + 1e-9 * abs(0.026752824669788355)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(partial_autocorrelation_lag2 - (-0.07488582800969257)) <= 1e-9 + 1e-9 * abs(-0.07488582800969257)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(partial_autocorrelation_lag3 - (-0.025999690982590442)) <= 1e-9 + 1e-9 * abs(-0.025999690982590442)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(partial_autocorrelation_lag4 - (-0.39110953857042163)) <= 1e-9 + 1e-9 * abs(-0.39110953857042163)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(partial_autocorrelation_lag5 - 0.1107535522386214) <= 1e-9 + 1e-9 * abs(0.1107535522386214)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+# --- (ts_features(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features(ds, v)).partial_autocorrelation_lag1 - 0.026752824669788355) <= 1e-9 + 1e-9 * abs(0.026752824669788355)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).partial_autocorrelation_lag2 - (-0.07488582800969257)) <= 1e-9 + 1e-9 * abs(-0.07488582800969257)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).partial_autocorrelation_lag3 - (-0.025999690982590442)) <= 1e-9 + 1e-9 * abs(-0.025999690982590442)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).partial_autocorrelation_lag4 - (-0.39110953857042163)) <= 1e-9 + 1e-9 * abs(-0.39110953857042163)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).partial_autocorrelation_lag5 - 0.1107535522386214) <= 1e-9 + 1e-9 * abs(0.1107535522386214)
+FROM x20;
+----
+true
+
+# --- (ts_features_agg(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features_agg(ds, v)).partial_autocorrelation_lag1 - 0.026752824669788355) <= 1e-9 + 1e-9 * abs(0.026752824669788355)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).partial_autocorrelation_lag2 - (-0.07488582800969257)) <= 1e-9 + 1e-9 * abs(-0.07488582800969257)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).partial_autocorrelation_lag3 - (-0.025999690982590442)) <= 1e-9 + 1e-9 * abs(-0.025999690982590442)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).partial_autocorrelation_lag4 - (-0.39110953857042163)) <= 1e-9 + 1e-9 * abs(-0.39110953857042163)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).partial_autocorrelation_lag5 - 0.1107535522386214) <= 1e-9 + 1e-9 * abs(0.1107535522386214)
+FROM x20;
+----
+true
+
+#######################################
+# autocorrelation_lag1/lag2/lag10 + anchors mean/abs_energy (Task 3, FEAT-05
+# -- tsfresh (n-lag)*var(x) denominator; autocorrelation_lag10 was previously
+# absent from every SQL surface because the C++ schema came from a 10-point
+# dummy series). tsfresh (short_n20): lag1 0.02675282466978834,
+# lag2 -0.0741165175742436, lag10 -0.35932858466315537. Anchors:
+# mean 2.7768499999999996, abs_energy 193.18060899999998 (already-matching,
+# unaffected features -- proves the new column doesn't disturb the rest).
+#######################################
+
+# --- ts_features_by('x20', id, ds, v) ---
+
+query I
+SELECT abs(autocorrelation_lag1 - 0.02675282466978834) <= 1e-9 + 1e-9 * abs(0.02675282466978834)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(autocorrelation_lag2 - (-0.0741165175742436)) <= 1e-9 + 1e-9 * abs(-0.0741165175742436)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(autocorrelation_lag10 - (-0.35932858466315537)) <= 1e-9 + 1e-9 * abs(-0.35932858466315537)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(mean - 2.7768499999999996) <= 1e-9 + 1e-9 * abs(2.7768499999999996)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(abs_energy - 193.18060899999998) <= 1e-9 + 1e-9 * abs(193.18060899999998)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+# --- (ts_features(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features(ds, v)).autocorrelation_lag1 - 0.02675282466978834) <= 1e-9 + 1e-9 * abs(0.02675282466978834)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).autocorrelation_lag2 - (-0.0741165175742436)) <= 1e-9 + 1e-9 * abs(-0.0741165175742436)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).autocorrelation_lag10 - (-0.35932858466315537)) <= 1e-9 + 1e-9 * abs(-0.35932858466315537)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).mean - 2.7768499999999996) <= 1e-9 + 1e-9 * abs(2.7768499999999996)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).abs_energy - 193.18060899999998) <= 1e-9 + 1e-9 * abs(193.18060899999998)
+FROM x20;
+----
+true
+
+# --- (ts_features_agg(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features_agg(ds, v)).autocorrelation_lag1 - 0.02675282466978834) <= 1e-9 + 1e-9 * abs(0.02675282466978834)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).autocorrelation_lag2 - (-0.0741165175742436)) <= 1e-9 + 1e-9 * abs(-0.0741165175742436)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).autocorrelation_lag10 - (-0.35932858466315537)) <= 1e-9 + 1e-9 * abs(-0.35932858466315537)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).mean - 2.7768499999999996) <= 1e-9 + 1e-9 * abs(2.7768499999999996)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).abs_energy - 193.18060899999998) <= 1e-9 + 1e-9 * abs(193.18060899999998)
+FROM x20;
+----
+true
+
+#######################################
+# last_location_of_maximum / last_location_of_minimum (Task 1, 14-02, FEAT-02):
+# tsfresh (short_n20): last_location_of_maximum 0.9 (max 6.178 at 0-based index
+# 17, (17+1)/20), last_location_of_minimum 0.5 (min 0.481 at 0-based index 9,
+# (9+1)/20) -- previously 0.85/0.45 under the raw-index/n definition.
+#######################################
+
+# --- ts_features_by('x20', id, ds, v) ---
+
+query I
+SELECT abs(last_location_of_maximum - 0.9) <= 1e-9 + 1e-9 * abs(0.9)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(last_location_of_minimum - 0.5) <= 1e-9 + 1e-9 * abs(0.5)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+# --- (ts_features(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features(ds, v)).last_location_of_maximum - 0.9) <= 1e-9 + 1e-9 * abs(0.9)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).last_location_of_minimum - 0.5) <= 1e-9 + 1e-9 * abs(0.5)
+FROM x20;
+----
+true
+
+# --- (ts_features_agg(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features_agg(ds, v)).last_location_of_maximum - 0.9) <= 1e-9 + 1e-9 * abs(0.9)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).last_location_of_minimum - 0.5) <= 1e-9 + 1e-9 * abs(0.5)
+FROM x20;
+----
+true
+
+#######################################
+# mean_second_derivative_central, time_reversal_asymmetry_stat_1, skewness,
+# kurtosis (Task 3, 14-02, FEAT-02). tsfresh (short_n20):
+# mean_second_derivative_central 0.030861111111111117,
+# time_reversal_asymmetry_stat_1 -1.0168216098333345,
+# skewness 0.30292879825084285, kurtosis 0.27652865463225274.
+#######################################
+
+# --- ts_features_by('x20', id, ds, v) ---
+
+query I
+SELECT abs(mean_second_derivative_central - 0.030861111111111117) <= 1e-9 + 1e-9 * abs(0.030861111111111117)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(time_reversal_asymmetry_stat_1 - (-1.0168216098333345)) <= 1e-9 + 1e-9 * abs(-1.0168216098333345)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(skewness - 0.30292879825084285) <= 1e-9 + 1e-9 * abs(0.30292879825084285)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(kurtosis - 0.27652865463225274) <= 1e-9 + 1e-9 * abs(0.27652865463225274)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+# --- (ts_features(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features(ds, v)).mean_second_derivative_central - 0.030861111111111117) <= 1e-9 + 1e-9 * abs(0.030861111111111117)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).time_reversal_asymmetry_stat_1 - (-1.0168216098333345)) <= 1e-9 + 1e-9 * abs(-1.0168216098333345)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).skewness - 0.30292879825084285) <= 1e-9 + 1e-9 * abs(0.30292879825084285)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).kurtosis - 0.27652865463225274) <= 1e-9 + 1e-9 * abs(0.27652865463225274)
+FROM x20;
+----
+true
+
+# --- (ts_features_agg(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features_agg(ds, v)).mean_second_derivative_central - 0.030861111111111117) <= 1e-9 + 1e-9 * abs(0.030861111111111117)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).time_reversal_asymmetry_stat_1 - (-1.0168216098333345)) <= 1e-9 + 1e-9 * abs(-1.0168216098333345)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).skewness - 0.30292879825084285) <= 1e-9 + 1e-9 * abs(0.30292879825084285)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).kurtosis - 0.27652865463225274) <= 1e-9 + 1e-9 * abs(0.27652865463225274)
+FROM x20;
+----
+true
+
+#######################################
+# D-05 cross-surface check: ts_features_by skewness/kurtosis on x20 must equal
+# ts_stats_by('x20', id, ds, v, '1d') skewness/kurtosis within 1e-12 -- both
+# now share the same sample_skewness_g1 / sample_excess_kurtosis_g2 helpers.
+#######################################
+
+query I
+SELECT abs(
+    (SELECT skewness FROM ts_features_by('x20', id, ds, v))
+    - (SELECT skewness FROM ts_stats_by('x20', id, ds, v, '1d'))
+) <= 1e-12;
+----
+true
+
+query I
+SELECT abs(
+    (SELECT kurtosis FROM ts_features_by('x20', id, ds, v))
+    - (SELECT kurtosis FROM ts_stats_by('x20', id, ds, v, '1d'))
+) <= 1e-12;
+----
+true
+
+#######################################
+# rw200 (random_walk_n200, Task 3, 14-02, FEAT-02): agg_linear_trend_rvalue
+# and variation_coefficient are now signed -- both negative on this series
+# (tsfresh agg_linear_trend_rvalue -0.7617386359686308, variation_coefficient
+# -0.7073077067644646). Previously agg_linear_trend_rvalue was always
+# non-negative (sqrt(r^2)) and variation_coefficient divided by |mean|.
+#######################################
+
+statement ok
+CREATE TABLE rw200 AS
+SELECT 'rw' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, v
+FROM (SELECT unnest(range(200)) AS i, unnest([
+    -0.0696, -0.0596, -1.3034, 1.0659, 1.2956, 0.0127, 0.3031, 1.3308, 0.0894, -0.9144,
+    -3.1402, -3.5596, -3.2528, -2.2983, -2.7286, -2.9042, -3.7146, -5.4347, -6.7176, -7.6104,
+    -7.2179, -6.592, -6.1262, -6.0636, -5.0741, -5.1462, -5.9392, -5.7934, -7.305, -8.5687,
+    -9.88, -14.1111, -13.171, -14.3802, -12.6565, -11.052, -11.625, -10.1314, -8.561, -7.4811,
+    -6.993, -6.4668, -6.9745, -6.5057, -7.1305, -5.3688, -4.3857, -4.9771, -5.5605, -6.0342,
+    -7.1747, -7.84, -7.6618, -5.8531, -3.9974, -3.4842, -0.5278, 0.9089, 0.0498, -0.8388,
+    -0.459, -1.4549, -2.7665, -3.5889, -3.8434, -4.917, -6.1107, -6.8922, -7.3403, -8.2339,
+    -6.7513, -4.8813, -4.5941, -3.8313, -2.4846, -4.213, -2.8029, -0.9339, -1.3886, -1.169,
+    -2.2528, -1.7954, -0.5494, -1.8674, -3.1724, -3.329, -5.191, -5.2873, -3.6818, -4.4975,
+    -4.8905, -4.46, -4.4366, -2.2971, -1.8934, -1.742, -1.6332, -0.673, 0.1576, -1.2583,
+    0.8771, 0.7671, 1.4123, -0.0732, 0.8994, 0.7291, -0.4248, -1.2108, -0.5141, -2.8243,
+    -2.1373, -2.3013, -3.5539, -3.5307, -4.1794, -3.8959, -3.9736, -4.6601, -6.0111, -6.0668,
+    -8.3054, -7.0295, -7.258, -6.7886, -7.9567, -8.5926, -9.1974, -10.1626, -11.2526, -11.2503,
+    -11.4811, -10.7589, -11.6055, -11.6755, -11.4618, -11.9126, -11.8376, -13.2704, -13.376,
+    -13.8708, -12.2323, -11.8249, -11.5119, -11.2518, -11.5006, -12.2109, -12.544, -12.5816,
+    -13.7002, -15.1004, -14.388, -14.0983, -13.4655, -14.7371, -15.4846, -15.2337, -14.5446,
+    -14.4552, -12.463, -12.37, -12.5874, -12.5317, -14.1603, -13.8391, -12.7649, -11.5302,
+    -10.9279, -11.5968, -13.3762, -13.9586, -15.0154, -16.2419, -16.7676, -15.4211, -16.6029,
+    -15.8809, -14.3677, -14.9556, -15.8159, -15.5313, -14.4699, -16.0786, -15.1837, -15.516,
+    -15.1953, -15.1783, -16.5123, -15.9857, -17.0501, -16.4342, -15.2676, -14.7203, -18.1064,
+    -15.6189, -15.7719, -15.6935, -16.1366, -15.3586, -16.0934, -15.9161
+]) AS v);
+
+query I
+SELECT abs(agg_linear_trend_rvalue - (-0.7617386359686308)) <= 1e-9 + 1e-9 * abs(-0.7617386359686308)
+FROM ts_features_by('rw200', id, ds, v);
+----
+true
+
+query I
+SELECT abs(variation_coefficient - (-0.7073077067644646)) <= 1e-9 + 1e-9 * abs(-0.7073077067644646)
+FROM ts_features_by('rw200', id, ds, v);
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).agg_linear_trend_rvalue - (-0.7617386359686308)) <= 1e-9 + 1e-9 * abs(-0.7617386359686308)
+FROM rw200;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).variation_coefficient - (-0.7073077067644646)) <= 1e-9 + 1e-9 * abs(-0.7073077067644646)
+FROM rw200;
+----
+true
+
+#######################################
+# fft_coefficient_0_real/1_imag/3_abs, spectral_centroid/variance (Task 1,
+# 14-03, FEAT-03): rustfft one-sided rfft spectrum, numpy-rfft-exact and
+# unnormalised (previously an O(n^2) naive DFT normalised by n). tsfresh
+# (short_n20): fft_coefficient_0_real 55.537 (previously the mean
+# 2.7768499999999996), fft_coefficient_1_imag -0.35096037761454757,
+# fft_coefficient_3_abs 9.654943456108715 (previously 0.4827471728054351),
+# spectral_centroid 2.740689544749791 (previously 2.016904841106497 over the
+# two-sided power spectrum), spectral_variance 11.264706553070855
+# (previously 22.834066212475133).
+#######################################
+
+# --- ts_features_by('x20', id, ds, v) ---
+
+query I
+SELECT abs(fft_coefficient_0_real - 55.537) <= 1e-9 + 1e-9 * abs(55.537)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(fft_coefficient_1_imag - (-0.35096037761454757)) <= 1e-9 + 1e-9 * abs(-0.35096037761454757)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(fft_coefficient_3_abs - 9.654943456108715) <= 1e-9 + 1e-9 * abs(9.654943456108715)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(spectral_centroid - 2.740689544749791) <= 1e-9 + 1e-9 * abs(2.740689544749791)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(spectral_variance - 11.264706553070855) <= 1e-9 + 1e-9 * abs(11.264706553070855)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+# --- (ts_features(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features(ds, v)).fft_coefficient_0_real - 55.537) <= 1e-9 + 1e-9 * abs(55.537)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).fft_coefficient_1_imag - (-0.35096037761454757)) <= 1e-9 + 1e-9 * abs(-0.35096037761454757)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).fft_coefficient_3_abs - 9.654943456108715) <= 1e-9 + 1e-9 * abs(9.654943456108715)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).spectral_centroid - 2.740689544749791) <= 1e-9 + 1e-9 * abs(2.740689544749791)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).spectral_variance - 11.264706553070855) <= 1e-9 + 1e-9 * abs(11.264706553070855)
+FROM x20;
+----
+true
+
+# --- (ts_features_agg(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features_agg(ds, v)).fft_coefficient_0_real - 55.537) <= 1e-9 + 1e-9 * abs(55.537)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).fft_coefficient_1_imag - (-0.35096037761454757)) <= 1e-9 + 1e-9 * abs(-0.35096037761454757)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).fft_coefficient_3_abs - 9.654943456108715) <= 1e-9 + 1e-9 * abs(9.654943456108715)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).spectral_centroid - 2.740689544749791) <= 1e-9 + 1e-9 * abs(2.740689544749791)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).spectral_variance - 11.264706553070855) <= 1e-9 + 1e-9 * abs(11.264706553070855)
+FROM x20;
+----
+true
+
+#######################################
+# sample_entropy (Task 1, 14-04, FEAT-04): tsfresh's full symmetric
+# match-count algorithm on the shared stats.rs template_match_counts band
+# search -- ROADMAP anchor, ln(3) = 1.0986122886681098 (previously
+# 0.9808292530117262 under the window-count-off-by-one/triangular-sum bug).
+#######################################
+
+# --- ts_features_by('x20', id, ds, v) ---
+
+query I
+SELECT abs(sample_entropy - 1.0986122886681098) <= 1e-9 + 1e-9 * abs(1.0986122886681098)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+# --- (ts_features(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features(ds, v)).sample_entropy - 1.0986122886681098) <= 1e-9 + 1e-9 * abs(1.0986122886681098)
+FROM x20;
+----
+true
+
+# --- (ts_features_agg(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features_agg(ds, v)).sample_entropy - 1.0986122886681098) <= 1e-9 + 1e-9 * abs(1.0986122886681098)
+FROM x20;
+----
+true
+
+#######################################
+# approximate_entropy, binned_entropy, benford_correlation,
+# permutation_entropy, lempel_ziv_complexity, number_peaks (Task 2, 14-04,
+# FEAT-04). tsfresh (short_n20): approximate_entropy 0.08780500866889396
+# (unchanged -- already matching), binned_entropy 1.7820471559051687
+# (previously 1.9206765920171578), benford_correlation 0.3816973836882482
+# (previously 0.42967594716771035), permutation_entropy 1.6731421371534196
+# (previously 0.933798406475988), lempel_ziv_complexity 0.4 (previously
+# 1.512674833210577), number_peaks 5.0 (confirmed unchanged).
+#######################################
+
+# --- ts_features_by('x20', id, ds, v) ---
+
+query I
+SELECT abs(approximate_entropy - 0.08780500866889396) <= 1e-9 + 1e-9 * abs(0.08780500866889396)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(binned_entropy - 1.7820471559051687) <= 1e-9 + 1e-9 * abs(1.7820471559051687)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(benford_correlation - 0.3816973836882482) <= 1e-9 + 1e-9 * abs(0.3816973836882482)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(permutation_entropy - 1.6731421371534196) <= 1e-9 + 1e-9 * abs(1.6731421371534196)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(lempel_ziv_complexity - 0.4) <= 1e-9 + 1e-9 * abs(0.4)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+query I
+SELECT abs(number_peaks - 5.0) <= 1e-9 + 1e-9 * abs(5.0)
+FROM ts_features_by('x20', id, ds, v);
+----
+true
+
+# --- (ts_features(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features(ds, v)).approximate_entropy - 0.08780500866889396) <= 1e-9 + 1e-9 * abs(0.08780500866889396)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).binned_entropy - 1.7820471559051687) <= 1e-9 + 1e-9 * abs(1.7820471559051687)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).benford_correlation - 0.3816973836882482) <= 1e-9 + 1e-9 * abs(0.3816973836882482)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).permutation_entropy - 1.6731421371534196) <= 1e-9 + 1e-9 * abs(1.6731421371534196)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).lempel_ziv_complexity - 0.4) <= 1e-9 + 1e-9 * abs(0.4)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features(ds, v)).number_peaks - 5.0) <= 1e-9 + 1e-9 * abs(5.0)
+FROM x20;
+----
+true
+
+# --- (ts_features_agg(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features_agg(ds, v)).approximate_entropy - 0.08780500866889396) <= 1e-9 + 1e-9 * abs(0.08780500866889396)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).binned_entropy - 1.7820471559051687) <= 1e-9 + 1e-9 * abs(1.7820471559051687)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).benford_correlation - 0.3816973836882482) <= 1e-9 + 1e-9 * abs(0.3816973836882482)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).permutation_entropy - 1.6731421371534196) <= 1e-9 + 1e-9 * abs(1.6731421371534196)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).lempel_ziv_complexity - 0.4) <= 1e-9 + 1e-9 * abs(0.4)
+FROM x20;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).number_peaks - 5.0) <= 1e-9 + 1e-9 * abs(5.0)
+FROM x20;
+----
+true
+
+#######################################
+# i100 (intermittent_n100, Task 2, 14-04, FEAT-04/FEAT-05): an intermittent
+# series (many zeros) exercises the degenerate paths of the entropy family.
+# tsfresh (intermittent_n100): benford_correlation -0.4135303840937026,
+# binned_entropy 1.083026882420419, lempel_ziv_complexity 0.24,
+# permutation_entropy 1.266513929850244, sample_entropy 0.852101712699849.
+#######################################
+
+statement ok
+CREATE TABLE i100 AS
+SELECT 'i100' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, v
+FROM (SELECT unnest(range(100)) AS i, unnest([
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 6.0, 0.0, 0.0, 0.0,
+    0.0, 7.0, 6.0, 0.0, 0.0, 5.0, 0.0, 6.0, 0.0, 0.0,
+    0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 5.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 4.0, 0.0, 0.0, 2.0,
+    0.0, 7.0, 0.0, 6.0, 0.0, 4.0, 0.0, 0.0, 6.0, 0.0,
+    0.0, 0.0, 0.0, 6.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 4.0,
+    0.0, 0.0, 3.0, 0.0, 0.0, 8.0, 0.0, 5.0, 0.0, 0.0,
+    9.0, 0.0, 0.0, 0.0, 0.0, 5.0, 7.0, 3.0, 0.0, 0.0
+]) AS v);
+
+# --- ts_features_by('i100', id, ds, v) ---
+
+query I
+SELECT abs(benford_correlation - (-0.4135303840937026)) <= 1e-9 + 1e-9 * abs(-0.4135303840937026)
+FROM ts_features_by('i100', id, ds, v);
+----
+true
+
+query I
+SELECT abs(binned_entropy - 1.083026882420419) <= 1e-9 + 1e-9 * abs(1.083026882420419)
+FROM ts_features_by('i100', id, ds, v);
+----
+true
+
+query I
+SELECT abs(lempel_ziv_complexity - 0.24) <= 1e-9 + 1e-9 * abs(0.24)
+FROM ts_features_by('i100', id, ds, v);
+----
+true
+
+query I
+SELECT abs(permutation_entropy - 1.266513929850244) <= 1e-9 + 1e-9 * abs(1.266513929850244)
+FROM ts_features_by('i100', id, ds, v);
+----
+true
+
+query I
+SELECT abs(sample_entropy - 0.852101712699849) <= 1e-9 + 1e-9 * abs(0.852101712699849)
+FROM ts_features_by('i100', id, ds, v);
+----
+true
+
+# --- (ts_features_agg(ds, v)).<feature> ---
+
+query I
+SELECT abs((ts_features_agg(ds, v)).benford_correlation - (-0.4135303840937026)) <= 1e-9 + 1e-9 * abs(-0.4135303840937026)
+FROM i100;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).binned_entropy - 1.083026882420419) <= 1e-9 + 1e-9 * abs(1.083026882420419)
+FROM i100;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).lempel_ziv_complexity - 0.24) <= 1e-9 + 1e-9 * abs(0.24)
+FROM i100;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).permutation_entropy - 1.266513929850244) <= 1e-9 + 1e-9 * abs(1.266513929850244)
+FROM i100;
+----
+true
+
+query I
+SELECT abs((ts_features_agg(ds, v)).sample_entropy - 0.852101712699849) <= 1e-9 + 1e-9 * abs(0.852101712699849)
+FROM i100;
+----
+true
+
+#######################################
+# 117-feature schema assertions (D-13, FEAT-05): autocorrelation_lag10 now
+# reaches every SQL surface. ts_features_by returns id + 117 feature columns
+# (118 total); ts_features_agg / ts_features return 117 struct keys;
+# ts_features_table returns 117 columns.
+#######################################
+
+query I
+SELECT count(*) FROM (DESCRIBE SELECT * FROM ts_features_by('x20', id, ds, v));
+----
+118
+
+query I
+SELECT count(*) FROM (DESCRIBE SELECT unnest(ts_features_agg(ds, v)) FROM x20);
+----
+117
+
+query I
+SELECT count(*) FROM (DESCRIBE SELECT unnest(ts_features(ds, v)) FROM x20);
+----
+117
+
+query I
+SELECT count(*) FROM (DESCRIBE SELECT * FROM ts_features_table('x20', ds, v));
+----
+117
+
+#######################################
+# linear_trend n=1 edge case (14-REVIEW.md WR-01): scipy.stats.linregress
+# needs >= 2 points to fit a line and returns NaN for every field at n=1
+# (confirmed live against scipy 1.18.1), including intercept -- not
+# `values[0]`. Reachable from ordinary SQL via any one-row group.
+#######################################
+
+statement ok
+CREATE TABLE one_row AS SELECT 'a' AS id, DATE '2024-01-01' AS ds, 5.0 AS v;
+
+query I
+SELECT isnan(linear_trend_slope) FROM ts_features_by('one_row', id, ds, v);
+----
+true
+
+query I
+SELECT isnan(linear_trend_intercept) FROM ts_features_by('one_row', id, ds, v);
+----
+true
+
+query I
+SELECT isnan(linear_trend_r_squared) FROM ts_features_by('one_row', id, ds, v);
+----
+true

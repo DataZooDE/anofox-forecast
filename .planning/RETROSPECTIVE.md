@@ -77,11 +77,50 @@ Living retrospective across milestones. Newest milestone first.
 - Delivered via `/gsd-autonomous` (full run, Phases 4-6). Worktrees disabled (`workflow.use_worktrees=false`) — executors ran sequentially on the main tree.
 - Notable: agent-death resilience (per-task commits + re-dispatch) and independent re-verification were the dominant time costs — but they caught the fabrications and the segfault that a trust-the-report flow would have shipped.
 
+## Milestone: v0.10.0 — Statistical Correctness
+
+**Shipped:** 2026-10-16
+**Phases:** 10 (9-18, incl. upstream Phase 11) | **Plans:** 57 | **Commits:** ~421 | **Diff (non-planning):** 347 files, +110.9k / -12.0k (much of it fixtures)
+
+### What Was Built
+- Checked-in R and Python reference-fixture harness. Every statistic is asserted against R `forecast` / `tseries` / `urca`, scipy, statsmodels or tsfresh values.
+- The forecast wrapper delegates intervals, fitted values, residuals and identity to the crate, with real ARIMA and errors instead of silent fallbacks.
+- Three upstream anofox-forecast releases (0.16.0 / 0.16.1 / 0.16.2) fixed ADF/KPSS, AutoARIMA (R `auto.arima` parity), ETS, Theta and ARIMA intervals (R `KalmanForecast`). The R `forecast` parity suite has zero AutoARIMA exceptions.
+- Statistics moved from C++/SQL into Rust: NULL policy, moments, STL strengths, MASE, 117 tsfresh features, peaks, BOCPD/PELT, MSTL, conformal and bootstrap.
+- Regression-proofing: json statically linked, a correctness suite plus inventory gate, a length-only sweep, the `make audit` no-stats guard with CI, `make check-docs`, and a breaking-changes CHANGELOG.
+
+### What Worked
+- Fixtures before fixes (Phase 9 first). Every later phase had a non-negotiable numeric target, and "never pin what the build returns" kept tolerances honest.
+- The root-cause-before-tolerance ladder (Phase 17, D-12): every R-parity gap needed an evidenced cause, which turned into upstream issues and then a crate release instead of a widened tolerance.
+- Independent orchestrator re-verification (git + disk + rebuild + full suite) after each executor. It caught a stalled executor (18-04) and an inventory-gate failure that the executor's own report would have hidden.
+- Releasing upstream, then consuming from crates.io (no local patch). It kept the extension honest about what users actually get.
+
+### What Was Inefficient
+- A known bug (`ts_detect_periods_by` all-NULL) was "worked around in docs" in Phase 10 and never tracked as a requirement. Only the milestone integration check found it, because no test called the SQL-facing macro.
+- gsd's staleness heuristic flagged every phase "stale" after normal downstream edits, forcing an override closeout and manual reasoning about verification freshness.
+- Subagents stalled silently (18-04 committed all its tasks, then hung before its SUMMARY) and needed manual close-outs. Long WASM and coverage builds stretched waits.
+- Phase 11 ran partly outside plan tracking (the "11-12" AutoARIMA work), which needed a backfilled addendum.
+
+### Patterns Established
+- The `FunctionNullHandling::SPECIAL_HANDLING` + body-NULL pattern for optional scalar args (it hit `ts_ljung_box`, `ts_residual_diagnostics` and `_ts_detect_periods`). Default NULL handling silently nulls the whole row.
+- Gates as scripts plus make targets: `make audit` (no CI build needed), `make check-docs` and the inventory check (release-DoD, these need a built extension).
+- Gap plans (18-05, 18-06) appended to the final phase for late upstream releases and audit findings, instead of new phases.
+
+### Key Lessons
+- "Documented workaround" means "open bug". Track it as a requirement or a correctness pin, or it ships.
+- Test the SQL-facing surface (macros), not just the underlying `_native` / `_ts_*` functions. The integration check should exercise every user-documented entry point.
+- A docs checker that only scans `docs/` misses `examples/`. Scope gates to everything users copy from.
+
+### Cost Observations
+- Model mix: orchestrator on Opus; executors, reviewers and verifiers mostly on Sonnet.
+- Notable: most wall-clock went to builds (release, wasm_eh) and upstream release CI (1-2 h per crate release), not agent reasoning.
+
 ## Cross-Milestone Trends
 
 | Milestone | Phases | Plans | LOC | Notable |
 |-----------|--------|-------|-----|---------|
 | v0.7.0 | 3 | 9 | ~17.9k | Diagnostics + global/classical/multivariate models; first tracked milestone |
 | v0.8.0 | 3 | 6 | ~13.9k | Model ensembling; surfaced a crate CV segfault + executor-report fabrications caught by independent re-verification |
+| v0.10.0 | 10 | 57 | ~110.9k (incl. fixtures) | Statistical correctness vs R/scipy/statsmodels/tsfresh; 3 upstream crate releases; integration check caught an untested SQL macro bug |
 
-**Recurring:** worktrees stay disabled on this repo (isolation split-brain); every capability-exposure phase = additive FFI + new/extended C++ + macro + verified example + docs; DoD is internal-consistency cross-checks run against the built extension.
+**Recurring:** independent re-verification of executor reports is load-bearing (fabrications in v0.8.0, a stall + hidden gate failure in v0.10.0); worktrees stay disabled on this repo (isolation split-brain); every capability-exposure phase = additive FFI + new/extended C++ + macro + verified example + docs; DoD is internal-consistency cross-checks run against the built extension.

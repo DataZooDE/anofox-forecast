@@ -1,0 +1,10 @@
+docs/reference/models/exponential-smoothing/ses.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'SES', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/exponential-smoothing/ses.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/exponential-smoothing/ses_optimized.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'SESOptimized', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/exponential-smoothing/ses_optimized.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/exponential-smoothing/holt.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'Holt', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/exponential-smoothing/holt.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/exponential-smoothing/holt_winters.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'HoltWinters', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/exponential-smoothing/holt_winters.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/exponential-smoothing/seasonal_es.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'SeasonalES', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/exponential-smoothing/seasonal_es.md	1	PASS	SELECT * FROM ts_forecast_by(	

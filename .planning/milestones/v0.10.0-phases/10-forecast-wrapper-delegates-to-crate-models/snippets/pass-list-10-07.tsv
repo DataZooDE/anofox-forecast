@@ -1,0 +1,10 @@
+docs/reference/models/baseline/naive.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'Naive', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/baseline/naive.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/baseline/seasonal_naive.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'SeasonalNaive', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/baseline/seasonal_naive.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/baseline/sma.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'SMA', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/baseline/sma.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/baseline/random_walk_drift.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'RandomWalkDrift', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/baseline/random_walk_drift.md	1	PASS	SELECT * FROM ts_forecast_by(	
+docs/reference/models/baseline/seasonal_window_average.md	0	SYNOPSIS	SELECT * FROM ts_forecast('table', date_col, value_col, 'SeasonalWindowAverage', horizon, params);	Catalog Error: Table with name table does not exist!
+docs/reference/models/baseline/seasonal_window_average.md	1	PASS	SELECT * FROM ts_forecast_by(	

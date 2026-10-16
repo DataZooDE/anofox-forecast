@@ -280,21 +280,29 @@ SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'ETS', 3, '1d'
 ----
 6
 
+# Re-pinned (Phase 18, 18-01, class D): model_name now reports the full state-space
+# notation, not the bare method name -- confirmed directly against the query output.
+# Attributed to Phase 17's ETS R-parity work (UPST-01, D-13).
 query I
 SELECT model_name FROM ts_forecast_by('test_groups', id, ds, value, 'ETS', 3, '1d', MAP([], [])) LIMIT 1;
 ----
-ETS
+ETS(A,Ad,N)
 
-# ARIMA - Autoregressive Integrated Moving Average
+# ARIMA - Autoregressive Integrated Moving Average. Re-pinned (Phase 18, 18-01,
+# class D): plain 'ARIMA' now requires an explicit arima_order=[p,d,q] ("silent
+# model/parameter fallbacks become errors", PROJECT.md, FCST-01..08) -- confirmed
+# directly via the Invalid Input Error.
 query I
-SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'ARIMA', 3, '1d', MAP([], []));
+SELECT COUNT(*) FROM ts_forecast_by('test_groups', id, ds, value, 'ARIMA', 3, '1d', MAP(['arima_order'], [[1, 1, 1]]));
 ----
 6
 
+# Re-pinned (Phase 18, 18-01, class D): same arima_order requirement as above;
+# model_name reports the full order notation, not the bare method name.
 query I
-SELECT model_name FROM ts_forecast_by('test_groups', id, ds, value, 'ARIMA', 3, '1d', MAP([], [])) LIMIT 1;
+SELECT model_name FROM ts_forecast_by('test_groups', id, ds, value, 'ARIMA', 3, '1d', MAP(['arima_order'], [[1, 1, 1]])) LIMIT 1;
 ----
-ARIMA
+ARIMA(1,1,1) with drift
 
 #######################################
 # Auto Selection Models (6)

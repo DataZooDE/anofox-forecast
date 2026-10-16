@@ -1,0 +1,435 @@
+# name: test/sql/correctness/detection_decomposition.test
+# description: Correctness-suite value pins for seasonality/peak/changepoint detection
+#   and decomposition functions fixed this milestone (WRAP-01, DET-01..07) -- Phase 18,
+#   18-02, TEST-03. Not json-gated (D-02): runs on every native build. Reused, with
+#   citation, from test/sql/ts_detection_reference.test (Phase 15 15-01..15-05),
+#   ts_changepoints.test, ts_detrend.test, and ts_peaks.test -- almost every block below
+#   is a formula-generated series (no large literal dump needed), matching those files'
+#   own style.
+# group: [sql]
+#
+# Where a fixture file IS used (scipy_peaks/cases.json plateau case), literals are
+# reproduced verbatim via:
+#   python3 -c "import json; d=json.load(open('validation/reference/fixtures/scipy_peaks/cases.json'))"
+
+require anofox_forecast
+
+# json is statically linked (Phase 18, 18-01, D-01) but not auto-loaded by the
+# native unittest harness without an explicit LOAD (ts_detect_peaks_by and
+# ts_mstl_decomposition_by expand to to_json(params)/json_extract_string calls
+# even for an empty params MAP -- a pre-existing, documented gap, see
+# ts_detection_reference.test around CR-04). It uses `require json`, which in the unittest harness
+# activates the statically linked json (a plain `LOAD json;` only worked where
+# json was also installed in ~/.duckdb and failed on clean CI runners). json is
+# always linked into native builds since 18-01, so this never skips natively.
+require json
+
+# =============================================================================
+# ts_detect_peaks (DET-01): direct port of scipy.signal.find_peaks. Plateau
+# midpoint rule: a flat run of equal values reports the MIDPOINT index as the
+# peak, matching scipy exactly (cited from ts_detection_reference.test 15-02).
+# =============================================================================
+
+query I
+SELECT list_transform((ts_detect_peaks([0, 1, 1, 1, 0, 2, 2, 0, 3, 3, 3, 3, 1, 0]::DOUBLE[])).peaks, p -> p.index);
+----
+[2, 5, 9]
+
+# =============================================================================
+# ts_detect_peaks_by (grouped macro): parity with the scalar ts_detect_peaks
+# on the same plateau series.
+# =============================================================================
+
+statement ok
+CREATE TABLE peaks_plateau AS
+SELECT 'g' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, v
+FROM (SELECT unnest(range(14)) AS i, unnest([0, 1, 1, 1, 0, 2, 2, 0, 3, 3, 3, 3, 1, 0]::DOUBLE[]) AS v);
+
+query I
+SELECT list_transform(peaks, p -> p.index) FROM ts_detect_peaks_by('peaks_plateau', id, ds, v, MAP{});
+----
+[2, 5, 9]
+
+statement ok
+DROP TABLE peaks_plateau;
+
+# =============================================================================
+# ts_analyze_peak_timing / ts_detect_seasonality_changes / ts_detect_amplitude_
+# modulation (DET-07 error unification, WR-03/CR-05/CR-06): a non-finite or
+# non-positive period raises the SAME message across all three functions
+# (cited from ts_detection_reference.test 15-05).
+# =============================================================================
+
+statement error
+SELECT ts_detect_seasonality_changes(
+    list_transform(range(120), lambda i: (10 + 5 * sin(2 * pi() * i / 12))::DOUBLE), 'nan'::DOUBLE
+);
+----
+Period must be a positive finite number
+
+statement error
+SELECT ts_detect_amplitude_modulation(
+    list_transform(range(120), lambda i: (10 + 5 * sin(2 * pi() * i / 12))::DOUBLE), 0.0
+);
+----
+Period must be a positive finite number
+
+statement error
+SELECT ts_analyze_peak_timing(
+    list_transform(range(120), lambda i: (10 + 5 * sin(2 * pi() * i / 12))::DOUBLE), '-inf'::DOUBLE
+);
+----
+Period must be a positive finite number
+
+# Functional (non-error) values on a noise-free period-12 sine -- locked-in
+# regression values (deterministic for this exact synthetic input).
+query I
+SELECT (ts_detect_seasonality_changes(list_transform(range(120), lambda i: (10 + 5 * sin(2 * pi() * i / 12))::DOUBLE), 12.0)).n_changes = 1;
+----
+true
+
+query I
+SELECT (ts_analyze_peak_timing(list_transform(range(120), lambda i: (10 + 5 * sin(2 * pi() * i / 12))::DOUBLE), 12.0)).n_peaks = 10;
+----
+true
+
+# amplitude modulation: growing amplitude -> emerging, constant -> stable.
+query I
+SELECT (ts_detect_amplitude_modulation(list_transform(range(240), lambda i: (1 + i / 30.0) * sin(2 * pi() * i / 12)), 12.0)).modulation_type;
+----
+emerging
+
+query I
+SELECT (ts_detect_amplitude_modulation(list_transform(range(240), lambda i: sin(2 * pi() * i / 12)), 12.0)).modulation_type;
+----
+stable
+
+# =============================================================================
+# ts_detect_changepoints (scalar PELT-family table function) / ts_detect_
+# changepoints_agg (DET-02): a clean 2-level step at index 5 is flagged
+# exactly there and nowhere else.
+# =============================================================================
+
+statement ok
+CREATE TABLE changepoint_test AS
+SELECT ('2023-01-01'::DATE + (i || ' day')::INTERVAL)::TIMESTAMP AS date,
+       CASE WHEN i < 5 THEN 1.0 ELSE 10.0 END AS val
+FROM generate_series(0, 9) AS t(i);
+
+query I
+SELECT list(is_changepoint ORDER BY date_col)
+FROM ts_detect_changepoints('changepoint_test', date, val, MAP(['hazard_lambda'], ['250.0']));
+----
+[false, false, false, false, false, true, false, false, false, false]
+
+query I
+SELECT list_transform((SELECT ts_detect_changepoints_agg(ts, v, MAP([], [])) FROM (
+    SELECT date AS ts, val AS v FROM changepoint_test
+)), s -> s.is_changepoint);
+----
+[false, false, false, false, false, true, false, false, false, false]
+
+statement ok
+DROP TABLE changepoint_test;
+
+# _ts_detect_changepoints_bocpd (DET-02, D-06): Adams & MacKay (2007) BOCPD.
+# issue-71 step ([100]*12 + [10]*12, hazard 250): flags index 12 (cited from
+# ts_detection_reference.test 15-03).
+
+query I
+SELECT (_ts_detect_changepoints_bocpd([100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0]::DOUBLE[], 250.0, true)).changepoint_indices
+     = [12]::UBIGINT[];
+----
+true
+
+# =============================================================================
+# ts_decompose_seasonal / _ts_mstl_decomposition / ts_mstl_decomposition_by
+# (DET-04): additive identity trend+seasonal+remainder == input; constant
+# series decomposes to trend==input, seasonal==0 (cited from 15-01/15-04).
+# =============================================================================
+
+query I
+SELECT max(abs(tr + se + re - v)) <= 1e-10
+FROM (
+    SELECT unnest(tr_list) AS tr, unnest(se_list) AS se, unnest(re_list) AS re, unnest(v_list) AS v
+    FROM (
+        SELECT
+            (ts_decompose_seasonal(list_transform(range(120), lambda i: (10 + 0.1 * i + 3 * sin(2 * pi() * i / 12))::DOUBLE), 12.0)).trend AS tr_list,
+            (ts_decompose_seasonal(list_transform(range(120), lambda i: (10 + 0.1 * i + 3 * sin(2 * pi() * i / 12))::DOUBLE), 12.0)).seasonal AS se_list,
+            (ts_decompose_seasonal(list_transform(range(120), lambda i: (10 + 0.1 * i + 3 * sin(2 * pi() * i / 12))::DOUBLE), 12.0)).remainder AS re_list,
+            list_transform(range(120), lambda i: (10 + 0.1 * i + 3 * sin(2 * pi() * i / 12))::DOUBLE) AS v_list
+    )
+);
+----
+true
+
+query I
+SELECT max(abs(t - 1.0)) <= 1e-12
+FROM (SELECT unnest((_ts_mstl_decomposition(list_transform(range(48), i -> 1.0), 'fail', [12])).trend) AS t);
+----
+true
+
+statement ok
+CREATE TABLE mstlc AS SELECT 'g' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, 1.0 AS v FROM range(48) t(i);
+
+query I
+SELECT max(abs(t - 1.0)) < 1e-6
+FROM (SELECT unnest(trend) AS t FROM ts_mstl_decomposition_by('mstlc', id, ds, v, MAP{'seasonal_periods':'[12]'}));
+----
+true
+
+query I
+SELECT max(abs(s)) < 1e-6
+FROM (SELECT unnest(flatten(seasonal)) AS s FROM ts_mstl_decomposition_by('mstlc', id, ds, v, MAP{'seasonal_periods':'[12]'}));
+----
+true
+
+statement ok
+DROP TABLE mstlc;
+
+# =============================================================================
+# ts_classify_seasonality / ts_classify_seasonality_by (WRAP-01): a strong
+# noise-free sine classifies stable_seasonal / is_seasonal / strength >= 0.99;
+# deterministic non-periodic noise does not (cited from 15-01).
+# =============================================================================
+
+statement ok
+CREATE TABLE sine120 AS
+SELECT 'g1' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, (10 + 5 * sin(2 * pi() * i / 12))::DOUBLE AS v
+FROM range(120) t(i);
+
+query III
+SELECT is_seasonal, timing_classification, seasonal_strength >= 0.99
+FROM ts_classify_seasonality_by('sine120', id, ds, v, 12.0);
+----
+true	stable_seasonal	true
+
+query I
+SELECT (ts_classify_seasonality(list_transform(range(120), lambda i: ((i * 7919) % 101) / 101.0 - 0.5), 12.0)).is_seasonal;
+----
+false
+
+statement ok
+DROP TABLE sine120;
+
+# =============================================================================
+# ts_detect_seasonality / ts_analyze_seasonality: a clean period-4 square wave
+# is detected as period 4.
+# =============================================================================
+
+query I
+SELECT list_contains(ts_detect_seasonality(list_transform(range(32), lambda i: (i % 4)::DOUBLE)), 4);
+----
+true
+
+query I
+SELECT (ts_analyze_seasonality(list_transform(range(32), lambda i: (i % 4)::DOUBLE))) IS NOT NULL;
+----
+true
+
+# =============================================================================
+# ts_seasonal_strength / ts_seasonal_strength_windowed (D-11/G19): linearly
+# detrending first makes a trend+seasonal series measure strongly seasonal
+# (cited from 15-05); 'wavelet' is a removed method (always errors).
+# =============================================================================
+
+query I
+SELECT ts_seasonal_strength(
+    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12)), 12.0
+) >= 0.95;
+----
+true
+
+statement error
+SELECT ts_seasonal_strength_windowed(
+    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12)), 12.0, 24.0, 'wavelet'
+);
+----
+removed
+
+# =============================================================================
+# Period estimators (DET-05/DET-06): FFT/ACF/regression/autoperiod on a
+# noise-free period-12 series, each pinned to its own exact/near value (cited
+# from 15-05).
+# =============================================================================
+
+query I
+SELECT (ts_estimate_period_fft(
+    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12))
+)).period;
+----
+12.0
+
+query I
+SELECT (ts_estimate_period_acf(
+    list_transform(range(40), i -> CASE WHEN i % 2 = 0 THEN 1.0 ELSE -1.0 END)
+)).period;
+----
+2.0
+
+query I
+SELECT (_ts_detect_periods(
+    list_transform(range(120), t -> sin(2 * pi() * t / 12)),
+    'regression'
+)).primary_period;
+----
+12.0
+
+query I
+SELECT (_ts_detect_periods(
+    list_transform(range(120), t -> 0.5 * t + 2 * sin(2 * pi() * t / 12)),
+    'fft'
+)).primary_period;
+----
+12.0
+
+# =============================================================================
+# ts_detect_periods / ts_detect_periods_by table macros (DET-01 gap closure,
+# 18-06): the default call (params := MAP{}, no expected_periods) used to
+# return an all-NULL row -- known since Phase 10 (10-06/10-08 SUMMARY),
+# worked around in docs via ts_detect_periods_agg, never fixed. Root cause:
+# the macros always call the 6-arg _ts_detect_periods overload, and their
+# default-case expected_periods extraction (json_extract(...) CAST to
+# DOUBLE[], which is NULL when the key is absent) hit DuckDB's default null
+# handling, short-circuiting the whole row to NULL before the function body
+# (which already treats a NULL expected_periods as "not provided") ever ran.
+# Fixed via FunctionNullHandling::SPECIAL_HANDLING on the 5-arg/6-arg
+# _ts_detect_periods overloads (same bug class as the Phase 17 WR-01
+# ts_ljung_box fix, commit 6ceea19). A second, independent macro bug was
+# found and fixed alongside it: expected_periods was extracted with
+# json_extract (returns a quoted JSON scalar, "[12.0]", which cannot CAST to
+# DOUBLE[]) instead of json_extract_string (returns the unquoted string
+# DuckDB parses as a list literal) -- meaning the expected_periods path was
+# never reachable via the MAP params form at all, not even before DET-01.
+# primary_period = 12.0 is the closed-form period of this noise-free
+# period-12 sinusoid, matching the identical _ts_detect_periods 'fft' pin
+# directly above (same functional root, now reachable through the macro).
+# =============================================================================
+
+statement ok
+CREATE TABLE det01_periods AS
+SELECT 'a' AS g, DATE '2020-01-01' + INTERVAL (i) DAY AS ds, sin(2 * pi() * i / 12) + 0.01 * i AS y
+FROM range(96) t(i);
+
+# Default case (grouped macro): previously an all-NULL row.
+query I
+SELECT primary_period FROM ts_detect_periods_by('det01_periods', g, ds, y, MAP{});
+----
+12.0
+
+# Default case (single-series macro): previously an all-NULL row.
+query I
+SELECT primary_period FROM ts_detect_periods('det01_periods', ds, y, MAP{});
+----
+12.0
+
+# expected_periods path: matches_expected / matched_expected_period populated
+# (closed-form: 12.0 is the series' true period, so it matches exactly).
+query II
+SELECT (periods[1]).matches_expected, (periods[1]).matched_expected_period
+FROM ts_detect_periods_by('det01_periods', g, ds, y, MAP{'expected_periods': '[12.0]'});
+----
+true	12.0
+
+# ts_detect_periods_agg: the GROUP BY aggregate form, documented as the
+# alternative to the table macros above (18-06). Same closed-form 12.0 on the
+# same fixture, proving the two surfaces agree.
+query I
+SELECT ts_detect_periods_agg(ds, y, 'fft').primary_period FROM det01_periods GROUP BY g;
+----
+12.0
+
+statement ok
+DROP TABLE det01_periods;
+
+# A NULL series (single-row group, value trims to empty) still yields a NULL
+# row through the table macro -- the SPECIAL_HANDLING fix must not fabricate
+# a result for genuinely missing data.
+statement ok
+CREATE TABLE det01_null AS SELECT 'a' AS g, DATE '2020-01-01' AS ds, NULL::DOUBLE AS y;
+
+query I
+SELECT primary_period FROM ts_detect_periods_by('det01_null', g, ds, y, MAP{});
+----
+NULL
+
+statement ok
+DROP TABLE det01_null;
+
+query I
+SELECT ts_autoperiod(list_transform(range(32), lambda i: (10 + 20 * (i % 4))::DOUBLE)).period = 4.0;
+----
+true
+
+query I
+SELECT ts_detect_multiple_periods(list_transform(range(32), lambda i: (10 + 20 * (i % 4))::DOUBLE)).primary_period = 4.0;
+----
+true
+
+query I
+SELECT ts_lomb_scargle(list_transform(range(32), lambda i: (10 + 20 * (i % 4))::DOUBLE)).period BETWEEN 3.5 AND 4.5;
+----
+true
+
+# cfd_autoperiod and instantaneous_period/sazed/ssa/stl/matrix_profile/aic
+# all return a non-NULL struct for a clean period-4 square wave (parity
+# existence check -- several of these intentionally disagree slightly on the
+# exact period for this specific input, as documented per-method in their own
+# reference material; this file locks in "detects something", the specific
+# per-method value pins live in test/sql/ts_periods_specialized.test and
+# ts_periods_advanced.test).
+query I
+SELECT ts_cfd_autoperiod(list_transform(range(32), lambda i: (10 + 20 * (i % 4))::DOUBLE)) IS NOT NULL
+   AND ts_instantaneous_period(list_transform(range(32), lambda i: (10 + 20 * (i % 4))::DOUBLE)) IS NOT NULL
+   AND ts_sazed_period(list_transform(range(32), lambda i: (10 + 20 * (i % 4))::DOUBLE)) IS NOT NULL
+   AND ts_ssa_period(list_transform(range(32), lambda i: (10 + 20 * (i % 4))::DOUBLE)) IS NOT NULL
+   AND ts_stl_period(list_transform(range(32), lambda i: (10 + 20 * (i % 4))::DOUBLE)) IS NOT NULL
+   AND ts_aic_period(list_transform(range(32), lambda i: (10 + 20 * (i % 4))::DOUBLE)) IS NOT NULL
+   AND ts_matrix_profile_period(list_transform(range(32), lambda i: (10 + 20 * (i % 4))::DOUBLE)) IS NOT NULL;
+----
+true
+
+# Closed-form, exact pins for the "detects period exactly 4" methods on the
+# same square wave (aic/stl/sazed all report 4.0 exactly on this fresh build).
+query I
+SELECT (ts_aic_period(list_transform(range(32), lambda i: (10 + 20 * (i % 4))::DOUBLE))).period = 4.0
+   AND (ts_stl_period(list_transform(range(32), lambda i: (10 + 20 * (i % 4))::DOUBLE))).period = 4.0
+   AND (ts_sazed_period(list_transform(range(32), lambda i: (10 + 20 * (i % 4))::DOUBLE))).period = 4.0;
+----
+true
+
+# =============================================================================
+# ts_detrend / ts_detrend_by (WRAP-01): a perfectly linear series detrends to
+# itself with method 'linear' (closed form, no fixture needed).
+# =============================================================================
+
+query I
+SELECT max(abs(t - e)) < 1e-8
+FROM (SELECT unnest((ts_detrend(list_transform(range(20), i -> 2.0 * i + 3.0), 'linear')).trend) AS t,
+             unnest(list_transform(range(20), i -> 2.0 * i + 3.0)) AS e);
+----
+true
+
+query I
+SELECT (ts_detrend(list_transform(range(20), i -> 2.0 * i + 3.0), 'linear')).method;
+----
+linear
+
+statement ok
+CREATE TABLE lin20 AS SELECT 'g' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, (2.0 * i + 3.0) AS v FROM range(20) t(i);
+
+query I
+SELECT max(abs(t - e)) < 1e-8
+FROM (
+    SELECT unnest(by_trend) AS t, unnest(scalar_trend) AS e
+    FROM (
+        SELECT
+            (SELECT trend FROM ts_detrend_by('lin20', id, ds, v, 'linear')) AS by_trend,
+            (ts_detrend(list_transform(range(20), i -> 2.0 * i + 3.0), 'linear')).trend AS scalar_trend
+    )
+);
+----
+true
+
+statement ok
+DROP TABLE lin20;

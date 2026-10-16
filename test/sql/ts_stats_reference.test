@@ -1,0 +1,532 @@
+# name: test/sql/ts_stats_reference.test
+# description: ts_stats moments/entropy/gap-count value assertions against reference fixtures (Phase 13 plan 13-01, STAT-01/STAT-03)
+# group: [sql]
+#
+# Non-json-gated so it runs on every native build. Literals below are copied from
+# validation/reference/fixtures/moments/scipy_moments.json (vectors x20, neg30) via:
+#   python3 -c "import json; d=json.load(open('validation/reference/fixtures/moments/scipy_moments.json')); print(d['vectors']['x20'])"
+# Entropy / gap-count blocks are added by plan 13-01 task 2/3.
+
+require anofox_forecast
+
+# --- moments/scipy_moments.json: vectors.x20 ---
+statement ok
+CREATE TABLE x20_tbl AS SELECT * FROM (VALUES
+    (DATE '2024-01-01' + INTERVAL (0) DAY, 3.337),
+    (DATE '2024-01-01' + INTERVAL (1) DAY, 2.674),
+    (DATE '2024-01-01' + INTERVAL (2) DAY, 2.292),
+    (DATE '2024-01-01' + INTERVAL (3) DAY, 3.491),
+    (DATE '2024-01-01' + INTERVAL (4) DAY, 2.217),
+    (DATE '2024-01-01' + INTERVAL (5) DAY, 4.765),
+    (DATE '2024-01-01' + INTERVAL (6) DAY, 3.613),
+    (DATE '2024-01-01' + INTERVAL (7) DAY, 3.258),
+    (DATE '2024-01-01' + INTERVAL (8) DAY, 0.928),
+    (DATE '2024-01-01' + INTERVAL (9) DAY, 0.481),
+    (DATE '2024-01-01' + INTERVAL (10) DAY, 1.015),
+    (DATE '2024-01-01' + INTERVAL (11) DAY, 3.755),
+    (DATE '2024-01-01' + INTERVAL (12) DAY, 3.21),
+    (DATE '2024-01-01' + INTERVAL (13) DAY, 0.738),
+    (DATE '2024-01-01' + INTERVAL (14) DAY, 3.727),
+    (DATE '2024-01-01' + INTERVAL (15) DAY, 1.651),
+    (DATE '2024-01-01' + INTERVAL (16) DAY, 1.653),
+    (DATE '2024-01-01' + INTERVAL (17) DAY, 6.178),
+    (DATE '2024-01-01' + INTERVAL (18) DAY, 3.053),
+    (DATE '2024-01-01' + INTERVAL (19) DAY, 3.501)
+) t(ds, v);
+
+statement ok
+CREATE TABLE x20_grp AS SELECT 'x20' AS id, ds, v FROM x20_tbl;
+
+# --- moments/scipy_moments.json: vectors.neg30 (ROADMAP SC1 audit vector) ---
+statement ok
+CREATE TABLE neg30_tbl AS SELECT * FROM (VALUES
+    (DATE '2024-01-01' + INTERVAL (0) DAY, -1.8991),
+    (DATE '2024-01-01' + INTERVAL (1) DAY, 0.6477),
+    (DATE '2024-01-01' + INTERVAL (2) DAY, -0.802),
+    (DATE '2024-01-01' + INTERVAL (3) DAY, -0.7567),
+    (DATE '2024-01-01' + INTERVAL (4) DAY, -3.1837),
+    (DATE '2024-01-01' + INTERVAL (5) DAY, -3.7957),
+    (DATE '2024-01-01' + INTERVAL (6) DAY, -5.3265),
+    (DATE '2024-01-01' + INTERVAL (7) DAY, -2.3631),
+    (DATE '2024-01-01' + INTERVAL (8) DAY, -5.7755),
+    (DATE '2024-01-01' + INTERVAL (9) DAY, -4.7125),
+    (DATE '2024-01-01' + INTERVAL (10) DAY, -7.6473),
+    (DATE '2024-01-01' + INTERVAL (11) DAY, -7.5362),
+    (DATE '2024-01-01' + INTERVAL (12) DAY, -10.0714),
+    (DATE '2024-01-01' + INTERVAL (13) DAY, -9.4829),
+    (DATE '2024-01-01' + INTERVAL (14) DAY, -8.8162),
+    (DATE '2024-01-01' + INTERVAL (15) DAY, -11.7517),
+    (DATE '2024-01-01' + INTERVAL (16) DAY, -10.1278),
+    (DATE '2024-01-01' + INTERVAL (17) DAY, -11.5628),
+    (DATE '2024-01-01' + INTERVAL (18) DAY, -13.644),
+    (DATE '2024-01-01' + INTERVAL (19) DAY, -13.8016),
+    (DATE '2024-01-01' + INTERVAL (20) DAY, -14.4591),
+    (DATE '2024-01-01' + INTERVAL (21) DAY, -14.7495),
+    (DATE '2024-01-01' + INTERVAL (22) DAY, -15.9361),
+    (DATE '2024-01-01' + INTERVAL (23) DAY, -16.9273),
+    (DATE '2024-01-01' + INTERVAL (24) DAY, -17.1046),
+    (DATE '2024-01-01' + INTERVAL (25) DAY, -18.5269),
+    (DATE '2024-01-01' + INTERVAL (26) DAY, -19.4895),
+    (DATE '2024-01-01' + INTERVAL (27) DAY, -18.9482),
+    (DATE '2024-01-01' + INTERVAL (28) DAY, -18.7171),
+    (DATE '2024-01-01' + INTERVAL (29) DAY, -21.8294)
+) t(ds, v);
+
+statement ok
+CREATE TABLE neg30_grp AS SELECT 'neg30' AS id, ds, v FROM neg30_tbl;
+
+# === ts_stats_by: x20 moments (scipy skew=0.30292879825084273, kurt=0.2765286546322532, bc=0.2861213328957609) ===
+query I
+SELECT abs(skewness - 0.30292879825084273) < 1e-10 AND abs(kurtosis - 0.2765286546322532) < 1e-10 AND abs(bimodality_coef - 0.2861213328957609) < 1e-10
+FROM ts_stats_by('x20_grp', id, ds, v, '1d');
+----
+true
+
+# === ts_stats macro: x20 moments ===
+query I
+SELECT abs(skewness - 0.30292879825084273) < 1e-10 AND abs(kurtosis - 0.2765286546322532) < 1e-10 AND abs(bimodality_coef - 0.2861213328957609) < 1e-10
+FROM ts_stats('x20_grp', id, ds, v, '1d');
+----
+true
+
+# === ts_stats_agg: x20 moments ===
+query I
+SELECT abs((s).skewness - 0.30292879825084273) < 1e-10 AND abs((s).kurtosis - 0.2765286546322532) < 1e-10 AND abs((s).bimodality_coef - 0.2861213328957609) < 1e-10
+FROM (SELECT ts_stats_agg(ds, v) AS s FROM x20_tbl);
+----
+true
+
+# === ts_stats_by: neg30 moments (scipy skew=0.009664978939615671, kurt=-1.1917581430411304, bc=0.4661259199823024 — ROADMAP SC1 "0.466, previously 0.600") ===
+query I
+SELECT abs(skewness - 0.009664978939615671) < 1e-10 AND abs(kurtosis - (-1.1917581430411304)) < 1e-10 AND abs(bimodality_coef - 0.4661259199823024) < 1e-10
+FROM ts_stats_by('neg30_grp', id, ds, v, '1d');
+----
+true
+
+# === ts_stats macro: neg30 moments ===
+query I
+SELECT abs(skewness - 0.009664978939615671) < 1e-10 AND abs(kurtosis - (-1.1917581430411304)) < 1e-10 AND abs(bimodality_coef - 0.4661259199823024) < 1e-10
+FROM ts_stats('neg30_grp', id, ds, v, '1d');
+----
+true
+
+# === ts_stats_agg: neg30 moments ===
+query I
+SELECT abs((s).skewness - 0.009664978939615671) < 1e-10 AND abs((s).kurtosis - (-1.1917581430411304)) < 1e-10 AND abs((s).bimodality_coef - 0.4661259199823024) < 1e-10
+FROM (SELECT ts_stats_agg(ds, v) AS s FROM neg30_tbl);
+----
+true
+
+# === Gap counting (D-04, STAT-03): n_gaps = missing periods, n_gap_runs = gap intervals ===
+# gap_daily: 60 days from 2024-01-01, days 20..39 missing (one 20-day run).
+statement ok
+CREATE TABLE gap_daily AS
+SELECT (DATE '2024-01-01' + CAST(i AS INTEGER))::TIMESTAMP AS ds, i::DOUBLE AS v
+FROM range(0, 60) t(i)
+WHERE i < 20 OR i >= 40;
+
+statement ok
+CREATE TABLE gap_daily_grp AS SELECT 'g' AS id, ds, v FROM gap_daily;
+
+query I
+SELECT n_gaps = 20 AND n_gap_runs = 1 AND expected_length = 60
+FROM ts_stats_by('gap_daily_grp', id, ds, v, '1d');
+----
+true
+
+query I
+SELECT n_gaps = 20 AND n_gap_runs = 1 AND expected_length = 60
+FROM ts_stats('gap_daily_grp', id, ds, v, '1d');
+----
+true
+
+# ts_stats_agg auto-detects the frequency (frequency_micros=0, FIXED) from the data itself.
+query I
+SELECT (s).n_gaps = 20 AND (s).n_gap_runs = 1 AND (s).expected_length = 60
+FROM (SELECT ts_stats_agg(ds, v) AS s FROM gap_daily);
+----
+true
+
+# gap_me: explicit month-end dates 2024-01-31, 2024-04-30, 2024-05-31 (Feb/Mar missing,
+# one run of 2 missing periods) under '1mo'.
+statement ok
+CREATE TABLE gap_me AS SELECT * FROM (VALUES
+    (DATE '2024-01-31', 1.0),
+    (DATE '2024-04-30', 2.0),
+    (DATE '2024-05-31', 3.0)
+) t(ds, v);
+
+statement ok
+CREATE TABLE gap_me_grp AS SELECT 'g' AS id, ds, v FROM gap_me;
+
+query I
+SELECT n_gaps = 2 AND n_gap_runs = 1 AND expected_length = 5
+FROM ts_stats_by('gap_me_grp', id, ds, v, '1mo');
+----
+true
+
+query I
+SELECT n_gaps = 2 AND n_gap_runs = 1 AND expected_length = 5
+FROM ts_stats('gap_me_grp', id, ds, v, '1mo');
+----
+true
+
+# === ts_stats_agg keeps NULL-valued rows (Phase 12 deferred item (a), fixed here) ===
+statement ok
+CREATE TABLE null_row AS SELECT * FROM (VALUES
+    (DATE '2024-01-01', 1.0),
+    (DATE '2024-01-02', NULL),
+    (DATE '2024-01-03', 3.0),
+    (DATE '2024-01-04', 4.0),
+    (DATE '2024-01-05', 5.0)
+) t(ds, v);
+
+statement ok
+CREATE TABLE null_row_grp AS SELECT 'g' AS id, ds, v FROM null_row;
+
+query I
+SELECT (SELECT (s).n_nulls FROM (SELECT ts_stats_agg(ds, v) AS s FROM null_row)) = (SELECT n_nulls FROM ts_stats_by('null_row_grp', id, ds, v, '1d'))
+   AND (SELECT (s).length FROM (SELECT ts_stats_agg(ds, v) AS s FROM null_row)) = (SELECT length FROM ts_stats_by('null_row_grp', id, ds, v, '1d'));
+----
+true
+
+# === Entropy (D-03): Pincus approximate entropy, m=2, r=0.2*sample sd ===
+# r_entropy/approx_entropy.json case ar1_100: apen = 0.622585685349877
+statement ok
+CREATE TABLE ar1_tbl AS SELECT * FROM (VALUES
+    (DATE '2024-01-01' + INTERVAL (0) DAY, 1.64822736959513),
+    (DATE '2024-01-01' + INTERVAL (1) DAY, 1.00167129073275),
+    (DATE '2024-01-01' + INTERVAL (2) DAY, 0.556141249648914),
+    (DATE '2024-01-01' + INTERVAL (3) DAY, 0.556578491564228),
+    (DATE '2024-01-01' + INTERVAL (4) DAY, 0.0708582682138433),
+    (DATE '2024-01-01' + INTERVAL (5) DAY, 0.445629124512097),
+    (DATE '2024-01-01' + INTERVAL (6) DAY, -1.27645768016855),
+    (DATE '2024-01-01' + INTERVAL (7) DAY, -0.174137774406155),
+    (DATE '2024-01-01' + INTERVAL (8) DAY, 1.95221003896684),
+    (DATE '2024-01-01' + INTERVAL (9) DAY, 0.497403238090164),
+    (DATE '2024-01-01' + INTERVAL (10) DAY, -0.443003396045896),
+    (DATE '2024-01-01' + INTERVAL (11) DAY, 0.828479108958883),
+    (DATE '2024-01-01' + INTERVAL (12) DAY, 0.64262779712222),
+    (DATE '2024-01-01' + INTERVAL (13) DAY, 1.21369097245444),
+    (DATE '2024-01-01' + INTERVAL (14) DAY, 0.334938801990886),
+    (DATE '2024-01-01' + INTERVAL (15) DAY, -1.09788373557318),
+    (DATE '2024-01-01' + INTERVAL (16) DAY, -1.14585728900292),
+    (DATE '2024-01-01' + INTERVAL (17) DAY, -0.46080045369288),
+    (DATE '2024-01-01' + INTERVAL (18) DAY, -0.289658862271088),
+    (DATE '2024-01-01' + INTERVAL (19) DAY, -0.258265327058516),
+    (DATE '2024-01-01' + INTERVAL (20) DAY, -0.401111264510107),
+    (DATE '2024-01-01' + INTERVAL (21) DAY, 0.898708647359595),
+    (DATE '2024-01-01' + INTERVAL (22) DAY, 0.165257594403561),
+    (DATE '2024-01-01' + INTERVAL (23) DAY, 1.25719910430602),
+    (DATE '2024-01-01' + INTERVAL (24) DAY, -0.200807497499747),
+    (DATE '2024-01-01' + INTERVAL (25) DAY, 0.35427930161872),
+    (DATE '2024-01-01' + INTERVAL (26) DAY, 1.02890531857185),
+    (DATE '2024-01-01' + INTERVAL (27) DAY, 0.669741908076764),
+    (DATE '2024-01-01' + INTERVAL (28) DAY, -0.602106161586049),
+    (DATE '2024-01-01' + INTERVAL (29) DAY, -0.224583514006705),
+    (DATE '2024-01-01' + INTERVAL (30) DAY, -1.69795136994131),
+    (DATE '2024-01-01' + INTERVAL (31) DAY, -1.39245174269178),
+    (DATE '2024-01-01' + INTERVAL (32) DAY, -1.47406341820141),
+    (DATE '2024-01-01' + INTERVAL (33) DAY, -2.89162437236603),
+    (DATE '2024-01-01' + INTERVAL (34) DAY, -0.850435657832997),
+    (DATE '2024-01-01' + INTERVAL (35) DAY, -1.6787927534765),
+    (DATE '2024-01-01' + INTERVAL (36) DAY, -0.659343096648954),
+    (DATE '2024-01-01' + INTERVAL (37) DAY, -0.180706196379095),
+    (DATE '2024-01-01' + INTERVAL (38) DAY, -0.551747410197716),
+    (DATE '2024-01-01' + INTERVAL (39) DAY, 0.0499685421518076),
+    (DATE '2024-01-01' + INTERVAL (40) DAY, -0.118746439185586),
+    (DATE '2024-01-01' + INTERVAL (41) DAY, -1.10321807036058),
+    (DATE '2024-01-01' + INTERVAL (42) DAY, -0.947106415869585),
+    (DATE '2024-01-01' + INTERVAL (43) DAY, 1.38571072559396),
+    (DATE '2024-01-01' + INTERVAL (44) DAY, 1.87033811853691),
+    (DATE '2024-01-01' + INTERVAL (45) DAY, 1.75466863828417),
+    (DATE '2024-01-01' + INTERVAL (46) DAY, 0.748486635443851),
+    (DATE '2024-01-01' + INTERVAL (47) DAY, -0.965763462786008),
+    (DATE '2024-01-01' + INTERVAL (48) DAY, -0.349703534085356),
+    (DATE '2024-01-01' + INTERVAL (49) DAY, -0.362687265543242),
+    (DATE '2024-01-01' + INTERVAL (50) DAY, -1.83293282631612),
+    (DATE '2024-01-01' + INTERVAL (51) DAY, 0.251608860542331),
+    (DATE '2024-01-01' + INTERVAL (52) DAY, 1.83084737358942),
+    (DATE '2024-01-01' + INTERVAL (53) DAY, 0.858488057324562),
+    (DATE '2024-01-01' + INTERVAL (54) DAY, -0.18466072710026),
+    (DATE '2024-01-01' + INTERVAL (55) DAY, 0.901108688212527),
+    (DATE '2024-01-01' + INTERVAL (56) DAY, -0.000860611279466683),
+    (DATE '2024-01-01' + INTERVAL (57) DAY, 0.882680052378669),
+    (DATE '2024-01-01' + INTERVAL (58) DAY, 0.811070135927831),
+    (DATE '2024-01-01' + INTERVAL (59) DAY, -0.389941580122491),
+    (DATE '2024-01-01' + INTERVAL (60) DAY, -1.77851256584642),
+    (DATE '2024-01-01' + INTERVAL (61) DAY, -2.0048627339188),
+    (DATE '2024-01-01' + INTERVAL (62) DAY, -1.33277940695807),
+    (DATE '2024-01-01' + INTERVAL (63) DAY, -0.565500870479993),
+    (DATE '2024-01-01' + INTERVAL (64) DAY, -0.67220221641797),
+    (DATE '2024-01-01' + INTERVAL (65) DAY, 0.11830499916269),
+    (DATE '2024-01-01' + INTERVAL (66) DAY, -1.2969147390824),
+    (DATE '2024-01-01' + INTERVAL (67) DAY, -2.09292668485536),
+    (DATE '2024-01-01' + INTERVAL (68) DAY, -0.528713274867872),
+    (DATE '2024-01-01' + INTERVAL (69) DAY, -1.50852584542554),
+    (DATE '2024-01-01' + INTERVAL (70) DAY, -1.40765731360685),
+    (DATE '2024-01-01' + INTERVAL (71) DAY, -1.01712587941958),
+    (DATE '2024-01-01' + INTERVAL (72) DAY, -1.75968247004244),
+    (DATE '2024-01-01' + INTERVAL (73) DAY, -2.19321199656953),
+    (DATE '2024-01-01' + INTERVAL (74) DAY, -3.20754244872526),
+    (DATE '2024-01-01' + INTERVAL (75) DAY, -0.625275373043682),
+    (DATE '2024-01-01' + INTERVAL (76) DAY, -2.47447754653152),
+    (DATE '2024-01-01' + INTERVAL (77) DAY, -0.0894983921027832),
+    (DATE '2024-01-01' + INTERVAL (78) DAY, 0.755551795447109),
+    (DATE '2024-01-01' + INTERVAL (79) DAY, 1.06347663878926),
+    (DATE '2024-01-01' + INTERVAL (80) DAY, -0.49345114617066),
+    (DATE '2024-01-01' + INTERVAL (81) DAY, -1.68586095711127),
+    (DATE '2024-01-01' + INTERVAL (82) DAY, -1.85515966079428),
+    (DATE '2024-01-01' + INTERVAL (83) DAY, -1.10074082873184),
+    (DATE '2024-01-01' + INTERVAL (84) DAY, 0.808146915843583),
+    (DATE '2024-01-01' + INTERVAL (85) DAY, -0.193913080876015),
+    (DATE '2024-01-01' + INTERVAL (86) DAY, 0.613297334100803),
+    (DATE '2024-01-01' + INTERVAL (87) DAY, -0.844086272675592),
+    (DATE '2024-01-01' + INTERVAL (88) DAY, -1.65661704970975),
+    (DATE '2024-01-01' + INTERVAL (89) DAY, -0.543811976726783),
+    (DATE '2024-01-01' + INTERVAL (90) DAY, 0.217522073546148),
+    (DATE '2024-01-01' + INTERVAL (91) DAY, 0.832916092481138),
+    (DATE '2024-01-01' + INTERVAL (92) DAY, 1.55452935914508),
+    (DATE '2024-01-01' + INTERVAL (93) DAY, 0.762798417281389),
+    (DATE '2024-01-01' + INTERVAL (94) DAY, -0.665090461381892),
+    (DATE '2024-01-01' + INTERVAL (95) DAY, 0.322901189210746),
+    (DATE '2024-01-01' + INTERVAL (96) DAY, -0.438122925666086),
+    (DATE '2024-01-01' + INTERVAL (97) DAY, 0.690727468883762),
+    (DATE '2024-01-01' + INTERVAL (98) DAY, 1.01315120180583),
+    (DATE '2024-01-01' + INTERVAL (99) DAY, 0.500319149038344)
+) t(ds, v);
+
+statement ok
+CREATE TABLE ar1_grp AS SELECT 'ar1' AS id, ds, v FROM ar1_tbl;
+
+query I
+SELECT abs(entropy - 0.622585685349877) < 1e-10
+FROM ts_stats_by('ar1_grp', id, ds, v, '1d');
+----
+true
+
+# Entropy is NULL for a series with an interior NULL ...
+statement ok
+CREATE TABLE entropy_interior_null AS SELECT * FROM (VALUES
+    (DATE '2024-01-01', 1.0),
+    (DATE '2024-01-02', 2.0),
+    (DATE '2024-01-03', NULL),
+    (DATE '2024-01-04', 4.0),
+    (DATE '2024-01-05', 5.0)
+) t(ds, v);
+
+statement ok
+CREATE TABLE entropy_interior_null_grp AS SELECT 'g' AS id, ds, v FROM entropy_interior_null;
+
+query I
+SELECT entropy IS NULL FROM ts_stats_by('entropy_interior_null_grp', id, ds, v, '1d');
+----
+true
+
+# ... and for a 2-value series.
+statement ok
+CREATE TABLE entropy_two_values AS SELECT * FROM (VALUES
+    (DATE '2024-01-01', 1.0),
+    (DATE '2024-01-02', 2.0)
+) t(ds, v);
+
+statement ok
+CREATE TABLE entropy_two_values_grp AS SELECT 'g' AS id, ds, v FROM entropy_two_values;
+
+query I
+SELECT entropy IS NULL FROM ts_stats_by('entropy_two_values_grp', id, ds, v, '1d');
+----
+true
+
+# === STL-based trend_strength / seasonality_strength (D-02, STAT-02, Phase 13 plan 13-02) ===
+# rw150: 150 monthly rows from 2010-01-31 month-ends, values = r_stl_strength/cases.json
+# case audit_rw150. tsfeatures::stl_features (ts(v, frequency=12)): trend 0.976625431133628,
+# seasonal_strength 0.0865166431060249 (provenance: validation/reference/r/gen_stl_strength_reference.R).
+statement ok
+CREATE TABLE rw150 AS
+SELECT (DATE '2010-01-01' + INTERVAL (i) MONTH + INTERVAL '1 month' - INTERVAL '1 day') AS ds, v
+FROM (SELECT UNNEST(generate_series(0,149)) AS i, UNNEST([-1.454, -1.6625, -2.2946, -4.0556, -3.3207, -3.3441, -3.2727, -4.025, -3.5702, -4.1095, -4.2524, -5.3607, -6.5768, -5.2413, -5.7484, -5.4567, -5.4905, -5.9316, -6.4396, -5.8095, -6.1114, -6.2628, -6.2406, -5.0641, -4.3836, -4.001, -4.5645, -5.9465, -4.997, -4.0305, -4.1712, -3.6293, -2.8479, -2.0167, -1.0953, -1.551, -0.036, -1.2826, -0.4209, 0.0731, 0.9467, 2.8257, 4.3102, 3.165, 1.4763, 2.2932, 1.2782, 1.2658, 2.1055, 0.4617, -1.6483, -1.389, -1.3446, -1.5904, -1.5519, -2.4124, -3.9259, -4.0925, -5.0642, -6.7077, -6.202, -6.2634, -5.8569, -6.8462, -7.5043, -8.5033, -9.3899, -9.1945, -9.9775, -9.6214, -9.2817, -7.2565, -8.6493, -7.7614, -7.8509, -7.8649, -9.3148, -9.775, -9.0318, -9.1143, -9.0332, -9.3239, -8.1694, -8.1908, -10.3912, -11.0833, -13.0521, -16.3036, -16.8337, -15.5001, -15.453, -16.6255, -17.5662, -16.4356, -16.278, -16.23, -16.2835, -16.2451, -15.4397, -14.8871, -14.6714, -15.7143, -15.2031, -15.8874, -14.7935, -16.0646, -16.2022, -16.2096, -17.5342, -15.8122, -14.3518, -14.8154, -14.0437, -13.665, -16.2786, -16.0282, -16.0895, -16.0063, -17.0832, -17.3525, -17.5308, -16.3427, -16.0083, -16.0138, -14.4849, -15.0401, -15.4295, -17.2463, -15.6772, -14.7129, -13.796, -13.1271, -13.017, -12.8015, -13.0535, -13.2571, -13.2028, -11.6909, -11.1353, -11.1937, -11.7731, -12.4081, -10.8054, -10.2987, -10.2312, -10.5773, -11.6864, -11.7533, -10.8796, -11.2721]) AS v);
+
+statement ok
+CREATE TABLE rw150_grp AS SELECT 'g' AS id, ds, v FROM rw150;
+
+query I
+SELECT abs(trend_strength - 0.976625431133628) < 1e-8
+FROM ts_stats_by('rw150_grp', id, ds, v, '1mo', seasonal_period := 12);
+----
+true
+
+query I
+SELECT abs(seasonality_strength - 0.0865166431060249) < 1e-8
+FROM ts_stats_by('rw150_grp', id, ds, v, '1mo', seasonal_period := 12);
+----
+true
+
+# ts_stats macro agrees with ts_stats_by on the same explicit period.
+query I
+SELECT
+  (SELECT trend_strength FROM ts_stats('rw150_grp', id, ds, v, '1mo', seasonal_period := 12))
+    IS NOT DISTINCT FROM
+  (SELECT trend_strength FROM ts_stats_by('rw150_grp', id, ds, v, '1mo', seasonal_period := 12))
+  AND
+  (SELECT seasonality_strength FROM ts_stats('rw150_grp', id, ds, v, '1mo', seasonal_period := 12))
+    IS NOT DISTINCT FROM
+  (SELECT seasonality_strength FROM ts_stats_by('rw150_grp', id, ds, v, '1mo', seasonal_period := 12));
+----
+true
+
+# det_seasonal84: t=1..84, v = 10 + 3*sin(2*pi*t/7) + 0.1*t + 0.5*cos(2.1*t), period 7
+# (fixture case det_seasonal84: trend 0.97998340937427, seasonal_strength 0.973887333793987).
+statement ok
+CREATE TABLE det84 AS
+SELECT DATE '2024-01-01' + INTERVAL (t - 1) DAY AS ds,
+       10 + 3 * sin(2 * pi() * t / 7) + 0.1 * t + 0.5 * cos(2.1 * t) AS v
+FROM (SELECT UNNEST(generate_series(1, 84)) AS t);
+
+statement ok
+CREATE TABLE det84_grp AS SELECT 'g' AS id, ds, v FROM det84;
+
+query I
+SELECT abs(trend_strength - 0.97998340937427) < 1e-8
+  AND abs(seasonality_strength - 0.973887333793987) < 1e-8
+FROM ts_stats_by('det84_grp', id, ds, v, '1d', seasonal_period := 7);
+----
+true
+
+# det_trend60 (fixture trend 0.974173889872301): seasonal_period := 1 -> non-seasonal,
+# seasonality_strength NULL, trend_strength matches the supsmu-based fixture value.
+statement ok
+CREATE TABLE det60 AS
+SELECT DATE '2024-01-01' + INTERVAL (t - 1) DAY AS ds,
+       0.5 * t + 2 * sin(1.3 * t) AS v
+FROM (SELECT UNNEST(generate_series(1, 60)) AS t);
+
+statement ok
+CREATE TABLE det60_grp AS SELECT 'g' AS id, ds, v FROM det60;
+
+query I
+SELECT seasonality_strength IS NULL AND abs(trend_strength - 0.974173889872301) < 1e-8
+FROM ts_stats_by('det60_grp', id, ds, v, '1d', seasonal_period := 1);
+----
+true
+
+# The first 14 det_seasonal84 rows with seasonal_period := 7: n (14) <= 2*period (14), so no
+# usable period (R's own tsfeatures/mstl fallback for an insufficiently-long series) ->
+# seasonality_strength NULL.
+statement ok
+CREATE TABLE det84_short_grp AS SELECT 'g' AS id, ds, v FROM det84 ORDER BY ds LIMIT 14;
+
+query I
+SELECT seasonality_strength IS NULL
+FROM ts_stats_by('det84_short_grp', id, ds, v, '1d', seasonal_period := 7);
+----
+true
+
+# seasonal_period := 0 (auto-detect) on det84 agrees with ts_stats_agg (which always
+# auto-detects, having no period argument) and is NOT NULL.
+query I
+SELECT
+  (SELECT trend_strength FROM ts_stats_by('det84_grp', id, ds, v, '1d', seasonal_period := 0))
+    IS NOT DISTINCT FROM
+  (SELECT (ts_stats_agg(ds, v)).trend_strength FROM det84_grp)
+  AND
+  (SELECT seasonality_strength FROM ts_stats_by('det84_grp', id, ds, v, '1d', seasonal_period := 0))
+    IS NOT DISTINCT FROM
+  (SELECT (ts_stats_agg(ds, v)).seasonality_strength FROM det84_grp)
+  AND
+  (SELECT seasonality_strength FROM ts_stats_by('det84_grp', id, ds, v, '1d', seasonal_period := 0))
+    IS NOT NULL;
+----
+true
+
+# seasonal_period := -1 is a bind-time error naming ts_stats_by.
+statement error
+SELECT trend_strength FROM ts_stats_by('det84_grp', id, ds, v, '1d', seasonal_period := -1);
+----
+seasonal_period must be >= 0
+
+# === CR-03 regression (iteration 2): fill_gaps's inserted-row count and
+# ts_stats_by's n_gaps must agree for every calendar gap, exact-multiple or not
+# (previously fill_gaps_calendar walked the grid directly while gap_counts
+# independently rounded the elapsed distance to the nearest whole step, and the
+# two disagreed whenever a gap was not an exact multiple of the step). ===
+
+# '1q' (period_count=1) over a 5-month gap: NOT an exact multiple of 3 months --
+# the review's exact reproduction. fill_gaps_by must insert exactly as many NULL
+# rows as ts_stats_by reports as n_gaps.
+statement ok
+CREATE TABLE cr03_q3 AS SELECT 'q3' AS id, ds::TIMESTAMP AS ds, 100.0 AS v
+FROM (VALUES ('2023-01-01'), ('2023-06-01')) AS t(ds);
+
+query I
+SELECT count(*) FILTER (WHERE v IS NULL) FROM ts_fill_gaps_by('cr03_q3', id, ds, v, '1q');
+----
+1
+
+query I
+SELECT n_gaps FROM ts_stats_by('cr03_q3', id, ds, v, '1q');
+----
+1
+
+statement ok
+DROP TABLE cr03_q3;
+
+# '3q' (period_count=3, 9-month step) over 12 months: the review's other exact
+# reproduction -- fill_gaps inserts one row at +9 months, the old gap_counts
+# rounding rule said 0 missing periods for the identical series.
+statement ok
+CREATE TABLE cr03_tq AS SELECT 'tq' AS id, ds::TIMESTAMP AS ds, 100.0 AS v
+FROM (VALUES ('2023-01-01'), ('2024-01-01')) AS t(ds);
+
+query I
+SELECT count(*) FILTER (WHERE v IS NULL) FROM ts_fill_gaps_by('cr03_tq', id, ds, v, '3q');
+----
+1
+
+query I
+SELECT n_gaps FROM ts_stats_by('cr03_tq', id, ds, v, '3q');
+----
+1
+
+statement ok
+DROP TABLE cr03_tq;
+
+# '2mo': one exactly-spaced pair (Jan 1 -> Mar 1) and one off-grid pair
+# (Mar 1 -> Jun 1 is 3 months, not a multiple of 2 -> one grid point at May 1).
+statement ok
+CREATE TABLE cr03_bm AS SELECT 'bm' AS id, ds::TIMESTAMP AS ds, 100.0 AS v
+FROM (VALUES ('2023-01-01'), ('2023-03-01'), ('2023-06-01')) AS t(ds);
+
+query I
+SELECT count(*) FILTER (WHERE v IS NULL) FROM ts_fill_gaps_by('cr03_bm', id, ds, v, '2mo');
+----
+1
+
+query I
+SELECT n_gaps FROM ts_stats_by('cr03_bm', id, ds, v, '2mo');
+----
+1
+
+statement ok
+DROP TABLE cr03_bm;
+
+# Month-end series (D-09): a '1q' step from Jan 31 to Apr 30 2023 is an exact
+# 3-month step with month-end alignment preserved (Feb 28 is skipped by the
+# calendar rule, not treated as a separate gap) -- both sides must agree on
+# zero gaps.
+statement ok
+CREATE TABLE cr03_me AS SELECT 'me' AS id, ds::TIMESTAMP AS ds, 100.0 AS v
+FROM (VALUES ('2023-01-31'), ('2023-04-30')) AS t(ds);
+
+query I
+SELECT count(*) FILTER (WHERE v IS NULL) FROM ts_fill_gaps_by('cr03_me', id, ds, v, '1q');
+----
+0
+
+query I
+SELECT n_gaps FROM ts_stats_by('cr03_me', id, ds, v, '1q');
+----
+0
+
+statement ok
+DROP TABLE cr03_me;

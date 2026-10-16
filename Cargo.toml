@@ -5,6 +5,7 @@ resolver = "2"
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.89"
 # Matches the repo's LICENSE file (Business Source License 1.1). The prior
 # "MIT" here contradicted LICENSE; BUSL-1.1 is the authoritative repo licence,
 # consistent with the sibling anofox extensions (optimize/inventory/bayes).
@@ -14,11 +15,11 @@ repository = "https://github.com/DataZooDE/anofox-forecast-extension"
 
 [workspace.dependencies]
 # Core forecasting library
-anofox-forecast = { version = "0.15.3", features = ["anomaly", "serde"] }
+anofox-forecast = { version = "0.16.2", features = ["anomaly", "serde"] }
 
 # Functional data analysis (seasonality, peaks, detrending)
 # Note: default-features disabled to allow WASM builds; features enabled per-target in crates
-fdars-core = { version = "0.3", default-features = false }
+fdars-core = { version = "0.47", default-features = false }
 
 # FFI and memory management
 libc = "0.2"
@@ -31,7 +32,7 @@ chrono = "0.4"
 statrs = "0.18"
 
 # Regression analysis
-anofox-regression = "=0.5.3"
+anofox-regression = "=0.5.15"
 faer = { version = "0.23", default-features = false, features = ["std", "linalg"] }
 
 
@@ -42,8 +43,12 @@ opt-level = 3
 strip = true  # Strip debug symbols for smaller binaries
 
 # Patch argmin to use stable Rust compatible version
-# argmin 0.11.0 uses unstable `is_multiple_of` feature (Rust 1.87+)
-# This fork replaces it with modulo operations for Rust 1.86 compatibility
+# argmin 0.11.0 uses unstable `is_multiple_of` feature (stable since Rust 1.87)
+# This fork replaces it with modulo operations. `is_multiple_of` has been
+# stable since 1.87, below this workspace's 1.89 rust-version floor (set by
+# trueno's AVX-512 code, transitive via anofox-forecast — see 09-RESEARCH.md),
+# so this patch is no longer the binding MSRV constraint; it is retained
+# until its removal is planned separately.
 [patch.crates-io]
 argmin = { git = "https://github.com/DataZooDE/argmin", branch = "fix/stable-rust-compat" }
 argmin-math = { git = "https://github.com/DataZooDE/argmin", branch = "fix/stable-rust-compat" }

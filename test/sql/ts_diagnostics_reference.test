@@ -1,0 +1,545 @@
+# name: test/sql/ts_diagnostics_reference.test
+# description: Phase 17 diagnostics value assertions against checked-in fixtures (plans 17-01..17-02)
+# group: [sql]
+#
+# Non-json-gated so it runs on every native build (Phase 13 lesson, D-12) --
+# every macro used here (ts_adf_by / ts_kpss_by / ts_stationarity_by) is
+# json-free. This file stays free of any json-extension require directive.
+#
+# Literals below are copied from fixture JSON via a one-line python3 snippet,
+# e.g. for validation/reference/fixtures/statsmodels_stationarity/adf_kpss_cases.json:
+#   python3 -c "import json; d=json.load(open('validation/reference/fixtures/statsmodels_stationarity/adf_kpss_cases.json')); cases={c['name']: c for c in d['cases']}; print(cases['air']['regressions']['ct']['adf'])"
+
+require anofox_forecast
+
+#######################################
+# Setup: air17 (AirPassengers, 144 rows) and ts17 (trend_stationary, 100 rows)
+#######################################
+
+statement ok
+CREATE TABLE air17 AS
+SELECT 'air' AS id, DATE '1949-01-01' + INTERVAL (i) MONTH AS ds, v
+FROM (SELECT unnest(range(144)) AS i, unnest([
+    112,118,132,129,121,135,148,148,136,119,104,118,115,126,141,135,125,149,
+    170,170,158,133,114,140,145,150,178,163,172,178,199,199,184,162,146,166,
+    171,180,193,181,183,218,230,242,209,191,172,194,196,196,236,235,229,243,
+    264,272,237,211,180,201,204,188,235,227,234,264,302,293,259,229,203,229,
+    242,233,267,269,270,315,364,347,312,274,237,278,284,277,317,313,318,374,
+    413,405,355,306,271,306,315,301,356,348,355,422,465,467,404,347,305,336,
+    340,318,362,348,363,435,491,505,404,359,310,337,360,342,406,396,420,472,
+    548,559,463,407,362,405,417,391,419,461,472,535,622,606,508,461,390,432
+]::DOUBLE[]) AS v);
+
+statement ok
+CREATE TABLE ts17 AS
+SELECT 'ts' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, v
+FROM (SELECT unnest(range(100)) AS i, unnest([
+    11.6868,11.6724,11.7833,11.1672,11.9244,11.9678,11.7347,11.9132,13.0209,
+    13.9755,12.6389,11.3045,11.1077,12.8573,12.3706,12.1477,13.7922,14.5765,
+    13.4204,10.7194,11.9456,13.974,14.2568,12.7642,12.7654,14.6512,15.689,
+    12.7434,11.9204,13.6517,15.4728,16.7095,15.8291,15.5605,16.3353,17.4651,
+    17.2086,18.1492,19.4742,19.7893,19.7197,20.1087,18.5176,19.301,17.9914,
+    19.8214,19.0297,17.6203,17.5362,19.0964,19.0789,20.4123,21.7995,20.9125,
+    21.1322,22.2103,21.8015,24.1885,23.4572,22.7352,22.3906,22.7709,23.1019,
+    24.8245,23.6303,23.6606,24.6127,23.1483,23.5438,24.2914,22.9941,23.6819,
+    25.4222,27.0908,27.1649,26.4485,25.8,27.1473,27.7016,27.4023,26.4704,
+    26.2581,26.9843,26.2706,28.1165,28.9246,28.1264,27.9331,27.9118,30.5434,
+    29.5322,28.9346,27.1721,27.8209,27.5195,28.6054,28.6876,29.5953,31.4823,
+    29.888
+]::DOUBLE[]) AS v);
+
+#######################################
+# 17-01 ADF (statsmodels adfuller)
+#######################################
+
+# air17 'c': statistic/p_value within 1e-8 of the fixture, cv_5pct within 1e-10, lags equal
+query I
+SELECT abs((ts_adf(LIST(v ORDER BY ds), -1, 'c')).statistic - (-0.986479461317597)) < 1e-8
+FROM air17;
+----
+true
+
+query I
+SELECT abs((ts_adf(LIST(v ORDER BY ds), -1, 'c')).p_value - 0.7581636095609505) < 1e-8
+FROM air17;
+----
+true
+
+query I
+SELECT abs((ts_adf(LIST(v ORDER BY ds), -1, 'c')).cv_5pct - (-2.882567574015525)) < 1e-10
+FROM air17;
+----
+true
+
+query I
+SELECT (ts_adf(LIST(v ORDER BY ds), -1, 'c')).lags
+FROM air17;
+----
+4
+
+# air17 'ct': statistic/p_value within 1e-8, cv_5pct within 1e-10, lags equal
+query I
+SELECT abs((ts_adf(LIST(v ORDER BY ds), -1, 'ct')).statistic - (-7.318571346919129)) < 1e-8
+FROM air17;
+----
+true
+
+query I
+SELECT abs((ts_adf(LIST(v ORDER BY ds), -1, 'ct')).cv_5pct - (-3.4427962380330523)) < 1e-10
+FROM air17;
+----
+true
+
+query I
+SELECT (ts_adf(LIST(v ORDER BY ds), -1, 'ct')).lags
+FROM air17;
+----
+5
+
+# ts_adf_by(regression := 'ct') equals the scalar on the same series
+query I
+SELECT abs((adf).statistic - (SELECT (ts_adf(LIST(v ORDER BY ds), -1, 'ct')).statistic FROM air17)) < 1e-12
+FROM ts_adf_by('air17', id, ds, v, regression := 'ct');
+----
+true
+
+# the macro without regression equals 'c' (the default)
+query I
+SELECT abs((adf).statistic - (SELECT (ts_adf(LIST(v ORDER BY ds), -1, 'c')).statistic FROM air17)) < 1e-12
+FROM ts_adf_by('air17', id, ds, v);
+----
+true
+
+# a NULL regression means 'c'
+query I
+SELECT abs((ts_adf(LIST(v ORDER BY ds), -1, NULL)).statistic - (-0.986479461317597)) < 1e-8
+FROM air17;
+----
+true
+
+# 'CT' (case-insensitive) equals 'ct'
+query I
+SELECT (ts_adf(LIST(v ORDER BY ds), -1, 'CT')).statistic = (ts_adf(LIST(v ORDER BY ds), -1, 'ct')).statistic
+FROM air17;
+----
+true
+
+# unknown regression strings raise an informative error
+statement error
+SELECT (ts_adf(LIST(v ORDER BY ds), -1, 'n')).statistic FROM air17;
+----
+expected one of: c, ct
+
+statement error
+SELECT (ts_adf(LIST(v ORDER BY ds), -1, 'trend')).statistic FROM air17;
+----
+expected one of: c, ct
+
+# ts17 with max_lags 1000 and 'ct': lags clamped to <= 47, statistic finite
+query I
+SELECT (ts_adf(LIST(v ORDER BY ds), 1000, 'ct')).lags <= 47
+FROM ts17;
+----
+true
+
+query I
+SELECT isfinite((ts_adf(LIST(v ORDER BY ds), 1000, 'ct')).statistic)
+FROM ts17;
+----
+true
+
+# n=3: NaN statistic and NaN cv_5pct, not a crash
+query I
+SELECT isnan((ts_adf([1.0, 2.0, 3.0]::DOUBLE[])).statistic)
+----
+true
+
+query I
+SELECT isnan((ts_adf([1.0, 2.0, 3.0]::DOUBLE[])).cv_5pct)
+----
+true
+
+#######################################
+# 17-01 KPSS (tseries / statsmodels)
+#######################################
+
+# air17 'c' and 'ct': statistic within 1e-10 of the fixture, p equal, lags 4
+query I
+SELECT abs((ts_kpss(LIST(v ORDER BY ds), -1, 'c')).statistic - 2.739473620962186) < 1e-10
+FROM air17;
+----
+true
+
+query I
+SELECT (ts_kpss(LIST(v ORDER BY ds), -1, 'c')).p_value = 0.01
+FROM air17;
+----
+true
+
+query I
+SELECT (ts_kpss(LIST(v ORDER BY ds), -1, 'c')).lags
+FROM air17;
+----
+4
+
+query I
+SELECT abs((ts_kpss(LIST(v ORDER BY ds), -1, 'ct')).statistic - 0.09614984853532407) < 1e-10
+FROM air17;
+----
+true
+
+query I
+SELECT (ts_kpss(LIST(v ORDER BY ds), -1, 'ct')).p_value = 0.1
+FROM air17;
+----
+true
+
+query I
+SELECT (ts_kpss(LIST(v ORDER BY ds), -1, 'ct')).lags
+FROM air17;
+----
+4
+
+# ts_kpss_by(regression := 'ct') equals the scalar
+query I
+SELECT abs((kpss).statistic - (SELECT (ts_kpss(LIST(v ORDER BY ds), -1, 'ct')).statistic FROM air17)) < 1e-12
+FROM ts_kpss_by('air17', id, ds, v, regression := 'ct');
+----
+true
+
+# ts17 with lags 1000 and 'ct': clamped to n/2 = 50
+query I
+SELECT (ts_kpss(LIST(v ORDER BY ds), 1000, 'ct')).lags
+FROM ts17;
+----
+50
+
+# unknown regression raises an informative error
+statement error
+SELECT (ts_kpss(LIST(v ORDER BY ds), -1, 'n')).statistic FROM air17;
+----
+expected one of: c, ct
+
+statement error
+SELECT (ts_stationarity(LIST(v ORDER BY ds), 'n')).verdict FROM air17;
+----
+expected one of: c, ct
+
+# interior NaN (D-12 missing convention) at position 6 of the ts17 list
+# still raises the series gate's "interior NULL" error (D-03)
+statement error
+SELECT ts_kpss(list_concat(list_concat(
+    (SELECT LIST(v ORDER BY ds) FROM ts17)[1:5],
+    ['NaN'::DOUBLE]),
+    (SELECT LIST(v ORDER BY ds) FROM ts17)[6:100]));
+----
+interior NULL at position 6
+
+#######################################
+# 17-01 four-way stationarity verdict (D-04)
+#######################################
+
+# air17: 'c' -> non_stationary, 'ct' -> stationary
+query I
+SELECT (ts_stationarity(LIST(v ORDER BY ds))).verdict
+FROM air17;
+----
+non_stationary
+
+query I
+SELECT (ts_stationarity(LIST(v ORDER BY ds), 'ct')).verdict
+FROM air17;
+----
+stationary
+
+# ts17 (trend_stationary): 'ct' -> trend_stationary, 'c' -> non_stationary
+query I
+SELECT (ts_stationarity(LIST(v ORDER BY ds), 'ct')).verdict
+FROM ts17;
+----
+trend_stationary
+
+query I
+SELECT (ts_stationarity(LIST(v ORDER BY ds), 'c')).verdict
+FROM ts17;
+----
+non_stationary
+
+query I
+SELECT stationarity.verdict
+FROM ts_stationarity_by('ts17', id, ds, v, regression := 'ct') AS stationarity;
+----
+trend_stationary
+
+query I
+SELECT stationarity.verdict
+FROM ts_stationarity_by('ts17', id, ds, v, regression := 'c') AS stationarity;
+----
+non_stationary
+
+# a constant series -> 'constant' verdict, scalar and via ts_stationarity_by
+statement ok
+CREATE TABLE const30 AS
+SELECT 'k' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, 5.0 AS v
+FROM range(30) t(i);
+
+query I
+SELECT (ts_stationarity(LIST(v ORDER BY ds))).verdict
+FROM const30;
+----
+constant
+
+query I
+SELECT stationarity.verdict
+FROM ts_stationarity_by('const30', id, ds, v) AS stationarity;
+----
+constant
+
+# too-short / degenerate series -> verdict IS NULL, not a crash
+query I
+SELECT (ts_stationarity([1.0, 2.0, 3.0]::DOUBLE[])).verdict IS NULL
+----
+true
+
+query I
+SELECT isnan((ts_stationarity([1.0, 2.0, 3.0]::DOUBLE[])).adf_statistic)
+----
+true
+
+query I
+SELECT (ts_stationarity(list_transform(range(30), i -> (2.0 + 0.5 * i)::DOUBLE), 'ct')).verdict IS NULL
+----
+true
+
+#######################################
+# 17-02 Ljung-Box fitted_params (R Box.test fitdf)
+#######################################
+
+# arma17: residuals(arima(ar1[1:120], order=c(1,0,1))) from
+# validation/reference/fixtures/r_diagnostics/stationarity_portmanteau.json
+# portmanteau_cases.arma11_resid_lag10_fitdf2.values
+statement ok
+CREATE TABLE arma17 AS
+SELECT 'r' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, v
+FROM (SELECT unnest(range(120)) AS i, unnest([
+    1.53910491144803,0.0927059968283129,-0.0267057793636747,0.269454013410025,-0.183735208410877,0.477597885378358,
+    -1.43104100808103,0.653795761217683,2.24691684877356,-0.505707832827451,-0.742503309652352,1.15481863815736,
+    0.297651600073974,0.902555788556166,-0.305116594275331,-1.26248951971874,-0.42306290690825,0.388323779678506,
+    0.174392224304195,0.0633957660258668,-0.11352470721297,1.26573218017238,-0.216120229093852,1.22011953776963,
+    -0.835824915145522,0.502330310352944,0.940407330204003,0.162016133805973,-0.947080103930614,0.189399561382151,
+    -1.41975069281159,-0.270996417814145,-0.437087802010838,-1.81647195713291,1.05474741579535,-0.870678711514882,
+    0.509701028382605,0.43447401602889,-0.276801385755237,0.503343537564977,0.00388156865526174,-0.918974140037249,
+    -0.182528787552765,2.12368527966838,1.24638395324344,0.697403237881655,-0.2894353604561,-1.41539101926921,
+    0.264525011450585,0.0106024113034849,-1.47879153733757,1.46011670985537,1.91972901403436,-0.0967424746482399,
+    -0.689201745657934,1.05421887667808,-0.407352392941386,0.93958811596761,0.404648339874869,-0.806014867316359,
+    -1.49600820119219,-0.835999463517051,0.0662113187260109,0.467482081506365,-0.12677428250455,0.671838146768535,
+    -1.20299185678584,-1.22552491171624,0.888157008452704,-0.941968239380464,-0.364582445126387,0.0200179559701344,
+    -0.950699722680909,-0.976949371115777,-1.69357412688932,1.51259530102636,-1.77173305711962,1.53138883460201,
+    1.08886403067656,0.761757184525572,-1.04495550583131,-1.35807200614954,-0.735249911869923,0.205613278968548,
+    1.6956858268712,-0.464826592113979,0.797698925637374,-1.07944478911051,-1.08951612690628,0.585593449225705,
+    0.761005192531296,0.867925997036568,1.17466971600245,-0.083431138000067,-1.10180306159788,0.763404938148435,
+    -0.475918435505009,1.04323813085357,0.751323529246389,-0.0174455373071992,-0.371163746107245,1.6929606086793,
+    -1.66930140209172,1.24511808918733,0.245048567232462,1.67851425946291,-0.989946797432704,0.586243077619852,
+    -0.517105152437977,-0.382375542401837,-1.37768385164801,-1.74418388241314,-1.58972940551,-1.62408740259292,
+    0.422972049810822,-0.735478965525293,-1.34651459278904,0.119230549917018,0.28426217241873,0.716911598802572
+]::DOUBLE[]) AS v);
+
+# lag 10, fitted_params 2: df 8, statistic/p match R Box.test(fitdf=2) to 1e-9
+query I
+SELECT (ts_ljung_box(LIST(v ORDER BY ds), 10, 2)).df
+FROM arma17;
+----
+8
+
+query I
+SELECT abs((ts_ljung_box(LIST(v ORDER BY ds), 10, 2)).statistic - 6.40542007298888) < 1e-9
+FROM arma17;
+----
+true
+
+query I
+SELECT abs((ts_ljung_box(LIST(v ORDER BY ds), 10, 2)).p_value - 0.601916478272279) < 1e-9
+FROM arma17;
+----
+true
+
+# ts_ljung_box_by(fitted_params := 2) equals the scalar
+query I
+SELECT abs((ljung_box).statistic - (SELECT (ts_ljung_box(LIST(v ORDER BY ds), 10, 2)).statistic FROM arma17)) < 1e-12
+FROM ts_ljung_box_by('arma17', id, ds, v, lags := 10, fitted_params := 2);
+----
+true
+
+# lag 20, fitted_params 2: df 18, p matches R Box.test(fitdf=2) to 1e-9
+query I
+SELECT (ts_ljung_box(LIST(v ORDER BY ds), 20, 2)).df
+FROM arma17;
+----
+18
+
+query I
+SELECT abs((ts_ljung_box(LIST(v ORDER BY ds), 20, 2)).p_value - 0.671834559581856) < 1e-9
+FROM arma17;
+----
+true
+
+# 2-arg form (fitted_params omitted) -> df = lags = 10
+query I
+SELECT (ts_ljung_box(LIST(v ORDER BY ds), 10)).df
+FROM arma17;
+----
+10
+
+#######################################
+# 17-02 Ljung-Box edge cases
+#######################################
+
+# df <= 0 at the effective lags is a SQL error naming fitted_params
+statement error
+SELECT (ts_ljung_box(LIST(v ORDER BY ds), 5, 5)).df FROM arma17;
+----
+fitted_params
+
+statement error
+SELECT (ts_ljung_box(LIST(v ORDER BY ds), 5, 7)).df FROM arma17;
+----
+fitted_params
+
+statement error
+SELECT (ts_ljung_box(LIST(v ORDER BY ds), 0)).df FROM arma17;
+----
+fitted_params
+
+# negative fitted_params is a SQL error naming the value
+statement error
+SELECT (ts_ljung_box(LIST(v ORDER BY ds), 5, -1)).df FROM arma17;
+----
+fitted_params must be >= 0
+
+# ts_ljung_box_by(lags := 3, fitted_params := 3) raises the same error
+statement error
+SELECT (ljung_box).df FROM ts_ljung_box_by('arma17', id, ds, v, lags := 3, fitted_params := 3);
+----
+fitted_params
+
+# lags 1000 on a 40-point list clamps to 39, no panic
+query I
+SELECT (ts_ljung_box(list_transform(range(40), i -> sin(i * 0.7)), 1000)).lags
+----
+39
+
+# a 2-point series: isnan(statistic), not a crash
+query I
+SELECT isnan((ts_ljung_box([1.0, 2.0]::DOUBLE[])).statistic)
+----
+true
+
+# diff(rw)[1:30], lag 6, fitted_params 2: df 4, p matches R Box.test(fitdf=2) to 1e-9
+statement ok
+CREATE TABLE diffrw30 AS
+SELECT 'r' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds, v
+FROM (SELECT unnest(range(30)) AS i, unnest([
+    0.204612204822171,-1.10794428722294,-0.0840144431342531,0.270266410898387,-0.597176483502718,1.03993296264139,
+    0.741001171800427,0.823222794685663,1.4474871795357,-0.900594281963712,-0.646241044974623,-0.398616137395182,
+    0.490971217436068,0.788357638657052,-0.0371411737745471,-0.746055981153077,-1.477722124961,-1.05972609391119,
+    -0.501791627990959,1.34088739417977,-0.265776376353777,-0.23134580251145,-0.459374134327623,-0.0749376556109413,
+    -0.5324142004701,-0.647679339000215,-1.54517894645899,-0.793756124415868,1.42239957140555,0.252280651926888
+]::DOUBLE[]) AS v);
+
+query I
+SELECT (ts_ljung_box(LIST(v ORDER BY ds), 6, 2)).df
+FROM diffrw30;
+----
+4
+
+query I
+SELECT abs((ts_ljung_box(LIST(v ORDER BY ds), 6, 2)).p_value - 0.0800218644335882) < 1e-9
+FROM diffrw30;
+----
+true
+
+# ts_residual_diagnostics's Ljung-Box gate (fitted_params 0) equals the scalar
+query I
+SELECT abs((ts_residual_diagnostics(LIST(v ORDER BY ds))).lb_p_value - (ts_ljung_box(LIST(v ORDER BY ds))).p_value) < 1e-12
+FROM arma17;
+----
+true
+
+#######################################
+# WR-01 (review fix): ts_ljung_box / ts_residual_diagnostics NULL-optional-arg
+# SPECIAL_HANDLING -- a NULL lags/fitted_params/alpha means the documented
+# "auto"/default, not SQL NULL (mirrors ts_adf's "a NULL regression means 'c'"
+# fix at line 113-118 above).
+#######################################
+
+# a NULL lags means the default (min(10, n/5) = 10 for arma17's 120 rows),
+# matching the pinned 10-lag/fitdf=2 reference values above
+query I
+SELECT (ts_ljung_box(LIST(v ORDER BY ds), NULL, 2)).df
+FROM arma17;
+----
+8
+
+query I
+SELECT abs((ts_ljung_box(LIST(v ORDER BY ds), NULL, 2)).statistic - 6.40542007298888) < 1e-9
+FROM arma17;
+----
+true
+
+query I
+SELECT abs((ts_ljung_box(LIST(v ORDER BY ds), NULL, 2)).p_value - 0.601916478272279) < 1e-9
+FROM arma17;
+----
+true
+
+# ts_ljung_box(x, NULL, 2) equals ts_ljung_box(x, <default lags>, 2) exactly
+query I
+SELECT (ts_ljung_box(LIST(v ORDER BY ds), NULL, 2)).statistic = (ts_ljung_box(LIST(v ORDER BY ds), 10, 2)).statistic
+   AND (ts_ljung_box(LIST(v ORDER BY ds), NULL, 2)).df = (ts_ljung_box(LIST(v ORDER BY ds), 10, 2)).df
+FROM arma17;
+----
+true
+
+# a NULL fitted_params (3-arg overload) means fitted_params = 0, equal to the
+# 2-arg (lags-only) overload and to the 1-arg overload's implicit default lags
+query I
+SELECT (ts_ljung_box(LIST(v ORDER BY ds), 10, NULL)).statistic = (ts_ljung_box(LIST(v ORDER BY ds), 10)).statistic
+   AND (ts_ljung_box(LIST(v ORDER BY ds), 10, NULL)).df = (ts_ljung_box(LIST(v ORDER BY ds), 10)).df
+FROM arma17;
+----
+true
+
+# a NULL series still yields SQL NULL for every overload, even with
+# SPECIAL_HANDLING set on the 2-arg/3-arg forms
+query II
+SELECT ts_ljung_box(NULL::DOUBLE[], 2) IS NULL, ts_ljung_box(NULL::DOUBLE[], 10, 2) IS NULL
+----
+true	true
+
+# anofox_fcst_ts_ljung_box alias set gets the same NULL-lags fix
+query I
+SELECT abs((anofox_fcst_ts_ljung_box(LIST(v ORDER BY ds), NULL, 2)).statistic - 6.40542007298888) < 1e-9
+FROM arma17;
+----
+true
+
+# a NULL alpha means the default 0.05, equal to the 1-arg overload
+query I
+SELECT (ts_residual_diagnostics(LIST(v ORDER BY ds), NULL)).lb_p_value = (ts_residual_diagnostics(LIST(v ORDER BY ds))).lb_p_value
+   AND (ts_residual_diagnostics(LIST(v ORDER BY ds), NULL)).adequate = (ts_residual_diagnostics(LIST(v ORDER BY ds))).adequate
+FROM arma17;
+----
+true
+
+# a NULL series still yields SQL NULL for ts_residual_diagnostics's 2-arg form
+query I
+SELECT ts_residual_diagnostics(NULL::DOUBLE[], 0.05) IS NULL
+----
+true
+
+# anofox_fcst_ts_residual_diagnostics alias set gets the same NULL-alpha fix
+query I
+SELECT (anofox_fcst_ts_residual_diagnostics(LIST(v ORDER BY ds), NULL)).lb_p_value = (ts_residual_diagnostics(LIST(v ORDER BY ds))).lb_p_value
+FROM arma17;
+----
+true
