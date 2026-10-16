@@ -47,3 +47,12 @@ duckdb_extension_load(anofox_forecast
     # resolves to the .a file path.
     LINKED_LIBS "$<TARGET_FILE:anofox_fcst_ffi-static>"
 )
+
+# DuckDB 2.0 links an extension into its own shell and unittest only when an
+# extension config asks for it; otherwise the sqllogictest runner skips every
+# `require anofox_forecast` test (the duckdb-next CI leg ran 0 of 94). DuckDB
+# 1.x links every loaded extension by default and has no such command, so this
+# is a no-op there. The distributed loadable extension is unaffected.
+if(COMMAND duckdb_extension_statically_link)
+    duckdb_extension_statically_link(anofox_forecast)
+endif()
