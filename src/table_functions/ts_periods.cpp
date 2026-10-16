@@ -427,22 +427,35 @@ void RegisterTsDetectPeriodsFunction(ExtensionLoader &loader) {
     full_func_conf.stability = FunctionStability::VOLATILE;
     ts_periods_set.AddFunction(full_func_conf);
 
-    // Five-argument version (values, method, max_period, min_confidence, expected_periods)
+    // Five-argument version (values, method, max_period, min_confidence, expected_periods).
+    // expected_periods is nullable: a SQL NULL means "not provided" (the Rust
+    // Option semantics), not "whole row is NULL" -- without SPECIAL_HANDLING,
+    // DuckDB's DEFAULT_NULL_HANDLING short-circuits the row to NULL the moment
+    // this argument is NULL, before the body (which already treats a NULL
+    // expected_periods as absent, see the has_expected_periods check above)
+    // ever runs. Same class of bug as the Phase 17 WR-01 ts_ljung_box fix
+    // (commit 6ceea19). DET-01 gap closure (18-06).
     auto func5 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::DOUBLE), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
         GetMultiPeriodResultType(),
         TsDetectPeriodsFunction
     );
     func5.stability = FunctionStability::VOLATILE;
+    func5.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
     ts_periods_set.AddFunction(func5);
 
-    // Six-argument version (values, method, max_period, min_confidence, expected_periods, tolerance)
+    // Six-argument version (values, method, max_period, min_confidence, expected_periods, tolerance).
+    // This is the overload the ts_detect_periods(_by) table macros always call
+    // (src/macros/ts_macros.cpp) -- the macro's default-case MAP{} call passes
+    // an explicit SQL NULL for expected_periods, which is the exact repro for
+    // DET-01's all-NULL-row bug. Same SPECIAL_HANDLING fix as func5 above.
     auto func6 = ScalarFunction(
         {LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::BIGINT), LogicalType(LogicalTypeId::DOUBLE), LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE)), LogicalType(LogicalTypeId::DOUBLE)},
         GetMultiPeriodResultType(),
         TsDetectPeriodsFunction
     );
     func6.stability = FunctionStability::VOLATILE;
+    func6.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
     ts_periods_set.AddFunction(func6);
 
     // Mark as internal to hide from duckdb_functions() and deprioritize in autocomplete
