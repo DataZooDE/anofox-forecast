@@ -2223,7 +2223,7 @@ WITH periods_data AS (
             COALESCE(json_extract_string(to_json(params), '$.method'), 'fft'),
             COALESCE(CAST(json_extract(to_json(params), '$.max_period') AS BIGINT), 0),
             COALESCE(CAST(json_extract(to_json(params), '$.min_confidence') AS DOUBLE), -1.0),
-            COALESCE(CAST(json_extract(to_json(params), '$.expected_periods') AS DOUBLE[]), NULL),
+            COALESCE(CAST(json_extract_string(to_json(params), '$.expected_periods') AS DOUBLE[]), NULL),
             COALESCE(CAST(json_extract(to_json(params), '$.tolerance') AS DOUBLE), -1.0)
         ) AS _periods
     FROM query_table(source::VARCHAR)
@@ -2258,7 +2258,7 @@ WITH periods_data AS (
             COALESCE(json_extract_string(to_json(params), '$.method'), 'fft'),
             COALESCE(CAST(json_extract(to_json(params), '$.max_period') AS BIGINT), 0),
             COALESCE(CAST(json_extract(to_json(params), '$.min_confidence') AS DOUBLE), -1.0),
-            COALESCE(CAST(json_extract(to_json(params), '$.expected_periods') AS DOUBLE[]), NULL),
+            COALESCE(CAST(json_extract_string(to_json(params), '$.expected_periods') AS DOUBLE[]), NULL),
             COALESCE(CAST(json_extract(to_json(params), '$.tolerance') AS DOUBLE), -1.0)
         ) AS _periods
     FROM query_table(source::VARCHAR)

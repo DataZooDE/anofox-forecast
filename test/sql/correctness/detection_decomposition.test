@@ -283,6 +283,71 @@ SELECT (_ts_detect_periods(
 ----
 12.0
 
+# =============================================================================
+# ts_detect_periods / ts_detect_periods_by table macros (DET-01 gap closure,
+# 18-06): the default call (params := MAP{}, no expected_periods) used to
+# return an all-NULL row -- known since Phase 10 (10-06/10-08 SUMMARY),
+# worked around in docs via ts_detect_periods_agg, never fixed. Root cause:
+# the macros always call the 6-arg _ts_detect_periods overload, and their
+# default-case expected_periods extraction (json_extract(...) CAST to
+# DOUBLE[], which is NULL when the key is absent) hit DuckDB's default null
+# handling, short-circuiting the whole row to NULL before the function body
+# (which already treats a NULL expected_periods as "not provided") ever ran.
+# Fixed via FunctionNullHandling::SPECIAL_HANDLING on the 5-arg/6-arg
+# _ts_detect_periods overloads (same bug class as the Phase 17 WR-01
+# ts_ljung_box fix, commit 6ceea19). A second, independent macro bug was
+# found and fixed alongside it: expected_periods was extracted with
+# json_extract (returns a quoted JSON scalar, "[12.0]", which cannot CAST to
+# DOUBLE[]) instead of json_extract_string (returns the unquoted string
+# DuckDB parses as a list literal) -- meaning the expected_periods path was
+# never reachable via the MAP params form at all, not even before DET-01.
+# primary_period = 12.0 is the closed-form period of this noise-free
+# period-12 sinusoid, matching the identical _ts_detect_periods 'fft' pin
+# directly above (same functional root, now reachable through the macro).
+# =============================================================================
+
+statement ok
+CREATE TABLE det01_periods AS
+SELECT 'a' AS g, DATE '2020-01-01' + INTERVAL (i) DAY AS ds, sin(2 * pi() * i / 12) + 0.01 * i AS y
+FROM range(96) t(i);
+
+# Default case (grouped macro): previously an all-NULL row.
+query I
+SELECT primary_period FROM ts_detect_periods_by('det01_periods', g, ds, y, MAP{});
+----
+12.0
+
+# Default case (single-series macro): previously an all-NULL row.
+query I
+SELECT primary_period FROM ts_detect_periods('det01_periods', ds, y, MAP{});
+----
+12.0
+
+# expected_periods path: matches_expected / matched_expected_period populated
+# (closed-form: 12.0 is the series' true period, so it matches exactly).
+query II
+SELECT (periods[1]).matches_expected, (periods[1]).matched_expected_period
+FROM ts_detect_periods_by('det01_periods', g, ds, y, MAP{'expected_periods': '[12.0]'});
+----
+true	12.0
+
+statement ok
+DROP TABLE det01_periods;
+
+# A NULL series (single-row group, value trims to empty) still yields a NULL
+# row through the table macro -- the SPECIAL_HANDLING fix must not fabricate
+# a result for genuinely missing data.
+statement ok
+CREATE TABLE det01_null AS SELECT 'a' AS g, DATE '2020-01-01' AS ds, NULL::DOUBLE AS y;
+
+query I
+SELECT primary_period FROM ts_detect_periods_by('det01_null', g, ds, y, MAP{});
+----
+NULL
+
+statement ok
+DROP TABLE det01_null;
+
 query I
 SELECT ts_autoperiod(list_transform(range(32), lambda i: (10 + 20 * (i % 4))::DOUBLE)).period = 4.0;
 ----
