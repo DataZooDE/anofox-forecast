@@ -25,7 +25,7 @@ against the code before being recorded here.
   `ts_data_quality_agg` → Phase 13 (wrapper/stats). Apply the same
   trim-edges/error-on-interior-NULL/all-NULL-returns-NULL Rust policy already
   established for `ts_features_agg`.
-- **Status:** open — routed to Phase 15 / Phase 13.
+- **Status:** acknowledged
 
 ## (b) Native detection table functions still impute NULL leaf values as 0
 
@@ -44,7 +44,7 @@ against the code before being recorded here.
   `ts_aggregate_hierarchy` change — carry a `valid` flag per row and decide the correct
   per-function policy (trim edges / error on interior NULL, matching the Rust
   single-series gate already used by the scalar/aggregate paths on the same data).
-- **Status:** open — routed to Phase 15.
+- **Status:** acknowledged
 
 ## (c) Correct-but-private list-marshalling helpers not yet consolidated onto `ts_list_marshal.hpp`
 
@@ -65,7 +65,7 @@ against the code before being recorded here.
 - **Suggested fix:** Phase 18 RUST-10 audit: grep for `FlatVector::GetData` list/array
   reads outside `ts_list_marshal.hpp`'s own call sites, consolidate the four files above
   (and any others the grep finds) onto the shared reader.
-- **Status:** open — routed to Phase 18 (RUST-10).
+- **Status:** acknowledged
 
 ## (d) `is_constant`'s absolute `f64::EPSILON` tolerance is not scale-aware
 
@@ -86,7 +86,7 @@ against the code before being recorded here.
 - **Suggested fix:** Phase 15 DET-07 — switch to a relative tolerance (e.g.
   `(v - first).abs() <= f64::EPSILON * first.abs().max(1.0)` or similar scale-aware rule)
   and re-bless any test fixture that relies on the current absolute behaviour.
-- **Status:** open — routed to Phase 15 (DET-07).
+- **Status:** acknowledged
 
 ## (e) `detect_frequency`'s microsecond return unit is undocumented at the public API boundary
 
@@ -103,7 +103,7 @@ against the code before being recorded here.
 - **Suggested fix:** Phase 13 WRAP-03 — add an explicit "(microseconds)" unit note to
   `detect_frequency`'s doc comment and any SQL-facing doc/skill page that surfaces its
   result, alongside WRAP-03's other wrapper-documentation work.
-- **Status:** open — routed to Phase 13 (WRAP-03); the tie-breaking rule itself is
+- **Status:** acknowledged
   already delivered (Plan 12-05, this phase).
 
 ## (f) Conformal NaN-residual handling has no documented finite-sample contract
@@ -123,4 +123,4 @@ against the code before being recorded here.
 - **Suggested fix:** Phase 16 CONF-03 — define and document a minimum-residual-count
   contract (error vs. a documented reduced-confidence NULL) for every conformal/
   bootstrap scalar, alongside CONF-03's other conformal-macro rework.
-- **Status:** open — routed to Phase 16 (CONF-03).
+- **Status:** acknowledged

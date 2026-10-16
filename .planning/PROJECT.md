@@ -12,10 +12,22 @@ SQL users can produce, validate, combine, and interval-bound time-series forecas
 
 ## Current State
 
+- **Shipped v0.10.0 — Statistical Correctness (2026-10-16):** every statistic is computed in Rust and checked against R / scipy / statsmodels / tsfresh fixtures. The forecast wrapper delegates to the crate (anofox-forecast 0.16.2), with 65/65 requirements met, a `test/sql/correctness/*` suite, a `make audit` no-stats-in-C++ guard and `make check-docs`. See `.planning/milestones/v0.10.0-*`.
 - **Shipped v0.8.0 — Ensemble Forecasting (2026-08-31):** AutoEnsemble (`ts_forecast_by('AutoEnsemble')`), explicit-member ensembles (`ts_forecast_ensemble_by`), six combination methods, ensemble conformal intervals (existing path), and member/weight introspection (`ts_ensemble_inspect_by` / `ts_auto_ensemble_inspect_by`). See `.planning/milestones/v0.8.0-*`.
 - **Shipped v0.7.0 — Diagnostics + Model Coverage (2026-08-22):** stationarity + residual diagnostics, global/panel models, GARCH/Kalman/VAR.
 
-## Current Milestone: v0.10.0 Statistical Correctness
+## Next Milestone Goals
+
+To be defined with `/gsd-new-milestone`. Candidates carried forward:
+- v0.10.0 tech debt: integer-`frequency` casts in `ts_forecast_panel_by` / `ts_forecast_var_by` / `ts_stats_by`; `window` / `seasonal_periods` misuse checks in the shared params header; strict parsing of numeric MAP params; the examples/ metric `_by` bare-table form; the `ts_features_config_*` "features" filter; dead `ConformalIntervalFFI`.
+- Upstream crate follow-ups: TBATS optimiser admissibility check; ETS multi-start (RC-03); SESOptimized intermittent optimum (RC-04).
+- v0.9.0 is still parked: the Phase 08 live-CI negative-control push (operator action).
+- Merge `fix/statistical-correctness` to `main` and cut the v0.10.0 extension release (user action).
+
+<details>
+<summary>v0.10.0 milestone definition (shipped 2026-10-16)</summary>
+
+### v0.10.0 Statistical Correctness
 
 **Goal:** Every statistic the extension returns is correct — verified against R / scipy reference values — and is computed in the Rust crates; C++ and SQL only marshal, group, and dispatch.
 
@@ -31,6 +43,8 @@ SQL users can produce, validate, combine, and interval-bound time-series forecas
 
 Input: `.planning/research/STAT-AUDIT-2026-10-08.md` (audit findings A–I). Branch: `fix/statistical-correctness`.
 v0.9.0 (WASM Runtime Verification) is parked with only the operator live-CI negative-control check (Phase 08) outstanding.
+
+</details>
 
 ## Requirements
 
@@ -64,20 +78,21 @@ v0.9.0 (WASM Runtime Verification) is parked with only the operator live-CI nega
 - ✓ anofox-forecast 0.16.2 (R KalmanForecast ARIMA/SARIMA intervals) published and consumed — AutoARIMA AirPassengers interval at R parity, zero AutoARIMA R-parity exceptions — v0.10.0 Phase 18 gap plan 18-05
 - ✓ Regression-proofing: json statically linked (50 gated tests run), `test/sql/correctness/*` pins every fixed function (inventory gate), length-only Rust-test sweep, `make audit` no-stats-in-C++/SQL guard + CI workflow, permanent `make check-docs` snippet checker, v0.10.0 breaking-changes CHANGELOG + release notes — v0.10.0 Phase 18 (TEST-02, TEST-03, RUST-10, DOCS-01, DOCS-02)
 
+- ✓ All wrapper-level statistical bugs from the 2026-10-08 audit fixed with value-asserting tests — Phases 10-18 — v0.10.0
+- ✓ No statistical computation remains in C++ or SQL macros — enforced by `make audit` (Phase 18) — v0.10.0
+- ✓ Core statistics, features, detection and conformal outputs match R/scipy/tsfresh references — Phases 13-16, pinned in Phase 18 — v0.10.0
+- ✓ Upstream anofox-forecast diagnostics/model-selection fixes merged and consumed — anofox-forecast 0.16.1, Phase 17 — v0.10.0
+- ✓ Dependencies bumped — anofox-regression 0.5.15 (Phase 9), fdars-core 0.47 (Phase 15), anofox-forecast 0.16.2 (Phase 18) — v0.10.0
+
 ### Active
 
-<!-- v0.10.0 Statistical Correctness — see REQUIREMENTS.md for REQ-IDs. -->
+<!-- v0.10.0 shipped 2026-10-16; REQ-IDs archived in milestones/v0.10.0-REQUIREMENTS.md. Next milestone's requirements come from /gsd-new-milestone. -->
 
-- [x] All wrapper-level statistical bugs from the 2026-10-08 audit fixed with value-asserting tests — Phases 10-18
-- [x] No statistical computation remains in C++ or SQL macros — enforced by `make audit` (Phase 18)
-- [x] Core statistics, features, detection and conformal outputs match R/scipy/tsfresh references — Phases 13-16, pinned in Phase 18
-- [x] Upstream anofox-forecast diagnostics/model-selection fixes merged and consumed — anofox-forecast 0.16.1, Phase 17
-- [x] Dependencies bumped — anofox-regression 0.5.15 (Phase 9), fdars-core 0.47 (Phase 15), anofox-forecast 0.16.2 (Phase 18)
 
 Parked from v0.9.0: Phase 08 live-CI negative-control push (operator action).
 
 Deferred from v0.8.0 (candidates for a future milestone):
-- **CV ensemble params + AutoEnsemble CV segfault:** `ts_cv_forecast_by('AutoEnsemble')` segfaults (CV native `ts_cv_forecast_native.cpp:380-388` never parses `ensemble_top_k`/`ensemble_method`). Wire ensemble-param parsing into the CV native so AutoEnsemble backtests natively (and honor top_k/combination_method instead of defaulting to top_k=3/Mean).
+- **CV ensemble params:** `ts_cv_forecast_native.cpp` never parses `ensemble_top_k`/`ensemble_method`, so CV backtests use top_k=3/Mean. The former `ts_cv_forecast_by('AutoEnsemble')` segfault is gone on anofox-forecast ≥0.16.1 (re-checked 2026-10-16 at v0.10.0: 2 folds × 7 forecasts, all non-NULL).
 - **AutoEnsemble inner combination weights (upstream):** crate 0.15.3 exposes no accessor for the inner ensemble's non-Mean weights; `ts_auto_ensemble_inspect_by` returns NULL weight for WeightedMSE/InverseAIC/Stacking/HorizonAdaptive. Upstream crate enhancement.
 - **ENS-F1** custom hand-supplied combination weights; **ENS-F2** panel/global + multivariate (VAR) ensembling; per-member ensemble parameters — all explicitly deferred at v0.8.0 start.
 - `build_forecaster` SeasonalWindowAverage `n_seasons=2` hardcoded (TODO ENS-03) — Forecaster trait has no pre-fit series-length hook.
@@ -108,13 +123,13 @@ Deferred from v0.7.0 (candidates for a future milestone):
 - **Shipped v0.7.0** (2026-08-22): +17.9k LOC across 57 commits / 111 files. Extension now surfaces 36 forecasting models (incl. GARCH, Kalman, panel Global*, multivariate VAR via `ts_forecast_var_by`) plus 7 statistical-diagnostic functions. `arch` added to `benchmark/.venv` (comparison group) for GARCH parity. New non-globbed C++ sources (`diagnostics.cpp`, `ts_forecast_panel_native.cpp`, `ts_forecast_var_native.cpp`) are explicitly listed in CMakeLists.
 - **Panel/table-in macro convention (v0.7.0 lesson):** table-in macros must wrap `query_table(...)` in a subselect `(SELECT ... FROM query_table(...))`; a bare TABLE arg silently fails to register.
 - **Shipped v0.8.0** (2026-08-31): +13.9k LOC across 57 files / 3 phases / 6 plans. Extension now surfaces AutoEnsemble (`ts_forecast_by('AutoEnsemble')`) + explicit-member ensembles (`ts_forecast_ensemble_by`) with six combination methods, ensemble conformal intervals (existing path), and member/weight introspection (`ts_ensemble_inspect_by` / `ts_auto_ensemble_inspect_by`). Two new non-globbed C++ sources (`ts_forecast_ensemble_native.cpp`, `ts_ensemble_inspect_native.cpp`) explicitly listed in CMakeLists. No external reference library for ensembles — verification is internal-consistency cross-checks (combined == manual weighted combination of members).
-- **`ts_cv_forecast_by('AutoEnsemble')` segfaults** (crate/CV-native bug: `ts_cv_forecast_native.cpp:380-388` never parses the ensemble params) — ensemble conformal CV uses a manual per-fold `_ts_forecast_scalar` loop instead. Known tech debt.
+- **`ts_cv_forecast_by('AutoEnsemble')`** no longer segfaults (anofox-forecast ≥0.16.1; re-checked at v0.10.0 close), but the CV native still ignores the ensemble params. The per-fold `_ts_forecast_scalar` workaround can be retired.
 
 ## Constraints
 
 - **Tech stack**: DuckDB v1.4.3+ extension; Rust 1.89+ core via FFI; C++17. No new languages.
 - **Architecture**: Parallelism stays at the DuckDB GROUP BY / scalar-function layer — no custom threading or table-in/table-out (established project rule).
-- **Dependencies**: v0.10.0 bumps anofox-regression → 0.5.15, anofox-forecast → ≥0.15.10 (plus upstream correctness fixes via branch + PR; user publishes releases; interim `[patch]` git/path dependency allowed on the fix branch only), fdars-core → 0.47.
+- **Dependencies**: anofox-forecast 0.16.2, anofox-regression =0.5.15, fdars-core 0.47 (as of v0.10.0). Upstream fixes ship as crate releases consumed from crates.io; no local `[patch]` for anofox-forecast.
 - **Correctness**: Statistics are computed in Rust only; every statistical output is checked against a reference implementation (R / scipy / statsmodels / tsfresh) via checked-in fixtures — length-only tests do not count.
 - **Compatibility**: Must build and load across Linux/macOS/Windows and WASM; OpenSSL stays statically linked; verify clean-machine load (not just green CI).
 - **Verification**: Every new SQL function must be exercised by a runnable example against the built extension before it counts as done.
@@ -161,4 +176,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-16 after v0.10.0 Phase 18 (all phases complete)*
+*Last updated: 2026-10-16 after v0.10.0 milestone*

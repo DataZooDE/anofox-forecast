@@ -2,40 +2,36 @@
 gsd_state_version: "1.0"
 milestone: v0.10.0
 milestone_name: Statistical Correctness
-current_phase: 18
-current_plan: Not started
-status: completed
-stopped_at: Phase 18 complete — all phases complete
-last_updated: "2026-10-15T23:50:20.368Z"
+status: Awaiting next milestone
+stopped_at: Milestone v0.10.0 complete and archived — ready for /gsd-new-milestone
+last_updated: "2026-10-16T06:12:23.776Z"
 last_activity: 2026-10-16
-last_activity_desc: Phase 18 complete
-state_head: 44bfba0b4384c672aeda9fc14b87574dba5a7e5d
+last_activity_desc: Milestone v0.10.0 completed and archived
+state_head: d8e463cd2e62c67d5317a75b315cc24c7f7ced2a
 progress:
   total_phases: 10
-  completed_phases: 1
-  total_plans: 56
-  completed_plans: 56
-  percent: 10
+  completed_phases: 10
+  total_plans: 57
+  completed_plans: 57
+  percent: 100
+current_phase: 18
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-10-08 — started v0.10.0 Statistical Correctness)
+See: .planning/PROJECT.md (updated 2026-10-16 — v0.10.0 Statistical Correctness shipped)
 
 **Core value:** Every statistic the extension returns is correct — verified against R / scipy / statsmodels / tsfresh reference values — and is computed in the Rust crates; C++ and SQL only marshal, group, and dispatch.
-**Current focus:** Phase 18 — Correctness Regression Suite, Audit & Docs
+**Current focus:** Planning next milestone (`/gsd-new-milestone`)
 
 ## Current Position
 
-Phase: 18
-Current Plan: Not started
-Total Plans in Phase: 4
-Status: All phases complete
-Last activity: 2026-10-16 — Phase 18 complete
-
-Progress: [█░░░░░░░░░] 10%
+Phase: Milestone v0.10.0 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-10-16 — Milestone v0.10.0 completed and archived
 
 ## Performance Metrics
 
@@ -154,6 +150,25 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 | Category | Item | Status | Deferred At | Milestone |
 |----------|------|--------|-------------|-----------|
+| verification_gaps | Phase 08 (archived v0.9.0): 08-VERIFICATION.md | human_needed | 2026-10-16 | v0.10.0 |
+| deferred_items | Phase 10/deferred-items.md: 1.  test/sql/ts_model_distinctness.test  SeasonalES/SeasonalESOptimized expected values are stale (pre-existin | acknowledged | 2026-10-16 | v0.10.0 |
+| deferred_items | Phase 10/deferred-items.md: 2. Theta and CrostonClassic produce identical in-sample fitted arrays and MSE on non-seasonal, no-zero series  | acknowledged | 2026-10-16 | v0.10.0 |
+| deferred_items | Phase 10/deferred-items.md: 3. Unparsable numeric params values silently fall back to defaults on every MAP-param surface  -   Discovered  | acknowledged | 2026-10-16 | v0.10.0 |
+| deferred_items | Phase 10/deferred-items.md: 4. docs/api/00-api-design.md lists stale ts_forecast_agg STRUCT field names  -   Discovered during:   Plan 10- | acknowledged | 2026-10-16 | v0.10.0 |
+| deferred_items | Phase 10/deferred-items.md: 5. json-gated agg test files expect pre-Phase-10 (and now pre-10-10) behaviour  -   Discovered during:   Plan  | acknowledged | 2026-10-16 | v0.10.0 |
+| deferred_items | Phase 12/deferred-items.md: (a) Several aggregate functions still drop NULL-valued rows instead of a trim/error/pairwise policy  -   Disco | acknowledged | 2026-10-16 | v0.10.0 |
+| deferred_items | Phase 12/deferred-items.md: (b) Native detection table functions still impute NULL leaf values as 0  -   Discovered during:   Plan 12-08 T | acknowledged | 2026-10-16 | v0.10.0 |
+| deferred_items | Phase 12/deferred-items.md: (c) Correct-but-private list-marshalling helpers not yet consolidated onto  ts_list_marshal.hpp   -   Discover | acknowledged | 2026-10-16 | v0.10.0 |
+| deferred_items | Phase 12/deferred-items.md: (d)  is_constant 's absolute  f64::EPSILON  tolerance is not scale-aware  -   Discovered during:   Plan 12-08  | acknowledged | 2026-10-16 | v0.10.0 |
+| deferred_items | Phase 12/deferred-items.md: (e)  detect_frequency 's microsecond return unit is undocumented at the public API boundary  -   Discovered du | acknowledged | 2026-10-16 | v0.10.0 |
+| deferred_items | Phase 12/deferred-items.md: (f) Conformal NaN-residual handling has no documented finite-sample contract  -   Discovered during:   Plan 12 | acknowledged | 2026-10-16 | v0.10.0 |
+| deferred_items | Phase 13/deferred-items.md: Plan 13-02  -   Pre-existing  cargo clippy --all-targets -- -D warnings  failure, unrelated to this plan's fil | acknowledged | 2026-10-16 | v0.10.0 |
+| deferred_items | Phase 13/deferred-items.md: Plan 13-03  -    ParseFrequencyWithType 's numeric multiplier is discarded for calendar (Monthly/Quarterly/Yea | acknowledged | 2026-10-16 | v0.10.0 |
+| deferred_items | Phase 13/deferred-items.md: Plan 13-04  -   D-08 scalar/table signature conflict, resolved (recorded for the user).   D-08 writes the new  | acknowledged | 2026-10-16 | v0.10.0 |
+| deferred_items | Phase 16/deferred-items.md:   ts_coverage_by / ts_quantile_loss_by (found in 16-03, pre-existing):   the macro bodies pass  source  straig | acknowledged | 2026-10-16 | v0.10.0 |
+| deferred_items | Phase 18/deferred-items.md: Plan 18-01  -   Bare  frequency  parameter passed to a VARCHAR-typed native function in  ts_forecast_panel_by  | acknowledged | 2026-10-16 | v0.10.0 |
+| deferred_items | Phase 18/deferred-items.md: Plan 18-02  -   Docs/examples still use the bare table-name form of the metric  _by  family.   18-02 Task 1's  | acknowledged | 2026-10-16 | v0.10.0 |
+| deferred_items | Phase 18/deferred-items.md: Plan 18-04  -    examples/backtesting/m5_backtest_examples.sql  and  examples/metrics/README.md  still use the | acknowledged | 2026-10-16 | v0.10.0 |
 | WASM (future) | Browser-based (not just Node) WASM E2E harness (WASM-F1) | Deferred | 2026-09-01 | v0.9.0 |
 | WASM (future) | Shared-memory `wasm_threads` build — blocked upstream (WASM-F2) | Deferred | 2026-09-01 | v0.9.0 |
 | ENS (future) | Custom hand-supplied combination weights (ENS-F1) | Deferred | 2026-08-30 | v0.8.0 |
@@ -165,3 +180,7 @@ Last session: 2026-10-15T04:59:02.258Z
 Stopped at: Phase 18 complete — all phases complete
 Resume file: None
 Next: `/gsd-plan-phase 9`
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone

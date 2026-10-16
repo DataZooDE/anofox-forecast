@@ -43,7 +43,7 @@ Out-of-scope discoveries logged per the executor's scope-boundary rule
   pass an explicit `seasonal_period` to pin the test to a period
   independent of `detect_seasonality`'s result). The `all_distinct`
   assertion logic itself still holds (`1`).
-- **Status:** open — not fixed in this plan.
+- **Status:** acknowledged
 
 ## 2. Theta and CrostonClassic produce identical in-sample fitted arrays and MSE on non-seasonal, no-zero series
 
@@ -82,7 +82,7 @@ Out-of-scope discoveries logged per the executor's scope-boundary rule
   than fixed, update `theta_and_croston_classic_fitted_are_both_ses_alpha_
   0_1_on_positive_series` (and its independent-recursion comparison) to
   match the new behaviour.
-- **Status:** open — Phase 11.
+- **Status:** acknowledged
 
 ## 3. Unparsable numeric params values silently fall back to defaults on every MAP-param surface
 
@@ -113,7 +113,7 @@ Out-of-scope discoveries logged per the executor's scope-boundary rule
   decision on accepted boolean spellings for
   `laplace_seasonal_batch_init` (currently any non-empty, non-zero-parsing
   string is truthy via the `!= 0` int64 coercion).
-- **Status:** open — unassigned.
+- **Status:** acknowledged
 
 ## 4. docs/api/00-api-design.md lists stale ts_forecast_agg STRUCT field names
 
@@ -130,7 +130,7 @@ Out-of-scope discoveries logged per the executor's scope-boundary rule
   but a full audit of `00-api-design.md` is out of scope here.
 - **Suggested fix:** Update `docs/api/00-api-design.md`'s Aggregate
   Functions block to the real field names/signature.
-- **Status:** open.
+- **Status:** acknowledged
 
 ## 5. json-gated agg test files expect pre-Phase-10 (and now pre-10-10) behaviour
 
@@ -152,4 +152,4 @@ Out-of-scope discoveries logged per the executor's scope-boundary rule
   expectations to match 10-02's and 10-10's error-raising behaviour, and
   remove the `require json` gate if it is no longer actually needed by the
   file's own assertions.
-- **Status:** open — test debt.
+- **Status:** acknowledged

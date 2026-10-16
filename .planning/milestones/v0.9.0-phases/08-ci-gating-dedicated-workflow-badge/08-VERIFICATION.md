@@ -5,12 +5,17 @@ status: human_needed
 score: "3/3 criteria structurally verified + gate mechanism proven locally; live-CI plumbing observation remains (operator push)"
 behavior_unverified: 0
 human_verification:
+
   - item: "Push the branch and confirm the wasm-runtime-test job runs GREEN in GitHub Actions (this also confirms the artifact name anofox_forecast-v1.5.5-extension-wasm_eh resolves to a real uploaded artifact)."
     why: "The needs:/download-artifact/workflow_run plumbing and the derived artifact name can only be confirmed against a live GitHub Actions run — not locally."
   - item: "Introduce a deliberate breakage in one CURATED test file, push, and confirm wasm-runtime-test turns RED; then revert and confirm it returns GREEN."
     why: "CI-01 success criterion requires observing the gate turn red on a WASM failure in live CI. NOTE: the gate's core mechanism is already proven locally (see below) — this step only confirms the GitHub Actions job surfaces the non-zero exit as a red check."
   - item: "Confirm the dedicated WASM workflow (WasmTest.yml) fires via workflow_run after the pipeline completes, and the README badge URL renders/flips with its status."
     why: "Badge rendering and workflow_run chaining are GitHub-side behaviors observable only after a push to main."
+audit_acknowledged:
+  milestone: v0.10.0
+  at: 2026-10-16
+  status: human_needed
 ---
 
 # Phase 8: CI Gating + Dedicated Workflow + Badge — Verification Report

@@ -33,6 +33,7 @@ scope boundary). Not fixed here.
   checks into `ApplyForecastParamSet` (mirroring the 'model' fix's placement/wording),
   plus regression tests for `ts_forecast_by`/`ts_forecast_agg` analogous to
   ts_forecast_ets_model.test's existing coverage.
+  status: acknowledged
 
 ## Plan 18-02
 
@@ -54,6 +55,7 @@ scope boundary). Not fixed here.
     `(source, date_col, actual_col, forecast_col)`, 4 args, not 3).
   - `docs/API_REFERENCE.md`'s metric table (cited in 18-RESEARCH.md) likely has the
     same stale table-name-form examples; not independently re-checked by 18-02.
+  status: acknowledged
 
 ## Plan 18-04
 
@@ -78,3 +80,4 @@ scope boundary). Not fixed here.
   investigate `ts_features_config_from_json`/`_csv`'s native implementation
   (likely in `src/table_functions/` or the FFI boundary) for why the `"features"`
   key is not applied before returning `feature_names`.
+  status: acknowledged

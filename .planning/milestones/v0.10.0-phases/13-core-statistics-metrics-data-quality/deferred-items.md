@@ -18,6 +18,7 @@ scope boundary). Not fixed here.
   step) regardless of toolchain pin; `stl.rs`/`supsmu.rs`/`stats.rs` (the files this plan
   touches) are themselves clippy-clean — verified by running the same command and
   confirming zero findings reference those three files.
+  status: acknowledged
 
 ## Plan 13-03
 
@@ -46,7 +47,7 @@ scope boundary). Not fixed here.
   `_ts_fill_forward_native` multiply by the parsed count the same way the forecast
   path's `MapFrequencyToStep` does, and add SQL regression tests for
   `'2mo'`/`'2q'`/`'2y'` on every affected surface.
-- **Status:** RESOLVED (code review fix pass, 13-REVIEW CR-01, iteration 1). Threaded
+- **Status:** acknowledged
   an explicit `period_count` parameter end-to-end -- Rust core (`gaps::fill_gaps`,
   `gaps::fill_forward`, `gaps::resolve_gap_step`, `gaps::step_count`,
   `stats::compute_ts_stats_with_dates_and_type`, `quality::compute_data_quality`),
@@ -106,7 +107,7 @@ scope boundary). Not fixed here.
   columns, pre-filtering before ever calling the FFI validity-bitmask path that Rust's
   `missing.rs` owns. Confirmed still true as of this plan (same four call sites 13-03
   already flagged as an open RUST-10 candidate are unchanged by this plan's work).
-  **Status:** open, routed to a future wrapper-surface phase (RUST-10 candidate,
+  **Status:** acknowledged
   Phase 18) per the existing Phase 18 note in the project roadmap -- not re-scoped here
   since this plan only owned the MASE/MAPE policy change (D-07/D-08), not a
   table-function-wide missing-data-policy migration.
