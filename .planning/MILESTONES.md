@@ -19,6 +19,19 @@
 
 **Upstream releases shipped during the milestone:** anofox-forecast v0.16.0 (2026-10-10), v0.16.1 (2026-10-14), v0.16.2 (2026-10-16).
 
+## v0.9.0 WASM Runtime Verification (Shipped: 2026-09-10; closed on main 2026-10-16)
+
+**Phases completed:** 2 phases (7-8), 2 plans, 3 tasks · 8/8 requirements
+
+**Key accomplishments:**
+
+- DuckDB-Wasm Node harness (`test/wasm/run.mjs` + `sqllogic.mjs`) loads the built `wasm_eh` extension and runs a curated 8-file / 396-assertion sqllogictest subset (Phase 7).
+- `wasm-runtime-test` gating job in MainDistributionPipeline.yml, a dedicated `WasmTest.yml` workflow (via `workflow_run`), and a README WASM badge (Phase 8).
+
+**Closeout note:** the 2026-09-10 close was committed on a side branch (`milestone/v0.8.0-ensemble-forecasting`, 9976346) and never merged, so v0.9.0 read "parked" on main. It was restored on 2026-10-16, once the outstanding live-CI negative control was observed: the gate went RED on run 38905747917 (only the deliberate control failed) and back to GREEN after the revert on run 38914644475 (draft PR #275, closed unmerged).
+
+**Deferred:** WASM-F1 browser E2E harness; WASM-F2 shared-memory `wasm_threads` (blocked upstream).
+
 ## v0.8.0 Ensemble Forecasting (Shipped: 2026-08-31)
 
 **Phases completed:** 3 phases, 6 plans, 11 tasks

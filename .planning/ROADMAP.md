@@ -4,7 +4,7 @@
 
 - ✅ **v0.7.0 — Close the Crate→Extension Gap (Diagnostics + Model Coverage)** — Phases 1-3 (shipped 2026-08-22)
 - ✅ **v0.8.0 — Ensemble Forecasting** — Phases 4-6 (shipped 2026-08-31)
-- 🗄 **v0.9.0 — WASM Runtime Verification** — Phases 7-8 (parked; Phase 8 operator live-CI negative control outstanding)
+- ✅ **v0.9.0 — WASM Runtime Verification** — Phases 7-8 (shipped 2026-09-10; closed on main 2026-10-16)
 - ✅ **v0.10.0 — Statistical Correctness** — Phases 9-18 (shipped 2026-10-16)
 
 ## Phases
@@ -46,15 +46,17 @@ Tech debt carried forward: `ts_cv_forecast_by('AutoEnsemble')` segfaults (crate/
 </details>
 
 <details>
-<summary>🗄 v0.9.0 — WASM Runtime Verification (Phases 7-8) — PARKED, phase dirs archived 2026-10-08</summary>
+<summary>✅ v0.9.0 — WASM Runtime Verification (Phases 7-8) — SHIPPED 2026-09-10 (closed on main 2026-10-16)</summary>
 
-Phase artifacts (plans, summaries, verification): [milestones/v0.9.0-phases/](milestones/v0.9.0-phases/). Not yet closed via `/gsd-complete-milestone`.
+Full detail: [milestones/v0.9.0-ROADMAP.md](milestones/v0.9.0-ROADMAP.md) · Requirements: [milestones/v0.9.0-REQUIREMENTS.md](milestones/v0.9.0-REQUIREMENTS.md) · Audit: [milestones/v0.9.0-MILESTONE-AUDIT.md](milestones/v0.9.0-MILESTONE-AUDIT.md) · Phase artifacts: [milestones/v0.9.0-phases/](milestones/v0.9.0-phases/)
 
 - [x] Phase 7: WASM Node Harness + Local Green (1/1 plans) — completed 2026-09-02
-      DuckDB-Wasm Node harness (`test/wasm/run.mjs` + `sqllogic.mjs`), `@duckdb/duckdb-wasm` engine-version pin, openssl `!wasm32` vcpkg guard (WASM-01, WASM-02, DEP-01, DEP-02). WASM-03 full-suite green deferred: 23 files fail on pre-existing `test/sql` API drift, not WASM.
+      DuckDB-Wasm Node harness (`test/wasm/run.mjs` + `sqllogic.mjs`), `@duckdb/duckdb-wasm` engine-version pin, openssl `!wasm32` vcpkg guard (WASM-01, WASM-02, DEP-01, DEP-02).
 
-- Phase 8: CI Gating + Dedicated Workflow + Badge (1/1 plans; verification deferred to operator)
-      `wasm-runtime-test` gating job (curated subset, no `--all`), `WasmTest.yml`, README badge (CI-01..03) — implemented and locally verified (curated exit 0 → broken test exit 1 → reverted exit 0). Outstanding: push the branch, observe the gate green → red (deliberate curated break) → green in GitHub Actions, confirm the badge flips, record run URLs, then `/gsd-verify-work 8` and `/gsd-complete-milestone v0.9.0`.
+- [x] Phase 8: CI Gating + Dedicated Workflow + Badge (1/1 plans) — completed 2026-09-10, live-CI verified 2026-10-16
+      `wasm-runtime-test` gating job (curated subset), `WasmTest.yml`, README badge (CI-01..03). Live negative control (draft PR #275): gate RED on run 38905747917, GREEN after revert on run 38914644475.
+
+The 2026-09-10 close lived only on a side branch (9976346) and was restored to main on 2026-10-16.
 
 </details>
 
