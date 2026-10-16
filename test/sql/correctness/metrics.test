@@ -45,20 +45,23 @@ A	0.5
 # The bare table-name form fails identically for the whole family (not just
 # coverage/quantile_loss) -- pinned as a statement error documenting the contract,
 # per the macro descriptions updated in src/macros/ts_macros.cpp this plan.
+# DuckDB 1.x rejects the VARCHAR table argument at bind ("Binder Error: No function
+# matches ..."); DuckDB 2.0 binds it and the metrics bind then reports the missing
+# column. Either way the bare table-name form is an error.
 statement error
 SELECT * FROM ts_coverage_by('probe10', 'ds', 'y', 'lo', 'hi');
 ----
-Binder Error
+<REGEX>:.*(Binder Error|Column 'ds' not found).*
 
 statement error
 SELECT * FROM ts_quantile_loss_by('probe10', 'ds', 'y', 'f', 0.5);
 ----
-Binder Error
+<REGEX>:.*(Binder Error|Column 'ds' not found).*
 
 statement error
 SELECT * FROM ts_mae_by('probe10', 'ds', 'y', 'f');
 ----
-Binder Error
+<REGEX>:.*(Binder Error|Column 'ds' not found).*
 
 # =============================================================================
 # Core scalar/_by metrics on probe10 (closed form): MAE 1.0, MSE 1.0, RMSE 1.0,
