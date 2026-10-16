@@ -114,3 +114,12 @@ No gaps found. All 5 ROADMAP success criteria are independently verified against
 
 _Verified: 2026-10-16_
 _Verifier: Claude (gsd-verifier)_
+
+
+## Addendum (2026-10-16): gap plan 18-06, milestone-audit gap DET-01
+
+The v0.10.0 milestone audit found `ts_detect_periods` / `ts_detect_periods_by` returning an all-NULL row in the default call. Gap plan 18-06 fixed it (ed3c390: SPECIAL_HANDLING on the `_ts_detect_periods` expected_periods overloads; 281560c: the macro's `expected_periods` used `json_extract` where it needed `json_extract_string`; plus correctness pins; d0ea55a: retired the docs workarounds). The orchestrator re-verified at 1f57487:
+- 6-arg `_ts_detect_periods(..., NULL::DOUBLE[], ...)` gives primary_period 12.0 on a period-12 sinusoid; `ts_detect_periods_by(..., MAP{})` gives n_periods 1, primary_period 12.0, method fft; the `expected_periods` '[12.0]' path gives matches_expected true; a NULL series gives NULL.
+- `build/release/test/unittest "test/sql/*"`: All tests passed (5593 assertions in 94 test cases).
+- `make check-docs`: 344 PASS, 0 FAIL, 0 STALE.
+Status remains passed.

@@ -393,9 +393,11 @@ Plans:
   4. `docs/` and `plugins/anofox-forecast/skills/` (bodies and frontmatter descriptions) describe the corrected definitions — interval source, MASE, strengths, features, diagnostics, conformal variants — with every changed SQL snippet executed against the built extension.
   5. CHANGELOG / release notes contain a breaking-change section listing every behaviour change that alters numerical output.
 
-**Plans**: 5/5 plans executed
+**Plans**: 6/6 plans executed
 
 Plans:
+
+- [x] 18-06-PLAN.md
 
 - [x] 18-05-PLAN.md
 
@@ -441,7 +443,7 @@ Phases execute in numeric order: 9 → 10 → 11 → 12 → 13 → 14 → 15 →
 | 15. Detection & Decomposition on fdars 0.47 | 5/5 | Complete    | 2026-10-14 |
 | 16. Conformal & Bootstrap Correctness | 3/3 | Complete    | 2026-10-14 |
 | 17. Upstream Consumption & Diagnostics Parity | 3/3 | Complete    | 2026-10-15 |
-| 18. Correctness Regression Suite, Audit & Docs | 5/5 | Complete    | 2026-10-16 |
+| 18. Correctness Regression Suite, Audit & Docs | 6/6 | In Progress|  |
 
 ## Next
 
