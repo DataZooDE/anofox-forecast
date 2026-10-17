@@ -8,6 +8,40 @@ Releases from `2026.09.26` onward use CalVer (`vYYYY.MM.DD`, the date the binary
 was cut), matching the rest of the anofox and erpl extensions. Earlier entries below
 use the semver numbering this project started with.
 
+## [2026.10.17] - 2026-10-17 — DuckDB 2.0 Compatibility
+
+No SQL signature or numeric output changes: on DuckDB v1.4.5 LTS and v1.5.6 every
+function returns exactly what it returned in v2026.10.16. This release makes the
+extension build and run on DuckDB 2.0-dev as well (PR #277).
+
+### Added
+
+- **DuckDB 2.0-dev support.** The extension now builds and passes the full SQL suite
+  (5591 assertions / 94 files) on DuckDB 2.0-dev, v1.5.6 and v1.4.5 LTS from one
+  source tree. All DuckDB API calls go through a new `src/include/duckdb_compat.hpp`,
+  which detects the API by shape (never by version macro).
+- **Non-blocking DuckDB 2.0-dev CI job** (`linux_amd64` + `wasm_eh`) alongside the
+  v1.4.5 LTS and v1.5.6 build matrices.
+
+### Changed
+
+- Every registered scalar function is marked fallible. No effect on 1.x; on 2.0 user
+  errors raised by a scalar stay user errors instead of surfacing as internal errors.
+- WASM builds pin Rust 1.86.0 through Corrosion (`ANOFOX_WASM_RUST_TOOLCHAIN`, set it
+  to `""` to disable). Rust >= 1.87 emits wasm target features that the binaryen
+  bundled with DuckDB's emsdk 3.1.71 rejects. Native builds keep the 1.89 floor.
+- Tests, examples and docs use the keyword lambda syntax (`lambda x: ...`) instead of
+  the deprecated arrow form.
+- On DuckDB 2.0 the extension is statically linked into DuckDB's own test binaries,
+  so the 2.0 sqllogictest run actually exercises it (it skipped all 94 files before).
+
+### Fixed
+
+- `ts_estimate_backtest_memory` could read past the end of a constant input vector;
+  it now reads its inputs through DuckDB's unified vector format.
+- `ts_features_config_from_json` read its input in a way that fails on DuckDB 2.0;
+  it now reads through the unified vector format too.
+
 ## [2026.10.16] - 2026-10-16 — Statistical Correctness
 
 ### Breaking changes in v2026.10.16
