@@ -204,6 +204,9 @@ if(TELEMETRY_SUPPORTED)
         include_directories(posthog-telemetry/include)
         add_definitions(-DHAS_POSTHOG_TELEMETRY)
     else()
+        # Also gates DATAZOO_BANNER_TELEMETRY below; otherwise the banner calls
+        # PostHogTelemetry symbols that were never built (undefined at link).
+        set(TELEMETRY_SUPPORTED FALSE)
         message(STATUS "OpenSSL not found - building without PostHog telemetry")
     endif()
 endif()
@@ -278,8 +281,11 @@ build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 # Build the loadable extension
 build_loadable_extension(${TARGET_NAME} "" ${EXTENSION_SOURCES})
 
-target_link_libraries(${EXTENSION_NAME} datazoo_banner)
-target_link_libraries(${LOADABLE_EXTENSION_NAME} datazoo_banner)
+# Name the targets explicitly. This file never sets EXTENSION_NAME; DuckDB
+# v2.0.0 defines it as the bare extension name ("anofox_forecast", not a
+# target) before add_subdirectory, so ${EXTENSION_NAME} fails configure.
+target_link_libraries(${TARGET_NAME}_extension datazoo_banner)
+target_link_libraries(${TARGET_NAME}_loadable_extension datazoo_banner)
 
 # Telemetry library + OpenSSL (only when OpenSSL was found)
 set(TELEMETRY_LIBS "")
