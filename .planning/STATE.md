@@ -1,20 +1,20 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.10.0
-milestone_name: Statistical Correctness
 status: Awaiting next milestone
-stopped_at: DuckDB 2.0 compat port done (quick 261016-tjw, draft PR #277 green); awaiting review/merge
-last_updated: "2026-10-16T06:12:23.776Z"
+stopped_at: DuckDB 2.0 compat port done (quick 261016-tjw, draft PR
+last_updated: "2026-10-21T21:06:32.649Z"
 last_activity: 2026-10-17
 last_activity_desc: Quick task 261016-tjw (DuckDB 2.0 compat port) completed
-state_head: d8e463cd2e62c67d5317a75b315cc24c7f7ced2a
+state_head: 4cab513eed3a3103024669fcfb457a2b221af5a5
+milestone_name: Statistical Correctness
+current_phase: 18
 progress:
   total_phases: 10
   completed_phases: 10
   total_plans: 57
   completed_plans: 57
   percent: 100
-current_phase: 18
 ---
 
 # Project State
@@ -140,6 +140,7 @@ None yet.
 |---|-------------|------|--------|-----------|
 | 261009-d02 | Docs/README/skills accuracy pass after Phase 9 | 2026-10-09 | 59e8e26 | [261009-d02-docs-readme-skills-accuracy-pass](./quick/261009-d02-docs-readme-skills-accuracy-pass/) |
 | 261016-tjw | DuckDB 2.0-dev compat port (compat header, WASM Rust 1.86 pin, 2.0 CI job) | 2026-10-17 | 720c7c7 | [261016-tjw-port-anofox-statistics-duckdb-2-0-compat](./quick/261016-tjw-port-anofox-statistics-duckdb-2-0-compat/) |
+| 3 | Fix DuckDB v2.0.0 build (explicit extension target names, no-OpenSSL banner gate, duckdb-next CI -> v2.0.0) | 2026-10-21 | 4cab513 | — |
 
 ## Deferred Verification
 

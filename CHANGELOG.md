@@ -8,6 +8,27 @@ Releases from `2026.09.26` onward use CalVer (`vYYYY.MM.DD`, the date the binary
 was cut), matching the rest of the anofox and erpl extensions. Earlier entries below
 use the semver numbering this project started with.
 
+## [2026.10.21] - 2026-10-21 — DuckDB v2.0.0
+
+No SQL signature or numeric output changes. This release builds against the final
+DuckDB v2.0.0 release, which the community-extensions registry now targets by default.
+
+### Fixed
+
+- **Build against DuckDB v2.0.0.** v2.0.0 defines `EXTENSION_NAME` as the bare
+  extension name before it reads the extension's `CMakeLists.txt`. Our banner link lines
+  used that variable without setting it, so configure failed with
+  `Cannot specify link libraries for target "anofox_forecast" which is not built by
+  this project`. The targets are now named explicitly. On DuckDB 1.x those lines had
+  silently linked nothing, which did no harm because the banner is header-only.
+- **Builds without OpenSSL** no longer fail to link. The banner's telemetry hook is
+  now disabled whenever PostHog telemetry is not built.
+
+### Changed
+
+- The DuckDB 2.0 CI job now builds and tests against the `v2.0.0` tag instead of a
+  2.0-dev commit. The full SQL suite (5591 assertions / 94 files) passes on v2.0.0.
+
 ## [2026.10.17] - 2026-10-17 — DuckDB 2.0 Compatibility
 
 No SQL signature or numeric output changes: on DuckDB v1.4.5 LTS and v1.5.6 every
