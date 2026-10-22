@@ -12,7 +12,7 @@ This milestone extends that SQL surface to reach crate capabilities that are cur
 
 ### Constraints
 
-- **Tech stack**: DuckDB v1.4.3+ extension; Rust 1.89+ core via FFI; C++17. No new languages.
+- **Tech stack**: DuckDB extension built for v2.0.0 (stable), v1.5.6 and v1.4.5 LTS; Rust 1.89+ core via FFI; C++17. No new languages.
 - **Architecture**: Parallelism stays at the DuckDB GROUP BY / scalar-function layer — no custom threading or table-in/table-out (established project rule).
 - **Dependencies**: `anofox-forecast` 0.15.10 and `anofox-regression` 0.5.15 (bumped clean in Phase 9, v0.10.0); further upstream statistical-correctness fixes (ADF/KPSS, diagnostics, conformal) are developed in Phase 11 against the upstream crate and consumed into this extension in Phase 17. Global-model steady-state ARIMA optimization remains tracked separately (awaiting a future crate release).
 - **Compatibility**: Must build and load across Linux/macOS/Windows and WASM; OpenSSL stays statically linked; verify clean-machine load (not just green CI).
@@ -34,7 +34,7 @@ This milestone extends that SQL surface to reach crate capabilities that are cur
 
 ## Runtime
 
-- DuckDB v1.4.3+ (primary database engine)
+- DuckDB v2.0.0 (primary database engine; v1.5.6 and v1.4.5 LTS lines also built and shipped)
 - Emscripten (WASM target builds via `wasm32-unknown-emscripten`)
 - Cargo (Rust) - Workspace root at `Cargo.toml` with 2 member crates
 - uv (Python) - Used for benchmark environment (`benchmark/pyproject.toml`)
@@ -58,7 +58,7 @@ This milestone extends that SQL surface to reach crate capabilities that are cur
 - `anofox-regression` v0.5.15 - Global regression and per-series scaling for forecasting
 - `fdars-core` v0.3 - Seasonality detection, peak analysis, period estimation (FFT/ACF/LombScargle)
 - `faer` v0.23 - MSTL decomposition, feature extraction, conformal prediction intervals
-- DuckDB v1.4.3 (submodule) - Extension host and table function framework
+- DuckDB v2.0.0 (submodule) - Extension host and table function framework
 - OpenSSL (conditional) - Static-linked for HTTPS in PostHog telemetry (`posthog-telemetry/`)
 - Corrosion v0.6.1 - CMake-Rust integration for FFI builds
 
@@ -78,8 +78,8 @@ This milestone extends that SQL surface to reach crate capabilities that are cur
 - Rust 1.89+ (workspace `rust-version`; floor set by trueno's AVX-512 code, stabilised in Rust 1.89)
 - C++ compiler supporting C++17 (GCC 14+ preferred on Linux due to symbol deduplication)
 - Python 3.11-3.12
-- DuckDB development headers (via submodule or v1.4.3 fetch)
-- DuckDB 1.4.3 or later
+- DuckDB development headers (via the duckdb submodule, pinned to v2.0.0)
+- DuckDB v2.0.0, v1.5.6, or v1.4.5 LTS (one extension build per line)
 - OpenSSL 1.1 or 3.x (static linking on Linux/Windows eliminates runtime .so/.dll deps)
 - macOS: CoreFoundation, SystemConfiguration frameworks
 - Windows: bcrypt library
@@ -289,7 +289,7 @@ This milestone extends that SQL surface to reach crate capabilities that are cur
 - **Circular imports:** None detected; dependency graph is strictly layered (SQL → C++ table/scalar → FFI → Rust core)
 - **WASM compatibility:** Rust FFI supports WASM via conditional compilation in Cargo.toml; fdars-core features gated by target_family; DuckDB extension layer is native-only
 - **Memory model:** ListVector for variable-length arrays; std::map for intermediate group data; all allocations freed in Finalize or on exception
-- **DuckDB version:** Tested on v1.4.5 LTS and v1.5.4+; uses C++17 standard; constexpr static members handled with forced C++17 in CMakeLists.txt
+- **DuckDB version:** Built and tested on v2.0.0 (stable; submodule + extension-ci-tools v2.0-cyanoptera), v1.5.6 (v1.5-variegata) and v1.4.5 LTS (v1.4-andium) CI lines; uses C++17 standard; constexpr static members handled with forced C++17 in CMakeLists.txt
 
 ## Anti-Patterns
 
