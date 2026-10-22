@@ -60,9 +60,10 @@ const SKIP_FILES = new Map([
   ['test/sql/ts_fill_forward_native.test', 'Emscripten abort trap (___trap) in WASM runtime'],
 ]);
 
-// Curated subset: 8 files verified green against the current WASM artifact.
+// Curated subset: 9 files verified green against the current WASM artifact.
 // Selected for breadth: core forecasting, CV, metrics, conformal, decomposition,
-// diagnostics, aggregation, period detection.
+// diagnostics, aggregation, period detection, and (Plan 19-01, #289) the
+// ts_fill_forward_operator deprecated macro + ts_fill_forward_by pins.
 const CURATED = [
   'test/sql/ts_forecast_by.test',
   'test/sql/ts_metrics.test',
@@ -72,6 +73,7 @@ const CURATED = [
   'test/sql/ts_cv_folds.test',
   'test/sql/ts_aggregate_hierarchy.test',
   'test/sql/ts_periods.test',
+  'test/sql/ts_fill_forward_operator.test',
 ];
 
 function parseArgs(argv) {

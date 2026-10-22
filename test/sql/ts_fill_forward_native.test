@@ -305,3 +305,33 @@ SELECT * FROM _ts_fill_forward_native(
 );
 ----
 target_date value '99999999999999999999' is out of range for a raw integer day-offset
+
+# ==============================================================================
+# ts_fill_forward_by hourly frequency pin. Moved here (out of
+# test/sql/ts_fill_forward_operator.test, Plan 19-01, #289) because TIMESTAMP +
+# hourly frequency crashes DuckDB-Wasm ("Maximum call stack size exceeded",
+# corrupts later results -- see 19-RESEARCH.md Pitfall 1 and
+# .planning/phases/19-wasm-traps-distribution-pipeline/deferred-items.md). This
+# whole file is already WASM skip-listed (a separate pre-existing ___trap
+# Emscripten issue), so it stays safe for this assertion natively.
+# ==============================================================================
+
+statement ok
+CREATE TABLE test_series AS
+SELECT 'A' AS id,
+       ('2024-01-01'::DATE + (i || ' days')::INTERVAL)::TIMESTAMP AS ds,
+       (10.0 + i)::DOUBLE AS value
+FROM generate_series(0, 4) AS t(i)
+UNION ALL
+SELECT 'B' AS id,
+       ('2024-01-01'::DATE + (i || ' days')::INTERVAL)::TIMESTAMP AS ds,
+       (100.0 + i * 5)::DOUBLE AS value
+FROM generate_series(0, 4) AS t(i);
+
+query I
+SELECT (SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-05 12:00:00', '1h')) > 10;
+----
+true
+
+statement ok
+DROP TABLE test_series;
