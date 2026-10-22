@@ -113,7 +113,13 @@ Full detail: [milestones/v0.10.0-ROADMAP.md](milestones/v0.10.0-ROADMAP.md) · R
   4. The `wasm_mvp` build either LOADs in DuckDB-Wasm on Node, or the `_setThrew is not defined` root cause is written up with a recorded decision (fix it, or stop shipping wasm_mvp and change the build/upload matrix to match).
   5. A handover note gives the owner the exact get.erpl.io CORS rule (GET/HEAD from `*`) and the list of stale old-version paths, ready to apply without further investigation.
 
-**Plans**: TBD
+**Plans:** 4 plans
+
+Plans:
+- [ ] 19-01-PLAN.md — BUG-01: `ts_fill_forward_operator` becomes a deprecated macro over `ts_fill_forward_by` (C++ nested-query operator deleted), pinned natively and in the curated DuckDB-Wasm subset (wave 1)
+- [ ] 19-02-PLAN.md — DIST-01/02/04: upload script replaces the WASM signature in place behind guards, post-upload check in the deploy job (S3 download, section count, DuckDB-Wasm LOAD), get.erpl.io owner handover doc (wave 1)
+- [ ] 19-03-PLAN.md — BUG-02: `ts_features_list()` / `ts_features_config_template()` WASM trap (libc free of Rust-allocated memory) fixed via a paired FFI free function, init_global state, 117-row tests in the curated subset (wave 2)
+- [ ] 19-04-PLAN.md — DIST-03/04: branch CI evidence, harness `--bundle mvp`, wasm_mvp `_setThrew` root cause + user decision (checkpoint), CHANGELOG #272, #272 comment (wave 3)
 
 ### Phase 20: Detection & Metric Bug Fixes
 
@@ -221,7 +227,7 @@ Extension phases execute in numeric order: 19 → 20 → 23 → 24 → 25. Phase
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 19. WASM Traps & Distribution Pipeline | 0/TBD | Not started | - |
+| 19. WASM Traps & Distribution Pipeline | 0/4 | Planned | - |
 | 20. Detection & Metric Bug Fixes | 0/TBD | Not started | - |
 | 21. Upstream AutoETS Spike & Ridge Conditioning Fixes | 0/TBD | Not started | - |
 | 22. Upstream Streaming Feature Builders | 0/TBD | Not started | - |
