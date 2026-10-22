@@ -76,10 +76,10 @@ jobs:
           git checkout ${{ inputs.duckdb_version }}
 
       - name: Checkout extension-ci-tools to version
-        # Submodules are pinned to the stable DuckDB version; for the
-        # LTS deploy we need the matching tools so the parsed
-        # architecture matrix lines up with what the LTS build job
-        # produced. Branch first, tag fallback.
+        # Submodules are pinned to the stable DuckDB version (v2.0.0); for
+        # the v1.5.6 and v1.4.5 LTS deploys we need their matching tools so
+        # the parsed architecture matrix lines up with what that line's
+        # build job produced. Branch first, tag fallback.
         run: |
           cd extension-ci-tools
           git fetch --depth 1 origin ${{ inputs.ci_tools_version }} || \

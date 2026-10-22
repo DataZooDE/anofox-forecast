@@ -70,6 +70,13 @@ Expected: `wasm_eh`. A mismatch between the artifact platform and the bundle
 variant used by the harness (`duckdb-eh.wasm`) will produce `Unknown ABI type`
 or silent load failures.
 
+**Current status (2026-10-22):** the stable build line is DuckDB v2.0.0, but
+this harness stays on the v1.5.6 artifact because no `@duckdb/duckdb-wasm` npm
+build bundles a v2.0.0 engine yet (the newest, 1.33.1-dev65.0, bundles
+v1.5.6 — see the table above). When a duckdb-wasm build bundling v2.0.0 ships,
+bump this pin, `test/wasm/package.json`, and the CI jobs that reference the
+v1.5.6 wasm_eh artifact to the v2.0.0 line together.
+
 **Bumping the pin** — when the extension moves to a new DuckDB version:
 
 1. Update the DuckDB submodule and rebuild.
