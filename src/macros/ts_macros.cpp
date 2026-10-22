@@ -457,6 +457,25 @@ SELECT * FROM _ts_fill_forward_native(
     "SELECT * FROM ts_fill_forward_by('sales', product_id, date, qty, '1d')",
     "data-preparation"},
 
+    // ts_fill_forward_operator: DEPRECATED VARCHAR-column-name form of ts_fill_forward_by (GH#289)
+    // C++ API: ts_fill_forward_operator(source_table, group_col, date_col, value_col, target_date, frequency)
+    //
+    // Previously a native C++ table function that ran a nested QueryMaterialized query from
+    // InitGlobal, hung natively and trapped DuckDB-Wasm, interpolated identifiers unquoted via
+    // StringUtil::Format, and ignored the frequency argument (always one day). It is now a thin
+    // macro over ts_fill_forward_by: COLUMNS([param]) resolves each VARCHAR column-name argument
+    // to a column reference at bind time via AST substitution, so reserved words and names with
+    // spaces need no quoting and no SQL text is ever formatted from user input. Deprecated and
+    // scheduled for removal in the next release — use ts_fill_forward_by with column references.
+    {"ts_fill_forward_operator", {"source_table", "group_col", "date_col", "value_col", "target_date", "frequency", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT * FROM ts_fill_forward_by(source_table, COLUMNS([group_col]), COLUMNS([date_col]), COLUMNS([value_col]), target_date, frequency)
+)",
+    "DEPRECATED (removed in the next release): use ts_fill_forward_by with column references. "
+    "Takes the group/date/value columns as VARCHAR names and forward-fills each group to target_date at the given frequency.",
+    "SELECT * FROM ts_fill_forward_operator('sales', 'store_id', 'sale_date', 'qty', TIMESTAMP '2024-01-10', '1d')",
+    "data-preparation"},
+
     // ts_drop_gappy_by: Filter out series with too many gaps
     // C++ API: ts_drop_gappy_by(table_name, group_col, value_col, max_gap_ratio)
     {"ts_drop_gappy_by", {"source", "group_col", "value_col", "max_gap_ratio", nullptr}, {{nullptr, nullptr}},

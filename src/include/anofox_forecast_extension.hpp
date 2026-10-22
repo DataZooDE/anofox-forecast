@@ -16,7 +16,6 @@ void RegisterTsFillGapsFunction(ExtensionLoader &loader);
 void RegisterTsFillGapsOperatorFunction(ExtensionLoader &loader);
 void RegisterTsFillGapsNativeFunction(ExtensionLoader &loader);
 void RegisterTsFillForwardFunction(ExtensionLoader &loader);
-void RegisterTsFillForwardOperatorFunction(ExtensionLoader &loader);
 void RegisterTsFillForwardNativeFunction(ExtensionLoader &loader);
 void RegisterTsSeriesTransformFunctions(ExtensionLoader &loader);
 void RegisterTsDetectSeasonalityFunction(ExtensionLoader &loader);

@@ -43,7 +43,6 @@ static void LoadInternal(ExtensionLoader &loader) {
     RegisterTsFillGapsOperatorFunction(loader);
     RegisterTsFillGapsNativeFunction(loader);
     RegisterTsFillForwardFunction(loader);
-    RegisterTsFillForwardOperatorFunction(loader);
     RegisterTsFillForwardNativeFunction(loader);
 
     // Register Series Transform functions (_ts_diff, _ts_fill_nulls_mean,

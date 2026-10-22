@@ -224,7 +224,6 @@ set(EXTENSION_SOURCES
     src/table_functions/ts_gaps.cpp
     src/table_functions/ts_fill_gaps_native.cpp
     src/table_functions/ts_fill_forward_native.cpp
-    src/table_functions/ts_fill_forward_operator.cpp
     src/table_functions/ts_forecast_native.cpp
     src/table_functions/ts_forecast_panel_native.cpp
     src/table_functions/ts_forecast_var_native.cpp
