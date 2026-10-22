@@ -67,11 +67,41 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
+| BUG-01 | Phase 19 | Pending |
+| BUG-02 | Phase 19 | Pending |
+| DIST-01 | Phase 19 | Pending |
+| DIST-02 | Phase 19 | Pending |
+| DIST-03 | Phase 19 | Pending |
+| DIST-04 | Phase 19 | Pending |
+| BUG-03 | Phase 20 | Pending |
+| BUG-04 | Phase 20 | Pending |
+| BUG-05 | Phase 20 | Pending |
+| BUG-06 | Phase 20 | Pending |
+| BUG-07 | Phase 20 | Pending |
+| CRATE-01 | Phase 21 | Pending |
+| CRATE-02 | Phase 21 | Pending |
+| CRATE-03 | Phase 22 | Pending |
+| CTR-01 | Phase 23 | Pending |
+| CTR-03 | Phase 23 | Pending |
+| CTR-04 | Phase 23 | Pending |
+| CTR-05 | Phase 23 | Pending |
+| CTR-06 | Phase 23 | Pending |
+| CTR-02 | Phase 24 | Pending |
+| CTR-07 | Phase 24 | Pending |
+| CTR-08 | Phase 24 | Pending |
+| CTR-09 | Phase 24 | Pending |
+| CTR-11 | Phase 24 | Pending |
+| CTR-12 | Phase 24 | Pending |
+| CRATE-04 | Phase 25 | Pending |
+| CTR-10 | Phase 25 | Pending |
+| DIST-05 | Phase 25 | Pending |
+| REL-01 | Phase 25 | Pending |
 
 **Coverage:**
 - v1 requirements: 29 total
-- Mapped to phases: 0 (filled in by the roadmapper)
+- Mapped to phases: 29 (Phases 19-25)
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-10-22*
-*Last updated: 2026-10-22 after initial definition*
+*Last updated: 2026-10-22 after roadmap creation (traceability filled)*
