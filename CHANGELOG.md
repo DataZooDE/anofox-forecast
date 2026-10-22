@@ -8,6 +8,19 @@ Releases from `2026.09.26` onward use CalVer (`vYYYY.MM.DD`, the date the binary
 was cut), matching the rest of the anofox and erpl extensions. Earlier entries below
 use the semver numbering this project started with.
 
+## [2026.10.22] - 2026-10-22 — macOS build on DuckDB v2.0.0
+
+No SQL signature or numeric output changes.
+
+### Fixed
+
+- **macOS build against DuckDB v2.0.0.** DuckDB 2.0's bundled HTTP client uses the
+  macOS keychain, so on macOS the extension must link the `Security` framework (next to
+  `CoreFoundation`). Without it the `osx_arm64` build on v2.0.0 failed to link with
+  undefined `_Sec*` symbols. The community-extensions registry builds macOS only after
+  merge, and one failed platform there skips the deploy for every platform. The 2.0
+  build now passes on `osx_arm64`; on DuckDB 1.x the extra framework is harmless.
+
 ## [2026.10.21] - 2026-10-21 — DuckDB v2.0.0
 
 No SQL signature or numeric output changes. This release builds against the final
