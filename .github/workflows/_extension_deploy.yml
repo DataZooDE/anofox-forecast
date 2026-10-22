@@ -19,9 +19,9 @@ on:
         required: true
         type: string
       # The extension-ci-tools ref (branch/tag) matching duckdb_version. Required
-      # because the rolling patch releases (e.g. v1.5.4 / v1.4.5) have no matching
-      # extension-ci-tools branch — the codename branches (v1.5-variegata /
-      # v1.4-andium) are the canonical targets instead.
+      # because the rolling patch releases (e.g. v1.5.4) have no matching
+      # extension-ci-tools branch — the codename branches (e.g. v1.5-variegata)
+      # are the canonical targets instead.
       ci_tools_version:
         required: true
         type: string
@@ -76,9 +76,9 @@ jobs:
           git checkout ${{ inputs.duckdb_version }}
 
       - name: Checkout extension-ci-tools to version
-        # Submodules are pinned to the stable DuckDB version; for the
-        # LTS deploy we need the matching tools so the parsed
-        # architecture matrix lines up with what the LTS build job
+        # Submodules are pinned to one DuckDB version; for a deploy
+        # against another line we need the matching tools so the parsed
+        # architecture matrix lines up with what that line's build job
         # produced. Branch first, tag fallback.
         run: |
           cd extension-ci-tools

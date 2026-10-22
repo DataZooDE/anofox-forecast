@@ -1,12 +1,12 @@
 #pragma once
 
-// Helpers that compile against DuckDB 1.4 LTS, 1.5.x and 2.0.
+// Helpers that compile against DuckDB 1.5.x and 2.0.
 //
 // DuckDB's headers expose no version macro, so every helper detects the API it
 // needs: from the shape of DuckDB's own callback typedefs (e.g. the arity of
 // aggregate_initialize_t), or with SFINAE on the presence of a member (accessors
 // such as GetReturnType() replace public fields across versions). Nothing here
-// changes behaviour; on 1.4/1.5 the adapters forward to the callback unchanged.
+// changes behaviour; on 1.5 the adapters forward to the callback unchanged.
 
 #include "duckdb.hpp"
 #include "duckdb/common/types/vector.hpp"
@@ -396,7 +396,8 @@ inline ScalarFunction Fallible(ScalarFunction function) {
 
 namespace compat_detail {
 // DataChunk::SetCardinality only sets the chunk count; 2.0 vectors carry their own size and
-// SetChildCardinality resizes them too (1.5.x: documented forwarder; 1.4: absent).
+// SetChildCardinality resizes them too (1.5.x: documented forwarder; the fallback overload
+// covers builds that lack it).
 template <class C>
 auto SetOutputCardinality(C &chunk, idx_t count, int) -> decltype(chunk.SetChildCardinality(count), void()) {
 	chunk.SetChildCardinality(count);

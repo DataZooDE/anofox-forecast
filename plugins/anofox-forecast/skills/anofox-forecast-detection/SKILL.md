@@ -12,7 +12,7 @@ user-invocable: false
 
 # Anofox Forecast — Detection & Decomposition Cheat Sheet
 
-**Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.16.2) | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
+**Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.16.2) | **DuckDB:** v1.5.6 / v2.0 | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
 
 Detect signal structure. When both `seasonal_period` and `seasonal_periods` are omitted,
 `ts_forecast_by` / `ts_cv_forecast_by` / the scalar paths / `ts_forecast_agg` all auto-detect
