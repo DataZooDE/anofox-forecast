@@ -116,9 +116,17 @@ Full detail: [milestones/v0.10.0-ROADMAP.md](milestones/v0.10.0-ROADMAP.md) · R
 **Plans:** 4 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 19-01-PLAN.md — BUG-01: `ts_fill_forward_operator` becomes a deprecated macro over `ts_fill_forward_by` (C++ nested-query operator deleted), pinned natively and in the curated DuckDB-Wasm subset (wave 1)
 - [ ] 19-02-PLAN.md — DIST-01/02/04: upload script replaces the WASM signature in place behind guards, post-upload check in the deploy job (S3 download, section count, DuckDB-Wasm LOAD), get.erpl.io owner handover doc (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 19-03-PLAN.md — BUG-02: `ts_features_list()` / `ts_features_config_template()` WASM trap (libc free of Rust-allocated memory) fixed via a paired FFI free function, init_global state, 117-row tests in the curated subset (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 19-04-PLAN.md — DIST-03/04: branch CI evidence, harness `--bundle mvp`, wasm_mvp `_setThrew` root cause + user decision (checkpoint), CHANGELOG #272, #272 comment (wave 3)
 
 ### Phase 20: Detection & Metric Bug Fixes
