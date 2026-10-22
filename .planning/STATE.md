@@ -1,20 +1,16 @@
 ---
 gsd_state_version: "1.0"
-milestone: v0.10.0
-status: Awaiting next milestone
-stopped_at: DuckDB 2.0 compat port done (quick 261016-tjw, draft PR
-last_updated: "2026-10-22T15:21:09.680Z"
-last_activity: 2026-10-17
-last_activity_desc: Quick task 261016-tjw (DuckDB 2.0 compat port) completed
-state_head: 7f33142511b6e48364074bd97828f452bab0ec25
-milestone_name: Statistical Correctness
-current_phase: 18
+milestone: v0.11.0
+milestone_name: "Issue Sweep: Contract, Bugs, Crate Fixes"
+status: planning
+last_updated: "2026-10-22T20:52:46.020Z"
+last_activity: 2026-10-22
 progress:
-  total_phases: 10
-  completed_phases: 10
-  total_plans: 57
-  completed_plans: 57
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -28,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-10-16 — v0.10.0 Statistical Correctnes
 
 ## Current Position
 
-Phase: Milestone v0.10.0 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-10-16 — Milestone v0.10.0 completed and archived
+Status: Defining requirements
+Last activity: 2026-10-22 — Milestone v0.11.0 started
 
 ## Performance Metrics
 

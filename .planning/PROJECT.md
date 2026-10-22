@@ -17,7 +17,19 @@ SQL users can produce, validate, combine, and interval-bound time-series forecas
 - **Shipped v0.8.0 — Ensemble Forecasting (2026-08-31):** AutoEnsemble (`ts_forecast_by('AutoEnsemble')`), explicit-member ensembles (`ts_forecast_ensemble_by`), six combination methods, ensemble conformal intervals (existing path), and member/weight introspection (`ts_ensemble_inspect_by` / `ts_auto_ensemble_inspect_by`). See `.planning/milestones/v0.8.0-*`.
 - **Shipped v0.7.0 — Diagnostics + Model Coverage (2026-08-22):** stationarity + residual diagnostics, global/panel models, GARCH/Kalman/VAR.
 
-## Next Milestone Goals
+## Current Milestone: v0.11.0 Issue Sweep: Contract, Bugs, Crate Fixes
+
+**Goal:** Close all 15 open GitHub issues of DataZooDE/anofox-forecast: make the outputs conform to the anofox-visualization contract, fix the reported detection, metric and WASM bugs, and ship the three upstream crate fixes.
+
+**Target features:**
+- Extension bugs: #289 (fill-forward operator: internal, quoted, frequency honoured; `ts_features_list` / `ts_features_config_template` WASM traps), #285 (`ts_mase_by` independent of row order), #286 (seasonality classification detrends first), #287 (changepoints don't flag a regular seasonal cycle; the agg's `is_changepoint` follows probability), #272 (upload script WASM signature, post-upload check, `wasm_mvp` `_setThrew`)
+- Output contract (#279-#284): discovery tags + `anofox_contract_version()`, consistent prediction columns + `level` (old names aliased for ONE release), long-form `ts_metrics_by`, long forms for list outputs + AutoARIMA inspect, changepoint events, Durbin-Watson `p_value`/`method`
+- Upstream crate fixes, released and consumed: #259 (AutoETS spike runaway), #258 (conditioning-aware ridge λ), #227 (standalone streaming feature builders)
+- Release closure: #288 closes once duckdb/community-extensions#3112 (v2026.10.22) is merged and verified
+
+**Locked decisions (2026-10-22):** #280 renames ship with old-name aliases for one release, then are removed; all three crate issues are in scope; #272 is code-only (the owner applies the get.erpl.io CORS rule and stale-path cleanup). Branch: `milestone/v0.11.0-issue-sweep`. Issue bodies: GitHub issues #227, #258, #259, #272, #279-#289.
+
+## Next Milestone Goals (carried candidates)
 
 To be defined with `/gsd-new-milestone`. Candidates carried forward:
 - v0.10.0 tech debt: integer-`frequency` casts in `ts_forecast_panel_by` / `ts_forecast_var_by` / `ts_stats_by`; `window` / `seasonal_periods` misuse checks in the shared params header; strict parsing of numeric MAP params; the examples/ metric `_by` bare-table form; the `ts_features_config_*` "features" filter; dead `ConformalIntervalFFI`.
@@ -86,7 +98,9 @@ v0.9.0 (WASM Runtime Verification) shipped 2026-09-10 and was closed on main 202
 
 ### Active
 
-<!-- v0.10.0 shipped 2026-10-16; REQ-IDs archived in milestones/v0.10.0-REQUIREMENTS.md. Next milestone's requirements come from /gsd-new-milestone. -->
+<!-- v0.11.0 requirements: see .planning/REQUIREMENTS.md (REQ-IDs mapped to phases in ROADMAP.md). -->
+
+- [ ] v0.11.0: close issues #227 #258 #259 #272 #279-#289 (see REQUIREMENTS.md)
 
 
 
@@ -126,7 +140,7 @@ Deferred from v0.7.0 (candidates for a future milestone):
 
 ## Constraints
 
-- **Tech stack**: DuckDB v1.4.3+ extension; Rust 1.89+ core via FFI; C++17. No new languages.
+- **Tech stack**: DuckDB extension built for v2.0.0 (stable), v1.5.6 and v1.4.5 LTS; Rust 1.89+ core via FFI; C++17. No new languages.
 - **Architecture**: Parallelism stays at the DuckDB GROUP BY / scalar-function layer — no custom threading or table-in/table-out (established project rule).
 - **Dependencies**: anofox-forecast 0.16.2, anofox-regression =0.5.15, fdars-core 0.47 (as of v0.10.0). Upstream fixes ship as crate releases consumed from crates.io; no local `[patch]` for anofox-forecast.
 - **Correctness**: Statistics are computed in Rust only; every statistical output is checked against a reference implementation (R / scipy / statsmodels / tsfresh) via checked-in fixtures — length-only tests do not count.
@@ -175,4 +189,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-16 after v0.10.0 milestone*
+*Last updated: 2026-10-22 after starting milestone v0.11.0*
