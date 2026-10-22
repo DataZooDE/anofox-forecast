@@ -1,6 +1,9 @@
 #
 # Main pipeline for building and distributing the anofox_forecast extension
 #
+# Three full build/smoke-test/deploy lines: v2.0.0 stable (registry track
+# cyanoptera), v1.5.6 (registry track variegata), v1.4.5 LTS (registry track
+# andium).
 name: Main Extension Distribution Pipeline
 on:
   push:
@@ -71,8 +74,10 @@ jobs:
       deploy_latest: ${{ startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' }}
       deploy_versioned: ${{ startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' }}
 
-  duckdb-latest-build:
-    name: Build extension binaries (DuckDB latest v1.5.6)
+  duckdb-v15-build:
+    # Full build + deploy line kept for the community-extensions registry's
+    # `variegata` (1.5.x) track, and for DataZoo repo users still on 1.5.6.
+    name: Build extension binaries (DuckDB v1.5.6, registry track variegata)
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.5-variegata
     with:
       duckdb_version: v1.5.6
@@ -83,18 +88,18 @@ jobs:
       # windows_amd64_mingw: rtools42 MinGW lacks libbcrypt.a needed by Rust getrandom 0.3+
       exclude_archs: 'windows_amd64_rtools;windows_amd64_mingw'
 
-  duckdb-latest-smoke-test:
+  duckdb-v15-smoke-test:
     name: Smoke test (v1.5.6)
-    needs: duckdb-latest-build
+    needs: duckdb-v15-build
     uses: ./.github/workflows/_extension_smoke_test.yml
     with:
       duckdb_version: v1.5.6
       extension_name: anofox_forecast
       exclude_archs: 'windows_amd64_rtools;windows_amd64_mingw'
 
-  duckdb-latest-deploy:
+  duckdb-v15-deploy:
     name: Deploy extension binaries (v1.5.6)
-    needs: [duckdb-latest-build, duckdb-latest-smoke-test]
+    needs: [duckdb-v15-build, duckdb-v15-smoke-test]
     if: ${{ !cancelled() }}
     uses: ./.github/workflows/_extension_deploy.yml
     secrets: inherit
@@ -106,19 +111,19 @@ jobs:
       deploy_latest: ${{ startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' }}
       deploy_versioned: ${{ startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' }}
 
-  duckdb-next-build:
-    name: Build + test against DuckDB v2.0.0 (non-blocking)
-    # DuckDB v2.0.0 is what duckdb/community-extensions builds the registry
-    # against (ref -> v2.0, ci-tools v2.0-cyanoptera); keep the duckdb tag and
-    # the ci-tools ref in sync with that repo and bump both together.
-    # Previously pinned to a 2.0-dev commit, which hid the v2.0.0 EXTENSION_NAME
-    # change (see CMakeLists.txt) until the registry PR failed.
-    # Non-blocking: no job `needs` this one, it gets no secrets and deploys
-    # nothing. (A reusable-workflow job cannot set continue-on-error; a red run
-    # here only flags the drift.)
-    # Linux x86 runs the full sqllogictest suite. wasm_eh mirrors the registry's
-    # PR build, which uses ci-tools' Rust (1.97+) with the old emsdk 3.1.71; see
-    # ANOFOX_WASM_RUST_TOOLCHAIN in CMakeLists.txt for why WASM pins Rust 1.86.
+  # Stable line. Matches the duckdb + extension-ci-tools submodules and
+  # duckdb/community-extensions' default build (ref v2.0, ci-tools
+  # v2.0-cyanoptera); bump the duckdb tag, the ci-tools ref and both
+  # submodules together.
+  # reduced_ci_mode: disabled makes linux_amd64 run the full sqllogictest suite.
+  # WASM pins Rust 1.86 via ANOFOX_WASM_RUST_TOOLCHAIN in CMakeLists.txt
+  # (ci-tools v2.0 uses Rust 1.97 + emsdk 3.1.71).
+  # On cyanoptera, osx_amd64, the musl archs and windows_arm64 are opt-in
+  # ci-tools archs and are not built here (the v1.5.6 line still ships
+  # osx_amd64).
+  # Smoke tests use the official v2.0.0 CLI tarballs (see scripts/smoke_test.py).
+  duckdb-stable-build:
+    name: Build extension binaries (DuckDB stable v2.0.0)
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v2.0-cyanoptera
     with:
       duckdb_version: v2.0.0
@@ -126,18 +131,47 @@ jobs:
       extension_name: anofox_forecast
       enable_rust: true
       reduced_ci_mode: disabled
-      artifact_postfix: "-duckdb-next"
-      exclude_archs: "linux_arm64;linux_amd64_musl;linux_arm64_musl;osx_amd64;osx_arm64;windows_amd64;windows_amd64_mingw;windows_arm64;wasm_mvp;wasm_threads"
+      exclude_archs: 'windows_amd64_rtools;windows_amd64_mingw'
+
+  duckdb-stable-smoke-test:
+    name: Smoke test (v2.0.0)
+    needs: duckdb-stable-build
+    uses: ./.github/workflows/_extension_smoke_test.yml
+    with:
+      duckdb_version: v2.0.0
+      extension_name: anofox_forecast
+      exclude_archs: 'windows_amd64_rtools;windows_amd64_mingw'
+
+  duckdb-stable-deploy:
+    name: Deploy extension binaries (v2.0.0 stable)
+    needs: [duckdb-stable-build, duckdb-stable-smoke-test]
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/_extension_deploy.yml
+    secrets: inherit
+    with:
+      duckdb_version: v2.0.0
+      ci_tools_version: v2.0-cyanoptera
+      extension_name: anofox_forecast
+      exclude_archs: 'windows_amd64_rtools;windows_amd64_mingw'
+      deploy_latest: ${{ startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' }}
+      deploy_versioned: ${{ startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' }}
 
   # A green wasm build only proves the extension COMPILES + LINKS. This job
   # proves it actually LOADS and RUNS in DuckDB-Wasm — the gap described in
   # query.farm's "Testing DuckDB WASM Extensions". It consumes the wasm_eh
   # artifact the build job already produced and runs test/wasm/run.mjs against
   # it. Gating (no continue-on-error) per milestone requirement CI-01.
+  # Stays on the v1.5.6 line: the newest @duckdb/duckdb-wasm on npm
+  # (1.33.1-dev65.0, dist-tag next; latest is 1.33.1-dev57.0) bundles at most
+  # engine v1.5.6 (the storage-version list in dist/duckdb-eh.wasm ends at
+  # v1.5.6, checked 2026-10-22), and DuckDB-Wasm rejects an extension built for
+  # a different engine version. When a duckdb-wasm build bundling v2.0.0
+  # ships, bump test/wasm/package.json, `needs` and the artifact name to the
+  # stable line together.
   wasm-runtime-test:
     name: WASM runtime test (Node harness, v1.5.6 wasm_eh)
-    needs: duckdb-latest-build
-    if: ${{ !cancelled() && needs.duckdb-latest-build.result == 'success' }}
+    needs: duckdb-v15-build
+    if: ${{ !cancelled() && needs.duckdb-v15-build.result == 'success' }}
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:

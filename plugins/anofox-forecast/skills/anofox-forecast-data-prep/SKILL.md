@@ -12,7 +12,7 @@ user-invocable: false
 
 # Anofox Forecast — Data Preparation Cheat Sheet
 
-**Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.16.2) | **DuckDB:** v1.4.5 LTS / v1.5.4+ | **Dual naming:** `ts_*` and `anofox_fcst_ts_*` (identical)
+**Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.16.2) | **DuckDB:** v2.0.0 / v1.5.6 / v1.4.5 LTS | **Dual naming:** `ts_*` and `anofox_fcst_ts_*` (identical)
 
 Prep raw time series so downstream forecasting / CV has clean input: no gaps, no unwanted NULLs, no degenerate series, correct hierarchy.
 

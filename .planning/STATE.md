@@ -3,10 +3,10 @@ gsd_state_version: "1.0"
 milestone: v0.10.0
 status: Awaiting next milestone
 stopped_at: DuckDB 2.0 compat port done (quick 261016-tjw, draft PR
-last_updated: "2026-10-21T21:06:32.649Z"
+last_updated: "2026-10-22T15:21:09.680Z"
 last_activity: 2026-10-17
 last_activity_desc: Quick task 261016-tjw (DuckDB 2.0 compat port) completed
-state_head: 4cab513eed3a3103024669fcfb457a2b221af5a5
+state_head: 7f33142511b6e48364074bd97828f452bab0ec25
 milestone_name: Statistical Correctness
 current_phase: 18
 progress:
@@ -141,6 +141,7 @@ None yet.
 | 261009-d02 | Docs/README/skills accuracy pass after Phase 9 | 2026-10-09 | 59e8e26 | [261009-d02-docs-readme-skills-accuracy-pass](./quick/261009-d02-docs-readme-skills-accuracy-pass/) |
 | 261016-tjw | DuckDB 2.0-dev compat port (compat header, WASM Rust 1.86 pin, 2.0 CI job) | 2026-10-17 | 720c7c7 | [261016-tjw-port-anofox-statistics-duckdb-2-0-compat](./quick/261016-tjw-port-anofox-statistics-duckdb-2-0-compat/) |
 | 3 | Fix DuckDB v2.0.0 build (explicit extension target names, no-OpenSSL banner gate, duckdb-next CI -> v2.0.0) | 2026-10-21 | 4cab513 | — |
+| 261022-laz | Make DuckDB v2.0.0 the stable build line (submodules, distribution CI, keep v1.5.6 + v1.4.5 lines, retire duckdb-next, docs) | 2026-10-22 | 7f33142 | [261022-laz-make-duckdb-v2-0-0-the-stable-build-line](./quick/261022-laz-make-duckdb-v2-0-0-the-stable-build-line/) |
 
 ## Deferred Verification
 

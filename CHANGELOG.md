@@ -8,6 +8,30 @@ Releases from `2026.09.26` onward use CalVer (`vYYYY.MM.DD`, the date the binary
 was cut), matching the rest of the anofox and erpl extensions. Earlier entries below
 use the semver numbering this project started with.
 
+## [Unreleased]
+
+No SQL signature or numeric output changes.
+
+### Changed
+
+- **DuckDB v2.0.0 is now the stable build line.** The `duckdb` submodule is pinned to
+  v2.0.0 and `extension-ci-tools` to v2.0-cyanoptera, so a local `make release` builds
+  against 2.0.0. CI now builds, smoke-tests and deploys three lines: v2.0.0 (stable,
+  ci-tools v2.0-cyanoptera), v1.5.6 (v1.5-variegata, the registry's `variegata` track)
+  and v1.4.5 LTS (v1.4-andium). The former non-blocking 2.0 build-only job is folded
+  into the stable line. This follows community-extensions' "Update path: After DuckDB
+  release".
+- **WASM runtime test stays on the v1.5.6 artifact.** No `@duckdb/duckdb-wasm` npm
+  build bundles a DuckDB v2.0.0 engine yet (the newest, 1.33.1-dev65.0, bundles
+  v1.5.6). The Node harness moves to the stable line when one ships.
+
+### Fixed
+
+- **Post-build smoke test on DuckDB v2.0.0.** v2.0.0 renamed its CLI release assets
+  from `duckdb_cli-<os>-<arch>.zip` to `duckdb-cli-<os>-<arch>.tar.gz`.
+  `scripts/smoke_test.py` now tries the new tarball first and falls back to the legacy
+  zip, so one script serves all three lines.
+
 ## [2026.10.22] - 2026-10-22 — macOS build on DuckDB v2.0.0
 
 No SQL signature or numeric output changes.
