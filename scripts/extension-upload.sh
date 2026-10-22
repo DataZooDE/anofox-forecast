@@ -13,45 +13,47 @@
 
 set -e
 
+# Directory holding the downloaded build artifact. Defaults to the CI path
+# (/tmp/extension); overridable for local dry runs against a scratch copy
+# without touching the real CI layout.
+EXTENSION_UPLOAD_DIR="${EXTENSION_UPLOAD_DIR:-/tmp/extension}"
+
 if [[ $4 == wasm* ]]; then
-  ext="/tmp/extension/$1.duckdb_extension.wasm"
+  ext="$EXTENSION_UPLOAD_DIR/$1.duckdb_extension.wasm"
 else
-  ext="/tmp/extension/$1.duckdb_extension"
+  ext="$EXTENSION_UPLOAD_DIR/$1.duckdb_extension"
 fi
 
 echo $ext
 
 script_dir="$(dirname "$(readlink -f "$0")")"
 
-# The build artifact already ends with a 256-byte signature placeholder
-# (zero-filled when unsigned). Strip it before computing the hash and
-# re-appending a fresh signature — otherwise we'd end up with 512 bytes
-# of trailing data and the metadata footer would no longer be at the
-# fixed offset DuckDB v1.5.3+ checks, causing the install to fail with
-# "metadata at the end of the file is invalid".
+# Artifact shape (#272, DIST-01/DIST-02): both native and WASM build
+# artifacts already end with a complete `duckdb_signature` custom section —
+# metadata plus a 256-byte signature placeholder, zero-filled when unsigned.
+# For BOTH platforms we strip that 256-byte placeholder before computing the
+# hash and re-append a fresh signature in its place; we never append a new
+# section HEADER. For native binaries the placeholder is the file's last 256
+# bytes directly. For WASM artifacts the placeholder is the last 256 bytes of
+# the existing trailing `duckdb_signature` custom section — that section's
+# own LEB128 size field already accounts for those 256 bytes, so truncating
+# and re-appending exactly 256 signature bytes keeps the section (and the
+# whole module) well-formed.
 #
-# wasm artifacts do not carry the placeholder, so the strip is gated on
-# the native-binary path only.
-cat $ext > $ext.append
-if [[ $4 != wasm* ]]; then
-  truncate -s -256 $ext.append
+# A WASM artifact that does NOT already end with exactly one
+# `duckdb_signature` section aborts here (set -e + non-zero exit from the
+# guard below) rather than silently getting a section appended — porting
+# anofox-statistics' conditional PR #193 fix was considered and rejected for
+# this repo's locked design (19-RESEARCH.md Pitfall 5): the current
+# extension-ci-tools WASM artifact always already carries the section, and a
+# future artifact shape change should fail loudly here, not get silently
+# patched into a different (and unverified) byte layout.
+if [[ $4 == wasm* ]]; then
+  python3 "$script_dir/wasm_signature_sections.py" check "$ext"
 fi
 
-if [[ $4 == wasm* ]]; then
-  # 0 for custom section
-  # 113 in hex = 275 in decimal, total lenght of what follows (1 + 16 + 2 + 256)
-  # [1(continuation) + 0010011(payload) = \x93, 0(continuation) + 10(payload) = \x02]
-  echo -n -e '\x00' >> $ext.append
-  echo -n -e '\x93\x02' >> $ext.append
-  # 10 in hex = 16 in decimal, lenght of name, 1 byte
-  echo -n -e '\x10' >> $ext.append
-  echo -n -e 'duckdb_signature' >> $ext.append
-  # the name of the WebAssembly custom section, 16 bytes
-  # 100 in hex, 256 in decimal
-  # [1(continuation) + 0000000(payload) = ff, 0(continuation) + 10(payload)],
-  # for a grand total of 2 bytes
-  echo -n -e '\x80\x02' >> $ext.append
-fi
+cat $ext > $ext.append
+truncate -s -256 $ext.append
 
 # (Optionally) Sign binary
 if [ "$DUCKDB_EXTENSION_SIGNING_PK" != "" ]; then
@@ -67,6 +69,13 @@ truncate -s 256 $ext.sign
 # append signature to extension binary
 cat $ext.sign >> $ext.append
 
+# Post-guard (#272): the processed WASM artifact must still carry exactly
+# one duckdb_signature section, now ending at EOF with the freshly-appended
+# signature bytes as its payload, before we ever compress or upload it.
+if [[ $4 == wasm* ]]; then
+  python3 "$script_dir/wasm_signature_sections.py" check "$ext.append"
+fi
+
 # compress extension binary
 if [[ $4 == wasm_* ]]; then
   brotli < $ext.append > "$ext.compressed"
@@ -75,6 +84,13 @@ else
 fi
 
 set -e
+
+# Upload manifest (#272, DIST-02): truncated fresh for this invocation, then
+# appended with one s3:// URI per successful upload below. The post-upload
+# check (scripts/extension-verify-upload.sh) reads this to know exactly
+# which objects this run actually published, with no need to re-derive the
+# key-formula logic in a second place.
+: > "$ext.uploaded"
 
 # Abort if AWS key is not set
 if [ -z "$AWS_ACCESS_KEY_ID" ]; then
@@ -85,17 +101,23 @@ fi
 # upload versioned version
 if [[ $7 = 'true' ]]; then
   if [[ $4 == wasm* ]]; then
-    aws s3 cp $ext.compressed s3://$5/$1/$2/$3/$4/$1.duckdb_extension.wasm --acl public-read --content-encoding br --content-type="application/wasm"
+    dest="s3://$5/$1/$2/$3/$4/$1.duckdb_extension.wasm"
+    aws s3 cp $ext.compressed "$dest" --acl public-read --content-encoding br --content-type="application/wasm"
   else
-    aws s3 cp $ext.compressed s3://$5/$1/$2/$3/$4/$1.duckdb_extension.gz --acl public-read
+    dest="s3://$5/$1/$2/$3/$4/$1.duckdb_extension.gz"
+    aws s3 cp $ext.compressed "$dest" --acl public-read
   fi
+  echo "$dest" >> "$ext.uploaded"
 fi
 
 # upload to latest version
 if [[ $6 = 'true' ]]; then
   if [[ $4 == wasm* ]]; then
-    aws s3 cp $ext.compressed s3://$5/$3/$4/$1.duckdb_extension.wasm --acl public-read --content-encoding br --content-type="application/wasm"
+    dest="s3://$5/$3/$4/$1.duckdb_extension.wasm"
+    aws s3 cp $ext.compressed "$dest" --acl public-read --content-encoding br --content-type="application/wasm"
   else
-    aws s3 cp $ext.compressed s3://$5/$3/$4/$1.duckdb_extension.gz --acl public-read
+    dest="s3://$5/$3/$4/$1.duckdb_extension.gz"
+    aws s3 cp $ext.compressed "$dest" --acl public-read
   fi
+  echo "$dest" >> "$ext.uploaded"
 fi

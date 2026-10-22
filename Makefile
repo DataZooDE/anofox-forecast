@@ -31,11 +31,13 @@ header:
 	@echo "Header generated at src/include/anofox_fcst_ffi.h"
 
 # Phase 18 (RUST-10, D-04/D-05): no-statistics-in-C++/SQL audit + D-03 length-only sweep
+# Phase 19 (#272, DIST-01/DIST-02): WASM duckdb_signature section parser self-test.
 # This target is wired into .github/workflows/audit.yml (no build required).
 audit:
 	python3 scripts/audit_no_stats_in_cpp.py --self-test
 	python3 scripts/audit_no_stats_in_cpp.py
 	python3 scripts/check_length_only_tests.py
+	python3 scripts/wasm_signature_sections.py --self-test
 
 # Phase 18 (DOCS-01, D-06): docs/skills SQL snippet + function-name checker
 # WR-04 (Phase 18 review): requires `make release` first (runs snippets against

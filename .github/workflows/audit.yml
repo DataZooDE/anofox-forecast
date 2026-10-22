@@ -4,6 +4,9 @@
 # scans over the checked-out source tree -- no DuckDB/Rust build, no secrets,
 # no reusable extension-ci-tools workflow. Deliberately independent of
 # MainDistributionPipeline.yml, which stays untouched.
+# Phase 19 (#272, DIST-01/DIST-02) adds the WASM duckdb_signature section
+# parser's own self-test step below -- also a pure python3 scan, no build,
+# no secrets.
 name: Static audits
 
 on:
@@ -37,3 +40,6 @@ jobs:
 
       - name: Length-only Rust test sweep (D-03)
         run: python3 scripts/check_length_only_tests.py
+
+      - name: WASM signature parser self-test (#272)
+        run: python3 scripts/wasm_signature_sections.py --self-test
