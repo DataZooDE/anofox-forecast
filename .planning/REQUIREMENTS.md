@@ -53,6 +53,7 @@
 ## Future Requirements
 
 - Remove the #280 old-name aliases (the release after v0.11.0's release).
+- Remove `ts_fill_forward_operator` and its `anofox_fcst_ts_fill_forward_operator` alias (the release after v0.11.0's release, with the #280 aliases). (#289)
 - v0.10.0 tech-debt candidates carried in PROJECT.md (integer `frequency` casts, params-header misuse checks, strict numeric MAP parsing, and so on).
 
 ## Out of Scope

@@ -77,7 +77,7 @@ Table macros. Signatures:
 | `ts_fill_nulls_backward_by(source, group_col, date_col, value_col)` | Next observation carried backward (NOCB) — mirrors forward: a trailing NULL run stays NULL |
 | `ts_fill_nulls_mean_by(source, group_col, date_col, value_col)` | Per-group mean, computed in Rust (NaN counts as missing too; all-missing group stays NULL) |
 | `ts_fill_nulls_const_by(source, group_col, date_col, value_col, fill_value)` | Constant (e.g. 0.0 for retail counts) |
-| `ts_fill_forward_by(...)` | Streaming per-group forward fill; also `ts_fill_forward_operator` for windowed variants |
+| `ts_fill_forward_by(...)` | Streaming per-group forward fill. `ts_fill_forward_operator` is the deprecated VARCHAR-column-name form of this macro, removed in the next release |
 | `ts_mark_unknown_by` | Marks values matching a sentinel as unknown |
 | `ts_fill_unknown_by` | Fills previously-marked unknowns |
 

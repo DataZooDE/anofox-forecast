@@ -10,7 +10,16 @@ use the semver numbering this project started with.
 
 ## [Unreleased]
 
-No SQL signature or numeric output changes.
+No signature changes. `ts_fill_forward_operator` changes implementation and now
+returns the source table's column names and types (previously always
+`group_col`/`date_col`/`value_col`, `TIMESTAMP`/`DOUBLE`).
+
+### Deprecated
+
+- **`ts_fill_forward_operator` and its `anofox_fcst_ts_fill_forward_operator`
+  alias are deprecated and will be removed in the next release.** Use
+  `ts_fill_forward_by` with column references instead (same signature:
+  source table name, group, date, value, target date, frequency).
 
 ### Changed
 
@@ -31,6 +40,14 @@ No SQL signature or numeric output changes.
   from `duckdb_cli-<os>-<arch>.zip` to `duckdb-cli-<os>-<arch>.tar.gz`.
   `scripts/smoke_test.py` now tries the new tarball first and falls back to the legacy
   zip, so one script serves all three lines.
+- **`ts_fill_forward_operator` hung natively and trapped DuckDB-Wasm (#289).** The
+  old native C++ table function ran a nested query from its `InitGlobal`, which hung
+  natively and trapped the DuckDB-Wasm instance; it also interpolated identifiers
+  unquoted via `StringUtil::Format` (breaking on reserved words or names with
+  spaces) and ignored the `frequency` argument (always forward-filled at one day).
+  It is now a table macro delegating to `ts_fill_forward_by`, which fixes all three:
+  the macro binder resolves column names via `COLUMNS([param])` (no SQL text is
+  built from user input), and `frequency` is honoured.
 
 ## [2026.10.22] - 2026-10-22 — macOS build on DuckDB v2.0.0
 
