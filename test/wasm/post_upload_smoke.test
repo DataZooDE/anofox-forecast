@@ -1,0 +1,35 @@
+# name: test/wasm/post_upload_smoke.test
+# description: Post-upload smoke test (#272, DIST-02) -- a minimal ts_forecast_by
+#   call used to LOAD-verify a just-uploaded WASM artifact in the DuckDB-Wasm Node
+#   harness (scripts/verify-wasm-artifact.sh). Deliberately requires only
+#   anofox_forecast -- no second extension requirement: the deploy job's
+#   post-upload check must not depend on any other extension being available,
+#   and this keeps the file runnable on every current line (v2.0.0 / v1.5.6 /
+#   v1.4.5) without an unrelated auto-load side effect.
+# group: [anofox_forecast]
+
+require anofox_forecast
+
+# ts_forecast_by must be registered and callable -- the thing the post-upload
+# check is actually proving about the just-downloaded, just-decompressed bytes.
+query I
+SELECT count(*) FROM duckdb_functions() WHERE function_name = 'ts_forecast_by';
+----
+1
+
+# A single 28-row series. i::INT cast before the DATE addition avoids the
+# DATE + BIGINT failure documented in test/wasm/README.md (range()/generate_series()
+# produce BIGINT; DuckDB only supports DATE + INTEGER).
+statement ok
+CREATE TABLE s AS
+SELECT
+    1 AS id,
+    (DATE '2024-01-01' + i::INT)::TIMESTAMP AS ds,
+    (i % 7)::DOUBLE AS y
+FROM range(28) t(i);
+
+# One group, horizon 3 -> exactly 3 forecast rows.
+query I
+SELECT count(*) FROM ts_forecast_by('s', id, ds, y, 'Naive', 3, '1d', MAP([], []));
+----
+3

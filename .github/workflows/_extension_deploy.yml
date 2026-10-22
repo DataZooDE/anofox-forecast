@@ -95,7 +95,9 @@ jobs:
 
   deploy:
     name: Deploy
-    timeout-minutes: 20
+    # Raised from 20 to 30 (#272, DIST-02): the post-upload check below adds a
+    # Node DuckDB-Wasm LOAD run on top of the existing upload.
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     needs: generate_matrix
     if: ${{ needs.generate_matrix.outputs.deploy_matrix != '{}' && needs.generate_matrix.outputs.deploy_matrix != '' }}
@@ -131,6 +133,15 @@ jobs:
           path: |
             /tmp/extension
 
+      - uses: actions/setup-node@v4
+        if: ${{ startsWith(matrix.duckdb_arch, 'wasm') }}
+        with:
+          node-version: 20
+
+      - name: Install WASM harness dependencies
+        if: ${{ startsWith(matrix.duckdb_arch, 'wasm') }}
+        run: npm --prefix test/wasm ci --ignore-scripts
+
       - name: Deploy
         shell: bash
         env:
@@ -148,3 +159,11 @@ jobs:
           export EXT_VERSION=`git tag --points-at HEAD`
           export EXT_VERSION=${EXT_VERSION:=`git log -1 --format=%h`}
           ${{ inputs.deploy_script }} ${{ inputs.extension_name }} $EXT_VERSION $DUCKDB_VERSION ${{ matrix.duckdb_arch }} $BUCKET_NAME ${{inputs.deploy_latest || 'true' && 'false'}} ${{inputs.deploy_versioned || 'true' && 'false'}}
+          # Post-upload check (#272, DIST-02): download every object the
+          # deploy script just uploaded (per its manifest), decompress it,
+          # assert exactly one duckdb_signature section, and -- on the
+          # v1.5.6 wasm_eh line the Node DuckDB-Wasm harness can actually
+          # LOAD -- run the real harness against it. Any failure here fails
+          # this job. $DUCKDB_VERSION is the same value the deploy script
+          # above just used (this is the same shell).
+          ./scripts/extension-verify-upload.sh ${{ inputs.extension_name }} ${{ matrix.duckdb_arch }} $DUCKDB_VERSION
