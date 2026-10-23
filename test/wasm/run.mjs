@@ -58,6 +58,21 @@ const SKIP_FILES = new Map([
   // (_ts_fill_forward_native) that triggers an Emscripten WebAssembly.RuntimeError
   // (___trap is not defined) in the WASM runtime. A separate ___trap import is
   // missing from the eh bundle used here.
+  //
+  // WR-02 (#272 review, 19-REVIEW.md): skipping this whole file also removes WASM
+  // CI coverage of a SECOND, unrelated, pre-existing _ts_fill_forward_native bug
+  // this file's assertions happen to pin natively -- see
+  // .planning/phases/19-wasm-traps-distribution-pipeline/deferred-items.md
+  // ("silently zero-fills ... for a second, distinct trigger shape") for the full
+  // bisection. The specific WASM-unprotected cases living only in THIS file (lines
+  // ~336-409) are: `ts_fill_forward_by('test_series', ..., '2024-01-08', '1d'/'1
+  // day')` (single-group-or-step==frequency shape, WASM returns 10 not 16),
+  // `ts_fill_forward_by('single_group', ..., '2024-01-05', '1d')` (1-2 rows/group,
+  // WASM returns 3 not 5), and the single-group `weird_single` quoted-identifier
+  // `ts_fill_forward_operator` pin. None of these are exercised by any other file
+  // in CURATED or --all on WASM. This is a tracked deferral, not a fix: do not
+  // remove this skip entry without first root-causing and fixing the underlying
+  // _ts_fill_forward_native bug (deferred-items.md, Plan 19-01 entries).
   ['test/sql/ts_fill_forward_native.test', 'Emscripten abort trap (___trap) in WASM runtime'],
 ]);
 
