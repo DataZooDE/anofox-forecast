@@ -5,16 +5,16 @@ milestone_name: "Issue Sweep: Contract, Bugs, Crate Fixes"
 current_phase: 20
 current_phase_name: Detection & Metric Bug Fixes
 status: executing
-stopped_at: Completed 20-02-PLAN.md
-last_updated: "2026-10-23T13:31:13.980Z"
+stopped_at: Completed 20-03-PLAN.md
+last_updated: "2026-10-23T14:13:01.136Z"
 last_activity: 2026-10-23
 last_activity_desc: Phase 20 execution started
-state_head: 73f01b4bda993f8334f3e5abba2182d8811e439d
+state_head: 4e7800f7f10198c0ce783b0de15a7565d8326351
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 11
-  completed_plans: 6
+  completed_plans: 7
   percent: 0
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-22 — milestone v0.11.0 started)
 ## Current Position
 
 Phase: 20 (Detection & Metric Bug Fixes) — EXECUTING
-Plan: 3 of 7
+Plan: 4 of 7
 Status: Ready to execute
 Last activity: 2026-10-23 — Phase 20 execution started
 
@@ -61,6 +61,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 19 P04 | 5h 13min | 3 tasks | 5 files |
 | Phase 20 P01 | 4h22m | 3 tasks | 10 files |
 | Phase 20 P02 | 56min | 3 tasks | 15 files |
+| Phase 20 P03 | 43min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -83,6 +84,8 @@ Recent decisions affecting current work:
 - [Phase 20]: 20-01: classify_seasonality/detect_amplitude_modulation strength = shared stl_strengths (ts_stats_by); degenerate classify strength NULL, amplitude-modulation keeps NaN; values-only change, schema unchanged
 - [Phase 20]: 20-02: metric macros feed natives via (SELECT * FROM _ts_passthrough(source) ORDER BY ALL), not a MATERIALIZED CTE (DuckDB 2.0 broadcast-exchange internal error); later plans 20-03..06 must switch recipe
 - [Phase 20]: 20-02: collect-then-finalize natives use TsCollectFinalizeBarrier (init_local registration, last arrival processes, no spin, MaxThreads unchanged, late-row guard)
+- [Phase 20]: 20-03: query_table-style _by macros feed natives via (... FROM query_table(source::VARCHAR) ORDER BY ALL); _ts_passthrough(source) cannot bind on a table-name source
+- [Phase 20]: 20-03: #287 default changepoint outputs frozen as md5 pins (detection_decomposition.test, captured at 21dfe7e); 20-06/20-07 must keep them green
 
 ### Pending Todos
 
@@ -96,6 +99,7 @@ None yet.
 - [All] Verify executor reports against git + disk, and run `cargo fmt --check` in the DoD (prior milestones: fabricated SUMMARYs, fmt-only CI failures).
 - [All] Local builds need `DUCKDB_VERSION=v2.0.0 make release`; the v1.5.6 and v1.4.5 LTS CI lines must stay green.
 - 20-03/20-04/20-05/20-06 prescribe WITH _ts_src AS MATERIALIZED; on DuckDB v2.0.0 that intermittently raises INTERNAL 'Pipeline broadcast exchange received invalid producer batch index' with final-emitting natives. Switch to (SELECT ... ORDER BY ALL) per 20-02 before executing (see phase deferred-items.md)
+- 20-03: branch MainDistributionPipeline (wasm-runtime-test v1.5.6 curated incl. fill-forward pins; v1.4.5/v1.5.6/v2.0.0 builds) not run - no trigger on branch push; workflow_dispatch uploads to the bucket, so it needs user go-ahead (or the PR run)
 
 ### Quick Tasks Completed
 
@@ -147,8 +151,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-23T13:30:58.367Z
-Stopped at: Completed 20-02-PLAN.md
+Last session: 2026-10-23T14:12:52.191Z
+Stopped at: Completed 20-03-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 19`
 
