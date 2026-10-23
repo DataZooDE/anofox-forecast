@@ -638,10 +638,52 @@ pub fn seasonal_strength_windowed(
     ))
 }
 
+/// fdars-core's own `classify_seasonality` classification rule (0.47.0,
+/// `src/seasonal/change.rs:579`), reproduced verbatim here because #286's
+/// fix (below) replaces fdars's `is_seasonal`/`seasonal_strength` inputs
+/// with the shared `stl_strengths` value but must keep the SAME decision
+/// tree fdars uses for `classification`: `NonSeasonal` when not seasonal;
+/// `IntermittentSeasonal` when the weak-season fraction exceeds 0.3 (and
+/// there is at least one cycle); `VariableTiming` when timing is not
+/// stable; else `StableSeasonal`.
+fn classify_seasonal_type(
+    is_seasonal: bool,
+    weak_seasons: &[usize],
+    cycle_strengths: &[f64],
+    has_stable_timing: bool,
+) -> SeasonalType {
+    if !is_seasonal {
+        return SeasonalType::NonSeasonal;
+    }
+    if !cycle_strengths.is_empty()
+        && (weak_seasons.len() as f64 / cycle_strengths.len() as f64) > 0.3
+    {
+        return SeasonalType::IntermittentSeasonal;
+    }
+    if !has_stable_timing {
+        return SeasonalType::VariableTiming;
+    }
+    SeasonalType::StableSeasonal
+}
+
 /// Classify the type of seasonality in a time series.
 ///
 /// Analyzes the series to determine if seasonality is stable, variable,
 /// intermittent, or absent.
+///
+/// `seasonal_strength` (and the `is_seasonal`/`classification` fields that
+/// depend on it) is the SAME STL strength `ts_stats_by` reports --
+/// `crate::stats::stl_strengths(values, &[period.round()])`'s
+/// `seasonality_strength` (tsfeatures' `F_S = max(0, 1 - Var(R)/Var(S+R))`
+/// on the R-matching STL decomposition), not fdars's own raw-series
+/// variance-explained measure. A non-integer `period` is rounded before
+/// this lookup. `seasonal_strength` is `NaN` when `stl_strengths` has no
+/// usable period or a degenerate (near-zero-variance) decomposition; the
+/// FFI/C++ marshalling layer maps that `NaN` to SQL `NULL`, matching
+/// `ts_stats_by`'s `seasonality_strength` NULL semantics (#286, BUG-04).
+/// `cycle_strengths`, `weak_seasons`, `has_stable_timing` and
+/// `timing_variability` still come from fdars's own analysis, which is
+/// orthogonal to the strength formula.
 ///
 /// # Arguments
 /// * `values` - Time series values
@@ -682,12 +724,32 @@ pub fn classify_seasonality(
 
     // fdars 0.47 / B2 fix: classify_seasonality(data: &FdMatrix, argvals, period, ...)
     // -- the matrix is built once as (1, n), not the swapped (n, 1) this
-    // function used to pass.
+    // function used to pass. fdars still supplies cycle_strengths,
+    // weak_seasons, has_stable_timing and timing_variability; its own
+    // is_seasonal/seasonal_strength/classification are overridden below
+    // (#286, BUG-04: fdars's raw-series strength disagreed with
+    // ts_stats_by's STL strength -- 0.156 vs 0.966 on the #286 series).
     let mat = single_series_matrix(values)?;
-    let result =
+    let fdars_result =
         fdars_classify_seasonality(&mat, &argvals, period, strength_threshold, timing_threshold);
+    let mut result: SeasonalityClassification = fdars_result.into();
 
-    Ok(result.into())
+    let p = period.round() as usize;
+    let stl = crate::stats::stl_strengths(values, &[p])?;
+    let seasonal_strength = stl.seasonality_strength.unwrap_or(f64::NAN);
+    let threshold = strength_threshold.unwrap_or(0.3);
+    let is_seasonal = seasonal_strength.is_finite() && seasonal_strength >= threshold;
+
+    result.seasonal_strength = seasonal_strength;
+    result.is_seasonal = is_seasonal;
+    result.classification = classify_seasonal_type(
+        is_seasonal,
+        &result.weak_seasons,
+        &result.cycle_strengths,
+        result.has_stable_timing,
+    );
+
+    Ok(result)
 }
 
 /// Detect changes in seasonality over time.
@@ -976,6 +1038,52 @@ mod tests {
         assert_eq!(result.classification, SeasonalType::StableSeasonal);
         assert!(
             result.seasonal_strength > 0.99,
+            "seasonal_strength = {}",
+            result.seasonal_strength
+        );
+    }
+
+    /// The exact #286 repro series (BUG-04): n=84, a weekly (period 7)
+    /// sine plus a trend plus two off-period cosine/sine nuisance terms.
+    fn issue286_weekly84() -> Vec<f64> {
+        (0..84)
+            .map(|i| {
+                let t = i as f64;
+                20.0 + 0.3 * t
+                    + 5.0 * (2.0 * PI * t / 7.0).sin()
+                    + 1.6 * (t * 0.9).cos()
+                    + 0.7 * (t * 1.7 + 20.0).sin()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_classify_seasonality_issue286_weekly_is_stable_seasonal() {
+        let values = issue286_weekly84();
+        let result = classify_seasonality(&values, 7.0, None, None).unwrap();
+
+        assert!(result.is_seasonal);
+        assert_eq!(result.classification, SeasonalType::StableSeasonal);
+
+        let want = crate::stats::stl_strengths(&values, &[7])
+            .unwrap()
+            .seasonality_strength
+            .unwrap();
+        assert_eq!(
+            result.seasonal_strength, want,
+            "classify_seasonality's strength must come from the same stl_strengths call ts_stats_by uses (#286)"
+        );
+    }
+
+    #[test]
+    fn test_classify_seasonality_constant_series_is_non_seasonal_nan_strength() {
+        let values = vec![5.0_f64; 84];
+        let result = classify_seasonality(&values, 7.0, None, None).unwrap();
+
+        assert!(!result.is_seasonal);
+        assert_eq!(result.classification, SeasonalType::NonSeasonal);
+        assert!(
+            result.seasonal_strength.is_nan(),
             "seasonal_strength = {}",
             result.seasonal_strength
         );

@@ -6,6 +6,7 @@
 #include "duckdb/common/types/timestamp.hpp"
 #include "duckdb/common/types/vector.hpp"
 #include "duckdb/parser/parsed_data/create_aggregate_function_info.hpp"
+#include <cmath>
 
 namespace duckdb {
 
@@ -223,8 +224,14 @@ static void TsClassifySeasonalityAggFinalize(Vector &state_vector, AggregateInpu
         // timing_variability (index 3)
         FlatDataMut<double>(StructEntry(children[3]))[row] = class_result.timing_variability;
 
-        // seasonal_strength (index 4)
-        FlatDataMut<double>(StructEntry(children[4]))[row] = class_result.seasonal_strength;
+        // seasonal_strength (index 4): NaN (degenerate/no-usable-period STL
+        // decomposition) marshals to SQL NULL, matching ts_stats_by's
+        // seasonality_strength NULL semantics (#286, BUG-04).
+        if (std::isnan(class_result.seasonal_strength)) {
+            FlatVector::SetNull(StructEntry(children[4]), row, true);
+        } else {
+            FlatDataMut<double>(StructEntry(children[4]))[row] = class_result.seasonal_strength;
+        }
 
         // is_seasonal (index 5)
         FlatDataMut<bool>(StructEntry(children[5]))[row] = class_result.is_seasonal;
