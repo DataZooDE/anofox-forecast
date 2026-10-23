@@ -78,3 +78,12 @@ Correct answers, independent of row order, on the data from #285, #286 and #287.
 ### #285 (BUG-03)
 - Research shows the per-series sort already exists in `_ts_mase_native` (ts_metrics_native.cpp:846-849) and the bug still reproduces (literal-cutoff case now NULL). Plan a diagnostic-first task: find the true cause (row/chunk delivery across UNION ALL + subquery, finalize/combine handling, or the date-based in-sample split) before fixing. The fix must make every input order give identical MASE, pinned by sorted, reversed, shuffled and both #285 shapes.
 </decisions_addendum>
+
+<decisions_addendum_2>
+## Decisions after planning (2026-10-23, user)
+
+Chosen: D1-b, D2-ii
+- D1-b: `deseasonalize := true` removes the STL seasonal component AND a straight-line (linear) trend before BOCPD, so level shifts stay as steps. It is still opt-in; defaults are unchanged.
+- D2-ii: when `threshold` is set, is_changepoint = (changepoint_probability >= threshold) for every row AFTER THE FIRST of each series. The first row is never flagged (its probability is always 1 − 1/hazard_lambda). Roadmap criterion 4 reads "every row after the first".
+- UNION ALL scope expansion: the same UNION-ALL truncation fix also applies, in Phase 20, to `ts_aggregate_hierarchy`, `ts_split_keys`, `ts_validate_separator` and the internal `_ts_forecast_native` (with the forecast macros that use it), with the same reversed/shuffled/UNION-ALL pin tests. Requirement BUG-03 covers it. Remove these from deferred-items.md.
+</decisions_addendum_2>
