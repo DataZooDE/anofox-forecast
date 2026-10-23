@@ -172,6 +172,17 @@ def check_bytes(b):
             f"{len(b)} bytes -- it is not the last section / does not end exactly at EOF"
         )
 
+    # This is deliberately `>=`, not `==` (see module docstring): a
+    # `duckdb_signature` section may carry metadata ahead of the 256-byte
+    # signature placeholder. scripts/extension-upload.sh depends on exactly
+    # this invariant -- it only ever replaces the *trailing* 256 bytes of
+    # the payload (`truncate -s -256` then append 256 fresh bytes), which is
+    # only correct because the last 256 bytes of ANY accepted payload shape
+    # (payload_len == 256, or payload_len > 256 with a metadata prefix) are
+    # always the signature placeholder. Case 6 in --self-test pins the
+    # payload_len > 256 shape so this bound is never tightened to `==` by a
+    # future edit without a visible self-test failure explaining why it is
+    # `>=`.
     payload_len = sig["content_end"] - sig["content_start"]
     if payload_len < MIN_PAYLOAD_LEN:
         return False, f"duckdb_signature payload is {payload_len} bytes, expected at least {MIN_PAYLOAD_LEN}"
@@ -302,12 +313,36 @@ def self_test():
     except Exception as e:  # noqa: BLE001 - this IS the failure mode under test
         failures.append(f"truncated-size module: raised {type(e).__name__} instead of returning (False, ...): {e}")
 
+    # --- Case 6 (WR-03, #272): a duckdb_signature section with payload_len
+    # > 256 -- a 4-byte metadata prefix ahead of the 256-byte signature
+    # placeholder (payload_len = 260) -> still ok. This pins the loose `>=`
+    # bound `check_bytes` uses against the exact shape
+    # scripts/extension-upload.sh's correctness depends on: that script
+    # only ever truncates/replaces the *trailing* 256 bytes of the payload
+    # (`truncate -s -256` then append 256 fresh bytes), so any
+    # metadata-prefixed payload_len >= 256 must keep passing `check`. A
+    # future edit that tightens this bound to `== 256` will fail this case
+    # loudly, with the explanation above, instead of silently breaking the
+    # upload script's assumption.
+    metadata_prefix = b"META"
+    sig_with_metadata = _make_custom_section(SIGNATURE_NAME, metadata_prefix + bytes(256))
+    with_metadata = header + type_section + sig_with_metadata
+    ok, msg = check_bytes(with_metadata)
+    check("signature-with-metadata-prefix module (payload_len=260): check passes", ok, msg)
+    sigs_with_metadata = find_signature_sections(parse_sections(with_metadata))
+    metadata_payload_len = sigs_with_metadata[0]["content_end"] - sigs_with_metadata[0]["content_start"]
+    check(
+        "signature-with-metadata-prefix module: payload_len is 260",
+        metadata_payload_len == 260,
+        f"payload_len={metadata_payload_len}",
+    )
+
     if failures:
         print("SELF-TEST FAILURES:", file=sys.stderr)
         for f in failures:
             print(f"  - {f}", file=sys.stderr)
         return 1
-    print("self-test: 5 synthetic module verdicts passed")
+    print("self-test: 6 synthetic module verdicts passed")
     return 0
 
 
