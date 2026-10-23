@@ -407,6 +407,19 @@ static OperatorFinalizeResultType TsForecastPanelNativeFinalize(
     // Panel processing (single thread)
     if (!gstate.processed) {
         // ------------------------------------------------------------------
+        // 0. Series order in the global fit = group key order (#285). The
+        //    shared-parameter fit depends on the order of the series rows in
+        //    the panel matrix, and group_order records ARRIVAL order, which
+        //    changes with the source's row order and with how parallel intake
+        //    interleaves chunks. Take the key order of the groups std::map so
+        //    the fit is the same for every row order.
+        // ------------------------------------------------------------------
+        gstate.group_order.clear();
+        for (const auto &entry : gstate.groups) {
+            gstate.group_order.push_back(entry.first);
+        }
+
+        // ------------------------------------------------------------------
         // 1. Sort each series by date; build shared date grid (union of dates)
         // ------------------------------------------------------------------
 

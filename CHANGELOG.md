@@ -75,6 +75,21 @@ returns the source table's column names and types (previously always
   (`ORDER BY ALL` single-pipeline input) and give identical results for UNION ALL,
   reversed and shuffled sources. Signatures, output columns and default changepoint
   outputs are unchanged.
+  The feature, cross-validation, panel and VAR macros had the same defect:
+  `ts_features_by`, `ts_cv_folds_by`, `ts_cv_split_by`, `ts_cv_hydrate_by`,
+  `ts_cv_forecast_by`, `ts_forecast_panel_by` and `ts_forecast_var_by`. On a UNION ALL
+  source (or fold table) they computed on part of the rows: `ts_features_by` reported a
+  length of 31 of 45, `ts_cv_folds_by` returned 171 of 255 fold rows,
+  `ts_cv_forecast_by` returned 0 of 30 forecasts, and `ts_forecast_panel_by` and
+  `ts_forecast_var_by` fitted on the first branch only. Backtests built on such
+  sources were therefore silently wrong. These macros now read their whole input
+  through the same `ORDER BY ALL` single-pipeline step. They give identical results
+  for UNION ALL, reversed and shuffled sources, and their signatures and output
+  columns are unchanged. `ts_forecast_panel_by` also fitted its shared model with the
+  series in arrival order, so on large panels its forecasts changed slightly from run
+  to run (on a 2000-series panel, the sum of the 6000 forecasts moved by about
+  0.0006). It now orders the series by group key, so it returns the same result on
+  every run.
 
 - **`ts_classify_seasonality_by` / `ts_classify_seasonality_agg` / `ts_classify_seasonality`
   reported a strong weekly series as non-seasonal with the wrong strength (#286).** The

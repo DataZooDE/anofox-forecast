@@ -596,3 +596,109 @@ query I
 SELECT count(*) FROM (SELECT * FROM ts_forecast_panel_by('ut', id, ds, y, 'GlobalETS', 3, '1d', MAP{}) EXCEPT ALL SELECT * FROM ts_forecast_panel_by('sv', id, ds, y, 'GlobalETS', 3, '1d', MAP{}));
 ----
 0
+
+# =============================================================================
+# ts_forecast_var_by (two variables, p = 1, horizon 3): a contiguous 84-day wide
+# fixture `wt`; `wu` re-reads it as a UNION ALL split at 2024-02-15 (scalar-subquery
+# cut-off on the second branch, both branches non-empty); `wr` / `ws` are reversed /
+# shuffled. One VAR fit on all 84 rows on every shape.
+# =============================================================================
+
+statement ok
+CREATE TABLE wt AS SELECT (TIMESTAMP '2024-01-01' + INTERVAL (i) DAY) AS ds, round(10 + sin(i) + 0.1 * i, 6) AS y1, round(5 + cos(i * 0.7) + 0.05 * i, 6) AS y2 FROM range(84) r(i);
+
+statement ok
+CREATE VIEW wu AS SELECT * FROM wt WHERE ds < TIMESTAMP '2024-02-15' UNION ALL SELECT * FROM wt WHERE ds >= (SELECT min(ds) FROM wt WHERE ds >= TIMESTAMP '2024-02-15');
+
+statement ok
+CREATE VIEW wr AS SELECT * FROM wt ORDER BY ds DESC;
+
+statement ok
+CREATE VIEW ws AS SELECT * FROM wt ORDER BY hash(ds);
+
+# Observed before the fix on the UNION ALL view: y1 14.442128..14.449617 (the first
+# branch alone) instead of 19.071735..19.168724.
+query IIII
+SELECT variable, count(*), round(min(forecast_value), 6), round(max(forecast_value), 6) FROM ts_forecast_var_by('wu', 'ds', ['y1', 'y2'], 3, '1d') GROUP BY ALL ORDER BY ALL;
+----
+y1	3	19.071735	19.168724
+y2	3	9.325175	9.523599
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_var_by('wu', 'ds', ['y1', 'y2'], 3, '1d') EXCEPT ALL SELECT * FROM ts_forecast_var_by('wt', 'ds', ['y1', 'y2'], 3, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_var_by('wt', 'ds', ['y1', 'y2'], 3, '1d') EXCEPT ALL SELECT * FROM ts_forecast_var_by('wu', 'ds', ['y1', 'y2'], 3, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_var_by('wr', 'ds', ['y1', 'y2'], 3, '1d') EXCEPT ALL SELECT * FROM ts_forecast_var_by('wt', 'ds', ['y1', 'y2'], 3, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_var_by('wt', 'ds', ['y1', 'y2'], 3, '1d') EXCEPT ALL SELECT * FROM ts_forecast_var_by('wr', 'ds', ['y1', 'y2'], 3, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_var_by('ws', 'ds', ['y1', 'y2'], 3, '1d') EXCEPT ALL SELECT * FROM ts_forecast_var_by('wt', 'ds', ['y1', 'y2'], 3, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_var_by('wt', 'ds', ['y1', 'y2'], 3, '1d') EXCEPT ALL SELECT * FROM ts_forecast_var_by('ws', 'ds', ['y1', 'y2'], 3, '1d'));
+----
+0
+
+# =============================================================================
+# ts_forecast_panel_by series order (Rule 1 fix in 20-04): the shared GlobalETS fit
+# used the series in ARRIVAL order, so on a 2000-series panel the result moved with
+# the intake interleaving (observed on the pre-fix 20-04 build, 400k rows: sum(yhat)
+# 127800.5516 or 127800.5522 between runs at default threads). The native now fits
+# the series in group-key order: the result at default threads equals the result at
+# threads = 1 and on a shuffled copy, both ways.
+# =============================================================================
+
+statement ok
+CREATE TABLE pbig AS SELECT 's' || (i // 200) AS id, TIMESTAMP '2024-01-01' + INTERVAL (i % 200) DAY AS ds, (i % 200) * 0.1 + ((i * 7919) % 13) * 0.25 AS y FROM range(400000) r(i);
+
+statement ok
+CREATE TABLE pbig_shuffled AS SELECT * FROM pbig ORDER BY hash(id, ds);
+
+statement ok
+SET threads = 1;
+
+statement ok
+CREATE TABLE pan_t1 AS SELECT * FROM ts_forecast_panel_by('pbig', id, ds, y, 'GlobalETS', 3, '1d', MAP{});
+
+statement ok
+RESET threads;
+
+query III
+SELECT count(*), count(DISTINCT id), round(sum(yhat), 4) FROM pan_t1;
+----
+6000	2000	127800.5516
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_panel_by('pbig', id, ds, y, 'GlobalETS', 3, '1d', MAP{}) EXCEPT ALL SELECT * FROM pan_t1);
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM pan_t1 EXCEPT ALL SELECT * FROM ts_forecast_panel_by('pbig', id, ds, y, 'GlobalETS', 3, '1d', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_panel_by('pbig_shuffled', id, ds, y, 'GlobalETS', 3, '1d', MAP{}) EXCEPT ALL SELECT * FROM pan_t1);
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM pan_t1 EXCEPT ALL SELECT * FROM ts_forecast_panel_by('pbig_shuffled', id, ds, y, 'GlobalETS', 3, '1d', MAP{}));
+----
+0

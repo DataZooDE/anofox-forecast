@@ -886,7 +886,7 @@ FROM _ts_forecast_panel_native(
 R"(
 SELECT *
 FROM _ts_forecast_var_native(
-    (SELECT * FROM query_table(source::VARCHAR)),
+    (SELECT * FROM query_table(source::VARCHAR) ORDER BY ALL),
     horizon,
     frequency,
     p,
