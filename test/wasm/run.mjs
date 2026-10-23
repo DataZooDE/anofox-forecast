@@ -60,8 +60,9 @@ const SKIP_FILES = new Map([
 // diagnostics, aggregation, period detection, (Plan 19-01, #289) the
 // ts_fill_forward_operator deprecated macro + ts_fill_forward_by pins, and
 // (Plan 19-03, #289 BUG-02) the ts_features_list/ts_features_config_template
-// catalog functions (the former "heap overflow" skip-list reason was wrong --
-// see the RegisterTsFeaturesListFunction comment in src/table_functions/ts_features.cpp).
+// catalog functions (the previous skip-list reason -- a WASM memory-limit
+// theory -- was wrong; see the RegisterTsFeaturesListFunction comment in
+// src/table_functions/ts_features.cpp).
 const CURATED = [
   'test/sql/ts_forecast_by.test',
   'test/sql/ts_metrics.test',

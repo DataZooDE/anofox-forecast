@@ -120,15 +120,15 @@ These two files are excluded from all runs (logged, never silent):
 | `ts_fill_forward_native.test`     | Emscripten abort trap (`___trap`) in WASM runtime            |
 
 `ts_features.test` and `ts_features_config.test` were previously skip-listed
-under the reason "WASM heap overflow in large TSFresh feature extraction" --
+under a reason blaming a large-TSFresh-extraction WASM memory limit --
 empirically wrong (Plan 19-03, #289 BUG-02). The real trap was (1) a
 malloc/free allocator mismatch between the WASM-only size-prefixed Rust
 allocator and C++'s raw `free()`, compounded by (2) a WASM toolchain
 code-folding defect that misoptimizes `DATAZOO_GUARD`-wrapped function pairs
 sharing an identical signature across the two zero-argument catalog
-functions. Neither cause has anything to do with heap size or TSFresh's
-feature count -- see the comment on `RegisterTsFeaturesListFunction` in
-`src/table_functions/ts_features.cpp`. Both files are now un-skipped;
+functions. Neither cause has anything to do with available memory or
+TSFresh's feature count -- see the comment on `RegisterTsFeaturesListFunction`
+in `src/table_functions/ts_features.cpp`. Both files are now un-skipped;
 `ts_features.test` is in `CURATED` (above), `ts_features_config.test` passes
 but is not curated (it exercises `ts_features_config_from_json`/`_csv`, not
 the fixed catalog functions, so it adds no incremental coverage for #289).
