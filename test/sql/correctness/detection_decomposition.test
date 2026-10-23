@@ -362,6 +362,124 @@ A	7.0	7.0
 B	7.0	7.0
 C	7.0	7.0
 
+# =============================================================================
+# #287 deseasonalize (BUG-05, D1-b, Phase 20 plan 20-07 Task 2). deseasonalize
+# removes the STL seasonal component AND a straight-line trend before BOCPD
+# (mstl_fit + detrend_linear in deseasonalize_for_changepoints), so a level
+# shift still survives as a step while regular weekly cycles stop producing
+# changepoints. Opt-in only -- CONTEXT Deferred Ideas: making this the
+# default is out of scope and must not happen. The transform itself is
+# pinned against R forecast::mstl's own seasonal component in
+# crates/anofox-fcst-core/tests/changepoint_reference.rs
+# (deseasonalize_for_changepoints_matches_r_mstl_seasonal_for_issue287, cases
+# issue287_A/B/C in validation/reference/fixtures/r_decomposition/cases.json).
+# =============================================================================
+
+# The #287 acceptance: deseasonalize combined with threshold 0.5 flags
+# nothing on A/C and exactly B's 2024-02-20 shift, on both surfaces.
+
+query II
+SELECT id, coalesce(string_agg(ds::DATE::VARCHAR, ',' ORDER BY ds) FILTER (WHERE is_changepoint), 'none')
+FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'true', 'threshold': '0.5'})
+GROUP BY id ORDER BY id;
+----
+A	none
+B	2024-02-20
+C	none
+
+query II
+SELECT id, coalesce(string_agg(r.timestamp::DATE::VARCHAR, ',' ORDER BY r.timestamp) FILTER (WHERE r.is_changepoint), 'none')
+FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'deseasonalize': 'true', 'threshold': '0.5'})) AS r FROM cp287 GROUP BY id)
+GROUP BY id ORDER BY id;
+----
+A	none
+B	2024-02-20
+C	none
+
+# Parity: table function and aggregate agree exactly row for row with
+# deseasonalize+threshold combined, both directions.
+
+query I
+SELECT count(*) FROM (
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'true', 'threshold': '0.5'})
+    EXCEPT ALL
+    SELECT id, r.timestamp, r.is_changepoint, r.changepoint_probability FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'deseasonalize': 'true', 'threshold': '0.5'})) AS r FROM cp287 GROUP BY id)
+);
+----
+0
+
+query I
+SELECT count(*) FROM (
+    SELECT id, r.timestamp, r.is_changepoint, r.changepoint_probability FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'deseasonalize': 'true', 'threshold': '0.5'})) AS r FROM cp287 GROUP BY id)
+    EXCEPT ALL
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'true', 'threshold': '0.5'})
+);
+----
+0
+
+# deseasonalize alone (MAP run-length rule, no threshold) still flags
+# nothing on A/C -- B gets additional weekly-spaced flags besides
+# 2024-02-20 (documented reason to combine deseasonalize with threshold).
+
+query II
+SELECT id, coalesce(string_agg(ds::DATE::VARCHAR, ',' ORDER BY ds) FILTER (WHERE is_changepoint), 'none')
+FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'true'})
+GROUP BY id ORDER BY id;
+----
+A	none
+B	2024-01-16,2024-01-23,2024-01-30,2024-02-20,2024-03-05,2024-03-12,2024-03-19
+C	none
+
+# seasonal_period '7' given explicitly gives the same result as the
+# auto-detected period (7, pinned by the BUG-07 block below) on the #287
+# panel.
+
+query I
+SELECT count(*) FROM (
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'true', 'threshold': '0.5', 'seasonal_period': '7'})
+    EXCEPT ALL
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'true', 'threshold': '0.5'})
+);
+----
+0
+
+# Default outputs (no deseasonalize key) stay byte-identical to before
+# BUG-05 -- re-asserted here (the md5 pins near the top of this file already
+# cover this; this block documents WHY it must hold next to the opt-in keys
+# it sits beside).
+
+query I
+SELECT count(*) FROM (
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{})
+    EXCEPT ALL
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'false'})
+);
+----
+0
+
+# deseasonalize/seasonal_period are strict and error naming the key, on
+# both surfaces.
+
+statement error
+SELECT count(*) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'yes'});
+----
+deseasonalize
+
+statement error
+SELECT count(*) FROM (SELECT unnest(ts_detect_changepoints_agg(ds, y, MAP{'deseasonalize': 'yes'})) FROM cp287 GROUP BY id);
+----
+deseasonalize
+
+statement error
+SELECT count(*) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'seasonal_period': '-1', 'deseasonalize': 'true'});
+----
+seasonal_period
+
+statement error
+SELECT count(*) FROM (SELECT unnest(ts_detect_changepoints_agg(ds, y, MAP{'seasonal_period': '-1', 'deseasonalize': 'true'})) FROM cp287 GROUP BY id);
+----
+seasonal_period
+
 statement ok
 DROP TABLE cp287;
 

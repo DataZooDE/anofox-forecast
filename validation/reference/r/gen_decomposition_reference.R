@@ -45,6 +45,18 @@ ones48_values <- rep(1, 48)
 
 air_n24_values <- air_values[1:24]
 
+# #287 panel (Phase 20 plan 20-07, BUG-05, D1-b): the exact SQL formula
+# pinned in test/sql/correctness/detection_decomposition.test's cp287 table
+# (84 days, 0-based day index i, weekly seasonality, B gets a +15 level
+# shift from day 50). Used to pin deseasonalize_for_changepoints's seasonal
+# removal against R forecast::mstl's own seasonal component at period 7.
+issue287_series <- function(base, step_at_50) {
+  i <- 0:83
+  base + 0.3 * i + 5 * sin(2 * pi * i / 7) +
+    ifelse(step_at_50 & i >= 50, 15, 0) +
+    1.6 * cos(i * 0.9) + 0.7 * sin(i * 1.7 + base)
+}
+
 # --- helpers --------------------------------------------------------------
 
 # MSTL case: forecast::mstl() trend/seasonal(s)/remainder. `periods` is the
@@ -106,7 +118,10 @@ mstl_cases <- list(
   msts_7_28 = mstl_case(msts_values, c(7, 28)),
   dropped_n60 = mstl_case(dropped_n60_values, c(12, 40)),
   nonseasonal_wn100 = mstl_case(nonseasonal_wn100_values, NULL),
-  ones48_p12 = mstl_case(ones48_values, 12)
+  ones48_p12 = mstl_case(ones48_values, 12),
+  issue287_A = mstl_case(issue287_series(20.0, FALSE), 7),
+  issue287_B = mstl_case(issue287_series(40.0, TRUE), 7),
+  issue287_C = mstl_case(issue287_series(60.0, FALSE), 7)
 )
 
 decompose_cases <- list(
