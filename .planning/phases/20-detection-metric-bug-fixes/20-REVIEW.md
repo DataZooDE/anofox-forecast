@@ -46,6 +46,12 @@ findings:
 status: issues_found
 ---
 
+## User Decisions (2026-10-24, binding for the fix pass)
+
+- **CR-01: WON'T FIX.** `ts_detect_amplitude_modulation` keeps returning NaN for a degenerate `seasonal_strength`; this is the deliberate 20-01 decision ("amplitude-modulation keeps NaN"). Do not change it.
+- **CR-02: FIX, option "default threshold".** When `deseasonalize = true` and `threshold` is unset, the effective threshold is 0.5. Decide this in Rust (`ChangepointOptions` / `detect_changepoints_bocpd_with_options`), not in C++, so both SQL surfaces (`ts_detect_changepoints_by` and `ts_detect_changepoints_agg`) inherit it. An explicit `threshold` always wins. With `deseasonalize` false/unset, results stay byte-identical (the md5 pins in detection_decomposition.test must stay green). This option is unreleased (CHANGELOG `[Unreleased]` only), so no compatibility concern. Add a Rust unit test and a SQL pin: on a noisy weekly sine (amplitude 5) + level shift (+8 at i=90, n=180), `deseasonalize` alone flags only the true shift, the same as `deseasonalize` + `threshold` 0.5. Update `docs/api/06-changepoint-detection.md`, the detection SKILL.md, the CHANGELOG entry and the example to state the 0.5 default, and remove the "can still flag weekly-spaced points" caveat.
+- **WR-03:** no code change expected. Record it in deferred-items.md: cross-line verification of TsCollectFinalizeBarrier on the v1.4.5/v1.5.6 lines happens through the PR CI run.
+
 # Phase 20: Code Review Report
 
 **Reviewed:** 2026-10-23T22:11:04Z
