@@ -23,6 +23,22 @@
   is a manual release-DoD gate (per 20-03's note below), so all three must be fixed
   before the next tag.
 
+## From code review (20-REVIEW.md, 2026-10-24)
+
+- **WR-03: `TsCollectFinalizeBarrier` correctness depends on an internal DuckDB scheduling
+  invariant verified only against v2.0.0, but is now load-bearing for 18 native functions
+  across 3 shipped DuckDB lines (v2.0.0, v1.5.6, v1.4.5 LTS).** The header's own comment
+  states the two scheduling facts it depends on (local-state creation ordering in
+  `PipelineExecutor`'s constructor; one `FinalExecute` call per executor once input is
+  exhausted) were "checked against duckdb v2.0.0" -- nothing in the reviewed files
+  demonstrates the same two facts hold on the 1.x lines. The failure mode if they don't is
+  silent: zero rows returned with no error, not a crash. **No code change for this finding
+  (user decision 2026-10-24).** Cross-line verification of `TsCollectFinalizeBarrier` on the
+  v1.4.5/v1.5.6 lines happens through the PR CI run (which builds and tests all three DuckDB
+  lines) rather than through a dedicated forced-multi-threaded/multi-morsel stress test added
+  in this fix pass. If that PR CI run surfaces a silent empty-result regression on either LTS
+  line, re-open this item.
+
 ## From 20-03 (2026-10-23)
 
 - **docs/api/04-data-preparation.md "Do not chain table functions in CTEs" warning may be stale.** Its own "broken" example (`WITH gaps_filled AS (ts_fill_gaps_by(...)), nulls_filled AS (ts_fill_nulls_const_by('gaps_filled', ...)) SELECT count(*) FROM ts_drop_short_by('nulls_filled', ...)`) on a 1M-row panel (5000 series x 200 days, every 11th row dropped) returned 999090 rows in 3/3 runs on BOTH the pre-20-03 binary (21dfe7e) and the 20-03 build, so the documented 0-row failure did not reproduce on DuckDB v2.0.0 at default threads. Not changed in 20-03: removing a workaround needs a pin across the v1.4.5/v1.5.6/v2.0.0 lines (memory: docs workarounds = open bugs).
