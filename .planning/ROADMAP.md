@@ -91,7 +91,7 @@ Full detail: [milestones/v0.10.0-ROADMAP.md](milestones/v0.10.0-ROADMAP.md) · R
 - Decimal phases (e.g. 20.1): Urgent insertions (marked with INSERTED)
 
 - [x] **Phase 19: WASM Traps & Distribution Pipeline** - The #289 WASM traps and the fill-forward hang are fixed; the upload script and a post-upload check stop broken WASM artifacts; wasm_mvp is decided; the CORS/stale-path changes are handed to the owner (completed 2026-10-23)
-- [ ] **Phase 20: Detection & Metric Bug Fixes** - `ts_mase_by` no longer depends on row order; seasonality classification agrees with `ts_stats_by`; changepoints ignore regular seasonal troughs and agree with their probability; period 7 is pinned
+- [x] **Phase 20: Detection & Metric Bug Fixes** - `ts_mase_by` no longer depends on row order; seasonality classification agrees with `ts_stats_by`; changepoints ignore regular seasonal troughs and agree with their probability; period 7 is pinned (completed 2026-10-24)
 - [ ] **Phase 21: Upstream AutoETS Spike & Ridge Conditioning Fixes** - AutoETS stops turning one-off spikes into a trend (anofox-forecast); the fold-level ridge chooses λ by conditioning (anofox-regression); delivered as upstream PRs for release
 - [ ] **Phase 22: Upstream Streaming Feature Builders** - anofox-forecast's regression feature engineering becomes standalone `(series, t, cfg) -> row` builders shared by the per-series and panel fits (upstream PR for release)
 - [ ] **Phase 23: Contract Discovery & Prediction Columns** - `anofox_contract_version()`; conformal, exog and VAR outputs use caller-named `id`/`ds` and `yhat` columns, with old names aliased for one release; every interval output carries `level`
@@ -142,7 +142,7 @@ Plans:
   4. In `ts_detect_changepoints_agg`, with a `threshold` set, `is_changepoint` is true exactly when `changepoint_probability` reaches the threshold for every row after the first of each series (the first row, whose probability is always 1 − 1/hazard_lambda, e.g. 0.996, is never flagged; user decision D2-ii 2026-10-23), and `ts_detect_periods_by` returns period 7 on the #287 panel.
   5. Each fix is computed in Rust and pinned by a value-asserting test under `test/sql/correctness/` built from the issue's reproducer; `make audit` and `cargo fmt --check` stay green.
 
-**Plans:** 7/7 plans executed (strictly sequential: shared build tree, CHANGELOG.md and ts_macros.cpp; all autonomous, decisions D1-b/D2-ii and the UNION ALL scope expansion recorded in 20-CONTEXT.md)
+**Plans:** 7/7 plans complete
 
 Plans:
 **Wave 1**
@@ -283,7 +283,7 @@ Extension phases execute in numeric order: 19 → 20 → 23 → 24 → 25. Phase
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 19. WASM Traps & Distribution Pipeline | 4/4 | Complete    | 2026-10-23 |
-| 20. Detection & Metric Bug Fixes | 7/7 | In Progress|  |
+| 20. Detection & Metric Bug Fixes | 7/7 | Complete    | 2026-10-24 |
 | 21. Upstream AutoETS Spike & Ridge Conditioning Fixes | 0/TBD | Not started | - |
 | 22. Upstream Streaming Feature Builders | 0/TBD | Not started | - |
 | 23. Contract Discovery & Prediction Columns | 0/TBD | Not started | - |
