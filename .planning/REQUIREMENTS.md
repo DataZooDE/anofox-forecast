@@ -18,8 +18,8 @@
 
 ### Distribution
 
-- [ ] **DIST-01**: `scripts/extension-upload.sh` produces WASM artifacts with exactly one `duckdb_signature` custom section: the placeholder signature is replaced, not followed by a second section. (#272)
-- [ ] **DIST-02**: A check after upload downloads each artifact, counts its `duckdb_signature` sections (must be 1), and LOADs the WASM build in DuckDB-Wasm on Node. (#272)
+- [x] **DIST-01**: `scripts/extension-upload.sh` produces WASM artifacts with exactly one `duckdb_signature` custom section: the placeholder signature is replaced, not followed by a second section. (#272)
+- [x] **DIST-02**: A check after upload downloads each artifact, counts its `duckdb_signature` sections (must be 1), and LOADs the WASM build in DuckDB-Wasm on Node. (#272)
 - [ ] **DIST-03**: The `wasm_mvp` build LOADs in DuckDB-Wasm, or the `_setThrew is not defined` root cause is documented and a decision recorded (fix, or stop shipping wasm_mvp). (#272)
 - [ ] **DIST-04**: The exact get.erpl.io CORS rule (GET/HEAD from `*`) and the list of stale old-version paths are documented and handed to the owner. (#272)
 - [ ] **DIST-05**: The community registry serves the current release (`INSTALL anofox_forecast FROM community` reports the current version on v2.0.0 and v1.5.6), verified with FORCE INSTALL, and #288 is closed. (#288)
@@ -70,8 +70,8 @@
 |-------------|-------|--------|
 | BUG-01 | Phase 19 | Complete |
 | BUG-02 | Phase 19 | Pending |
-| DIST-01 | Phase 19 | Pending |
-| DIST-02 | Phase 19 | Pending |
+| DIST-01 | Phase 19 | Complete |
+| DIST-02 | Phase 19 | Complete |
 | DIST-03 | Phase 19 | Pending |
 | DIST-04 | Phase 19 | Pending |
 | BUG-03 | Phase 20 | Pending |

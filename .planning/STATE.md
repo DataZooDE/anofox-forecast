@@ -5,16 +5,16 @@ milestone_name: "Issue Sweep: Contract, Bugs, Crate Fixes"
 current_phase: 19
 current_phase_name: WASM Traps & Distribution Pipeline
 status: executing
-stopped_at: Completed 19-01-PLAN.md
-last_updated: "2026-10-22T23:39:40.573Z"
+stopped_at: Completed 19-02-PLAN.md
+last_updated: "2026-10-23T00:01:07.329Z"
 last_activity: 2026-10-23
 last_activity_desc: Phase 19 execution started
-state_head: 696828f2daf8a3947bca254a2dd7f770044e3568
+state_head: 337e143c0a99f5c83389cb0cc2c35d178a306365
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 4
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-22 — milestone v0.11.0 started)
 ## Current Position
 
 Phase: 19 (WASM Traps & Distribution Pipeline) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-10-23 — Phase 19 execution started
 
@@ -56,6 +56,7 @@ Progress: [░░░░░░░░░░] 0%
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 19 P01 | 55min | 3 tasks | 14 files |
+| Phase 19 P02 | 20min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -71,6 +72,8 @@ Recent decisions affecting current work:
 - Roadmap: CTR-02 (contract tags) is in Phase 24, after the shape changes of Phase 23 and the long forms/events of Phase 24.
 - [Phase 19]: ts_fill_forward_operator became a table macro over ts_fill_forward_by via COLUMNS([param]); the native C++ operator (nested query, unquoted identifiers, ignored frequency) was deleted. — Per locked CONTEXT #289 decision 1; COLUMNS([param]) gets identifier quoting and frequency handling for free from the already-correct ts_fill_forward_by macro.
 - [Phase 19]: Discovered a second pre-existing WASM-only _ts_fill_forward_native bug (silent zero-fill when a group's date step equals the fill frequency, or a group has 1-2 rows), unrelated to #289; reworked new assertions to avoid it and moved affected carried-over pins to the WASM-skip-listed native test file, documented in deferred-items.md. — Found during WASM verification against the branch-built v1.5.6 wasm_eh artifact; bisection with disposable test files confirmed the bug predates this plan (the affected function is untouched by this plan's diff).
+- [Phase 19]: extension-upload.sh replaces a WASM artifact's trailing duckdb_signature section in place (never appends a second one); the post-upload check in _extension_deploy.yml downloads every uploaded WASM object, re-asserts the section count, and LOADs v1.5.6 wasm_eh in the Node harness, failing the deploy job on any defect. — Per locked CONTEXT #272 decision 1/2: the pipeline must be unable to publish a WASM artifact that fails to LOAD. Live probe confirmed all 9 current-line WASM objects were still double-signed at probe time -- the fix is proven locally against the real pre-fix CI artifact and will take effect on the next redeploy.
+- [Phase 19]: docs/distribution/get-erpl-io.md documents the exact S3 CORS rule, the stale v1.5.4/v1.5.5 paths (frozen since 2026-07-17/2026-09-26), and redeploy steps for the bucket owner; this phase made no bucket changes and read no repository variables or secrets. — Per locked CONTEXT #272 decision 4: CORS and stale-path cleanup are owner/bucket-controlled actions, out of this phase's code-change scope. Evidence is a 134-row read-only HTTP probe log, never an aws command against the real bucket.
 
 ### Pending Todos
 
@@ -130,8 +133,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-22T23:39:40.554Z
-Stopped at: Completed 19-01-PLAN.md
+Last session: 2026-10-23T00:01:07.309Z
+Stopped at: Completed 19-02-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 19`
 
