@@ -1,0 +1,68 @@
+# Phase 20: Detection & Metric Bug Fixes - Context
+
+**Gathered:** 2026-10-23
+**Status:** Ready for planning
+
+<domain>
+## Phase Boundary
+
+Correct answers, independent of row order, on the data from #285, #286 and #287. Requirements: BUG-03, BUG-04, BUG-05, BUG-06, BUG-07. Issue bodies: GitHub #285, #286, #287 (each contains exact repro SQL and expected outcomes; use them as fixtures).
+
+</domain>
+
+<decisions>
+## Implementation Decisions
+
+### #287: changepoints (BUG-05, BUG-06, BUG-07)
+- OPT-IN, not default (user decision): add a `deseasonalize` option (default false) to `ts_detect_changepoints_by` and `ts_detect_changepoints_agg` (MAP param, consistent with existing params such as hazard_lambda). When true: estimate the seasonal component with STL at the given `seasonal_period` param, or the auto-detected period if none is given, and subtract ONLY the seasonal component (keep trend and level) before BOCPD, so level shifts survive. Default results must stay byte-identical to the current behaviour; pin that with a test.
+- Agg consistency: in `ts_detect_changepoints_agg`, `is_changepoint` must be true exactly when `changepoint_probability >= threshold` (the same rule as the table function). Fix the agg's decision rule; no unflagged row at p = 0.996.
+- `ts_detect_periods_by` returns period 7 on the #287 panel: verify it on main and pin it with a regression test (already fixed on main per #287, release-only bug).
+- Fixture: the #287 panel (3 series × 84 days; B has +15 from day 50 = 2024-02-20). With deseasonalize: no flags on A/C, B flagged at 2024-02-20 (allow the documented BOCPD detection-lag tolerance only if justified by a reference).
+- All computation in Rust (crates/anofox-fcst-core); C++ only marshals (make audit).
+
+### #286: seasonality strength (BUG-04)
+- One shared Rust implementation: `ts_classify_seasonality_by` / `_agg` must use the SAME seasonal-strength function as `ts_stats_by` (Hyndman `max(0, 1 − Var(R)/Var(S+R))` on the detrended STL decomposition). Remove the divergent computation.
+- `is_seasonal` keeps its existing threshold, applied to the corrected strength. The #286 weekly series → seasonal; never NaN on a regular complete daily series; `seasonal_strength` consistent with `cycle_strengths`.
+- Reference check against R (`forecast`/`feasts` STL strength) or the existing v0.10.0 STL-strength fixtures (validation/reference), per the project's reference-fixture rule.
+
+### #285: row order (BUG-03)
+- `_ts_mase_native` sorts by date within each series before computing the in-sample naive scale.
+- AUDIT every native metric / `_by` table function and aggregate for the same row-order dependence (anything that assumes input arrives date-sorted). Fix each one found, and pin every metric with a test that feeds date-ordered, reversed and shuffled input (including the #285 UNION ALL + scalar-subquery shape) and asserts identical results.
+
+### Claude's Discretion
+- Exact option name spelling (`deseasonalize` preferred) and its MAP parsing location (shared params header).
+- How the shuffle test is generated (deterministic seed).
+
+</decisions>
+
+<code_context>
+## Existing Code Insights
+
+### Reusable Assets
+- `crates/anofox-fcst-core/src/{changepoint,seasonality,stats,periods}.rs`: Rust implementations; STL strength already used by ts_stats_by (v0.10.0 Phase 13/15).
+- `src/table_functions/ts_changepoints.cpp`, `src/aggregate_functions/ts_changepoints_agg.cpp`, `src/table_functions/ts_seasonality.cpp`, `src/table_functions/ts_periods.cpp`.
+- `ts_mase_by` → `_ts_mase_native` (src/macros/ts_macros.cpp:2523); metric natives under src/table_functions.
+- `test/sql/correctness/*` suite and the inventory gate (scripts/check_correctness_inventory.py).
+
+### Established Patterns
+- Statistics only in Rust; `make audit` enforces it. Reference fixtures in validation/reference (R + uv Python generators).
+- NULL handling via validity; optional NULL args need SPECIAL_HANDLING (memory).
+
+### Integration Points
+- Shared params header for MAP options; docs/api + skills (detection, backtest) must document the new option; `make check-docs`.
+
+</code_context>
+
+<specifics>
+## Specific Ideas
+
+- Use the exact repro SQL from #285/#286/#287 as sqllogictests in test/sql/correctness/.
+
+</specifics>
+
+<deferred>
+## Deferred Ideas
+
+- Making deseasonalize the default for changepoints (user chose opt-in; revisit later if users ask).
+
+</deferred>

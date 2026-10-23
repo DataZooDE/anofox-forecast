@@ -138,7 +138,7 @@ Plans:
 
   1. `ts_mase_by` returns the same value for a series whether its rows arrive in date order, in reverse, or through the #285 `UNION ALL` filtered by a subquery (previously NULL), and that value equals the Hyndman-Koehler MASE computed on the date-sorted series.
   2. `ts_classify_seasonality_by` classifies the #286 strong weekly series as seasonal (not `non_seasonal`, never NaN), and its `seasonal_strength` is consistent with its own `cycle_strengths` and with `ts_stats_by`'s seasonal strength on the same series.
-  3. On the #287 panel, `ts_detect_changepoints_by` and `ts_detect_changepoints_agg` flag none of the troughs of the regular weekly cycle and still flag series B's level shift on 2024-02-20.
+  3. On the #287 panel, with the new opt-in `deseasonalize := true`, `ts_detect_changepoints_by` and `ts_detect_changepoints_agg` flag none of the troughs of the regular weekly cycle and still flag series B's level shift on 2024-02-20. Without the option, default results are unchanged (user decision 2026-10-23).
   4. In `ts_detect_changepoints_agg`, `is_changepoint` is true exactly when `changepoint_probability` reaches the threshold (no unflagged row at p = 0.996), and `ts_detect_periods_by` returns period 7 on the #287 panel.
   5. Each fix is computed in Rust and pinned by a value-asserting test under `test/sql/correctness/` built from the issue's reproducer; `make audit` and `cargo fmt --check` stay green.
 
