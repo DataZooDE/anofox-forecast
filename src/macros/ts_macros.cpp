@@ -721,6 +721,21 @@ FROM (
     "SELECT * FROM ts_forecast_by('sales', product_id, date, qty, 'AutoETS', 12, '1d')",
     "forecasting"},
 
+    // _ts_forecast_native: INTERNAL ONLY (#285, 20-05). This underscore-prefixed
+    // macro wraps the renamed `_ts_forecast_native_impl` native (ts_forecast_native.cpp)
+    // with a single-pipeline input, (SELECT * FROM _ts_passthrough(source) ORDER BY ALL),
+    // so a UNION ALL source is read in full instead of silently truncated. It exists
+    // only because test/sql/ts_forecast_param_grid.test, ts_native_model_names.test and
+    // ts_native_param_validation.test call it directly, positional. ts_forecast_by does
+    // NOT use this macro or the native behind it (GROUP BY + _ts_forecast_scalar; already
+    // correct on UNION ALL sources, untouched here). RegisterTsTableMacros skips the
+    // anofox_fcst_ alias for any name starting with '_'.
+    {"_ts_forecast_native", {"source", "horizon", "frequency", "method", "params", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT * FROM _ts_forecast_native_impl((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), horizon, frequency, method, params)
+)",
+    nullptr, nullptr, nullptr},
+
     // ts_forecast_ensemble_by: Explicit-member ensemble forecasting (Phase 5: ENS-02)
     //
     // Fits each named member model independently per series and combines forecasts
@@ -2760,6 +2775,12 @@ void RegisterTsTableMacros(ExtensionLoader &loader) {
         // Register the short name (e.g. ts_forecast_by)
         auto info = CreateTableMacro(ts_table_macros[i]);
         loader.RegisterFunction(*info);
+
+        // Internal macros (name starts with '_', e.g. _ts_forecast_native, #285/20-05)
+        // are not public API and must not gain an anofox_fcst_ alias.
+        if (ts_table_macros[i].name[0] == '_') {
+            continue;
+        }
 
         // Register the prefixed alias (e.g. anofox_fcst_ts_forecast_by)
         auto alias_info = CreateTableMacro(ts_table_macros[i]);

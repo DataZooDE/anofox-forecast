@@ -1,5 +1,6 @@
 #include "duckdb_compat.hpp"
 #include "ts_forecast_native.hpp"
+#include "ts_collect_finalize.hpp"  // TsCollectFinalizeBarrier (#285, 20-05)
 #include "ts_fill_gaps_native.hpp"  // For ParseFrequencyToSeconds, etc.
 #include "ts_future_dates.hpp"     // StepFromFrequency, ComputeFutureDates (D-12)
 #include "anofox_fcst_ffi.h"
@@ -9,18 +10,18 @@
 #include <map>
 #include <unordered_set>
 #include <mutex>
-#include <atomic>
-#include <thread>
 #include <cmath>
 #include <cstring>
 
 namespace duckdb {
 
 // ============================================================================
-// _ts_forecast_native - Internal native streaming forecast table function
+// _ts_forecast_native_impl - Internal native streaming forecast table function
 //
-// This is an INTERNAL function used by ts_forecast_by macro.
-// Users should call ts_forecast_by() instead of this function directly.
+// This is the renamed native behind the public `_ts_forecast_native` table
+// macro (ts_macros.cpp), itself only used directly by test files; the
+// production forecast path is ts_forecast_by, which does not call this
+// function. Users should call ts_forecast_by() for forecasting.
 //
 // MEMORY FOOTPRINT:
 //   - Native (this function): O(group_size) per group
@@ -94,8 +95,7 @@ struct ForecastOutputRow {
 
 struct TsForecastNativeLocalState : public LocalTableFunctionState {
     bool owns_finalize = false;
-    bool registered_collector = false;
-    bool registered_finalizer = false;
+    bool arrived_at_final = false;
 };
 
 // ============================================================================
@@ -121,10 +121,12 @@ struct TsForecastNativeGlobalState : public GlobalTableFunctionState {
     bool processed = false;
     idx_t output_offset = 0;
 
-    // Single-thread finalize + barrier
-    std::atomic<bool> finalize_claimed{false};
-    std::atomic<idx_t> threads_collecting{0};
-    std::atomic<idx_t> threads_done_collecting{0};
+    // Single-thread finalize + barrier (#285, 20-05: TsCollectFinalizeBarrier,
+    // see src/include/ts_collect_finalize.hpp. Only a single-pipeline input,
+    // (SELECT * FROM _ts_passthrough(source) ORDER BY ALL) as the
+    // _ts_forecast_native macro supplies, guarantees the barrier sees every
+    // executor that can hold rows.)
+    TsCollectFinalizeBarrier barrier;
 };
 
 // ============================================================================
@@ -507,6 +509,7 @@ static unique_ptr<LocalTableFunctionState> TsForecastNativeInitLocal(
     ExecutionContext &context,
     TableFunctionInitInput &input,
     GlobalTableFunctionState *global_state) {
+    global_state->Cast<TsForecastNativeGlobalState>().barrier.RegisterLocal();
     return make_uniq<TsForecastNativeLocalState>();
 }
 
@@ -522,13 +525,8 @@ static OperatorResultType TsForecastNativeInOut(
 
     auto &bind_data = data_p.bind_data->Cast<TsForecastNativeBindData>();
     auto &gstate = data_p.global_state->Cast<TsForecastNativeGlobalState>();
-    auto &lstate = data_p.local_state->Cast<TsForecastNativeLocalState>();
 
-    // Register this thread as a collector (first call only)
-    if (!lstate.registered_collector) {
-        gstate.threads_collecting.fetch_add(1);
-        lstate.registered_collector = true;
-    }
+    gstate.barrier.AssertCollecting("_ts_forecast_native_impl");
 
     // Extract batch locally (no lock)
     struct TempRow {
@@ -606,22 +604,18 @@ static OperatorFinalizeResultType TsForecastNativeFinalize(
     auto &gstate = data_p.global_state->Cast<TsForecastNativeGlobalState>();
     auto &lstate = data_p.local_state->Cast<TsForecastNativeLocalState>();
 
-    // Barrier + claim
-    if (!lstate.registered_finalizer) {
-        if (lstate.registered_collector) {
-            gstate.threads_done_collecting.fetch_add(1);
-        }
-        lstate.registered_finalizer = true;
-    }
+    // Last-finalizer claim (ts_collect_finalize.hpp): the local state whose
+    // arrival completes the count of registered local states processes; every
+    // other one finishes at once (no spin-wait).
     if (!lstate.owns_finalize) {
-        bool expected = false;
-        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true)) {
+        if (lstate.arrived_at_final) {
+            return OperatorFinalizeResultType::FINISHED;
+        }
+        lstate.arrived_at_final = true;
+        if (!gstate.barrier.ArriveAtFinal()) {
             return OperatorFinalizeResultType::FINISHED;
         }
         lstate.owns_finalize = true;
-        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load()) {
-            std::this_thread::yield();
-        }
     }
 
     // Process all groups (single thread)
@@ -850,8 +844,13 @@ static OperatorFinalizeResultType TsForecastNativeFinalize(
 void RegisterTsForecastNativeFunction(ExtensionLoader &loader) {
     // Internal table-in-out function: (TABLE, horizon, frequency, method, params)
     // Input table must have 3 columns: group_col, date_col, value_col
-    // Note: This is an internal function (prefixed with _) called by ts_forecast_by macro
-    TableFunction func("_ts_forecast_native",
+    // Note: this is the renamed native (#285, 20-05). The public, user-facing
+    // name `_ts_forecast_native` is now a ts_table_macros[] entry (ts_macros.cpp)
+    // that feeds this function a single-pipeline input via
+    // (SELECT * FROM _ts_passthrough(source) ORDER BY ALL), so a UNION ALL
+    // source is read in full. ts_forecast_by itself does not call this
+    // function; it is unaffected (GROUP BY + _ts_forecast_scalar).
+    TableFunction func("_ts_forecast_native_impl",
         {LogicalType::TABLE, LogicalType::INTEGER, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::ANY},
         nullptr,  // No execute function - use in_out_function
         TsForecastNativeBind,

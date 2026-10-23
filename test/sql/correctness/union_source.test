@@ -702,3 +702,113 @@ query I
 SELECT count(*) FROM (SELECT * FROM pan_t1 EXCEPT ALL SELECT * FROM ts_forecast_panel_by('pbig_shuffled', id, ds, y, 'GlobalETS', 3, '1d', MAP{}));
 ----
 0
+
+# =============================================================================
+# 20-05: _ts_forecast_native (internal, #285 scope expansion, decisions_addendum_2)
+# and ts_forecast_by (already correct; pinned here, body untouched). Fixture: 3
+# series x 84 days with a weekly sine component (planner facts, 20-05-PLAN.md),
+# so SeasonalNaive/Theta have something to fit. uv/rv/sv/ut reuse the s2/f2
+# fixture above for the ts_forecast_by pins (seasonality is irrelevant to those
+# -- they only check shape independence); fs2/fuv/fut/frv/fsv below are a
+# separate seasonal fixture used only for the exact-value _ts_forecast_native pin.
+# =============================================================================
+
+statement ok
+CREATE TABLE fs2 AS SELECT id, (TIMESTAMP '2024-01-01' + INTERVAL (i) DAY) AS ds, base + 0.3 * i + 5 * sin(2 * pi() * i / 7) AS y FROM (VALUES ('A', 20.0), ('B', 40.0), ('C', 60.0)) t(id, base), range(84) r(i);
+
+statement ok
+CREATE TABLE ff2 AS SELECT id, ds, y FROM fs2 WHERE ds >= TIMESTAMP '2024-03-11';
+
+statement ok
+CREATE VIEW fuv AS SELECT id, ds, y FROM fs2 WHERE ds < TIMESTAMP '2024-02-01' UNION ALL SELECT id, ds, y FROM fs2 WHERE ds >= (SELECT min(ds) FROM ff2);
+
+statement ok
+CREATE TABLE fut AS SELECT * FROM fuv;
+
+statement ok
+CREATE VIEW frv AS SELECT * FROM fut ORDER BY id, ds DESC;
+
+statement ok
+CREATE VIEW fsv AS SELECT * FROM fut ORDER BY hash(id, ds);
+
+# _ts_forecast_native: 9 forecast rows (3 ids x 3 horizon), sum(yhat) 548.917583
+# on every shape (was 484.871756 on `fuv` pre-fix: the UNION's first branch
+# alone, extrapolated -- the second branch's rows never reached finalize).
+query II
+SELECT count(*), round(sum(yhat), 6) FROM _ts_forecast_native((SELECT id, ds, y FROM fuv), 3, '1d', 'Naive', MAP{});
+----
+9	548.917583
+
+query II
+SELECT count(*), round(sum(yhat), 6) FROM _ts_forecast_native((SELECT id, ds, y FROM fut), 3, '1d', 'Naive', MAP{});
+----
+9	548.917583
+
+query I
+SELECT count(*) FROM (SELECT * FROM _ts_forecast_native((SELECT id, ds, y FROM fuv), 3, '1d', 'Naive', MAP{}) EXCEPT ALL SELECT * FROM _ts_forecast_native((SELECT id, ds, y FROM fut), 3, '1d', 'Naive', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM _ts_forecast_native((SELECT id, ds, y FROM fut), 3, '1d', 'Naive', MAP{}) EXCEPT ALL SELECT * FROM _ts_forecast_native((SELECT id, ds, y FROM fuv), 3, '1d', 'Naive', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM _ts_forecast_native((SELECT id, ds, y FROM frv), 3, '1d', 'Naive', MAP{}) EXCEPT ALL SELECT * FROM _ts_forecast_native((SELECT id, ds, y FROM fut), 3, '1d', 'Naive', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM _ts_forecast_native((SELECT id, ds, y FROM fut), 3, '1d', 'Naive', MAP{}) EXCEPT ALL SELECT * FROM _ts_forecast_native((SELECT id, ds, y FROM frv), 3, '1d', 'Naive', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM _ts_forecast_native((SELECT id, ds, y FROM fsv), 3, '1d', 'Naive', MAP{}) EXCEPT ALL SELECT * FROM _ts_forecast_native((SELECT id, ds, y FROM fut), 3, '1d', 'Naive', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM _ts_forecast_native((SELECT id, ds, y FROM fut), 3, '1d', 'Naive', MAP{}) EXCEPT ALL SELECT * FROM _ts_forecast_native((SELECT id, ds, y FROM fsv), 3, '1d', 'Naive', MAP{}));
+----
+0
+
+# ts_forecast_by: already union-safe (GROUP BY + _ts_forecast_scalar); pinned
+# here on the s2/f2/uv/ut/rv/sv fixture (defined above) for SeasonalNaive and
+# Theta, both with seasonal_period := 7. Its macro body is untouched (Task 1
+# acceptance: byte-identical to the phase base).
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_by('uv', id, ds, y, 'SeasonalNaive', 7, '1d', params := MAP{'seasonal_period': '7'}) EXCEPT ALL SELECT * FROM ts_forecast_by('ut', id, ds, y, 'SeasonalNaive', 7, '1d', params := MAP{'seasonal_period': '7'}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_by('ut', id, ds, y, 'SeasonalNaive', 7, '1d', params := MAP{'seasonal_period': '7'}) EXCEPT ALL SELECT * FROM ts_forecast_by('uv', id, ds, y, 'SeasonalNaive', 7, '1d', params := MAP{'seasonal_period': '7'}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_by('rv', id, ds, y, 'SeasonalNaive', 7, '1d', params := MAP{'seasonal_period': '7'}) EXCEPT ALL SELECT * FROM ts_forecast_by('ut', id, ds, y, 'SeasonalNaive', 7, '1d', params := MAP{'seasonal_period': '7'}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_by('sv', id, ds, y, 'SeasonalNaive', 7, '1d', params := MAP{'seasonal_period': '7'}) EXCEPT ALL SELECT * FROM ts_forecast_by('ut', id, ds, y, 'SeasonalNaive', 7, '1d', params := MAP{'seasonal_period': '7'}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_by('uv', id, ds, y, 'Theta', 7, '1d', params := MAP{'seasonal_period': '7'}) EXCEPT ALL SELECT * FROM ts_forecast_by('ut', id, ds, y, 'Theta', 7, '1d', params := MAP{'seasonal_period': '7'}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_by('rv', id, ds, y, 'Theta', 7, '1d', params := MAP{'seasonal_period': '7'}) EXCEPT ALL SELECT * FROM ts_forecast_by('ut', id, ds, y, 'Theta', 7, '1d', params := MAP{'seasonal_period': '7'}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_by('sv', id, ds, y, 'Theta', 7, '1d', params := MAP{'seasonal_period': '7'}) EXCEPT ALL SELECT * FROM ts_forecast_by('ut', id, ds, y, 'Theta', 7, '1d', params := MAP{'seasonal_period': '7'}));
+----
+0
