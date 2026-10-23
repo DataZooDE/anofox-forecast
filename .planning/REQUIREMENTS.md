@@ -9,7 +9,7 @@
 ### Bugs
 
 - [x] **BUG-01**: `ts_fill_forward_operator` no longer runs a nested query that hangs (native) or traps (WASM). It becomes internal (underscore name, undocumented) or is removed; if it is kept, its identifiers are quoted and `frequency` is honoured. `ts_fill_forward_by` is unaffected. (#289)
-- [ ] **BUG-02**: `ts_features_list()` and `ts_features_config_template()` run in DuckDB-Wasm (wasm_eh) without trapping and return 117 rows. (#289)
+- [x] **BUG-02**: `ts_features_list()` and `ts_features_config_template()` run in DuckDB-Wasm (wasm_eh) without trapping and return 117 rows. (#289)
 - [ ] **BUG-03**: `ts_mase_by` returns the same value whatever the input row order: it sorts by date within each series before computing the in-sample naive scale. (#285)
 - [ ] **BUG-04**: `ts_classify_seasonality_by` classifies a strong weekly series as seasonal; `seasonal_strength` is consistent with its own `cycle_strengths` and with `ts_stats_by`. (#286)
 - [ ] **BUG-05**: `ts_detect_changepoints_by` / `_agg` don't flag the troughs of a regular seasonal cycle as changepoints, and still find a real level shift (the #287 panel: B on 2024-02-20). (#287)
@@ -69,7 +69,7 @@
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | BUG-01 | Phase 19 | Complete |
-| BUG-02 | Phase 19 | Pending |
+| BUG-02 | Phase 19 | Complete |
 | DIST-01 | Phase 19 | Complete |
 | DIST-02 | Phase 19 | Complete |
 | DIST-03 | Phase 19 | Pending |

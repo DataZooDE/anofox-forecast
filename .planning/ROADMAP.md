@@ -113,7 +113,7 @@ Full detail: [milestones/v0.10.0-ROADMAP.md](milestones/v0.10.0-ROADMAP.md) · R
   4. The `wasm_mvp` build either LOADs in DuckDB-Wasm on Node, or the `_setThrew is not defined` root cause is written up with a recorded decision (fix it, or stop shipping wasm_mvp and change the build/upload matrix to match).
   5. A handover note gives the owner the exact get.erpl.io CORS rule (GET/HEAD from `*`) and the list of stale old-version paths, ready to apply without further investigation.
 
-**Plans:** 2/4 plans executed
+**Plans:** 3/4 plans executed
 
 Plans:
 **Wave 1**
@@ -123,7 +123,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 19-03-PLAN.md — BUG-02: `ts_features_list()` / `ts_features_config_template()` WASM trap (libc free of Rust-allocated memory) fixed via a paired FFI free function, init_global state, 117-row tests in the curated subset (wave 2)
+- [x] 19-03-PLAN.md — BUG-02: `ts_features_list()` / `ts_features_config_template()` WASM trap (libc free of Rust-allocated memory) fixed via a paired FFI free function, init_global state, 117-row tests in the curated subset (wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -235,7 +235,7 @@ Extension phases execute in numeric order: 19 → 20 → 23 → 24 → 25. Phase
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 19. WASM Traps & Distribution Pipeline | 2/4 | In Progress|  |
+| 19. WASM Traps & Distribution Pipeline | 3/4 | In Progress|  |
 | 20. Detection & Metric Bug Fixes | 0/TBD | Not started | - |
 | 21. Upstream AutoETS Spike & Ridge Conditioning Fixes | 0/TBD | Not started | - |
 | 22. Upstream Streaming Feature Builders | 0/TBD | Not started | - |
