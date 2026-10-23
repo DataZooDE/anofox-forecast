@@ -299,3 +299,136 @@ query I
 SELECT count(*) FROM (SELECT * FROM ts_mstl_decomposition_by('ut', id, ds, y, MAP{'seasonal_periods': '[7]'}) EXCEPT ALL SELECT * FROM ts_mstl_decomposition_by('sv', id, ds, y, MAP{'seasonal_periods': '[7]'}));
 ----
 0
+
+# =============================================================================
+# 20-04: features, cross-validation, panel and VAR macros (same recipe: an ORDER BY
+# ALL breaker on the native's input plus TsCollectFinalizeBarrier).
+# =============================================================================
+
+# =============================================================================
+# ts_features_by: one row per id computed on all 45 rows (was length 31, slope
+# 0.3 from the first branch alone on the UNION ALL view), identical on every shape.
+# =============================================================================
+
+query IIII
+SELECT id, length, mean IS NOT NULL, round(linear_trend_slope, 10) FROM ts_features_by('uv', id, ds, y) ORDER BY id;
+----
+A	45.0	true	0.6345059289
+B	45.0	true	0.6345059289
+C	45.0	true	0.6345059289
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_features_by('uv', id, ds, y) EXCEPT ALL SELECT * FROM ts_features_by('ut', id, ds, y));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_features_by('ut', id, ds, y) EXCEPT ALL SELECT * FROM ts_features_by('uv', id, ds, y));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_features_by('rv', id, ds, y) EXCEPT ALL SELECT * FROM ts_features_by('ut', id, ds, y));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_features_by('ut', id, ds, y) EXCEPT ALL SELECT * FROM ts_features_by('rv', id, ds, y));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_features_by('sv', id, ds, y) EXCEPT ALL SELECT * FROM ts_features_by('ut', id, ds, y));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_features_by('ut', id, ds, y) EXCEPT ALL SELECT * FROM ts_features_by('sv', id, ds, y));
+----
+0
+
+# =============================================================================
+# ts_cv_folds_by (2 folds, horizon 5): train rows count every source row before
+# the cutoff (was 63 and 78 train rows on the UNION ALL view), identical on every shape.
+# =============================================================================
+
+query IIII
+SELECT fold_id, split, count(*), count(y) FROM ts_cv_folds_by('uv', id, ds, y, 2, 5, MAP{}) GROUP BY ALL ORDER BY ALL;
+----
+1	test	15	15
+1	train	105	105
+2	test	15	15
+2	train	120	120
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_folds_by('uv', id, ds, y, 2, 5, MAP{}) EXCEPT ALL SELECT * FROM ts_cv_folds_by('ut', id, ds, y, 2, 5, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_folds_by('ut', id, ds, y, 2, 5, MAP{}) EXCEPT ALL SELECT * FROM ts_cv_folds_by('uv', id, ds, y, 2, 5, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_folds_by('rv', id, ds, y, 2, 5, MAP{}) EXCEPT ALL SELECT * FROM ts_cv_folds_by('ut', id, ds, y, 2, 5, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_folds_by('ut', id, ds, y, 2, 5, MAP{}) EXCEPT ALL SELECT * FROM ts_cv_folds_by('rv', id, ds, y, 2, 5, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_folds_by('sv', id, ds, y, 2, 5, MAP{}) EXCEPT ALL SELECT * FROM ts_cv_folds_by('ut', id, ds, y, 2, 5, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_folds_by('ut', id, ds, y, 2, 5, MAP{}) EXCEPT ALL SELECT * FROM ts_cv_folds_by('sv', id, ds, y, 2, 5, MAP{}));
+----
+0
+
+# =============================================================================
+# ts_cv_split_by (cutoffs 2024-01-20 and 2024-03-12, horizon 3): fold 2 spans both
+# UNION ALL branches; identical on every shape.
+# =============================================================================
+
+query IIII
+SELECT fold_id, split, count(*), count(y) FROM ts_cv_split_by('uv', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}) GROUP BY ALL ORDER BY ALL;
+----
+1	test	9	9
+1	train	60	60
+2	test	9	9
+2	train	99	99
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_split_by('uv', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}) EXCEPT ALL SELECT * FROM ts_cv_split_by('ut', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_split_by('ut', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}) EXCEPT ALL SELECT * FROM ts_cv_split_by('uv', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_split_by('rv', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}) EXCEPT ALL SELECT * FROM ts_cv_split_by('ut', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_split_by('ut', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}) EXCEPT ALL SELECT * FROM ts_cv_split_by('rv', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_split_by('sv', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}) EXCEPT ALL SELECT * FROM ts_cv_split_by('ut', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_split_by('ut', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}) EXCEPT ALL SELECT * FROM ts_cv_split_by('sv', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}));
+----
+0

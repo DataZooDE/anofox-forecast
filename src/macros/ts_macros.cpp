@@ -1517,7 +1517,7 @@ ORDER BY fold_id
     {"ts_cv_split_by", {"source", "group_col", "date_col", "target_col", "training_end_times", "horizon", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_cv_split_native(
-    (SELECT group_col, date_col, target_col FROM query_table(source::VARCHAR)),
+    (SELECT group_col, date_col, target_col FROM query_table(source::VARCHAR) ORDER BY ALL),
     horizon,
     training_end_times,
     params
@@ -1685,7 +1685,7 @@ SELECT * FROM _ts_cv_folds_native(
         group_col,      -- Original name (position 3)
         date_col,       -- Original name (position 4)
         target_col      -- Original name (position 5)
-     FROM query_table(source::VARCHAR)),
+     FROM query_table(source::VARCHAR) ORDER BY ALL),
     n_folds,
     horizon,
     params
@@ -2205,7 +2205,7 @@ FROM features_data
     {"ts_features_by", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_features_native(
-    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR))
+    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR) ORDER BY ALL)
 )
 )",
     "Extracts time series features for each group and returns results as a structured table.",
