@@ -1,0 +1,7 @@
+# Phase 20 deferred items
+
+## From 20-02 (2026-10-23)
+
+- **Plans 20-03, 20-04, 20-05, 20-06 prescribe `WITH _ts_src AS MATERIALIZED (...)` as the single-pipeline recipe.** On DuckDB v2.0.0 that CTE runs through the pipeline broadcast exchange. A final-emitting in-out native fed by it intermittently raises `INTERNAL Error: Pipeline broadcast exchange received invalid producer batch index` (observed in 20-02: 4/30 runs of a single `ts_mase_by` under `count(DISTINCT mase), min(mase) GROUP BY id`; 9/30 to 19/30 on the 4-shape verify query; 0/30 with `preserve_insertion_order = false` or `threads = 1`). 20-02 used `(SELECT * FROM _ts_passthrough(source) ORDER BY ALL)` instead (0/40 failures, about 0.04 s per 1M rows versus about 0.36 s for the CTE). Those plans should use the ORDER BY ALL breaker. For query_table-style macros this is `(SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR) ORDER BY ALL)`. Their `AS MATERIALIZED` acceptance greps also need updating.
+- `src/macros/ts_macros.cpp` (comment above the metric macros, ~line 2420) still says the table macros "have threading issues requiring SET threads=1 for correct results". That is stale after #285. It was not changed in 20-02 because the comment is outside Task 3's file list.
+- Upstream: the broadcast-exchange internal error above is a DuckDB v2.0.0 defect (it also hits the pre-20-02 baseline binary when a user wraps a native in a MATERIALIZED CTE: 30/30). It has not been reported yet.

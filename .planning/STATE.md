@@ -5,16 +5,16 @@ milestone_name: "Issue Sweep: Contract, Bugs, Crate Fixes"
 current_phase: 20
 current_phase_name: Detection & Metric Bug Fixes
 status: executing
-stopped_at: Completed 20-01-PLAN.md
-last_updated: "2026-10-23T12:32:07.779Z"
+stopped_at: Completed 20-02-PLAN.md
+last_updated: "2026-10-23T13:31:13.980Z"
 last_activity: 2026-10-23
 last_activity_desc: Phase 20 execution started
-state_head: 7e729045f21ec6f9052b17f9b1bea6d21afcd807
+state_head: 73f01b4bda993f8334f3e5abba2182d8811e439d
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 11
-  completed_plans: 5
+  completed_plans: 6
   percent: 0
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-22 — milestone v0.11.0 started)
 ## Current Position
 
 Phase: 20 (Detection & Metric Bug Fixes) — EXECUTING
-Plan: 2 of 7
+Plan: 3 of 7
 Status: Ready to execute
 Last activity: 2026-10-23 — Phase 20 execution started
 
@@ -60,6 +60,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 19 P03 | 39min | 2 tasks | 9 files |
 | Phase 19 P04 | 5h 13min | 3 tasks | 5 files |
 | Phase 20 P01 | 4h22m | 3 tasks | 10 files |
+| Phase 20 P02 | 56min | 3 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -80,6 +81,8 @@ Recent decisions affecting current work:
 - [Phase 19]: BUG-02 required TWO independent fixes, not one: the planned allocator-pairing fix AND removing DATAZOO_GUARD from both ts_features catalog functions (empirically bisected WASM toolchain code-folding defect when two guarded functions share a signature). — Verified by 7 controlled wasm_eh rebuilds; neither fix alone resolved the trap.
 - [Phase 19]: wasm_mvp: keep-mvp (user decision at Task 2 checkpoint) -- LOADs cleanly, zero mvp-only failures across 94 files; _setThrew is non-fatal upstream console noise in @duckdb/duckdb-wasm's own JS glue, not fixable in this repo — Deviates from the locked CONTEXT #272 upstream->drop default because the measured evidence does not match the #272 report's "fails to LOAD" framing that rule was written against
 - [Phase 20]: 20-01: classify_seasonality/detect_amplitude_modulation strength = shared stl_strengths (ts_stats_by); degenerate classify strength NULL, amplitude-modulation keeps NaN; values-only change, schema unchanged
+- [Phase 20]: 20-02: metric macros feed natives via (SELECT * FROM _ts_passthrough(source) ORDER BY ALL), not a MATERIALIZED CTE (DuckDB 2.0 broadcast-exchange internal error); later plans 20-03..06 must switch recipe
+- [Phase 20]: 20-02: collect-then-finalize natives use TsCollectFinalizeBarrier (init_local registration, last arrival processes, no spin, MaxThreads unchanged, late-row guard)
 
 ### Pending Todos
 
@@ -92,6 +95,7 @@ None yet.
 - [Phase 23] Renaming columns touches examples, docs and skills broadly; the aliases must hold on the v2.0.0, v1.5.6 and v1.4.5 LTS builds.
 - [All] Verify executor reports against git + disk, and run `cargo fmt --check` in the DoD (prior milestones: fabricated SUMMARYs, fmt-only CI failures).
 - [All] Local builds need `DUCKDB_VERSION=v2.0.0 make release`; the v1.5.6 and v1.4.5 LTS CI lines must stay green.
+- 20-03/20-04/20-05/20-06 prescribe WITH _ts_src AS MATERIALIZED; on DuckDB v2.0.0 that intermittently raises INTERNAL 'Pipeline broadcast exchange received invalid producer batch index' with final-emitting natives. Switch to (SELECT ... ORDER BY ALL) per 20-02 before executing (see phase deferred-items.md)
 
 ### Quick Tasks Completed
 
@@ -143,8 +147,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-23T12:32:07.698Z
-Stopped at: Completed 20-01-PLAN.md
+Last session: 2026-10-23T13:30:58.367Z
+Stopped at: Completed 20-02-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 19`
 
