@@ -173,6 +173,7 @@ static void LoadInternal(ExtensionLoader &loader) {
     RegisterTsFeaturesNativeFunction(loader);
     RegisterTsAggregateHierarchyFunction(loader);
     RegisterTsCombineKeysFunction(loader);
+    RegisterTsPassthroughFunction(loader);
     RegisterTsSplitKeysFunction(loader);
     RegisterTsValidateSeparatorFunction(loader);
     RegisterTsMetricsNativeFunction(loader);

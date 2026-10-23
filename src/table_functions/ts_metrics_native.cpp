@@ -2,6 +2,7 @@
 #include "ts_metrics_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // For DateColumnType enum and date helpers
 #include "anofox_fcst_ffi.h"
+#include "ts_collect_finalize.hpp"
 #include "duckdb.hpp"
 #include "duckdb/function/table_function.hpp"
 #include "duckdb/common/exception.hpp"
@@ -610,15 +611,12 @@ struct TsMaseNativeGlobalState : public GlobalTableFunctionState {
     vector<MaseOutputRow> results;
     bool processed = false;
     idx_t output_offset = 0;
-    std::atomic<bool> finalize_claimed{false};
-    std::atomic<idx_t> threads_collecting{0};
-    std::atomic<idx_t> threads_done_collecting{0};
+    TsCollectFinalizeBarrier barrier;
 };
 
 struct TsMaseNativeLocalState : public LocalTableFunctionState {
     bool owns_finalize = false;
-    bool registered_collector = false;
-    bool registered_finalizer = false;
+    bool arrived_at_final = false;
 };
 
 static unique_ptr<FunctionData> TsMaseNativeBind(
@@ -717,6 +715,7 @@ static unique_ptr<GlobalTableFunctionState> TsMaseNativeInitGlobal(
 
 static unique_ptr<LocalTableFunctionState> TsMaseNativeInitLocal(
     ExecutionContext &context, TableFunctionInitInput &input, GlobalTableFunctionState *global_state) {
+    global_state->Cast<TsMaseNativeGlobalState>().barrier.RegisterLocal();
     return make_uniq<TsMaseNativeLocalState>();
 }
 
@@ -725,12 +724,8 @@ static OperatorResultType TsMaseNativeInOut(
 
     auto &bind_data = data_p.bind_data->Cast<TsMaseNativeBindData>();
     auto &gstate = data_p.global_state->Cast<TsMaseNativeGlobalState>();
-    auto &lstate = data_p.local_state->Cast<TsMaseNativeLocalState>();
 
-    if (!lstate.registered_collector) {
-        gstate.threads_collecting.fetch_add(1);
-        lstate.registered_collector = true;
-    }
+    gstate.barrier.AssertCollecting("_ts_mase_native");
 
     // Extract batch locally first (no lock)
     struct LocalEntry {
@@ -813,20 +808,18 @@ static OperatorFinalizeResultType TsMaseNativeFinalize(
     auto &gstate = data_p.global_state->Cast<TsMaseNativeGlobalState>();
     auto &lstate = data_p.local_state->Cast<TsMaseNativeLocalState>();
 
-    // Barrier + claim pattern
-    if (!lstate.registered_finalizer) {
-        if (lstate.registered_collector)
-            gstate.threads_done_collecting.fetch_add(1);
-        lstate.registered_finalizer = true;
-    }
-
+    // Last-finalizer claim (ts_collect_finalize.hpp): the local state whose
+    // arrival completes the count of registered local states processes; every
+    // other one finishes at once (no spin-wait).
     if (!lstate.owns_finalize) {
-        bool expected = false;
-        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true))
+        if (lstate.arrived_at_final) {
             return OperatorFinalizeResultType::FINISHED;
+        }
+        lstate.arrived_at_final = true;
+        if (!gstate.barrier.ArriveAtFinal()) {
+            return OperatorFinalizeResultType::FINISHED;
+        }
         lstate.owns_finalize = true;
-        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load())
-            std::this_thread::yield();
     }
 
     if (!gstate.processed) {

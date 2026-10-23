@@ -130,6 +130,7 @@ void RegisterTsFeaturesNativeFunction(ExtensionLoader &loader);
 void RegisterTsDetectChangepointsNativeFunction(ExtensionLoader &loader);
 void RegisterTsAggregateHierarchyFunction(ExtensionLoader &loader);
 void RegisterTsCombineKeysFunction(ExtensionLoader &loader);
+void RegisterTsPassthroughFunction(ExtensionLoader &loader);
 void RegisterTsSplitKeysFunction(ExtensionLoader &loader);
 void RegisterTsValidateSeparatorFunction(ExtensionLoader &loader);
 void RegisterTsMetricsNativeFunction(ExtensionLoader &loader);

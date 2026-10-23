@@ -2522,7 +2522,7 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'bi
     // 5th-argument baseline-column form was removed in v2026.10.16 (see ts_rmae_by).
     {"ts_mase_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{"seasonal_period", "1"}, {nullptr, nullptr}},
 R"(
-SELECT * FROM _ts_mase_native(source, date_col, actual_col, forecast_col, seasonal_period)
+SELECT * FROM _ts_mase_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, forecast_col, seasonal_period)
 )",
     "Computes Hyndman-Koehler Mean Absolute Scaled Error (MASE) per group: the out-of-sample forecast MAE scaled by the in-sample seasonal-naive MAE at lag seasonal_period (default 1). Source rows dated before each group's first forecast (forecast NULL) supply the in-sample scale. The old baseline-column form was removed in v2026.10.16 -- use ts_rmae_by for a relative-MAE comparison. "
     "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
