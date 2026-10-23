@@ -139,10 +139,10 @@ Plans:
   1. `ts_mase_by` returns the same value for a series whether its rows arrive in date order, in reverse, or through the #285 `UNION ALL` filtered by a subquery (previously NULL), and that value equals the Hyndman-Koehler MASE computed on the date-sorted series.
   2. `ts_classify_seasonality_by` classifies the #286 strong weekly series as seasonal (not `non_seasonal`, never NaN), and its `seasonal_strength` is consistent with its own `cycle_strengths` and with `ts_stats_by`'s seasonal strength on the same series.
   3. On the #287 panel, with the new opt-in `deseasonalize := true`, `ts_detect_changepoints_by` and `ts_detect_changepoints_agg` flag none of the troughs of the regular weekly cycle and still flag series B's level shift on 2024-02-20. Without the option, default results are unchanged (user decision 2026-10-23).
-  4. In `ts_detect_changepoints_agg`, `is_changepoint` is true exactly when `changepoint_probability` reaches the threshold (no unflagged row at p = 0.996), and `ts_detect_periods_by` returns period 7 on the #287 panel.
+  4. In `ts_detect_changepoints_agg`, with a `threshold` set, `is_changepoint` is true exactly when `changepoint_probability` reaches the threshold for every row after the first of each series (the first row, whose probability is always 1 − 1/hazard_lambda, e.g. 0.996, is never flagged; user decision D2-ii 2026-10-23), and `ts_detect_periods_by` returns period 7 on the #287 panel.
   5. Each fix is computed in Rust and pinned by a value-asserting test under `test/sql/correctness/` built from the issue's reproducer; `make audit` and `cargo fmt --check` stay green.
 
-**Plans:** 7 plans (strictly sequential: shared build tree, CHANGELOG.md and ts_macros.cpp; 20-05 has a blocking user decision)
+**Plans:** 7 plans (strictly sequential: shared build tree, CHANGELOG.md and ts_macros.cpp; all autonomous, decisions D1-b/D2-ii and the UNION ALL scope expansion recorded in 20-CONTEXT.md)
 
 Plans:
 **Wave 1**
@@ -151,7 +151,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 20-02-PLAN.md — BUG-03 (#285) tracer: diagnose the UNION ALL partial-finalize root cause; `_ts_passthrough` + MATERIALIZED input + single-executor natives for all 11 metric macros; R MASE reference; order/plan-shape pins (wave 2)
+- [ ] 20-02-PLAN.md — BUG-03 (#285) tracer: perf baseline; diagnose the UNION ALL partial-finalize root cause; `_ts_passthrough` + MATERIALIZED input + shared last-finalizer barrier (parallel intake kept) for all 11 metric macros; R MASE reference; order/plan-shape pins (wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -159,19 +159,19 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 20-04-PLAN.md — BUG-03 audit: features/CV/panel/VAR `_by` macros union-safe; full in-out audit table; out-of-scope public in-out functions recorded as deferred (wave 4)
+- [ ] 20-04-PLAN.md — BUG-03 audit: features/CV/panel/VAR `_by` macros union-safe; full in-out audit table (wave 4)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 20-05-PLAN.md — BUG-06 part 1: shared changepoint params parser, aggregate honours hazard_lambda and matches the table function; checkpoint: user decides deseasonalize transform (D1) and first-row threshold rule (D2) (wave 5)
+- [ ] 20-05-PLAN.md — BUG-03 scope expansion: `_ts_forecast_native`, `ts_aggregate_hierarchy`, `ts_split_keys`, `ts_validate_separator` union-safe with unchanged signatures; `ts_forecast_by` pinned on UNION ALL sources; 1M-row perf comparison against the baseline (forecast hot path, GROUP BY parallelism) (wave 5)
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 20-06-PLAN.md — BUG-06 part 2 + BUG-07: `threshold` key decided in Rust for both surfaces; numpy reference; period-7 pin (wave 6)
+- [ ] 20-06-PLAN.md — BUG-06 + BUG-07: shared changepoint params parser (aggregate honours hazard_lambda, mirrors the table function); `threshold` key with the D2-ii rule decided in Rust; numpy reference; period-7 pin (wave 6)
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
-- [ ] 20-07-PLAN.md — BUG-05: opt-in `deseasonalize` / `seasonal_period` per D1; R mstl reference; #287 acceptance; docs/example; Phase 20 gate and CI (wave 7)
+- [ ] 20-07-PLAN.md — BUG-05: opt-in `deseasonalize` / `seasonal_period` with the D1-b transform; R mstl reference; #287 acceptance; docs/skill/example for all changepoint keys; Phase 20 gate and CI (wave 7)
 
 ### Phase 21: Upstream AutoETS Spike & Ridge Conditioning Fixes
 
