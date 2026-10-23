@@ -247,8 +247,8 @@ Output columns (group column preserved):
 | `modulation_type` | VARCHAR | `'stable'` / `'emerging'` / `'fading'` / `'oscillating'` / `'non_seasonal'` (NOT `Additive`/`Multiplicative`/`None` — that is not the real label set) |
 | `has_stable_timing` | BOOLEAN | Peak timing regularity |
 | `timing_variability` | DOUBLE | Numeric variability score |
-| `seasonal_strength` | DOUBLE | ∈ [0, 1] |
-| `is_seasonal` | BOOLEAN | Overall verdict |
+| `seasonal_strength` | DOUBLE | STL strength ∈ [0, 1], `NULL` if no usable period |
+| `is_seasonal` | BOOLEAN | `seasonal_strength >= 0.3` by default |
 | `cycle_strengths` | DOUBLE[] | Per-cycle strengths |
 | `weak_seasons` | BIGINT[] | Indices of weak seasonal peaks |
 
@@ -256,6 +256,11 @@ Output columns (group column preserved):
 correctly comes back as `timing_classification = 'stable_seasonal'`, `is_seasonal = true`,
 with `seasonal_strength` close to 1.0 (previously a fdars-core dimension-swap bug made every
 call return `'non_seasonal'` / `NaN`).
+
+**#286 fix:** `seasonal_strength` is now the SAME STL strength `ts_stats_by` reports (not
+fdars's own raw-series strength, which used to disagree — e.g. 0.156 here vs 0.966 from
+`ts_stats_by` on the identical series/period). `ts_detect_amplitude_modulation`'s
+seasonality gate and `seasonal_strength` use the same shared STL strength.
 
 ```sql
 SELECT product_id, timing_classification, modulation_type, is_seasonal, seasonal_strength

@@ -23,6 +23,13 @@ returns the source table's column names and types (previously always
 
 ### Changed
 
+- **`ts_detect_amplitude_modulation`'s seasonality gate and `seasonal_strength` now
+  use the same STL strength as `ts_stats_by` / `ts_classify_seasonality_by` (#286),
+  not fdars's own raw-series spectral strength.** Below the (default 0.3) threshold,
+  or with no usable period, it now returns `NonSeasonal` directly without running the
+  wavelet analysis; `seasonal_strength` is `NaN` when no usable period exists (the
+  output struct is unchanged; only values differ).
+
 - **DuckDB v2.0.0 is now the stable build line.** The `duckdb` submodule is pinned to
   v2.0.0 and `extension-ci-tools` to v2.0-cyanoptera, so a local `make release` builds
   against 2.0.0. CI now builds, smoke-tests and deploys three lines: v2.0.0 (stable,
@@ -45,6 +52,18 @@ returns the source table's column names and types (previously always
   handover (CORS rule, stale paths, redeploy steps).
 
 ### Fixed
+
+- **`ts_classify_seasonality_by` / `ts_classify_seasonality_agg` / `ts_classify_seasonality`
+  reported a strong weekly series as non-seasonal with the wrong strength (#286).** The
+  Rust `classify_seasonality` passed the raw, undetrended series straight to fdars's own
+  `classify_seasonality`, which measures variance explained on the raw series -- a
+  different formula from `ts_stats_by`'s STL-based `seasonality_strength`, and the two
+  disagreed on the same series (0.156 vs 0.966 on the #286 repro). `seasonal_strength`
+  (and the `is_seasonal`/`timing_classification` that depend on it) now come from the
+  same `stl_strengths` function `ts_stats_by` uses, at the rounded period; `cycle_strengths`,
+  `weak_seasons`, `has_stable_timing` and `timing_variability` are unaffected. A degenerate
+  series (no usable period, or zero seasonal variance) now reports `seasonal_strength` as
+  SQL `NULL` (previously `NaN`), matching `ts_stats_by`'s own NULL semantics.
 
 - **Post-build smoke test on DuckDB v2.0.0.** v2.0.0 renamed its CLI release assets
   from `duckdb_cli-<os>-<arch>.zip` to `duckdb-cli-<os>-<arch>.tar.gz`.

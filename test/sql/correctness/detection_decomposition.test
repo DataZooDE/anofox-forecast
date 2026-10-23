@@ -213,6 +213,64 @@ statement ok
 DROP TABLE sine120;
 
 # =============================================================================
+# #286 (BUG-04): classify_seasonality's seasonal_strength must come from the
+# SAME STL strength ts_stats_by uses, not fdars's own raw-series strength --
+# the two used to disagree (0.156 vs 0.966) on this exact series/period.
+# Values below are the literals the built extension prints; a strong weekly
+# series must classify stable_seasonal/is_seasonal with cycle_strengths
+# consistent with the overall strength (no 0.16-vs-1.0 contradiction), and
+# the scalar/aggregate/table-macro surfaces must all agree exactly.
+# =============================================================================
+
+statement ok
+CREATE TABLE w AS
+SELECT 'A' AS id, (TIMESTAMP '2024-01-01' + INTERVAL (i) DAY) AS ds,
+       20 + 0.3 * i + 5 * sin(2 * pi() * i / 7) + 1.6 * cos(i * 0.9) + 0.7 * sin(i * 1.7 + 20) AS y
+FROM range(84) r(i);
+
+query IIIII
+SELECT timing_classification, modulation_type <> 'non_seasonal', is_seasonal,
+       round(seasonal_strength, 10), list_min(cycle_strengths) >= 0.3
+FROM ts_classify_seasonality_by('w', id, ds, y, 7.0);
+----
+stable_seasonal	true	true	0.986881091	true
+
+query I
+SELECT abs(
+    (SELECT seasonal_strength FROM ts_classify_seasonality_by('w', id, ds, y, 7.0)) -
+    (SELECT seasonality_strength FROM ts_stats_by('w', id, ds, y, '1d', seasonal_period := 7))
+) < 1e-12;
+----
+true
+
+query I
+SELECT round((ts_classify_seasonality(list(y ORDER BY ds), 7.0)).seasonal_strength, 10) FROM w;
+----
+0.986881091
+
+query I
+SELECT round((ts_classify_seasonality_agg(ds, y, 7.0)).seasonal_strength, 10) FROM w;
+----
+0.986881091
+
+statement ok
+DROP TABLE w;
+
+statement ok
+CREATE TABLE issue286_constant AS
+SELECT 'A' AS id, (TIMESTAMP '2024-01-01' + INTERVAL (i) DAY) AS ds, 5.0 AS y
+FROM range(84) r(i);
+
+query II
+SELECT is_seasonal, seasonal_strength IS NULL
+FROM ts_classify_seasonality_by('issue286_constant', id, ds, y, 7.0);
+----
+false	true
+
+statement ok
+DROP TABLE issue286_constant;
+
+# =============================================================================
 # ts_detect_seasonality / ts_analyze_seasonality: a clean period-4 square wave
 # is detected as period 4.
 # =============================================================================
