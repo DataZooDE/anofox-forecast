@@ -1031,6 +1031,19 @@ typedef struct BocpdResult {
 } BocpdResult;
 
 /**
+ * Options for `anofox_ts_detect_changepoints_bocpd_opts` (#287, BUG-06,
+ * D2-ii). `hazard_lambda <= 0.0` means "unset" (defaults to 250.0, same
+ * convention as `anofox_ts_detect_changepoints_bocpd`'s own parameter).
+ * `threshold` is NaN when unset (the default MAP run-length-reset
+ * heuristic applies); otherwise it must be finite and in `[0, 1]` --
+ * range validation happens in `anofox_fcst_core`, not here.
+ */
+typedef struct ChangepointOptionsFFI {
+    double hazard_lambda;
+    double threshold;
+} ChangepointOptionsFFI;
+
+/**
  * Feature extraction result.
  */
 typedef struct FeaturesResult {
@@ -2733,6 +2746,29 @@ bool anofox_ts_detect_changepoints_bocpd(const double *values,
                                          bool include_probabilities,
                                          struct BocpdResult *out_result,
                                          struct AnofoxError *out_error);
+
+/**
+ * BOCPD changepoint detection with an explicit `is_changepoint` decision
+ * rule (#287, BUG-06, user decision D2-ii): shared by both
+ * `ts_detect_changepoints_by` and `ts_detect_changepoints_agg` so they
+ * agree on hazard_lambda and threshold for identical inputs.
+ *
+ * `opts->threshold` NaN means "unset" (the default heuristic applies,
+ * reproducing [`anofox_ts_detect_changepoints_bocpd`] bit for bit).
+ * `opts->hazard_lambda <= 0.0` means "unset" (defaults to 250.0, same
+ * convention as the sibling export above). A set, out-of-range
+ * `opts->threshold` (not finite, or outside `[0, 1]`) returns an
+ * `INVALID_INPUT`-coded error naming `threshold` in the message.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null. Arrays must have the
+ * specified lengths.
+ */
+bool anofox_ts_detect_changepoints_bocpd_opts(const double *values,
+                                              size_t length,
+                                              const struct ChangepointOptionsFFI *opts,
+                                              struct BocpdResult *out_result,
+                                              struct AnofoxError *out_error);
 
 /**
  * Extract time series features.

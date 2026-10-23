@@ -729,6 +729,18 @@ impl Default for BocpdResult {
     }
 }
 
+/// Options for `anofox_ts_detect_changepoints_bocpd_opts` (#287, BUG-06,
+/// D2-ii). `hazard_lambda <= 0.0` means "unset" (defaults to 250.0, same
+/// convention as `anofox_ts_detect_changepoints_bocpd`'s own parameter).
+/// `threshold` is NaN when unset (the default MAP run-length-reset
+/// heuristic applies); otherwise it must be finite and in `[0, 1]` --
+/// range validation happens in `anofox_fcst_core`, not here.
+#[repr(C)]
+pub struct ChangepointOptionsFFI {
+    pub hazard_lambda: c_double,
+    pub threshold: c_double,
+}
+
 /// Feature extraction result.
 #[repr(C)]
 pub struct FeaturesResult {

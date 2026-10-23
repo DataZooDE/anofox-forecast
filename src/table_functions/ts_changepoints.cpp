@@ -463,20 +463,29 @@ static OperatorFinalizeResultType TsDetectChangepointsByFinalize(
                 sorted_values.push_back(p.second);
             }
 
-            // Call Rust FFI
+            // Call Rust FFI (#287, BUG-06, D2-ii): shared options struct so
+            // both consumers decide is_changepoint identically for
+            // identical hazard_lambda/threshold.
             BocpdResult bocpd_result = {};
             AnofoxError error = {};
 
-            bool success = anofox_ts_detect_changepoints_bocpd(
+            ChangepointOptionsFFI opts;
+            opts.hazard_lambda = bind_data.params.hazard_lambda;
+            opts.threshold = bind_data.params.threshold;
+
+            bool success = anofox_ts_detect_changepoints_bocpd_opts(
                 sorted_values.data(),
                 sorted_values.size(),
-                bind_data.params.hazard_lambda,
-                true,  // Always include probabilities
+                &opts,
                 &bocpd_result,
                 &error
             );
 
             if (!success) {
+                if (error.code == INVALID_INPUT) {
+                    throw InvalidInputException("ts_detect_changepoints_by: %s",
+                        error.message ? error.message : "invalid input");
+                }
                 // Output rows with default values on error instead of skipping
                 for (size_t i = 0; i < sorted_values.size(); i++) {
                     ChangepointOutputRow row;

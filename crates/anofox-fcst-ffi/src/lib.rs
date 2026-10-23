@@ -3414,6 +3414,119 @@ pub unsafe extern "C" fn anofox_ts_detect_changepoints_bocpd(
     }
 }
 
+/// BOCPD changepoint detection with an explicit `is_changepoint` decision
+/// rule (#287, BUG-06, user decision D2-ii): shared by both
+/// `ts_detect_changepoints_by` and `ts_detect_changepoints_agg` so they
+/// agree on hazard_lambda and threshold for identical inputs.
+///
+/// `opts->threshold` NaN means "unset" (the default heuristic applies,
+/// reproducing [`anofox_ts_detect_changepoints_bocpd`] bit for bit).
+/// `opts->hazard_lambda <= 0.0` means "unset" (defaults to 250.0, same
+/// convention as the sibling export above). A set, out-of-range
+/// `opts->threshold` (not finite, or outside `[0, 1]`) returns an
+/// `INVALID_INPUT`-coded error naming `threshold` in the message.
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null. Arrays must have the
+/// specified lengths.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_detect_changepoints_bocpd_opts(
+    values: *const c_double,
+    length: size_t,
+    opts: *const types::ChangepointOptionsFFI,
+    out_result: *mut types::BocpdResult,
+    out_error: *mut AnofoxError,
+) -> bool {
+    if !out_error.is_null() {
+        *out_error = AnofoxError::success();
+    }
+
+    if values.is_null() || opts.is_null() || out_result.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
+        }
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let values_vec = std::slice::from_raw_parts(values, length).to_vec();
+        let hazard_lambda = if (*opts).hazard_lambda > 0.0 {
+            (*opts).hazard_lambda
+        } else {
+            250.0
+        };
+        let threshold = if (*opts).threshold.is_nan() {
+            None
+        } else {
+            Some((*opts).threshold)
+        };
+        anofox_fcst_core::detect_changepoints_bocpd_with_options(
+            &values_vec,
+            &anofox_fcst_core::ChangepointOptions {
+                hazard_lambda,
+                threshold,
+            },
+        )
+    }));
+
+    match result {
+        Ok(Ok(bocpd)) => {
+            let n = bocpd.is_changepoint.len();
+            (*out_result).n_points = n;
+
+            let is_cp_ptr = malloc(n * std::mem::size_of::<bool>()) as *mut bool;
+            for (i, &cp) in bocpd.is_changepoint.iter().enumerate() {
+                *is_cp_ptr.add(i) = cp;
+            }
+            (*out_result).is_changepoint = is_cp_ptr;
+
+            let prob_ptr = malloc(n * std::mem::size_of::<c_double>()) as *mut c_double;
+            for (i, &p) in bocpd.changepoint_probability.iter().enumerate() {
+                *prob_ptr.add(i) = p;
+            }
+            (*out_result).changepoint_probability = prob_ptr;
+
+            let n_cp = bocpd.changepoints.len();
+            (*out_result).n_changepoints = n_cp;
+            if n_cp > 0 {
+                let idx_ptr = malloc(n_cp * std::mem::size_of::<size_t>()) as *mut size_t;
+                for (i, &c) in bocpd.changepoints.iter().enumerate() {
+                    *idx_ptr.add(i) = c;
+                }
+                (*out_result).changepoint_indices = idx_ptr;
+            } else {
+                (*out_result).changepoint_indices = ptr::null_mut();
+            }
+
+            true
+        }
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                let error_code = match e.to_code() {
+                    1 => ErrorCode::NullPointer,
+                    2 => ErrorCode::InvalidInput,
+                    3 => ErrorCode::ComputationError,
+                    4 => ErrorCode::AllocationError,
+                    5 => ErrorCode::InvalidModel,
+                    6 => ErrorCode::InsufficientData,
+                    7 => ErrorCode::InvalidDateFormat,
+                    8 => ErrorCode::InvalidFrequency,
+                    9 => ErrorCode::InvalidInput, // InvalidParameter -> InvalidInput at FFI boundary
+                    _ => ErrorCode::InternalError,
+                };
+                (*out_error).set_error(error_code, &e.to_string());
+            }
+            false
+        }
+        Err(_) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
+            }
+            false
+        }
+    }
+}
+
 // ============================================================================
 // Feature Functions
 // ============================================================================

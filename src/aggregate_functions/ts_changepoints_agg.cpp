@@ -151,21 +151,31 @@ static void TsChangepointsAggFinalize(Vector &state_vector, AggregateInputData &
             sorted_values.push_back(p.second);
         }
 
-        // Call BOCPD changepoint detection
+        // Call BOCPD changepoint detection (#287, BUG-06, D2-ii): same
+        // shared options struct ts_detect_changepoints_by uses, so both
+        // consumers decide is_changepoint identically for identical
+        // hazard_lambda/threshold.
         BocpdResult cp_result;
         memset(&cp_result, 0, sizeof(cp_result));
         AnofoxError error;
 
-        bool success = anofox_ts_detect_changepoints_bocpd(
+        ChangepointOptionsFFI opts;
+        opts.hazard_lambda = data.params.hazard_lambda;
+        opts.threshold = data.params.threshold;
+
+        bool success = anofox_ts_detect_changepoints_bocpd_opts(
             sorted_values.data(),
             sorted_values.size(),
-            data.params.hazard_lambda,
-            true,  // always include probabilities for aggregate
+            &opts,
             &cp_result,
             &error
         );
 
         if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_detect_changepoints_agg: %s",
+                    error.message ? error.message : "invalid input");
+            }
             FlatVector::SetNull(result, row, true);
             continue;
         }

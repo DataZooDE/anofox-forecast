@@ -607,14 +607,67 @@ impl Default for ChangepointOptions {
     }
 }
 
-// RED STUB (20-06 Task 2): threshold is parsed into the options but not yet
-// honoured -- this intentionally fails the threshold-rule and validation
-// tests below until the GREEN commit implements the D2-ii rule.
+/// Bayesian Online Changepoint Detection with an explicit decision rule for
+/// `is_changepoint` (#287, BUG-06; user decision D2-ii,
+/// 20-CONTEXT.md decisions_addendum_2).
+///
+/// `opts.threshold == None` reproduces [`detect_changepoints_bocpd`] bit for
+/// bit: `is_changepoint` is the existing MAP run-length-reset heuristic
+/// ([`bocpd_trace`]'s `is_changepoint`), and `changepoint_probability` is
+/// always populated (`trace.prob`) -- both SQL consumers already always
+/// request probabilities, so there is no `include_probabilities` toggle
+/// here.
+///
+/// `opts.threshold == Some(t)` applies the D2-ii rule instead:
+/// `is_changepoint[i] = i >= 1 && prob[i] >= t` for every `i`. Index 0 is
+/// NEVER flagged, even when `t == 0.0` and `prob[0] >= 0.0` -- it has no
+/// preceding segment to have broken from, and its probability is always
+/// `1 - 1/hazard_lambda` (the hazard prior alone, before any data is seen),
+/// which is not evidence of a changepoint. `changepoints` is recomputed
+/// from the resulting `is_changepoint`.
+///
+/// # Errors
+/// `ForecastError::InvalidParameter { param: "threshold", .. }` if
+/// `opts.threshold` is `Some` and not finite or outside `[0, 1]`.
+/// Otherwise, the same errors as [`bocpd_trace`]
+/// (`InsufficientData`/`InvalidInput`).
 pub fn detect_changepoints_bocpd_with_options(
     values: &[f64],
     opts: &ChangepointOptions,
 ) -> Result<BocpdResult> {
-    detect_changepoints_bocpd(values, opts.hazard_lambda, true)
+    if let Some(threshold) = opts.threshold {
+        if !threshold.is_finite() || !(0.0..=1.0).contains(&threshold) {
+            return Err(ForecastError::InvalidParameter {
+                param: "threshold".to_string(),
+                value: threshold.to_string(),
+                reason: "must be a finite number in [0, 1]".to_string(),
+            });
+        }
+    }
+
+    let trace = bocpd_trace(values, opts.hazard_lambda)?;
+
+    let is_changepoint: Vec<bool> = match opts.threshold {
+        None => trace.is_changepoint,
+        Some(threshold) => trace
+            .prob
+            .iter()
+            .enumerate()
+            .map(|(i, &p)| i >= 1 && p >= threshold)
+            .collect(),
+    };
+
+    let changepoints: Vec<usize> = is_changepoint
+        .iter()
+        .enumerate()
+        .filter_map(|(i, &f)| if f { Some(i) } else { None })
+        .collect();
+
+    Ok(BocpdResult {
+        is_changepoint,
+        changepoint_probability: trace.prob,
+        changepoints,
+    })
 }
 
 /// Detect changepoints using Bayesian Online Changepoint Detection (simplified).
@@ -1068,22 +1121,34 @@ mod tests {
         };
         let with_opts = detect_changepoints_bocpd_with_options(&step, &opts).unwrap();
         let base = detect_changepoints_bocpd(&step, 250.0, true).unwrap();
-        assert_eq!(with_opts.is_changepoint, base.is_changepoint, "step series: is_changepoint");
+        assert_eq!(
+            with_opts.is_changepoint, base.is_changepoint,
+            "step series: is_changepoint"
+        );
         assert_eq!(
             with_opts.changepoint_probability, base.changepoint_probability,
             "step series: changepoint_probability"
         );
-        assert_eq!(with_opts.changepoints, base.changepoints, "step series: changepoints");
+        assert_eq!(
+            with_opts.changepoints, base.changepoints,
+            "step series: changepoints"
+        );
 
         let b = issue287_series_b();
         let with_opts_b = detect_changepoints_bocpd_with_options(&b, &opts).unwrap();
         let base_b = detect_changepoints_bocpd(&b, 250.0, true).unwrap();
-        assert_eq!(with_opts_b.is_changepoint, base_b.is_changepoint, "#287 series B: is_changepoint");
+        assert_eq!(
+            with_opts_b.is_changepoint, base_b.is_changepoint,
+            "#287 series B: is_changepoint"
+        );
         assert_eq!(
             with_opts_b.changepoint_probability, base_b.changepoint_probability,
             "#287 series B: changepoint_probability"
         );
-        assert_eq!(with_opts_b.changepoints, base_b.changepoints, "#287 series B: changepoints");
+        assert_eq!(
+            with_opts_b.changepoints, base_b.changepoints,
+            "#287 series B: changepoints"
+        );
     }
 
     #[test]
