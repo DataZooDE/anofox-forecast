@@ -60,8 +60,20 @@ struct ChangepointParamSet {
     int64_t seasonal_period = 0;
 };
 
-// Reads hazard_lambda/threshold from a MAP(VARCHAR, VARCHAR) or STRUCT
-// Value. A NULL Value or a missing key falls back to the default. An
+// Reads hazard_lambda/threshold from a MAP(VARCHAR, VARCHAR) Value. (Code
+// review WR-05, 2026-10-24: this header previously also branched on a
+// STRUCT-typed params_value, mirroring ts_forecast_params.hpp's parser --
+// but unlike that header's consumers, BOTH of this header's call sites
+// (_ts_detect_changepoints_by_native's TableFunction signature and
+// ts_detect_changepoints_agg's AggregateFunction signature) declare the
+// params argument's type as exactly MAP(VARCHAR, VARCHAR), not
+// LogicalType::ANY, so DuckDB's binder never lets a bare STRUCT value
+// reach this function in the first place -- the STRUCT branch was
+// untested dead code. Removed rather than kept dead; if STRUCT-typed
+// params are wanted for these two functions later, that needs its own
+// decision to widen both declared signatures to LogicalType::ANY, not a
+// silent revival of this branch.) A NULL Value or a missing key falls
+// back to the default. An
 // unparsable hazard_lambda falls back to the default -- this mirrors the
 // pre-existing leniency of ts_detect_changepoints_by's removed
 // ParseHazardLambda helper (deferred-items.md entry 3: unparsable numeric
@@ -84,14 +96,6 @@ inline ChangepointParamSet ParseChangepointParamSet(const Value &params_value) {
                 auto &v = StructValue::GetChildren(child)[1];
                 if (k.ToString() == key) {
                     return v;
-                }
-            }
-        } else if (params_value.type().id() == LogicalTypeId::STRUCT) {
-            auto &struct_children = StructValue::GetChildren(params_value);
-            auto &child_types = StructType::GetChildTypes(params_value.type());
-            for (idx_t i = 0; i < child_types.size(); i++) {
-                if (NameString(child_types[i].first) == key) {
-                    return struct_children[i];
                 }
             }
         }
