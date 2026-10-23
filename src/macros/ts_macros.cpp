@@ -634,6 +634,10 @@ ORDER BY od._dt
     // C++ API: ts_detect_changepoints_by(table_name, group_col, date_col, value_col, params MAP)
     // Returns: TABLE with group_col (preserved name!), date_col, value_col, is_changepoint, changepoint_probability
     //
+    // The native's input is (... FROM query_table(source) ORDER BY ALL): the ORDER BY is a
+    // single-pipeline breaker, so a UNION ALL view cannot hand the collect-then-finalize
+    // native several pipelines that finalize on partial input (#285, Phase 20 20-03).
+    //
     // This macro wraps the native streaming implementation (_ts_detect_changepoints_by_native)
     // which fixes issue #149:
     // - Preserves the input group column name (was hardcoded as 'id')
@@ -641,7 +645,7 @@ ORDER BY od._dt
     {"ts_detect_changepoints_by", {"source", "group_col", "date_col", "value_col", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_detect_changepoints_by_native(
-    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
+    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR) ORDER BY ALL),
     COALESCE(TRY_CAST(params['hazard_lambda'] AS VARCHAR), '250.0')
 )
 )",
@@ -1992,6 +1996,10 @@ FROM per_group
     // C++ API: ts_stats_by(table_name, group_col, date_col, value_col, frequency, seasonal_period := 0)
     // Returns: TABLE with group column (preserving original name!) and 36 statistics columns
     //
+    // The native's input is (... FROM query_table(source) ORDER BY ALL): the ORDER BY is a
+    // single-pipeline breaker, so a UNION ALL view cannot hand the collect-then-finalize
+    // native several pipelines that finalize on partial input (#285, Phase 20 20-03).
+    //
     // This macro is a thin wrapper around the native streaming implementation (_ts_stats_by_native)
     // which fixes the following bugs from issue #147:
     // - Bug 1: Preserves the input group column name (was hardcoded as 'id')
@@ -2002,7 +2010,7 @@ FROM per_group
     {"ts_stats_by", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{"seasonal_period", "0"}, {nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_stats_by_native(
-    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
+    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR) ORDER BY ALL),
     frequency,
     seasonal_period::INTEGER
 )

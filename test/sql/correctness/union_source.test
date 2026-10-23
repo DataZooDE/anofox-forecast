@@ -1,0 +1,129 @@
+# name: test/sql/correctness/union_source.test
+# description: Plan-shape and row-order independence of the collect-then-finalize
+#   `_by` table macros (BUG-03, #285, Phase 20 plans 20-03..20-05). Each macro must
+#   return the same rows over a UNION ALL view, a reversed-order view and a shuffled
+#   view as over the same rows materialized in a plain table.
+# group: [sql]
+#
+# #285 root cause (20-02): a UNION ALL source gives the in-out native several input
+# pipelines that share one global state, and the first pipeline to finish ran the
+# finalize on its own branch only, silently dropping the other branch's rows
+# (measured before the fix: ts_detect_changepoints_by kept 14 of 45 rows per id,
+# ts_fill_gaps_by returned 93 of 252 rows). The macros now read their source through
+# an ORDER BY ALL pipeline breaker and the natives use TsCollectFinalizeBarrier
+# (src/include/ts_collect_finalize.hpp).
+#
+# Fixture (20-03 PLAN context): 3 linear series x 84 days; the UNION ALL view keeps
+# days 0..30 (ds < 2024-02-01, 31 rows) and days 70..83 (ds >= the scalar-subquery
+# cut-off 2024-03-11, 14 rows) = 45 rows per id. `ut` is the same 45 rows per id as a
+# plain table; `rv` is reversed, `sv` is shuffled (deterministic hash order).
+
+require anofox_forecast
+
+statement ok
+CREATE TABLE s2 AS SELECT id, (TIMESTAMP '2024-01-01' + INTERVAL (i) DAY) AS ds, base + 0.3 * i AS y FROM (VALUES ('A', 20.0), ('B', 40.0), ('C', 60.0)) t(id, base), range(84) r(i);
+
+statement ok
+CREATE TABLE f2 AS SELECT id, ds, y FROM s2 WHERE ds >= TIMESTAMP '2024-03-11';
+
+statement ok
+CREATE VIEW uv AS SELECT id, ds, y FROM s2 WHERE ds < TIMESTAMP '2024-02-01' UNION ALL SELECT id, ds, y FROM s2 WHERE ds >= (SELECT min(ds) FROM f2);
+
+statement ok
+CREATE TABLE ut AS SELECT * FROM uv;
+
+statement ok
+CREATE VIEW rv AS SELECT * FROM ut ORDER BY id, ds DESC;
+
+statement ok
+CREATE VIEW sv AS SELECT * FROM ut ORDER BY hash(id, ds);
+
+query II
+SELECT id, count(*) FROM ut GROUP BY id ORDER BY id;
+----
+A	45
+B	45
+C	45
+
+# =============================================================================
+# ts_detect_changepoints_by: every input row comes back (was 14 of 45 per id on
+# the UNION ALL view), with a non-NULL probability, and the same rows as on `ut`.
+# =============================================================================
+
+query III
+SELECT id, count(*), count(changepoint_probability) FROM ts_detect_changepoints_by('uv', id, ds, y, MAP{}) GROUP BY id ORDER BY id;
+----
+A	45	45
+B	45	45
+C	45	45
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_detect_changepoints_by('uv', id, ds, y, MAP{}) EXCEPT ALL SELECT * FROM ts_detect_changepoints_by('ut', id, ds, y, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_detect_changepoints_by('ut', id, ds, y, MAP{}) EXCEPT ALL SELECT * FROM ts_detect_changepoints_by('uv', id, ds, y, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_detect_changepoints_by('rv', id, ds, y, MAP{}) EXCEPT ALL SELECT * FROM ts_detect_changepoints_by('ut', id, ds, y, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_detect_changepoints_by('ut', id, ds, y, MAP{}) EXCEPT ALL SELECT * FROM ts_detect_changepoints_by('rv', id, ds, y, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_detect_changepoints_by('sv', id, ds, y, MAP{}) EXCEPT ALL SELECT * FROM ts_detect_changepoints_by('ut', id, ds, y, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_detect_changepoints_by('ut', id, ds, y, MAP{}) EXCEPT ALL SELECT * FROM ts_detect_changepoints_by('sv', id, ds, y, MAP{}));
+----
+0
+
+# =============================================================================
+# ts_stats_by: one row per id, length 45 on every shape, identical statistics.
+# =============================================================================
+
+query II
+SELECT id, length FROM ts_stats_by('uv', id, ds, y, '1d') ORDER BY id;
+----
+A	45
+B	45
+C	45
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_stats_by('uv', id, ds, y, '1d') EXCEPT ALL SELECT * FROM ts_stats_by('ut', id, ds, y, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_stats_by('ut', id, ds, y, '1d') EXCEPT ALL SELECT * FROM ts_stats_by('uv', id, ds, y, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_stats_by('rv', id, ds, y, '1d') EXCEPT ALL SELECT * FROM ts_stats_by('ut', id, ds, y, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_stats_by('ut', id, ds, y, '1d') EXCEPT ALL SELECT * FROM ts_stats_by('rv', id, ds, y, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_stats_by('sv', id, ds, y, '1d') EXCEPT ALL SELECT * FROM ts_stats_by('ut', id, ds, y, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_stats_by('ut', id, ds, y, '1d') EXCEPT ALL SELECT * FROM ts_stats_by('sv', id, ds, y, '1d'));
+----
+0
