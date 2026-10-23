@@ -33,6 +33,16 @@ returns the source table's column names and types (previously always
 - **WASM runtime test stays on the v1.5.6 artifact.** No `@duckdb/duckdb-wasm` npm
   build bundles a DuckDB v2.0.0 engine yet (the newest, 1.33.1-dev65.0, bundles
   v1.5.6). The Node harness moves to the stable line when one ships.
+- **`wasm_mvp` keeps shipping (#272).** `wasm_mvp` was measured against the v1.5.6
+  engine: it LOADs and the full 94-file suite shows zero `wasm_mvp`-only failures
+  versus `wasm_eh`. A `ReferenceError: _setThrew is not defined` console error is
+  a non-fatal, upstream `@duckdb/duckdb-wasm` defect (its own JS glue never binds
+  `_setThrew` to the main module's `setThrew` export, on either bundle); it never
+  failed a query result in any measurement. The post-upload deploy check now
+  LOADs `wasm_mvp` too (not just `wasm_eh`), so a real future regression still
+  blocks the deploy. See `docs/distribution/get-erpl-io.md` for the full
+  measurement, root-cause, and decision record, and for the bucket owner's
+  handover (CORS rule, stale paths, redeploy steps).
 
 ### Fixed
 
@@ -40,6 +50,17 @@ returns the source table's column names and types (previously always
   from `duckdb_cli-<os>-<arch>.zip` to `duckdb-cli-<os>-<arch>.tar.gz`.
   `scripts/smoke_test.py` now tries the new tarball first and falls back to the legacy
   zip, so one script serves all three lines.
+- **WASM artifacts on get.erpl.io carried two `duckdb_signature` sections and failed
+  to LOAD (#272).** `extension-upload.sh` used to unconditionally append a second
+  `duckdb_signature` custom section to every WASM artifact instead of overwriting
+  the placeholder inside the existing one, like the native path already did.
+  `extension-upload.sh` now replaces the signature in place for WASM too, guarded
+  by pre- and post-upload section-count checks (`scripts/wasm_signature_sections.py`)
+  that abort rather than ever produce a double-signed artifact. The deploy job
+  (`_extension_deploy.yml`) now also verifies every artifact it just uploaded:
+  section count for every WASM arch, and a real DuckDB-Wasm LOAD via the Node
+  harness for `v1.5.6` `wasm_eh` and `wasm_mvp` (`scripts/verify-wasm-artifact.sh`,
+  `scripts/extension-verify-upload.sh`). Any failure fails the deploy job.
 - **`ts_fill_forward_operator` hung natively and trapped DuckDB-Wasm (#289).** The
   old native C++ table function ran a nested query from its `InitGlobal`, which hung
   natively and trapped the DuckDB-Wasm instance; it also interpolated identifiers

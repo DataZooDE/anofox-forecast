@@ -138,7 +138,7 @@ Every object uploaded under the versioned-tree key layout (`<name>/<ext_version>
 ## Redeploy steps
 
 1. **Merge this plan's branch to `main`.** `MainDistributionPipeline.yml`'s three lines (`duckdb-stable-deploy` / `duckdb-v15-deploy` / `duckdb-lts-deploy`) each run `scripts/extension-upload.sh` (now fixed) followed by `scripts/extension-verify-upload.sh` (new) inside the same deploy-job shell, for every arch in that line's build matrix. Any post-upload verification failure fails that arch's deploy-job matrix entry.
-2. **Confirm the redeploy's WASM objects are now single-signed.** Either re-run this plan's probe script pattern against the live objects, or trust the deploy job's own post-upload check (it is the stronger proof -- it LOADs `v1.5.6`/`wasm_eh` in the real Node harness against the actual uploaded bytes, not just a byte count).
+2. **Confirm the redeploy's WASM objects are now single-signed.** Either re-run this plan's probe script pattern against the live objects, or trust the deploy job's own post-upload check -- it is the stronger proof. Per the `keep-mvp` decision (DIST-03, below), the `v1.5.6` line's post-upload check now LOADs **both** `wasm_eh` and `wasm_mvp` (via `--bundle mvp`) in the real Node harness against the actual uploaded bytes, not just a byte count.
 3. **Owner applies the CORS rule** (see "CORS rule" above) to the S3 bucket and, since CloudFront fronts it, to the CloudFront distribution's response-headers/cache policy, then invalidates the WASM paths.
 4. **Owner deletes the stale `v1.5.4`/`v1.5.5` paths** (see "Stale paths" above) once satisfied nothing still depends on them.
 5. **Verify from a workstation** (not CI, to confirm the public-facing bytes and headers, independent of this repo's own tooling):
@@ -146,8 +146,12 @@ Every object uploaded under the versioned-tree key layout (`<name>/<ext_version>
    curl --compressed -o /tmp/eh.wasm https://get.erpl.io/v1.5.6/wasm_eh/anofox_forecast.duckdb_extension.wasm
    python3 scripts/wasm_signature_sections.py check /tmp/eh.wasm   # expect: ok, 1 section
    scripts/verify-wasm-artifact.sh /tmp/eh.wasm wasm_eh v1.5.6     # expect: LOAD + post_upload_smoke.test pass
+
+   curl --compressed -o /tmp/mvp.wasm https://get.erpl.io/v1.5.6/wasm_mvp/anofox_forecast.duckdb_extension.wasm
+   python3 scripts/wasm_signature_sections.py check /tmp/mvp.wasm  # expect: ok, 1 section
+   scripts/verify-wasm-artifact.sh /tmp/mvp.wasm wasm_mvp v1.5.6   # expect: LOAD + post_upload_smoke.test pass
    ```
-   Then, in a browser or DuckDB-Wasm Node session: `FORCE INSTALL anofox_forecast FROM 'https://get.erpl.io';` and confirm it loads and `ts_forecast_by` runs.
+   Then, in a browser or DuckDB-Wasm Node session: `FORCE INSTALL anofox_forecast FROM 'https://get.erpl.io';` and confirm it loads and `ts_forecast_by` runs (both the `eh` and `mvp` bundle paths).
 
 ## wasm_mvp status (DIST-03)
 
@@ -156,7 +160,7 @@ Every object uploaded under the versioned-tree key layout (`<name>/<ext_version>
 
 ### LOAD verdict
 
-`FORCE INSTALL anofox_forecast FROM <local server>; LOAD anofox_forecast;` succeeds on `wasm_mvp` -- confirmed via `DuckDB-Wasm bundle: mvp` followed by `LOAD anofox_forecast succeeded` in every run below. The `#272` issue comment's "fails to LOAD" framing does not hold against a correctly-signed artifact (the originally-reported LOAD failure was most likely confounded by the separate DIST-01 double-signature bug, fixed in 19-02 -- see "mvp vs. the pre-DIST-01-fix production artifact" below).
+`FORCE INSTALL anofox_forecast FROM <local server>; LOAD anofox_forecast;` succeeds on `wasm_mvp` -- confirmed via `DuckDB-Wasm bundle: mvp` followed by `LOAD anofox_forecast succeeded` in every run below. The `#272` issue comment's "fails to LOAD" framing does not hold against a correctly-signed artifact: against the *current production* `wasm_mvp` object on get.erpl.io (still double-signed as of this probe -- see "Live artifact check" above, DIST-01 fix not yet redeployed), the same `_setThrew` reference reproducibly crashed the whole harness worker outright on `ts_conformal.test`; against a correctly-signed artifact (every measurement in this section), LOAD always succeeds and the same reference only ever produces non-fatal console noise. The originally-reported LOAD failure was most likely confounded by the separate DIST-01 double-signature bug, fixed in 19-02 and expected to self-correct on the next redeploy (see "Redeploy steps" above).
 
 ### Curated subset (10 files) vs. `--all` (94 files)
 
@@ -250,5 +254,14 @@ query's own result was unaffected in every observed case), but it is
 user-visible console noise and may be fatal in other call orderings we have
 not characterized.
 ```
+
+## Decision record
+
+Decision: keep-mvp
+
+**Date:** 2026-10-23
+**Decided by:** the user, at the Task 2 `checkpoint:decision` in plan 19-04.
+**Rationale:** the locked CONTEXT #272 decision 3 rule ("upstream -> stop deploying wasm_mvp") was written against the `#272` issue comment's report that `wasm_mvp` "fails to LOAD." The measurements above show that does not hold against a correctly-signed artifact: `wasm_mvp` LOADs every time, and the `--all` suite (94 files) produces byte-identical per-file pass/fail/skip results between `wasm_mvp` and `wasm_eh` -- zero mvp-only failures. The only observed symptom of the upstream `_setThrew` gap is non-fatal console noise (188 occurrences across 40 files, never flipping a test from pass to fail). Given the Classification is upstream (not ours, so `fix-ours` was not available) and `keep-mvp`'s own precondition (LOADs + no mvp-only failures) is fully met, the user chose to deviate from the literal locked rule rather than drop a currently-working artifact over a cosmetic, already-characterized upstream defect. This is a deliberate, recorded deviation from the locked default, not an oversight.
+**What changed in the repository:** `scripts/verify-wasm-artifact.sh`'s `LOAD_ARCHS` now includes `wasm_mvp` alongside `wasm_eh` for the `v1.5.6` line, and the script passes `--bundle mvp` to `test/wasm/run.mjs` when verifying a `wasm_mvp` object (the `eh` bundle remains the default for every other LOAD arch). This means the post-upload check now actually LOADs `wasm_mvp` in the real DuckDB-Wasm Node harness on every future deploy -- so a genuine future regression (as opposed to today's known, cosmetic upstream noise) still fails the deploy job. `wasm_mvp` is not excluded from any build/deploy matrix; no CI workflow YAML changed. The drafted upstream `duckdb/duckdb-wasm` issue (above) is kept in this document for the owner to file at their discretion -- filing it is not required for DIST-03 to be considered resolved for this milestone, since the defect is now measured, classified, and gated, not merely noted.
 
 Plan 19-04 adds this `wasm_mvp` decision-record section (DIST-03) and files the #272 comment linking to this document; neither is in this plan's scope.
