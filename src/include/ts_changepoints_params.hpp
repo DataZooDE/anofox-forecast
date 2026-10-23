@@ -16,6 +16,23 @@
 // (hazard_lambda, threshold, deseasonalize, seasonal_period) so they cannot
 // drift again. Unknown keys are ignored, matching both consumers' prior
 // behaviour.
+//
+// Code review WR-04 (2026-10-23): key-name matching below is an exact
+// string match, so a TYPO'D KEY NAME (e.g. 'Threshold', 'treshold',
+// 'seasonalPeriod') is indistinguishable from "key absent" and silently
+// uses the default -- the same silent-drift failure mode that the
+// value-level strictness on threshold/deseasonalize/seasonal_period was
+// deliberately written to avoid, just one layer up (key name instead of
+// key value). This is a KNOWN, DELIBERATE tradeoff: unknown-key leniency
+// (needed for backward/forward params-MAP compatibility -- rejecting an
+// unrecognized key would be a breaking change for any caller passing an
+// extra key this header doesn't yet know about) is accepted here even
+// though it reintroduces, at the key-name layer, the exact risk the
+// value-level strictness exists to prevent. If key-typo protection is
+// wanted later, it needs its own explicit decision (validate every input
+// key against the four recognized names and throw naming the unrecognized
+// key) -- not a silent addition, since it would change behavior for any
+// caller currently passing an unrecognized key and expecting it ignored.
 // ============================================================================
 
 #include "duckdb.hpp"
