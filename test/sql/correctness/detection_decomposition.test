@@ -259,6 +259,109 @@ SELECT (
 ----
 true
 
+# =============================================================================
+# #287 threshold (BUG-06, D2-ii) and BUG-07 period regression pins (Phase 20
+# plan 20-06 Task 3). D2-ii: with a threshold set, is_changepoint =
+# (changepoint_probability >= threshold) for every row AFTER THE FIRST of
+# each series; the first row is never flagged. These numbers are also pinned
+# against an independent numpy BOCPD reference in
+# crates/anofox-fcst-core/tests/changepoint_reference.rs
+# (bocpd_with_options_threshold_matches_numpy_expected_threshold_0_5, cases
+# issue287_A/B/C in validation/reference/fixtures/changepoints/bocpd_cases.json).
+# =============================================================================
+
+# Consistency: every row after the first obeys is_changepoint ==
+# (changepoint_probability >= threshold), and no first row is ever flagged --
+# on both surfaces.
+
+query I
+SELECT count(*) FROM (
+    SELECT id, ds, is_changepoint, changepoint_probability,
+           row_number() OVER (PARTITION BY id ORDER BY ds) AS rn
+    FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'threshold': '0.5'})
+) WHERE rn > 1 AND is_changepoint <> (changepoint_probability >= 0.5);
+----
+0
+
+query I
+SELECT count(*) FROM (
+    SELECT id, ds, is_changepoint,
+           row_number() OVER (PARTITION BY id ORDER BY ds) AS rn
+    FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'threshold': '0.5'})
+) WHERE rn = 1 AND is_changepoint;
+----
+0
+
+query I
+SELECT count(*) FROM (
+    SELECT id, r.timestamp, r.is_changepoint, r.changepoint_probability,
+           row_number() OVER (PARTITION BY id ORDER BY r.timestamp) AS rn
+    FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'threshold': '0.5'})) AS r FROM cp287 GROUP BY id)
+) WHERE rn > 1 AND is_changepoint <> (changepoint_probability >= 0.5);
+----
+0
+
+query I
+SELECT count(*) FROM (
+    SELECT id, r.timestamp, r.is_changepoint,
+           row_number() OVER (PARTITION BY id ORDER BY r.timestamp) AS rn
+    FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'threshold': '0.5'})) AS r FROM cp287 GROUP BY id)
+) WHERE rn = 1 AND is_changepoint;
+----
+0
+
+# Readable form: threshold 0.5 flags exactly B's 2024-02-20 and nothing else
+# (A and C have no flagged rows at all, so they produce no group here).
+
+query II
+SELECT id, string_agg(ds::DATE::VARCHAR, ',' ORDER BY ds) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'threshold': '0.5'}) WHERE is_changepoint GROUP BY id ORDER BY id;
+----
+B	2024-02-20
+
+# Parity (threshold combined with a non-default hazard_lambda): table
+# function and aggregate still agree exactly.
+
+query I
+SELECT count(*) FROM (
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'threshold': '0.5', 'hazard_lambda': '50'})
+    EXCEPT ALL
+    SELECT id, r.timestamp, r.is_changepoint, r.changepoint_probability FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'threshold': '0.5', 'hazard_lambda': '50'})) AS r FROM cp287 GROUP BY id)
+);
+----
+0
+
+query I
+SELECT count(*) FROM (
+    SELECT id, r.timestamp, r.is_changepoint, r.changepoint_probability FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'threshold': '0.5', 'hazard_lambda': '50'})) AS r FROM cp287 GROUP BY id)
+    EXCEPT ALL
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'threshold': '0.5', 'hazard_lambda': '50'})
+);
+----
+0
+
+# A threshold outside [0, 1] errors naming the key, on both surfaces.
+
+statement error
+SELECT count(*) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'threshold': '1.5'});
+----
+threshold
+
+statement error
+SELECT count(*) FROM (SELECT unnest(ts_detect_changepoints_agg(ds, y, MAP{'threshold': '1.5'})) FROM cp287 GROUP BY id);
+----
+threshold
+
+# BUG-07 (#287 release-only symptom, already fixed on main): ts_detect_
+# periods_by returns primary_period 7.0 (the weekly seasonality every #287
+# series shares) for A, B and C -- regression pin.
+
+query III
+SELECT id, primary_period, periods[1].period FROM ts_detect_periods_by('cp287', id, ds, y, MAP{}) ORDER BY id;
+----
+A	7.0	7.0
+B	7.0	7.0
+C	7.0	7.0
+
 statement ok
 DROP TABLE cp287;
 

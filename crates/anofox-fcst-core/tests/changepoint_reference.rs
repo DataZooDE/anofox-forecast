@@ -169,7 +169,10 @@ fn bocpd_with_options_threshold_matches_numpy_expected_threshold_0_5() {
             result.changepoints, want_threshold_flags,
             "{name}: threshold=0.5 flags"
         );
-        assert!(!result.is_changepoint[0], "{name}: index 0 must never be flagged");
+        assert!(
+            !result.is_changepoint[0],
+            "{name}: index 0 must never be flagged"
+        );
         checked_at_least_one = true;
     }
     assert!(
