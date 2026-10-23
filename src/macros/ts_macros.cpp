@@ -2012,9 +2012,48 @@ FROM per_group
     // ================================================================================
     // Multi-key unique_id functions (Issue #78)
     // ================================================================================
-    // NOTE: ts_validate_separator, ts_combine_keys, ts_aggregate_hierarchy, and ts_split_keys
-    // are now native table functions supporting arbitrary hierarchy levels.
-    // See: ts_validate_separator.cpp, ts_aggregate_hierarchy.cpp, ts_combine_keys.cpp, ts_split_keys.cpp
+    // NOTE: ts_combine_keys is still a native table function (streaming, no
+    // in_out_function_final, so it is not affected by #285).
+    // ts_validate_separator, ts_aggregate_hierarchy and ts_split_keys are
+    // collect-then-finalize natives and were silently truncating a UNION ALL
+    // source (#285, decisions_addendum_2, 20-05). Each is now a table macro
+    // over a renamed `_ts_*_native` (ts_validate_separator.cpp,
+    // ts_aggregate_hierarchy.cpp, ts_split_keys.cpp) that reads its source
+    // through (SELECT * FROM _ts_passthrough(source) ORDER BY ALL), the same
+    // single-pipeline breaker the metric/detection/CV macros use. Call
+    // signatures and output columns are unchanged.
+
+    // ts_aggregate_hierarchy: aggregate a leaf-level time series up through a
+    // hierarchy of group keys. `params` stays a required positional MAP (no
+    // default, matching the pre-20-05 native's signature).
+    {"ts_aggregate_hierarchy", {"source", "params", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT * FROM _ts_aggregate_hierarchy_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), params)
+)",
+    "Aggregates time series data up through a hierarchy of group keys, rolling up lower-level series to higher levels.",
+    "SELECT * FROM ts_aggregate_hierarchy(TABLE(SELECT date, value, region, store, item FROM t), MAP {'separator': '|'})",
+    "hierarchical"},
+
+    // ts_split_keys: split a composite unique_id column back into its
+    // component key columns. `columns` defaults to NULL (auto-generated
+    // id_part_N names), matching the pre-20-05 native's optional parameter.
+    {"ts_split_keys", {"source", nullptr}, {{"separator", "'|'"}, {"columns", "NULL"}, {nullptr, nullptr}},
+R"(
+SELECT * FROM _ts_split_keys_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), separator := separator, columns := columns)
+)",
+    "Splits a composite group key column back into its original multiple key columns.",
+    "SELECT * FROM ts_split_keys(TABLE(SELECT unique_id, date, value FROM t), separator='|', columns=['region', 'store', 'item'])",
+    "hierarchical"},
+
+    // ts_validate_separator: check whether a separator is safe to use (does
+    // not appear in any ID column value) across the whole source.
+    {"ts_validate_separator", {"source", nullptr}, {{"separator", "'|'"}, {nullptr, nullptr}},
+R"(
+SELECT * FROM _ts_validate_separator_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), separator := separator)
+)",
+    "Validates that group key separators in composite keys are consistent and non-ambiguous.",
+    "SELECT * FROM ts_validate_separator(TABLE(SELECT region, store FROM t), separator='|')",
+    "utilities"},
 
     // ts_stats_by: Compute time series statistics grouped by a unique ID column
     // C++ API: ts_stats_by(table_name, group_col, date_col, value_col, frequency, seasonal_period := 0)

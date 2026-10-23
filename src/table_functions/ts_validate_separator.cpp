@@ -1,13 +1,11 @@
 #include "duckdb_compat.hpp"
 #include "ts_validate_separator.hpp"
+#include "ts_collect_finalize.hpp"  // TsCollectFinalizeBarrier (#285, 20-05)
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
-#include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 #include <set>
 #include <vector>
 #include <mutex>
-#include <atomic>
-#include <thread>
 
 namespace duckdb {
 
@@ -43,10 +41,11 @@ struct TsValidateSeparatorGlobalState : public GlobalTableFunctionState {
     bool processed = false;
     bool output_done = false;
 
-    // Finalize coordination
-    std::atomic<bool> finalize_claimed{false};
-    std::atomic<idx_t> threads_collecting{0};
-    std::atomic<idx_t> threads_done_collecting{0};
+    // Finalize coordination (#285, 20-05: TsCollectFinalizeBarrier; a
+    // single-pipeline input via (SELECT * FROM _ts_passthrough(source)
+    // ORDER BY ALL), supplied by the public ts_validate_separator macro,
+    // guarantees the barrier sees every executor that can hold rows).
+    TsCollectFinalizeBarrier barrier;
 
     idx_t MaxThreads() const override {
         return 1;
@@ -59,8 +58,7 @@ struct TsValidateSeparatorGlobalState : public GlobalTableFunctionState {
 
 struct TsValidateSeparatorLocalState : public LocalTableFunctionState {
     bool owns_finalize = false;
-    bool registered_collector = false;
-    bool registered_finalizer = false;
+    bool arrived_at_final = false;
 };
 
 // ============================================================================
@@ -75,10 +73,13 @@ static unique_ptr<FunctionData> TsValidateSeparatorBind(
 
     auto bind_data = make_uniq<TsValidateSeparatorBindData>();
 
-    // Parse named parameters
+    // Parse named parameters. Skip NULL unconditionally (not just when
+    // kNamedParamsHaveNullDefault): the ts_validate_separator macro
+    // (ts_macros.cpp, #285/20-05) always passes `separator := separator`
+    // explicitly, which is a literal default when the caller omitted it, on
+    // every DuckDB line.
     for (auto &kv : input.named_parameters) {
-        // DuckDB 2.0 passes the typed-NULL default of every parameter the caller left out.
-        if (kNamedParamsHaveNullDefault && kv.second.IsNull()) {
+        if (kv.second.IsNull()) {
             continue;
         }
         if (NameString(kv.first) == "separator") {
@@ -129,6 +130,7 @@ static unique_ptr<LocalTableFunctionState> TsValidateSeparatorInitLocal(
     TableFunctionInitInput &input,
     GlobalTableFunctionState *global_state) {
 
+    global_state->Cast<TsValidateSeparatorGlobalState>().barrier.RegisterLocal();
     return make_uniq<TsValidateSeparatorLocalState>();
 }
 
@@ -144,12 +146,8 @@ static OperatorResultType TsValidateSeparatorInOut(
 
     auto &bind_data = data.bind_data->Cast<TsValidateSeparatorBindData>();
     auto &gstate = data.global_state->Cast<TsValidateSeparatorGlobalState>();
-    auto &lstate = data.local_state->Cast<TsValidateSeparatorLocalState>();
 
-    if (!lstate.registered_collector) {
-        gstate.threads_collecting.fetch_add(1);
-        lstate.registered_collector = true;
-    }
+    gstate.barrier.AssertCollecting("_ts_validate_separator_native");
 
     // Extract batch locally first
     std::set<string> local_batch;
@@ -190,19 +188,18 @@ static OperatorFinalizeResultType TsValidateSeparatorFinalize(
     auto &gstate = data.global_state->Cast<TsValidateSeparatorGlobalState>();
     auto &lstate = data.local_state->Cast<TsValidateSeparatorLocalState>();
 
-    // Barrier + claim: ensure all collecting threads are done before processing
-    if (!lstate.registered_finalizer) {
-        if (lstate.registered_collector)
-            gstate.threads_done_collecting.fetch_add(1);
-        lstate.registered_finalizer = true;
-    }
+    // Last-finalizer claim (ts_collect_finalize.hpp): the local state whose
+    // arrival completes the count of registered local states processes; every
+    // other one finishes at once (no spin-wait).
     if (!lstate.owns_finalize) {
-        bool expected = false;
-        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true))
+        if (lstate.arrived_at_final) {
             return OperatorFinalizeResultType::FINISHED;
+        }
+        lstate.arrived_at_final = true;
+        if (!gstate.barrier.ArriveAtFinal()) {
+            return OperatorFinalizeResultType::FINISHED;
+        }
         lstate.owns_finalize = true;
-        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load())
-            std::this_thread::yield();
     }
 
     if (gstate.output_done) {
@@ -269,8 +266,13 @@ static OperatorFinalizeResultType TsValidateSeparatorFinalize(
 // ============================================================================
 
 void RegisterTsValidateSeparatorFunction(ExtensionLoader &loader) {
-    // Function with TABLE parameter and named parameters
-    TableFunction func("ts_validate_separator",
+    // Renamed native (#285, 20-05). The public name `ts_validate_separator` is
+    // now a ts_table_macros[] entry (ts_macros.cpp) that feeds this function a
+    // single-pipeline input via (SELECT * FROM _ts_passthrough(source) ORDER
+    // BY ALL), so a UNION ALL source is read in full instead of a partial
+    // distinct-value set. Signature and output columns are unchanged; the
+    // description, example and category live on the macro entry.
+    TableFunction func("_ts_validate_separator_native",
                        {LogicalType::TABLE},
                        nullptr,
                        TsValidateSeparatorBind,
@@ -284,15 +286,7 @@ void RegisterTsValidateSeparatorFunction(ExtensionLoader &loader) {
     func.in_out_function = TsValidateSeparatorInOut;
     func.in_out_function_final = TsValidateSeparatorFinalize;
 
-    {
-        CreateTableFunctionInfo info(func);
-        FunctionDescription desc;
-        desc.description = "Validates that group key separators in composite keys are consistent and non-ambiguous.";
-        desc.examples = {"SELECT * FROM ts_validate_separator(TABLE(SELECT region, store FROM t), separator='|')"};
-        desc.categories = {"time-series", "utilities"};
-        info.descriptions.push_back(std::move(desc));
-        loader.RegisterFunction(std::move(info));
-    }
+    loader.RegisterFunction(func);
 }
 
 } // namespace duckdb

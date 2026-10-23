@@ -812,3 +812,145 @@ query I
 SELECT count(*) FROM (SELECT * FROM ts_forecast_by('sv', id, ds, y, 'Theta', 7, '1d', params := MAP{'seasonal_period': '7'}) EXCEPT ALL SELECT * FROM ts_forecast_by('ut', id, ds, y, 'Theta', 7, '1d', params := MAP{'seasonal_period': '7'}));
 ----
 0
+
+# =============================================================================
+# 20-05: ts_aggregate_hierarchy, ts_split_keys and ts_validate_separator
+# (#285 scope expansion, decisions_addendum_2). Same recipe as the metric
+# macros: (SELECT * FROM _ts_passthrough(source) ORDER BY ALL) on the renamed
+# native's input, plus TsCollectFinalizeBarrier. Fixture: 3 leaf series
+# (region|store|item, 2 regions, 2 stores) x 20 days; the UNION ALL view keeps
+# days 0..9 and days 10..19 (both branches non-empty, 30 rows each).
+# =============================================================================
+
+statement ok
+CREATE TABLE hsales AS SELECT (DATE '2024-01-01' + INTERVAL (i) DAY) AS dt, 10.0 + i AS qty, region, store, item FROM (VALUES ('EU', 'S1', 'A'), ('EU', 'S1', 'B'), ('US', 'S2', 'C')) t(region, store, item), range(20) r(i);
+
+statement ok
+CREATE VIEW huv AS SELECT * FROM hsales WHERE dt < DATE '2024-01-11' UNION ALL SELECT * FROM hsales WHERE dt >= (SELECT min(dt) FROM hsales WHERE dt >= DATE '2024-01-11');
+
+statement ok
+CREATE TABLE hut AS SELECT * FROM huv;
+
+statement ok
+CREATE VIEW hrv AS SELECT * FROM hut ORDER BY region DESC, store DESC, item DESC, dt DESC;
+
+statement ok
+CREATE VIEW hsv AS SELECT * FROM hut ORDER BY hash(region, store, item, dt);
+
+query I
+SELECT count(*) FROM huv;
+----
+60
+
+# ts_aggregate_hierarchy: grand total + 2 regions + 2 region|store + 3 leaves
+# = 8 unique_ids x 20 dates = 160 rows on every shape (was a partial count on
+# `huv` pre-fix, a collect-then-finalize native without the breaker).
+query II
+SELECT count(*), count(DISTINCT unique_id) FROM ts_aggregate_hierarchy((SELECT dt, qty, region, store, item FROM huv), MAP{});
+----
+160	8
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_aggregate_hierarchy((SELECT dt, qty, region, store, item FROM huv), MAP{}) EXCEPT ALL SELECT * FROM ts_aggregate_hierarchy((SELECT dt, qty, region, store, item FROM hut), MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_aggregate_hierarchy((SELECT dt, qty, region, store, item FROM hut), MAP{}) EXCEPT ALL SELECT * FROM ts_aggregate_hierarchy((SELECT dt, qty, region, store, item FROM huv), MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_aggregate_hierarchy((SELECT dt, qty, region, store, item FROM hrv), MAP{}) EXCEPT ALL SELECT * FROM ts_aggregate_hierarchy((SELECT dt, qty, region, store, item FROM hut), MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_aggregate_hierarchy((SELECT dt, qty, region, store, item FROM hut), MAP{}) EXCEPT ALL SELECT * FROM ts_aggregate_hierarchy((SELECT dt, qty, region, store, item FROM hrv), MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_aggregate_hierarchy((SELECT dt, qty, region, store, item FROM hsv), MAP{}) EXCEPT ALL SELECT * FROM ts_aggregate_hierarchy((SELECT dt, qty, region, store, item FROM hut), MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_aggregate_hierarchy((SELECT dt, qty, region, store, item FROM hut), MAP{}) EXCEPT ALL SELECT * FROM ts_aggregate_hierarchy((SELECT dt, qty, region, store, item FROM hsv), MAP{}));
+----
+0
+
+# ts_split_keys: unique_id = region|store|item split back into 3 parts; 60
+# rows on every shape (was a partial count pre-fix).
+query II
+SELECT count(*), count(DISTINCT id_part_1) FROM ts_split_keys((SELECT region || '|' || store || '|' || item AS unique_id, dt, qty FROM huv));
+----
+60	2
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_split_keys((SELECT region || '|' || store || '|' || item AS unique_id, dt, qty FROM huv)) EXCEPT ALL SELECT * FROM ts_split_keys((SELECT region || '|' || store || '|' || item AS unique_id, dt, qty FROM hut)));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_split_keys((SELECT region || '|' || store || '|' || item AS unique_id, dt, qty FROM hut)) EXCEPT ALL SELECT * FROM ts_split_keys((SELECT region || '|' || store || '|' || item AS unique_id, dt, qty FROM huv)));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_split_keys((SELECT region || '|' || store || '|' || item AS unique_id, dt, qty FROM hrv)) EXCEPT ALL SELECT * FROM ts_split_keys((SELECT region || '|' || store || '|' || item AS unique_id, dt, qty FROM hut)));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_split_keys((SELECT region || '|' || store || '|' || item AS unique_id, dt, qty FROM hut)) EXCEPT ALL SELECT * FROM ts_split_keys((SELECT region || '|' || store || '|' || item AS unique_id, dt, qty FROM hrv)));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_split_keys((SELECT region || '|' || store || '|' || item AS unique_id, dt, qty FROM hsv)) EXCEPT ALL SELECT * FROM ts_split_keys((SELECT region || '|' || store || '|' || item AS unique_id, dt, qty FROM hut)));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_split_keys((SELECT region || '|' || store || '|' || item AS unique_id, dt, qty FROM hut)) EXCEPT ALL SELECT * FROM ts_split_keys((SELECT region || '|' || store || '|' || item AS unique_id, dt, qty FROM hsv)));
+----
+0
+
+# ts_validate_separator: all 3 columns are ID columns; distinct values counted
+# across the whole source, not just one UNION branch (was a partial distinct
+# set pre-fix). No '|' in region/store/item, so is_valid = true, n_conflicts = 0.
+query II
+SELECT is_valid, n_conflicts FROM ts_validate_separator((SELECT region, store, item FROM huv));
+----
+true	0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_validate_separator((SELECT region, store, item FROM huv)) EXCEPT ALL SELECT * FROM ts_validate_separator((SELECT region, store, item FROM hut)));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_validate_separator((SELECT region, store, item FROM hut)) EXCEPT ALL SELECT * FROM ts_validate_separator((SELECT region, store, item FROM huv)));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_validate_separator((SELECT region, store, item FROM hrv)) EXCEPT ALL SELECT * FROM ts_validate_separator((SELECT region, store, item FROM hut)));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_validate_separator((SELECT region, store, item FROM hut)) EXCEPT ALL SELECT * FROM ts_validate_separator((SELECT region, store, item FROM hrv)));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_validate_separator((SELECT region, store, item FROM hsv)) EXCEPT ALL SELECT * FROM ts_validate_separator((SELECT region, store, item FROM hut)));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_validate_separator((SELECT region, store, item FROM hut)) EXCEPT ALL SELECT * FROM ts_validate_separator((SELECT region, store, item FROM hsv)));
+----
+0

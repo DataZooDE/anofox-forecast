@@ -1,15 +1,13 @@
 #include "duckdb_compat.hpp"
 #include "ts_aggregate_hierarchy.hpp"
+#include "ts_collect_finalize.hpp"  // TsCollectFinalizeBarrier (#285, 20-05)
 #include "ts_fill_gaps_native.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
-#include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 #include <algorithm>
 #include <map>
 #include <vector>
 #include <mutex>
-#include <atomic>
-#include <thread>
 
 namespace duckdb {
 
@@ -80,10 +78,11 @@ struct TsAggregateHierarchyGlobalState : public GlobalTableFunctionState {
     idx_t current_result = 0;
     bool processed = false;
 
-    // Finalize coordination
-    std::atomic<bool> finalize_claimed{false};
-    std::atomic<idx_t> threads_collecting{0};
-    std::atomic<idx_t> threads_done_collecting{0};
+    // Finalize coordination (#285, 20-05: TsCollectFinalizeBarrier; a
+    // single-pipeline input via (SELECT * FROM _ts_passthrough(source)
+    // ORDER BY ALL), supplied by the public ts_aggregate_hierarchy macro,
+    // guarantees the barrier sees every executor that can hold rows).
+    TsCollectFinalizeBarrier barrier;
 
     idx_t MaxThreads() const override {
         return 1;
@@ -96,8 +95,7 @@ struct TsAggregateHierarchyGlobalState : public GlobalTableFunctionState {
 
 struct TsAggregateHierarchyLocalState : public LocalTableFunctionState {
     bool owns_finalize = false;
-    bool registered_collector = false;
-    bool registered_finalizer = false;
+    bool arrived_at_final = false;
 };
 
 // ============================================================================
@@ -239,6 +237,7 @@ static unique_ptr<LocalTableFunctionState> TsAggregateHierarchyInitLocal(
     TableFunctionInitInput &input,
     GlobalTableFunctionState *global_state) {
 
+    global_state->Cast<TsAggregateHierarchyGlobalState>().barrier.RegisterLocal();
     return make_uniq<TsAggregateHierarchyLocalState>();
 }
 
@@ -254,12 +253,8 @@ static OperatorResultType TsAggregateHierarchyInOut(
 
     auto &bind_data = data.bind_data->Cast<TsAggregateHierarchyBindData>();
     auto &gstate = data.global_state->Cast<TsAggregateHierarchyGlobalState>();
-    auto &lstate = data.local_state->Cast<TsAggregateHierarchyLocalState>();
 
-    if (!lstate.registered_collector) {
-        gstate.threads_collecting.fetch_add(1);
-        lstate.registered_collector = true;
-    }
+    gstate.barrier.AssertCollecting("_ts_aggregate_hierarchy_native");
 
     // Extract batch locally first
     vector<TsAggHierRowData> local_batch;
@@ -329,19 +324,18 @@ static OperatorFinalizeResultType TsAggregateHierarchyFinalize(
     auto &gstate = data.global_state->Cast<TsAggregateHierarchyGlobalState>();
     auto &lstate = data.local_state->Cast<TsAggregateHierarchyLocalState>();
 
-    // Barrier + claim: ensure all collecting threads are done before processing
-    if (!lstate.registered_finalizer) {
-        if (lstate.registered_collector)
-            gstate.threads_done_collecting.fetch_add(1);
-        lstate.registered_finalizer = true;
-    }
+    // Last-finalizer claim (ts_collect_finalize.hpp): the local state whose
+    // arrival completes the count of registered local states processes; every
+    // other one finishes at once (no spin-wait).
     if (!lstate.owns_finalize) {
-        bool expected = false;
-        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true))
+        if (lstate.arrived_at_final) {
             return OperatorFinalizeResultType::FINISHED;
+        }
+        lstate.arrived_at_final = true;
+        if (!gstate.barrier.ArriveAtFinal()) {
+            return OperatorFinalizeResultType::FINISHED;
+        }
         lstate.owns_finalize = true;
-        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load())
-            std::this_thread::yield();
     }
 
     if (!gstate.processed) {
@@ -448,8 +442,13 @@ static OperatorFinalizeResultType TsAggregateHierarchyFinalize(
 // ============================================================================
 
 void RegisterTsAggregateHierarchyFunction(ExtensionLoader &loader) {
-    // Single function with positional TABLE and MAP{} parameters
-    TableFunction func("ts_aggregate_hierarchy",
+    // Renamed native (#285, 20-05). The public name `ts_aggregate_hierarchy` is
+    // now a ts_table_macros[] entry (ts_macros.cpp) that feeds this function a
+    // single-pipeline input via (SELECT * FROM _ts_passthrough(source) ORDER BY
+    // ALL), so a UNION ALL source is read in full instead of silently
+    // truncated. Signature and output columns are unchanged; the description,
+    // example and category live on the macro entry.
+    TableFunction func("_ts_aggregate_hierarchy_native",
                        {LogicalType::TABLE, LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR)},
                        nullptr,
                        TsAggregateHierarchyBind,
@@ -460,15 +459,7 @@ void RegisterTsAggregateHierarchyFunction(ExtensionLoader &loader) {
     func.in_out_function = TsAggregateHierarchyInOut;
     func.in_out_function_final = TsAggregateHierarchyFinalize;
 
-    {
-        CreateTableFunctionInfo info(func);
-        FunctionDescription desc;
-        desc.description = "Aggregates time series data up through a hierarchy of group keys, rolling up lower-level series to higher levels.";
-        desc.examples = {"SELECT * FROM ts_aggregate_hierarchy(TABLE(SELECT date, value, region, store, item FROM t), MAP {'separator': '|'})"};
-        desc.categories = {"time-series", "hierarchical"};
-        info.descriptions.push_back(std::move(desc));
-        loader.RegisterFunction(std::move(info));
-    }
+    loader.RegisterFunction(func);
 }
 
 } // namespace duckdb

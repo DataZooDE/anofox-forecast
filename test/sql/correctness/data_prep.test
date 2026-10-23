@@ -179,6 +179,51 @@ statement ok
 DROP TABLE hier_nulls;
 
 # =============================================================================
+# ts_aggregate_hierarchy on a UNION ALL source (#285, decisions_addendum_2,
+# 20-05): the collect-then-finalize native was silently truncating to one
+# UNION branch. Fixed via a table macro over a renamed native that reads its
+# source through (SELECT * FROM _ts_passthrough(source) ORDER BY ALL); full
+# UNION/reversed/shuffled pins live in test/sql/correctness/union_source.test.
+# =============================================================================
+
+statement ok
+CREATE TABLE hier_union_base AS SELECT * FROM (VALUES
+    ('EU', 'S1', 'A', DATE '2024-01-01', 10.0),
+    ('EU', 'S1', 'A', DATE '2024-01-02', 20.0),
+    ('US', 'S2', 'B', DATE '2024-01-01', 30.0),
+    ('US', 'S2', 'B', DATE '2024-01-02', 40.0)
+) AS t(region, store, item, ds, qty);
+
+statement ok
+CREATE VIEW hier_union_v AS
+SELECT region, store, item, ds, qty FROM hier_union_base WHERE ds = DATE '2024-01-01'
+UNION ALL
+SELECT region, store, item, ds, qty FROM hier_union_base WHERE ds = DATE '2024-01-02';
+
+# Grand total across both UNION branches and both leaves: 10+20+30+40 = 100.
+query R
+SELECT sum(qty) FROM ts_aggregate_hierarchy(
+    (SELECT ds, qty, region, store, item FROM hier_union_v), MAP{}
+) WHERE unique_id = 'AGGREGATED|AGGREGATED|AGGREGATED';
+----
+100.0
+
+query I
+SELECT count(*) FROM (
+    SELECT * FROM ts_aggregate_hierarchy((SELECT ds, qty, region, store, item FROM hier_union_v), MAP{})
+    EXCEPT ALL
+    SELECT * FROM ts_aggregate_hierarchy((SELECT ds, qty, region, store, item FROM hier_union_base), MAP{})
+);
+----
+0
+
+statement ok
+DROP VIEW hier_union_v;
+
+statement ok
+DROP TABLE hier_union_base;
+
+# =============================================================================
 # ts_interval_width_by / ts_mean_interval_width: pairwise-complete mean
 # interval width (cited from ts_conformal_reference.test 16-01).
 # =============================================================================
