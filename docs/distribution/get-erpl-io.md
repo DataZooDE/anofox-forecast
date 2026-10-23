@@ -149,4 +149,106 @@ Every object uploaded under the versioned-tree key layout (`<name>/<ext_version>
    ```
    Then, in a browser or DuckDB-Wasm Node session: `FORCE INSTALL anofox_forecast FROM 'https://get.erpl.io';` and confirm it loads and `ts_forecast_by` runs.
 
-Plan 19-04 adds the `wasm_mvp` decision-record section (DIST-03) and files the #272 comment linking to this document; neither is in this plan's scope.
+## wasm_mvp status (DIST-03)
+
+**Date:** 2026-10-23
+**Artifact provenance:** both `wasm_mvp` and `wasm_eh` artifacts are the official build-job outputs of branch CI run [`39879822323`](https://github.com/DataZooDE/anofox-forecast/actions/runs/39879822323) (commit `611b1fd9e88d9a15ceda19b8c0d789fc1b0270b3`, conclusion `success`), downloaded via `gh run download 39879822323 -n anofox_forecast-v1.5.6-extension-wasm_mvp` / `-wasm_eh`. All measurements below were additionally cross-checked against a `wasm_mvp` artifact built locally from commit `3d2cd48` (one commit behind HEAD; `git diff 3d2cd48 611b1fd` touches only `.planning/`, `test/wasm/run.mjs`'s skip-list wording, and `test/wasm/README.md` -- no `src/`, `crates/`, or `CMakeLists.txt` changes) -- both sources produced byte-identical totals (482/0/0 curated, 3604/49/0 `--all`, 188 `_setThrew` occurrences), ruling out a build-environment artifact as the explanation for any of the findings below. Harness: `node test/wasm/run.mjs --bundle mvp`, `@duckdb/duckdb-wasm` 1.33.1-dev65.0 (engine v1.5.6).
+
+### LOAD verdict
+
+`FORCE INSTALL anofox_forecast FROM <local server>; LOAD anofox_forecast;` succeeds on `wasm_mvp` -- confirmed via `DuckDB-Wasm bundle: mvp` followed by `LOAD anofox_forecast succeeded` in every run below. The `#272` issue comment's "fails to LOAD" framing does not hold against a correctly-signed artifact (the originally-reported LOAD failure was most likely confounded by the separate DIST-01 double-signature bug, fixed in 19-02 -- see "mvp vs. the pre-DIST-01-fix production artifact" below).
+
+### Curated subset (10 files) vs. `--all` (94 files)
+
+| Run | Files | Passed | Failed | Skipped | `_setThrew` console occurrences |
+|-----|-------|--------|--------|---------|----------------------------------|
+| `mvp`, curated | 10 | 482 | 0 | 0 | 10 |
+| `mvp`, `--all` | 94 | 3604 | 49 | 0 | 188 (187 with a captured stack; 3 distinct stack signatures) |
+| `eh`, `--all` | 94 | 3604 | 49 | 0 | 0 |
+
+### mvp-only failures
+
+**None.** `mvp --all` and `eh --all` produce byte-identical per-file pass/fail/skip counts and the identical 12-file failing-file list (`diff` of the two per-file result listings is empty). The 49 failures on both bundles are the pre-existing, already-tracked WASM test-suite debt documented in `test/wasm/README.md`'s "Known failures" section (stale API references, cascade failures, `DATE + BIGINT` test bugs) plus the pre-existing calendar-frequency `_ts_fill_forward_native` WASM bug (19-RESEARCH.md Pitfall 1) -- none are new, and none are caused by the `_setThrew` reference.
+
+### `_setThrew` count and triggering statements
+
+188 occurrences across 40 of the 94 `--all` files (`ts_diagnostics.test`, `ts_conformal_*.test`, `ts_cv_*.test`, `ts_forecast_*.test`, and others spanning most of the extension's functional breadth -- not confined to one function family). Running any one of these files **in isolation** (e.g. `--file test/sql/ts_diagnostics.test`, `--file test/sql/ts_conformal.test`) reproduces **zero** occurrences -- the trigger depends on accumulated runtime/call-table state built up over the course of the `--all` run, not on a single, isolatable SQL statement. Only 3 distinct JS stack signatures occur across all 188 occurrences (same `invoke_ii`/`invoke_vii`/`invoke_viiii`/`invoke_viii` chains and the same `wasm-function[N]` indices every time), e.g.:
+
+```
+ReferenceError: _setThrew is not defined
+    at invoke_ii (.../duckdb-node-mvp.worker.cjs:38:101785)
+    at wasm://wasm/09e0d7fa:wasm-function[34349]:0x1a65350
+    at invoke_vii (.../duckdb-node-mvp.worker.cjs:38:101870)
+    at wasm://wasm/09e0d7fa:wasm-function[34342]:0x1a64feb
+    at invoke_vii (.../duckdb-node-mvp.worker.cjs:38:101870)
+    at wasm://wasm/09e0d7fa:wasm-function[8694]:0xc59844
+    at invoke_vii (.../duckdb-node-mvp.worker.cjs:38:101870)
+    at wasm://wasm/09e0d7fa:wasm-function[28269]:0x179ba36
+    at invoke_viiii (.../duckdb-node-mvp.worker.cjs:38:102151)
+    at wasm://wasm/09e0d7fa:wasm-function[28305]:0x17a2187
+```
+Both the release build of DuckDB core (the main module) and of this extension (the side module) are compiled with symbols stripped, so no frame in any of the 3 signatures resolves to a named DuckDB-core, this-extension-C++, or this-extension-Rust symbol -- the stack trace alone cannot attribute the call to one side with certainty. The console error is emitted from inside the Worker thread's own exception-reporting path and is asynchronous with respect to the query call that was in flight: the main-thread `await conn.query(...)` promise that was running at the time still resolves with the correct result in every one of the 188 cases (confirmed by the 0-failure totals above), consistent with the error firing on a trampoline invocation whose result was never actually needed by the SQL statement that happened to be executing, or with DuckDB's own exception handling recovering at a layer above the broken JS shim before the result reaches the caller.
+
+### Four-check root-cause investigation (time-boxed per CONTEXT #272 decision 3)
+
+1. **`WebAssembly.Module.imports` of the `mvp` and `eh` extension artifacts**, filtered to `invoke_*`/`setThrew`/`__cxa_*`/`getTempRet0`/`setTempRet0`/`longjmp`/`setjmp`: both artifacts import the same large `invoke_*` family (120+ signatures), `__cxa_allocate_exception`/`__cxa_throw`/`__cxa_begin_catch`/`__cxa_end_catch`/`__cxa_find_matching_catch_2`/`_4`, `getTempRet0`/`setTempRet0`, and `GOT.func.__cxa_pure_virtual`. **Neither artifact imports `setThrew`/`_setThrew` directly** -- the extension itself never references it; the import is resolved transitively through the host's own `invoke_*` wrapper implementations, which are JS, not WASM, functions.
+2. **`WebAssembly.Module.exports` of `duckdb-mvp.wasm`/`duckdb-eh.wasm`** (the `@duckdb/duckdb-wasm` npm package's own compiled main modules), filtered to `setThrew`: **both** main modules export a WASM function named `setThrew` (plus `getTempRet0`/`setTempRet0`). Grepping both `duckdb-node-mvp.worker.cjs` and `duckdb-node-eh.worker.cjs` for the `invoke_*` trampoline bodies confirms every one of them calls a bare `_setThrew(1,0)` (346 occurrences of the literal `_setThrew` in each file) -- but **neither file contains an assignment, `var` declaration, or `function` declaration for `_setThrew` anywhere** (`grep -o '_setThrew=[^,;)]*'` and `grep -o 'function _setThrew'` both return nothing in both files). The compiled main module exports a WASM function literally named `setThrew`, but the JS glue that ships in the `@duckdb/duckdb-wasm` npm package never binds that export to the global `_setThrew` identifier its own generated `invoke_*` wrappers call. **This gap exists identically in both bundles** -- it is latent/unreachable in `eh` because `eh`'s own compiled code uses native Wasm exception handling (`-fwasm-exceptions`) for the call sites a normal SQL error path exercises, so the broken JS `invoke_*`/`_setThrew` path is never actually invoked; `mvp` has no native Wasm EH at all, so any call that needs this path hits the undefined global.
+3. **JS stack for one occurrence, and which side it is on:** captured above. Inconclusive on attribution (symbols stripped on both sides, as noted), but the 3-signature invariance across 40 functionally unrelated test files, and the fact that isolating any single triggering file to a standalone run makes the error disappear, both point away from anything specific to this extension's own ts_* functions and toward a structural, generic code path inside DuckDB-Wasm's own cross-module call/exception-dispatch machinery.
+4. **`rustc +1.86.0 --print cfg --target wasm32-unknown-emscripten`** (panic strategy): `panic="unwind"` (the Rust toolchain default for this target; this repository does not override it in `Cargo.toml`). **This repository's own `CMakeLists.txt` and `extension_config.cmake` set no exception-handling-related C++ flags for WASM** (`grep -i 'exception\|panic\|-fwasm-exceptions'` over both returns nothing) -- the `mvp`/`eh` asymmetry (`WASM_CXX_MVP_FLAGS=` empty vs. `WASM_CXX_EH_FLAGS=-fwasm-exceptions -DWEBDB_FAST_EXCEPTIONS=1`) is set entirely by `duckdb/extension-ci-tools`' own `makefiles/duckdb_extension.Makefile`, not by anything in this repository.
+
+Classification: upstream
+
+The undefined `_setThrew` global is a defect in the `@duckdb/duckdb-wasm` npm package's own compiled JS glue (both `duckdb-node-mvp.worker.cjs` and `duckdb-node-eh.worker.cjs` reference it without ever binding it to the main module's own `setThrew` WASM export), not in anything this repository's `CMakeLists.txt`, `extension_config.cmake`, or Rust/C++ source controls. No change available in this repository removes the gap -- the `mvp`/`eh` compile-flag asymmetry that determines whether the gap is reachable is itself owned entirely by `duckdb/extension-ci-tools`, and even a hypothetical Rust `panic="abort"` override (which would weaken this crate's own `catch_unwind`-based panic safety at the FFI boundary -- a correctness regression, not a fix) would not touch the DuckDB-core-side call paths that trigger it, since DuckDB core's own C++ exception handling is unaffected by this repository's Rust panic strategy.
+
+### Drafted upstream issue (for the owner to file against `duckdb/duckdb-wasm`; not filed by this phase)
+
+**Title:** `mvp bundle: invoke_* trampolines call an unbound global _setThrew when a dynamically-loaded extension crosses the exception boundary`
+
+**Body:**
+```
+Environment: @duckdb/duckdb-wasm 1.33.1-dev65.0 (bundles DuckDB engine v1.5.6),
+Node.js v24+, mvp bundle (duckdb-mvp.wasm + duckdb-node-mvp.worker.cjs).
+
+Reproduction: LOAD any dynamically-loaded (side-module) DuckDB extension that is
+itself compiled without native Wasm exception handling (the standard
+extension-ci-tools `wasm_mvp` target: WASM_CXX_MVP_FLAGS is empty, no
+-fwasm-exceptions). Run any SQL statement sequence long/varied enough to
+exercise an indirect call that can throw across the main-module/side-module
+boundary (reliably reproduced via sqllogictest files exercising
+diagnostics/conformal/CV/forecast error paths; not reproducible by running any
+single triggering file in isolation -- requires accumulated call-table state
+from a longer run).
+
+Observed: `ReferenceError: _setThrew is not defined` thrown from inside the
+package's own generated invoke_* wrapper functions in
+dist/duckdb-node-mvp.worker.cjs, e.g.:
+
+  function invoke_vii(index,a1,a2){var sp=stackSave();try{getWasmTableEntry(index)(a1,a2)}
+  catch(e){stackRestore(sp);if(e!==e+0)throw e;_setThrew(1,0)}}
+
+_setThrew is referenced ~346 times in this file (and identically in
+duckdb-node-eh.worker.cjs) but is never declared (no `var _setThrew`, no
+`function _setThrew`) or bound to the compiled module's own `setThrew` WASM
+export anywhere in the bundled JS.
+
+Evidence the export exists but is never wired up:
+  node -e "console.log(WebAssembly.Module.exports(new WebAssembly.Module(
+    require('fs').readFileSync('dist/duckdb-mvp.wasm'))).filter(e=>e.name==='setThrew'))"
+  -> [ { name: 'setThrew', kind: 'function' } ]   (the export exists)
+
+  grep -o '_setThrew=[^,;)]*' dist/duckdb-node-mvp.worker.cjs
+  grep -o 'function _setThrew' dist/duckdb-node-mvp.worker.cjs
+  -> both empty (the export is never assigned to the JS global the invoke_*
+     wrappers call)
+
+Impact: in the eh bundle this is latent/unreachable because the eh bundle's
+own compiled code uses native Wasm exception handling for the call sites a
+normal SQL error path exercises. The mvp bundle has no native Wasm EH, so any
+call needing this JS-level path hits the undefined global. In our testing
+this was non-fatal and asynchronous with respect to the in-flight query (the
+query's own result was unaffected in every observed case), but it is
+user-visible console noise and may be fatal in other call orderings we have
+not characterized.
+```
+
+Plan 19-04 adds this `wasm_mvp` decision-record section (DIST-03) and files the #272 comment linking to this document; neither is in this plan's scope.

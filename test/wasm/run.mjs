@@ -13,8 +13,14 @@
 //   - serve the built .wasm over localhost and FORCE INSTALL ... FROM it
 //
 // Usage:
-//   node run.mjs [--ext <path-to-.duckdb_extension.wasm>] [--all] [--file <t.test> ...]
-//   ANOFOX_WASM_EXT=<path> node run.mjs
+//   node run.mjs [--ext <path-to-.duckdb_extension.wasm>] [--bundle eh|mvp] [--all] [--file <t.test> ...]
+//   ANOFOX_WASM_EXT=<path> ANOFOX_WASM_BUNDLE=<eh|mvp> node run.mjs
+//
+// --bundle / ANOFOX_WASM_BUNDLE selects which @duckdb/duckdb-wasm bundle boots
+// the engine (eh: exception-handling, the default; mvp: minimal viable
+// product -- see test/wasm/README.md's "wasm_mvp status (DIST-03)" section
+// in docs/distribution/get-erpl-io.md for why this exists and what it found).
+// An unrecognized value exits 1 before booting anything.
 //
 // Exit code 0 on success; non-zero on any load or assertion failure.
 
@@ -77,10 +83,16 @@ const CURATED = [
 ];
 
 function parseArgs(argv) {
-  const args = { ext: process.env.ANOFOX_WASM_EXT || null, all: false, files: [] };
+  const args = {
+    ext: process.env.ANOFOX_WASM_EXT || null,
+    bundle: process.env.ANOFOX_WASM_BUNDLE || 'eh',
+    all: false,
+    files: [],
+  };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--ext') args.ext = argv[++i];
+    else if (a === '--bundle') args.bundle = argv[++i];
     else if (a === '--all') args.all = true;
     else if (a === '--file') args.files.push(argv[++i]);
     else if (a.endsWith('.test')) args.files.push(a);
@@ -150,18 +162,23 @@ function startServer(extPath) {
   });
 }
 
-async function bootEngine() {
+const VALID_BUNDLES = new Set(['eh', 'mvp']);
+
+async function bootEngine(bundle) {
+  if (!VALID_BUNDLES.has(bundle)) {
+    throw new Error(`unknown --bundle/ANOFOX_WASM_BUNDLE value: ${bundle} (expected eh or mvp)`);
+  }
   const duckdb = require('@duckdb/duckdb-wasm/dist/duckdb-node.cjs');
   const Worker = require('web-worker');
   const DIST = path.dirname(require.resolve('@duckdb/duckdb-wasm/dist/duckdb-node.cjs'));
 
-  const mainModule = path.join(DIST, 'duckdb-eh.wasm');
-  const mainWorker = path.join(DIST, 'duckdb-node-eh.worker.cjs');
+  const mainModule = path.join(DIST, `duckdb-${bundle}.wasm`);
+  const mainWorker = path.join(DIST, `duckdb-node-${bundle}.worker.cjs`);
 
   const worker = new Worker(mainWorker);
   const logger = { log() {} }; // silence per-query engine logs; we report ourselves
   const db = new duckdb.AsyncDuckDB(logger, worker);
-  await db.instantiate(mainModule, null); // pthreadWorker MUST be null for eh
+  await db.instantiate(mainModule, null); // pthreadWorker MUST be null for eh/mvp
   await db.open({ allowUnsignedExtensions: true });
   return { db, worker };
 }
@@ -184,10 +201,18 @@ async function main() {
   const args = parseArgs(process.argv);
   const log = (s) => process.stdout.write(s + '\n');
 
+  if (!VALID_BUNDLES.has(args.bundle)) {
+    process.stderr.write(
+      `✗ HARNESS ERROR: unknown --bundle/ANOFOX_WASM_BUNDLE value: ${args.bundle} (expected eh or mvp)\n`,
+    );
+    process.exit(1);
+  }
+
   log('━━━ anofox_forecast — DuckDB-Wasm harness ━━━');
 
   const extPath = findExtension(args.ext);
   log(`Extension artifact: ${path.relative(REPO_ROOT, extPath)}`);
+  log(`DuckDB-Wasm bundle: ${args.bundle}`);
 
   const { server, port } = await startServer(extPath);
   const base = `http://127.0.0.1:${port}`;
@@ -195,7 +220,7 @@ async function main() {
   let engine;
   let failedHard = false;
   try {
-    engine = await bootEngine();
+    engine = await bootEngine(args.bundle);
     const conn = await engine.db.connect();
 
     let version = 'unknown';

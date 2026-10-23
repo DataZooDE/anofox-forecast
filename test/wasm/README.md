@@ -84,6 +84,10 @@ v1.5.6 wasm_eh artifact to the v2.0.0 line together.
    storage-version list embedded in `duckdb-eh.wasm` is the authoritative source.
 3. Update `dependencies` in `package.json`, run `npm --prefix test/wasm install`
    to regenerate `package-lock.json`, add a row to the table above, and commit.
+4. Also bump `WASM_HARNESS_ENGINE` in `scripts/verify-wasm-artifact.sh` (the
+   post-upload check, #272 DIST-02) and re-verify `test/wasm/post_upload_smoke.test`
+   still passes against a freshly built artifact on the new engine version
+   before relying on the post-upload gate again.
 
 ## Running modes
 
@@ -93,6 +97,7 @@ v1.5.6 wasm_eh artifact to the v2.0.0 line together.
 | `node run.mjs --all`             | All 66 `.test` files under `test/sql/`                 |
 | `node run.mjs --file <f.test>`   | Single named file (relative to repo root)              |
 | `node run.mjs --ext <path>`      | Override the artifact path (also: `ANOFOX_WASM_EXT`)  |
+| `node run.mjs --bundle mvp`      | Boot the `mvp` DuckDB-Wasm bundle instead of the default `eh` (also: `ANOFOX_WASM_BUNDLE`). An unrecognized value exits 1 before booting anything. See the "wasm_mvp status (DIST-03)" section of `docs/distribution/get-erpl-io.md` for why this exists and what it found. |
 
 Exit code 0 on success, 1 on any assertion failure or harness error.
 
