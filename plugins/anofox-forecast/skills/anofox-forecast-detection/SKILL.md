@@ -197,7 +197,7 @@ identical inputs and params**; all defaults below are unchanged since before Pha
 |---|---|---|
 | `hazard_lambda` | 250.0 | Expected run length between changepoints. Lower → more changepoints (and more false alarms) |
 | `threshold` | unset | When set (`[0, 1]`), `is_changepoint = (changepoint_probability >= threshold)` for every row **after the first** of each series — the first row is never flagged. When unset, the existing MAP run-length-reset heuristic applies. Out-of-range/non-numeric throws, naming `threshold` |
-| `deseasonalize` | `false` | Strict bool (`true`/`false`/`1`/`0`). When `true`, removes the STL seasonal component at `seasonal_period` (or auto-detected) AND a linear trend before BOCPD (D1-b) — level shifts survive as steps, regular seasonal cycles stop producing changepoints. **Opt-in only**; defaults unaffected. Invalid value throws, naming `deseasonalize` |
+| `deseasonalize` | `false` | Strict bool (`true`/`false`/`1`/`0`). When `true`, removes the STL seasonal component at `seasonal_period` (or auto-detected) AND a linear trend before BOCPD (D1-b) — level shifts survive as steps, regular seasonal cycles stop producing changepoints. When `true` and `threshold` is unset, the effective threshold defaults to `0.5` instead of the MAP run-length-reset heuristic (CR-02) — an explicit `threshold` always wins. **Opt-in only**; defaults with `deseasonalize` unset/`false` are unaffected. Invalid value throws, naming `deseasonalize` |
 | `seasonal_period` | `0` (auto) | Strict non-negative integer; only consulted when `deseasonalize` is `true`. Negative/non-numeric throws, naming `seasonal_period` |
 
 Returns one row per input point with `<group_col>`, `<date_col>`, `is_changepoint BOOLEAN`,
@@ -211,10 +211,12 @@ FROM ts_detect_changepoints_by('sales', product_id, ds, y,
     MAP{'hazard_lambda': '100'})
 WHERE is_changepoint;
 
--- Ignore a weekly cycle, flag only a genuine sustained level shift (#287, D1-b)
+-- Ignore a weekly cycle, flag only a genuine sustained level shift (#287, D1-b).
+-- threshold unset here defaults to an effective 0.5 (CR-02) -- pass 'threshold': '0.5'
+-- explicitly for the identical result, or a different value to override it.
 SELECT product_id, ds, is_changepoint
 FROM ts_detect_changepoints_by('sales', product_id, ds, y,
-    MAP{'deseasonalize': 'true', 'threshold': '0.5'})
+    MAP{'deseasonalize': 'true'})
 WHERE is_changepoint;
 ```
 

@@ -726,6 +726,19 @@ impl Default for ChangepointOptions {
 /// (the default) leaves `values` unchanged -- defaults stay byte-identical
 /// to before BUG-05.
 ///
+/// When `opts.deseasonalize == true` and `opts.threshold` is `None`, the
+/// *effective* threshold used for the `is_changepoint` decision defaults to
+/// `0.5` instead of falling back to the MAP run-length-reset heuristic
+/// (code review CR-02, user decision 2026-10-24): removing the seasonal
+/// component collapses `robust_noise_scale` by up to ~70x, which causes the
+/// heuristic to flag changepoints scattered across the entire series (see
+/// `deseasonalize_for_changepoints`'s doc comment and the Phase 20 review
+/// report for the measured numbers). An explicit `opts.threshold` always
+/// wins over this default. `opts.deseasonalize == false` is unaffected --
+/// `threshold: None` still means "use the MAP heuristic", preserving the
+/// byte-identical defaults pinned by
+/// `test/sql/correctness/detection_decomposition.test`.
+///
 /// # Errors
 /// `ForecastError::InvalidParameter { param: "threshold", .. }` if
 /// `opts.threshold` is `Some` and not finite or outside `[0, 1]`.
@@ -758,7 +771,17 @@ pub fn detect_changepoints_bocpd_with_options(
 
     let trace = bocpd_trace(series, opts.hazard_lambda)?;
 
-    let is_changepoint: Vec<bool> = match opts.threshold {
+    // CR-02 (code review, user decision 2026-10-24): when deseasonalize is
+    // on and the caller left threshold unset, default the *effective*
+    // threshold to 0.5 rather than falling back to the MAP run-length-reset
+    // heuristic -- see this function's doc comment for why. An explicit
+    // threshold always wins; deseasonalize: false is never affected.
+    let effective_threshold = match (opts.deseasonalize, opts.threshold) {
+        (true, None) => Some(0.5),
+        (_, explicit) => explicit,
+    };
+
+    let is_changepoint: Vec<bool> = match effective_threshold {
         None => trace.is_changepoint,
         Some(threshold) => trace
             .prob
@@ -1441,6 +1464,100 @@ mod tests {
         assert_eq!(
             result, expected,
             "too-short-for-any-period series: deseasonalize must equal a plain linear detrend"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // Code review CR-02 (user decision 2026-10-24): `deseasonalize: true`
+    // with `threshold` left unset must default the *effective* threshold
+    // to 0.5 instead of falling back to the MAP run-length-reset
+    // heuristic, which floods the series with spurious changepoints once
+    // the seasonal variance is removed (robust_noise_scale collapse --
+    // see `detect_changepoints_bocpd_with_options`'s doc comment). An
+    // explicit `threshold` always wins, and `deseasonalize: false` stays
+    // unaffected (covered by `test_deseasonalize_false_reproduces_20_06_bit_for_bit`).
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn test_deseasonalize_without_threshold_defaults_to_0_5_cr02() {
+        // Noisy weekly sine (amplitude 5) + a single level shift of +8 at
+        // i=90, n=180 -- the scenario pinned in the Phase 20 review report.
+        let base = 40.0;
+        let n = 180_i64;
+        let series: Vec<f64> = (0..n)
+            .map(|i| {
+                let i_f = i as f64;
+                base + 5.0 * (2.0 * std::f64::consts::PI * i_f / 7.0).sin()
+                    + if i >= 90 { 8.0 } else { 0.0 }
+                    + deterministic_noise(i as usize)
+            })
+            .collect();
+
+        let deseasonalize_only = ChangepointOptions {
+            hazard_lambda: 250.0,
+            threshold: None,
+            deseasonalize: true,
+            seasonal_period: Some(7),
+        };
+        let deseasonalize_with_threshold = ChangepointOptions {
+            hazard_lambda: 250.0,
+            threshold: Some(0.5),
+            deseasonalize: true,
+            seasonal_period: Some(7),
+        };
+
+        let only = detect_changepoints_bocpd_with_options(&series, &deseasonalize_only).unwrap();
+        let with_threshold =
+            detect_changepoints_bocpd_with_options(&series, &deseasonalize_with_threshold).unwrap();
+
+        assert_eq!(
+            only.is_changepoint, with_threshold.is_changepoint,
+            "deseasonalize alone (threshold unset) must match deseasonalize+threshold=0.5 \
+             now that the effective threshold defaults to 0.5"
+        );
+        assert_eq!(only.changepoints, with_threshold.changepoints);
+        assert_eq!(
+            only.changepoints.len(),
+            1,
+            "must flag only the true shift, got {:?}",
+            only.changepoints
+        );
+        assert!(
+            (89..=91).contains(&only.changepoints[0]),
+            "flagged changepoint must be near the true shift at i=90, got {:?}",
+            only.changepoints
+        );
+    }
+
+    #[test]
+    fn test_deseasonalize_explicit_threshold_wins_over_default_cr02() {
+        // Same series as above, but with an explicit threshold of 0.0 --
+        // the explicit value must win over the deseasonalize-true default
+        // of 0.5, flagging index 0 excluded but every other point whose
+        // probability is >= 0.0 (i.e. every point from index 1 on).
+        let base = 40.0;
+        let n = 180_i64;
+        let series: Vec<f64> = (0..n)
+            .map(|i| {
+                let i_f = i as f64;
+                base + 5.0 * (2.0 * std::f64::consts::PI * i_f / 7.0).sin()
+                    + if i >= 90 { 8.0 } else { 0.0 }
+                    + deterministic_noise(i as usize)
+            })
+            .collect();
+
+        let opts = ChangepointOptions {
+            hazard_lambda: 250.0,
+            threshold: Some(0.0),
+            deseasonalize: true,
+            seasonal_period: Some(7),
+        };
+        let result = detect_changepoints_bocpd_with_options(&series, &opts).unwrap();
+        assert!(!result.is_changepoint[0], "index 0 must never be flagged");
+        assert_eq!(
+            result.changepoints,
+            (1..series.len()).collect::<Vec<_>>(),
+            "explicit threshold=0.0 must win over the deseasonalize-true 0.5 default"
         );
     }
 }

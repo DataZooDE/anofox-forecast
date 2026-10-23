@@ -417,9 +417,13 @@ SELECT count(*) FROM (
 ----
 0
 
-# deseasonalize alone (MAP run-length rule, no threshold) still flags
-# nothing on A/C -- B gets additional weekly-spaced flags besides
-# 2024-02-20 (documented reason to combine deseasonalize with threshold).
+# deseasonalize alone (threshold unset) now defaults the EFFECTIVE
+# threshold to 0.5 (code review CR-02, user decision 2026-10-24) instead of
+# falling back to the MAP run-length-reset heuristic -- the heuristic
+# flagged B's weekly troughs in addition to the real 2024-02-20 shift once
+# the dominant seasonal variance was removed (robust_noise_scale collapse).
+# deseasonalize alone must therefore match deseasonalize+threshold=0.5
+# exactly: nothing on A/C, only B's 2024-02-20 shift.
 
 query II
 SELECT id, coalesce(string_agg(ds::DATE::VARCHAR, ',' ORDER BY ds) FILTER (WHERE is_changepoint), 'none')
@@ -427,8 +431,17 @@ FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'true'})
 GROUP BY id ORDER BY id;
 ----
 A	none
-B	2024-01-16,2024-01-23,2024-01-30,2024-02-20,2024-03-05,2024-03-12,2024-03-19
+B	2024-02-20
 C	none
+
+query I
+SELECT count(*) FROM (
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'true'})
+    EXCEPT ALL
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'true', 'threshold': '0.5'})
+);
+----
+0
 
 # seasonal_period '7' given explicitly gives the same result as the
 # auto-detected period (7, pinned by the BUG-07 block below) on the #287

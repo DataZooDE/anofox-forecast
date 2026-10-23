@@ -301,9 +301,11 @@ ORDER BY n_changepoints DESC;
 -- sequence of changepoints to BOCPD, drowning out a genuine level shift.
 -- `deseasonalize` removes the STL seasonal component AND a linear trend
 -- before detection runs -- level shifts survive as steps, regular cycles
--- do not. It is opt-in (default false); combine it with `threshold` to
--- isolate genuine level shifts from the residual sensitivity around the
--- shift that `deseasonalize` alone can still leave.
+-- do not. It is opt-in (default false). When `threshold` is left unset,
+-- the effective threshold defaults to 0.5 (code review CR-02) instead of
+-- falling back to the MAP run-length-reset heuristic, so `deseasonalize`
+-- alone already isolates genuine level shifts; an explicit `threshold`
+-- always wins over this default.
 
 .print ''
 .print '>>> SECTION 7: Ignoring a Regular Seasonal Cycle (deseasonalize)'
@@ -330,11 +332,11 @@ FROM ts_detect_changepoints_by('seasonal_panel', id, ds, y, MAP{})
 GROUP BY id
 ORDER BY id;
 
--- 7.2: deseasonalize alone (no threshold) -- A and C are now clean, but B
--- still gets extra weekly-spaced flags besides the real shift (the reason
--- to combine deseasonalize with threshold below).
+-- 7.2: deseasonalize alone (no threshold) -- the effective threshold now
+-- defaults to 0.5 (CR-02), so A and C are clean and B flags only the real
+-- shift, matching 7.3's explicit threshold=0.5 result exactly.
 .print ''
-.print 'Section 7.2: deseasonalize=true alone -- A/C clean, B still has extra weekly-spaced flags'
+.print 'Section 7.2: deseasonalize=true alone -- A/C clean, B flags only the real shift (effective threshold defaults to 0.5)'
 
 SELECT id, string_agg(ds::DATE::VARCHAR, ', ' ORDER BY ds) FILTER (WHERE is_changepoint) AS changepoint_dates
 FROM ts_detect_changepoints_by('seasonal_panel', id, ds, y, MAP{'deseasonalize': 'true'})

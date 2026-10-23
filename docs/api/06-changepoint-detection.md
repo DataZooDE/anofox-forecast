@@ -166,11 +166,16 @@ identical inputs and params**, and every default below is unchanged from before 
   BOCPD runs: the STL seasonal component at `seasonal_period` (or the auto-detected period) is
   subtracted, and a straight-line (linear) trend is **always** removed afterwards — so a
   regular seasonal cycle stops producing changepoints, while a genuine level shift still
-  survives as a step (a global line cannot absorb a local step). **Opt-in only** — making this
-  the default is explicitly out of scope; defaults with `deseasonalize` unset are
-  byte-identical to before this option existed (pinned by md5 in
-  `test/sql/correctness/detection_decomposition.test`). An invalid (non-bool) value throws,
-  naming `deseasonalize`.
+  survives as a step (a global line cannot absorb a local step). When `deseasonalize` is
+  `true` and `threshold` is left unset, the **effective threshold defaults to `0.5`** (decided
+  in Rust, so `ts_detect_changepoints_by` and `ts_detect_changepoints_agg` both inherit it)
+  instead of falling back to the MAP run-length-reset heuristic — removing the dominant
+  seasonal variance collapses the BOCPD noise scale enough that the heuristic otherwise floods
+  the series with spurious changepoints. An explicit `threshold` always wins over this
+  default. **Opt-in only** — making `deseasonalize` itself the default is explicitly out of
+  scope; defaults with `deseasonalize` unset/`false` are byte-identical to before this option
+  existed (pinned by md5 in `test/sql/correctness/detection_decomposition.test`). An invalid
+  (non-bool) value throws, naming `deseasonalize`.
 - `seasonal_period`: Strict non-negative integer (default: `0` = auto-detect via
   `ts_detect_periods_by`'s FFT primary period). Only consulted when `deseasonalize` is `true`
   (accepted but ignored otherwise). A negative or non-numeric value throws, naming
@@ -282,8 +287,9 @@ FROM (SELECT product_id, unnest(ts_detect_changepoints_agg(date, quantity, MAP{}
 
 A regular seasonal cycle (e.g. weekly traffic) can itself look like a sequence of
 changepoints to BOCPD, drowning out a genuine level shift. `deseasonalize` removes the
-seasonal component (and, always, a linear trend) before detection runs — combine it with
-`threshold` so only strong, sustained shifts are flagged:
+seasonal component (and, always, a linear trend) before detection runs. When `threshold` is
+left unset, the effective threshold defaults to `0.5` (code review CR-02) so only strong,
+sustained shifts are flagged — the two calls below are equivalent:
 
 ```sql
 CREATE TABLE weekly_with_shift AS
@@ -295,16 +301,18 @@ CREATE TABLE weekly_with_shift AS
 
 SELECT ds, is_changepoint
 FROM ts_detect_changepoints_by('weekly_with_shift', id, ds, y,
-    MAP{'deseasonalize': 'true', 'threshold': '0.5'})
+    MAP{'deseasonalize': 'true'})
 WHERE is_changepoint;
 -- 2024-02-20   true    (the level shift -- weekly troughs are NOT flagged)
-```
 
-> **`deseasonalize` alone (no `threshold`) can still flag weekly-spaced points around a real
-> shift** — removing the seasonal component does not remove every trace of the cycle from the
-> MAP run-length-reset heuristic's sensitivity, so the shift's neighbourhood can still produce
-> extra flags at roughly one-period intervals. Combining `deseasonalize` with `threshold`
-> (as above) is the recommended way to isolate genuine level shifts.
+-- Equivalent -- an explicit threshold always wins, and 0.5 is the default
+-- effective threshold whenever deseasonalize is true and threshold is unset:
+SELECT ds, is_changepoint
+FROM ts_detect_changepoints_by('weekly_with_shift', id, ds, y,
+    MAP{'deseasonalize': 'true', 'threshold': '0.5'})
+WHERE is_changepoint;
+-- 2024-02-20   true    (identical result)
+```
 
 ---
 

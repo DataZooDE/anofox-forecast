@@ -24,13 +24,20 @@ returns the source table's column names and types (previously always
   `deseasonalize` (strict bool, default `false`, opt-in only): removes the STL
   seasonal component at `seasonal_period` (or the auto-detected period) AND a
   linear trend before BOCPD, so a regular seasonal cycle stops producing
-  changepoints while a genuine level shift still survives as a step.
+  changepoints while a genuine level shift still survives as a step. When
+  `deseasonalize` is `true` and `threshold` is left unset, the *effective*
+  threshold defaults to `0.5` (decided in Rust, so both SQL surfaces inherit it)
+  instead of falling back to the MAP run-length-reset heuristic, which floods the
+  series with spurious changepoints once the dominant seasonal variance is
+  removed; an explicit `threshold` always wins over this default (code review
+  CR-02).
   `seasonal_period` (strict non-negative integer, default `0` = auto-detect via
   `ts_detect_periods_by`'s FFT primary period; only consulted when `deseasonalize`
   is `true`). Both functions parse this params MAP through one shared C++ header
   and decide `is_changepoint`/`changepoint_probability` through one Rust function,
-  so they return identical rows for identical inputs and params. Defaults are
-  unchanged (pinned by md5 in `test/sql/correctness/detection_decomposition.test`).
+  so they return identical rows for identical inputs and params. Defaults with
+  `deseasonalize` unset/`false` are unchanged (pinned by md5 in
+  `test/sql/correctness/detection_decomposition.test`).
 
 ### Deprecated
 
