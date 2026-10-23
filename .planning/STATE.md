@@ -22,10 +22,10 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-10-22 — milestone v0.11.0 started)
+See: .planning/PROJECT.md (updated 2026-10-24 — after Phase 20)
 
 **Core value:** SQL users can produce, validate, combine and interval-bound time-series forecasts entirely within DuckDB. Every statistic is correct and computed in Rust.
-**Current focus:** Phase 20 — Detection & Metric Bug Fixes
+**Current focus:** Phase 20.1 — API Compatibility Gate
 
 ## Current Position
 
@@ -111,9 +111,8 @@ None yet.
 - [Phase 23] Renaming columns touches examples, docs and skills broadly; the aliases must hold on the v2.0.0, v1.5.6 and v1.4.5 LTS builds.
 - [All] Verify executor reports against git + disk, and run `cargo fmt --check` in the DoD (prior milestones: fabricated SUMMARYs, fmt-only CI failures).
 - [All] Local builds need `DUCKDB_VERSION=v2.0.0 make release`; the v1.5.6 and v1.4.5 LTS CI lines must stay green.
-- 20-03/20-04/20-05/20-06 prescribe WITH _ts_src AS MATERIALIZED; on DuckDB v2.0.0 that intermittently raises INTERNAL 'Pipeline broadcast exchange received invalid producer batch index' with final-emitting natives. Switch to (SELECT ... ORDER BY ALL) per 20-02 before executing (see phase deferred-items.md)
-- 20-03: branch MainDistributionPipeline (wasm-runtime-test v1.5.6 curated incl. fill-forward pins; v1.4.5/v1.5.6/v2.0.0 builds) not run - no trigger on branch push; workflow_dispatch uploads to the bucket, so it needs user go-ahead (or the PR run)
-- python3 scripts/check_correctness_inventory.py exits 1 on 3 pre-existing MISSING names (ts_features_config_template, ts_features_list from Phase 19; _ts_forecast_scalar from 20-02) unrelated to Phase 20 plan 20-07's diff -- manual release-DoD gate, must be fixed before the next tag
+- [Phase 20] Branch MainDistributionPipeline (wasm-runtime-test v1.5.6 curated incl. fill-forward pins; v1.4.5/v1.5.6/v2.0.0 builds) not run for any Phase 20 change (incl. TsCollectFinalizeBarrier on v1.4.5/v1.5.6, review WR-03) - no trigger on branch push; workflow_dispatch uploads to the bucket, so it needs user go-ahead (or the PR run)
+- [Release] python3 scripts/check_correctness_inventory.py exits 1 on 3 pre-existing MISSING names (ts_features_config_template, ts_features_list from Phase 19; _ts_forecast_scalar from 20-02) unrelated to Phase 20 plan 20-07's diff -- manual release-DoD gate, must be fixed before the next tag
 
 ### Quick Tasks Completed
 
@@ -165,7 +164,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-23T22:00:12.158Z
+Last session: 2026-10-24
 Stopped at: Phase 20 complete, ready to plan Phase 20.1
 Resume file: None
 Next: `/gsd-plan-phase 19`
