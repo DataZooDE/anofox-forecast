@@ -95,6 +95,7 @@ v0.9.0 (WASM Runtime Verification) shipped 2026-09-10 and was closed on main 202
 - ✓ Core statistics, features, detection and conformal outputs match R/scipy/tsfresh references — Phases 13-16, pinned in Phase 18 — v0.10.0
 - ✓ Upstream anofox-forecast diagnostics/model-selection fixes merged and consumed — anofox-forecast 0.16.1, Phase 17 — v0.10.0
 - ✓ Dependencies bumped — anofox-regression 0.5.15 (Phase 9), fdars-core 0.47 (Phase 15), anofox-forecast 0.16.2 (Phase 18) — v0.10.0
+- ✓ Metric/detection functions order- and UNION-ALL-independent (#285: collect-then-finalize natives fed via `ORDER BY ALL` single-pipeline breaker + shared `TsCollectFinalizeBarrier`), seasonality strength = STL strength shared with `ts_stats_by` (#286), changepoint params parity + `threshold` + opt-in `deseasonalize` (#287) — v0.11.0 Phase 20 (BUG-03..07)
 
 ### Active
 
@@ -170,6 +171,8 @@ Deferred from v0.7.0 (candidates for a future milestone):
 | SQL `'Holt'` = ETS(A,A,N), R `holt()`'s definition (v0.10.0 P17, D-13) | `HoltLinearTrend::auto()` diverged from R by 3–13x on parity fixtures | ✓ Good — R-parity point deviation cut 6.86x (AirPassengers), 13.41x (rw), 3.01x (trend) |
 | Upstream fixes ship as crate releases, never local [patch] (v0.10.0 P18, user 2026-10-16) | Extension must consume what crates.io serves; a local patch hides release drift | ✓ Good — v0.16.2 merged + published upstream, then consumed from crates.io |
 | Every R-parity known gap must cite an evidenced root cause, never a loosened tolerance (v0.10.0 P17, D-12) | Prevents tolerance-widening from masking real bugs | ✓ Good — RC-01..RC-05 table; extension-side cause fixed, 3 crate-side causes drafted as upstream issues with repros |
+| Feed collect-then-finalize natives through `(SELECT * FROM _ts_passthrough(src) ORDER BY ALL)`, not `WITH ... AS MATERIALIZED` (v0.11.0 P20) | MATERIALIZED CTE hits a DuckDB v2.0.0 broadcast-exchange INTERNAL error intermittently; ORDER BY ALL is a single-pipeline breaker that is also ~9x cheaper | ✓ Good — #285 fixed across 18 natives; ≤0.02 s/1M-row overhead; cross-line (v1.4.5/v1.5.6) barrier check deferred to PR CI |
+| `deseasonalize` without `threshold` uses effective threshold 0.5 (v0.11.0 P20 review, user 2026-10-24) | Deseasonalized residual collapses BOCPD noise scale ~10-70x, so the MAP run-length rule flagged 8-21 false changepoints | ✓ Good — deseasonalize alone now flags only the real shift; defaults byte-identical |
 
 ## Evolution
 
@@ -189,4 +192,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-22 after starting milestone v0.11.0*
+*Last updated: 2026-10-24 after Phase 20*
