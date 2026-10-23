@@ -66,3 +66,15 @@ Correct answers, independent of row order, on the data from #285, #286 and #287.
 - Making deseasonalize the default for changepoints (user chose opt-in; revisit later if users ask).
 
 </deferred>
+
+<decisions_addendum>
+## Decisions added after research (2026-10-23)
+
+### #287 is_changepoint vs probability (BUG-06), user decision: opt-in threshold
+- `ts_detect_changepoints_agg` must parse its `params` MAP (today it silently ignores it; research 20-RESEARCH.md) and mirror `ts_detect_changepoints_by` EXACTLY: same heuristic, same defaults, same parameters. With identical inputs and params, both give identical is_changepoint/probability. Default outputs of both functions stay unchanged.
+- Add a new optional `threshold` param (default: unset) to both. When set, is_changepoint = (changepoint_probability >= threshold), decided in Rust and shared by both consumers. When unset, the existing heuristic applies.
+- The #287 acceptance check for "no unflagged row at p = 0.996" is evaluated with `threshold` set (e.g. 0.5), plus a test proving that agg == table function with defaults.
+
+### #285 (BUG-03)
+- Research shows the per-series sort already exists in `_ts_mase_native` (ts_metrics_native.cpp:846-849) and the bug still reproduces (literal-cutoff case now NULL). Plan a diagnostic-first task: find the true cause (row/chunk delivery across UNION ALL + subquery, finalize/combine handling, or the date-based in-sample split) before fixing. The fix must make every input order give identical MASE, pinned by sorted, reversed, shuffled and both #285 shapes.
+</decisions_addendum>
