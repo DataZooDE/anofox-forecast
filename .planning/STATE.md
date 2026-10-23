@@ -4,17 +4,17 @@ milestone: v0.11.0
 milestone_name: "Issue Sweep: Contract, Bugs, Crate Fixes"
 current_phase: 20
 current_phase_name: Detection & Metric Bug Fixes
-status: executing
-stopped_at: Completed 20-06-PLAN.md
-last_updated: "2026-10-23T21:16:14.693Z"
+status: verifying
+stopped_at: Completed 20-07-PLAN.md (Phase 20 complete, all 7 plans done)
+last_updated: "2026-10-23T22:00:12.194Z"
 last_activity: 2026-10-23
 last_activity_desc: Phase 20 execution started
-state_head: 9392ea2262925866c64d93f1d93825187d0b6775
+state_head: d081a4b360963236ccda224580f4c14a98997051
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 11
-  completed_plans: 10
+  completed_plans: 11
   percent: 0
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-22 — milestone v0.11.0 started)
 
 Phase: 20 (Detection & Metric Bug Fixes) — EXECUTING
 Plan: 7 of 7
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-10-23 — Phase 20 execution started
 
 Progress: [░░░░░░░░░░] 0%
@@ -65,6 +65,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 20 P04 | 50min | 3 tasks | 10 files |
 | Phase 20 P05 | 75min | 3 tasks | 10 files |
 | Phase 20 P06 | 36min | 3 tasks | 13 files |
+| Phase 20 P07 | 42min | 3 tasks | 18 files |
 
 ## Accumulated Context
 
@@ -95,6 +96,8 @@ Recent decisions affecting current work:
 - [Phase 20]: [Phase 20] 20-06: ts_detect_changepoints_by's native second arg changed VARCHAR->MAP(VARCHAR,VARCHAR); removed the old regex-based ParseHazardLambda in favour of shared ParseChangepointParamSet (internal signature only, public macro unchanged)
 - [Phase 20]: [Phase 20] 20-06: threshold validated in Rust only ([0,1], finite); C++ params header just parses the raw string (quiet-NaN=unset), erroring only on a non-numeric value
 - [Phase 20]: [Phase 20] 20-06: aggregate parses params once per state on the first row seen per group; first row's params win if a group's rows carry different MAPs (documented, matches existing Combine semantics)
+- [Phase 20]: [Phase 20]: 20-07: deseasonalize_for_changepoints (D1-b) reuses mstl_fit + detrend_linear; detrend_linear always runs even with no usable seasonal period; deseasonalize/seasonal_period strict-parsed in C++, range/usability semantics in Rust
+- [Phase 20]: [Phase 20]: 20-07: MainDistributionPipeline not dispatched for this plan's CI step (no push trigger; workflow_dispatch hits the bucket) -- only the push-triggered Static audits workflow was watched, same precedent as 20-03/20-04/20-05
 
 ### Pending Todos
 
@@ -109,6 +112,7 @@ None yet.
 - [All] Local builds need `DUCKDB_VERSION=v2.0.0 make release`; the v1.5.6 and v1.4.5 LTS CI lines must stay green.
 - 20-03/20-04/20-05/20-06 prescribe WITH _ts_src AS MATERIALIZED; on DuckDB v2.0.0 that intermittently raises INTERNAL 'Pipeline broadcast exchange received invalid producer batch index' with final-emitting natives. Switch to (SELECT ... ORDER BY ALL) per 20-02 before executing (see phase deferred-items.md)
 - 20-03: branch MainDistributionPipeline (wasm-runtime-test v1.5.6 curated incl. fill-forward pins; v1.4.5/v1.5.6/v2.0.0 builds) not run - no trigger on branch push; workflow_dispatch uploads to the bucket, so it needs user go-ahead (or the PR run)
+- python3 scripts/check_correctness_inventory.py exits 1 on 3 pre-existing MISSING names (ts_features_config_template, ts_features_list from Phase 19; _ts_forecast_scalar from 20-02) unrelated to Phase 20 plan 20-07's diff -- manual release-DoD gate, must be fixed before the next tag
 
 ### Quick Tasks Completed
 
@@ -160,8 +164,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-23T21:16:14.627Z
-Stopped at: Completed 20-06-PLAN.md
+Last session: 2026-10-23T22:00:12.158Z
+Stopped at: Completed 20-07-PLAN.md (Phase 20 complete, all 7 plans done)
 Resume file: None
 Next: `/gsd-plan-phase 19`
 

@@ -12,7 +12,7 @@
 - [x] **BUG-02**: `ts_features_list()` and `ts_features_config_template()` run in DuckDB-Wasm (wasm_eh) without trapping and return 117 rows. (#289)
 - [ ] **BUG-03**: `ts_mase_by` returns the same value whatever the input row order: it sorts by date within each series before computing the in-sample naive scale. (#285)
 - [x] **BUG-04**: `ts_classify_seasonality_by` classifies a strong weekly series as seasonal; `seasonal_strength` is consistent with its own `cycle_strengths` and with `ts_stats_by`. (#286)
-- [ ] **BUG-05**: `ts_detect_changepoints_by` / `_agg` gain an opt-in `deseasonalize := true` option (user decision 2026-10-23: defaults unchanged). With it, the troughs of a regular seasonal cycle are not flagged, and a real level shift is still found (the #287 panel: none on A/C, B on 2024-02-20). (#287)
+- [x] **BUG-05**: `ts_detect_changepoints_by` / `_agg` gain an opt-in `deseasonalize := true` option (user decision 2026-10-23: defaults unchanged). With it, the troughs of a regular seasonal cycle are not flagged, and a real level shift is still found (the #287 panel: none on A/C, B on 2024-02-20). (#287)
 - [x] **BUG-06**: In `ts_detect_changepoints_agg`, `is_changepoint` agrees with `changepoint_probability` and the threshold. (#287)
 - [x] **BUG-07**: `ts_detect_periods_by` finds period 7 on the #287 panel, pinned by a regression test. (#287)
 
@@ -86,7 +86,7 @@
 | DIST-04 | Phase 19 | Complete |
 | BUG-03 | Phase 20 | Pending |
 | BUG-04 | Phase 20 | Complete |
-| BUG-05 | Phase 20 | Pending |
+| BUG-05 | Phase 20 | Complete |
 | BUG-06 | Phase 20 | Complete |
 | BUG-07 | Phase 20 | Complete |
 | CRATE-01 | Phase 21 | Pending |
