@@ -3415,9 +3415,11 @@ pub unsafe extern "C" fn anofox_ts_detect_changepoints_bocpd(
 }
 
 /// BOCPD changepoint detection with an explicit `is_changepoint` decision
-/// rule (#287, BUG-06, user decision D2-ii): shared by both
+/// rule (#287, BUG-06, user decision D2-ii; `deseasonalize`/
+/// `seasonal_period` added for BUG-05, D1-b): shared by both
 /// `ts_detect_changepoints_by` and `ts_detect_changepoints_agg` so they
-/// agree on hazard_lambda and threshold for identical inputs.
+/// agree on hazard_lambda, threshold, deseasonalize and seasonal_period for
+/// identical inputs.
 ///
 /// `opts->threshold` NaN means "unset" (the default heuristic applies,
 /// reproducing [`anofox_ts_detect_changepoints_bocpd`] bit for bit).
@@ -3425,6 +3427,10 @@ pub unsafe extern "C" fn anofox_ts_detect_changepoints_bocpd(
 /// convention as the sibling export above). A set, out-of-range
 /// `opts->threshold` (not finite, or outside `[0, 1]`) returns an
 /// `INVALID_INPUT`-coded error naming `threshold` in the message.
+/// `opts->deseasonalize == false` (default) leaves `values` unchanged.
+/// `opts->seasonal_period == 0` means "auto-detect the period"; a negative
+/// value returns an `INVALID_INPUT`-coded error naming `seasonal_period`;
+/// a positive value is the explicit period.
 ///
 /// # Safety
 /// All pointer arguments must be valid and non-null. Arrays must have the
@@ -3460,11 +3466,26 @@ pub unsafe extern "C" fn anofox_ts_detect_changepoints_bocpd_opts(
         } else {
             Some((*opts).threshold)
         };
+        let seasonal_period_raw = (*opts).seasonal_period;
+        if seasonal_period_raw < 0 {
+            return Err(anofox_fcst_core::ForecastError::InvalidParameter {
+                param: "seasonal_period".to_string(),
+                value: seasonal_period_raw.to_string(),
+                reason: "must be a non-negative integer".to_string(),
+            });
+        }
+        let seasonal_period = if seasonal_period_raw == 0 {
+            None
+        } else {
+            Some(seasonal_period_raw as usize)
+        };
         anofox_fcst_core::detect_changepoints_bocpd_with_options(
             &values_vec,
             &anofox_fcst_core::ChangepointOptions {
                 hazard_lambda,
                 threshold,
+                deseasonalize: (*opts).deseasonalize,
+                seasonal_period,
             },
         )
     }));

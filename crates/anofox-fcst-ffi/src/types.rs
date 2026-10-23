@@ -730,15 +730,22 @@ impl Default for BocpdResult {
 }
 
 /// Options for `anofox_ts_detect_changepoints_bocpd_opts` (#287, BUG-06,
-/// D2-ii). `hazard_lambda <= 0.0` means "unset" (defaults to 250.0, same
+/// D2-ii; `deseasonalize`/`seasonal_period` added for BUG-05, D1-b).
+/// `hazard_lambda <= 0.0` means "unset" (defaults to 250.0, same
 /// convention as `anofox_ts_detect_changepoints_bocpd`'s own parameter).
 /// `threshold` is NaN when unset (the default MAP run-length-reset
 /// heuristic applies); otherwise it must be finite and in `[0, 1]` --
-/// range validation happens in `anofox_fcst_core`, not here.
+/// range validation happens in `anofox_fcst_core`, not here. `deseasonalize`
+/// defaults to `false` (byte-identical to before BUG-05). `seasonal_period`
+/// is `0` for "auto-detect the period" or a negative value for "invalid"
+/// (both handled at the FFI boundary); a positive value is the explicit
+/// period.
 #[repr(C)]
 pub struct ChangepointOptionsFFI {
     pub hazard_lambda: c_double,
     pub threshold: c_double,
+    pub deseasonalize: bool,
+    pub seasonal_period: i64,
 }
 
 /// Feature extraction result.

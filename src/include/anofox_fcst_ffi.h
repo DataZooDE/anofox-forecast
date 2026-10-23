@@ -1032,15 +1032,22 @@ typedef struct BocpdResult {
 
 /**
  * Options for `anofox_ts_detect_changepoints_bocpd_opts` (#287, BUG-06,
- * D2-ii). `hazard_lambda <= 0.0` means "unset" (defaults to 250.0, same
+ * D2-ii; `deseasonalize`/`seasonal_period` added for BUG-05, D1-b).
+ * `hazard_lambda <= 0.0` means "unset" (defaults to 250.0, same
  * convention as `anofox_ts_detect_changepoints_bocpd`'s own parameter).
  * `threshold` is NaN when unset (the default MAP run-length-reset
  * heuristic applies); otherwise it must be finite and in `[0, 1]` --
- * range validation happens in `anofox_fcst_core`, not here.
+ * range validation happens in `anofox_fcst_core`, not here. `deseasonalize`
+ * defaults to `false` (byte-identical to before BUG-05). `seasonal_period`
+ * is `0` for "auto-detect the period" or a negative value for "invalid"
+ * (both handled at the FFI boundary); a positive value is the explicit
+ * period.
  */
 typedef struct ChangepointOptionsFFI {
     double hazard_lambda;
     double threshold;
+    bool deseasonalize;
+    int64_t seasonal_period;
 } ChangepointOptionsFFI;
 
 /**
@@ -2749,9 +2756,11 @@ bool anofox_ts_detect_changepoints_bocpd(const double *values,
 
 /**
  * BOCPD changepoint detection with an explicit `is_changepoint` decision
- * rule (#287, BUG-06, user decision D2-ii): shared by both
+ * rule (#287, BUG-06, user decision D2-ii; `deseasonalize`/
+ * `seasonal_period` added for BUG-05, D1-b): shared by both
  * `ts_detect_changepoints_by` and `ts_detect_changepoints_agg` so they
- * agree on hazard_lambda and threshold for identical inputs.
+ * agree on hazard_lambda, threshold, deseasonalize and seasonal_period for
+ * identical inputs.
  *
  * `opts->threshold` NaN means "unset" (the default heuristic applies,
  * reproducing [`anofox_ts_detect_changepoints_bocpd`] bit for bit).
@@ -2759,6 +2768,10 @@ bool anofox_ts_detect_changepoints_bocpd(const double *values,
  * convention as the sibling export above). A set, out-of-range
  * `opts->threshold` (not finite, or outside `[0, 1]`) returns an
  * `INVALID_INPUT`-coded error naming `threshold` in the message.
+ * `opts->deseasonalize == false` (default) leaves `values` unchanged.
+ * `opts->seasonal_period == 0` means "auto-detect the period"; a negative
+ * value returns an `INVALID_INPUT`-coded error naming `seasonal_period`;
+ * a positive value is the explicit period.
  *
  * # Safety
  * All pointer arguments must be valid and non-null. Arrays must have the

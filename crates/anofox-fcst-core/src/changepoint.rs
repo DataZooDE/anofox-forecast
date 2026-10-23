@@ -8,7 +8,10 @@
 //! by `crates/anofox-fcst-core/tests/changepoint_reference.rs` against an
 //! independent numpy exact-DP reference, never via SQL.
 
+use crate::decomposition::mstl_fit;
+use crate::detrending::detrend_linear;
 use crate::error::{ForecastError, Result};
+use crate::periods::{detect_periods, PeriodMethod};
 use statrs::function::gamma::ln_gamma;
 
 /// 1 / Phi^-1(0.75) -- the usual constant that rescales a MAD to a
@@ -582,8 +585,85 @@ pub fn detect_changepoints_bocpd(
     })
 }
 
+/// Removes the STL seasonal component AND a straight-line (linear) trend
+/// from `values` before BOCPD (#287, BUG-05; user decision D1-b,
+/// 20-CONTEXT.md decisions_addendum_2).
+///
+/// Per the locked CONTEXT #287 decision 1 (opt-in `deseasonalize`, STL at
+/// the given `seasonal_period` or the auto-detected period) as refined by
+/// D1-b: a plain "remove seasonal, keep trend" transform (the rejected
+/// D1-a) still breaks BOCPD's piecewise-constant-mean assumption whenever
+/// the series has a non-zero slope -- the slope itself gets flagged as a
+/// sequence of weekly-spaced "changepoints" (measured on the #287 panel:
+/// raw series B flags only its real shift at 2024-02-20 plus six spurious
+/// weekly-trough dates; seasonal-removed-trend-kept flags twelve spurious
+/// dates on A alone). Removing a GLOBAL straight line cannot absorb a
+/// local step, so a genuine level shift still survives as a step in the
+/// detrended series (D1-b's rationale) while the slope itself is gone.
+///
+/// Period selection: `seasonal_period` when `Some(p)` with `p >= 2`;
+/// otherwise the auto-detected primary period from
+/// [`crate::periods::detect_periods`] (`PeriodMethod::Fft`, default
+/// `max_period`/`min_confidence`), rounded to the nearest integer. If
+/// auto-detection finds no usable period (rounds to `< 2`, including "no
+/// seasonality" which reports `primary_period == 0.0`), no seasonal
+/// component is removed -- only the linear detrend runs.
+///
+/// Seasonal removal itself reuses [`mstl_fit`] (the same `forecast::mstl`
+/// iteration `ts_stats_by`/`ts_mstl_decomposition_by` already share) at the
+/// single selected period; if `mstl_fit` itself finds the period unusable
+/// (`n <= 2*p`, mirroring R `mstl`/`msts`'s own drop rule), seasonal removal
+/// is skipped the same way. The straight-line detrend
+/// ([`crate::detrending::detrend_linear`]) then ALWAYS runs on whatever is
+/// left (deseasonalised, or the raw series if no period was usable) -- D1-b
+/// applies even to a series with no detectable seasonality, which is why a
+/// too-short series still returns a linearly detrended result rather than
+/// an error.
+///
+/// # Errors
+/// Propagates any error from [`detect_periods`], [`mstl_fit`] or
+/// [`detrend_linear`] (e.g. `InsufficientData` if `values.len() < 2`).
+pub fn deseasonalize_for_changepoints(
+    values: &[f64],
+    seasonal_period: Option<usize>,
+) -> Result<Vec<f64>> {
+    let period = match seasonal_period {
+        Some(p) if p >= 2 => Some(p),
+        _ => {
+            let detected = detect_periods(values, PeriodMethod::Fft, None, None)?;
+            let primary = detected.primary_period.round();
+            if primary >= 2.0 {
+                Some(primary as usize)
+            } else {
+                None
+            }
+        }
+    };
+
+    let deseasonalised: Vec<f64> = match period {
+        Some(p) => {
+            let fit = mstl_fit(values, &[p])?;
+            if fit.periods.is_empty() {
+                // mstl_fit's own usability filter (n <= 2*p) rejected the
+                // period -- no seasonal component to remove.
+                values.to_vec()
+            } else {
+                values
+                    .iter()
+                    .zip(fit.seasonals[0].iter())
+                    .map(|(&v, &s)| v - s)
+                    .collect()
+            }
+        }
+        None => values.to_vec(),
+    };
+
+    Ok(detrend_linear(&deseasonalised)?.detrended)
+}
+
 /// Options for [`detect_changepoints_bocpd_with_options`] (#287, BUG-06,
-/// user decision D2-ii, 20-CONTEXT.md decisions_addendum_2).
+/// user decision D2-ii, 20-CONTEXT.md decisions_addendum_2; `deseasonalize`/
+/// `seasonal_period` added for BUG-05, D1-b).
 #[derive(Debug, Clone, Copy)]
 pub struct ChangepointOptions {
     /// Expected run length between changepoints (same meaning as
@@ -596,6 +676,18 @@ pub struct ChangepointOptions {
     /// [`detect_changepoints_bocpd_with_options`] returns
     /// `ForecastError::InvalidParameter`.
     pub threshold: Option<f64>,
+    /// When `false` (default), BOCPD runs on `values` unchanged -- the
+    /// defaults are byte-identical to before BUG-05 (#287). When `true`,
+    /// [`deseasonalize_for_changepoints`] runs first (D1-b): level shifts
+    /// survive as steps, but regular seasonal cycles stop producing
+    /// changepoints. Opt-in only -- see CONTEXT Deferred Ideas (making this
+    /// the default is out of scope).
+    pub deseasonalize: bool,
+    /// Seasonal period passed to [`deseasonalize_for_changepoints`] when
+    /// `deseasonalize` is `true`. `None` auto-detects the period (the FFI
+    /// boundary's `0` sentinel maps to this). Ignored when `deseasonalize`
+    /// is `false`.
+    pub seasonal_period: Option<usize>,
 }
 
 impl Default for ChangepointOptions {
@@ -603,6 +695,8 @@ impl Default for ChangepointOptions {
         Self {
             hazard_lambda: 250.0,
             threshold: None,
+            deseasonalize: false,
+            seasonal_period: None,
         }
     }
 }
@@ -626,11 +720,18 @@ impl Default for ChangepointOptions {
 /// which is not evidence of a changepoint. `changepoints` is recomputed
 /// from the resulting `is_changepoint`.
 ///
+/// `opts.deseasonalize == true` runs [`deseasonalize_for_changepoints`]
+/// (#287, BUG-05, D1-b) on `values` BEFORE BOCPD, at `opts.seasonal_period`
+/// (or the auto-detected period when `None`). `opts.deseasonalize == false`
+/// (the default) leaves `values` unchanged -- defaults stay byte-identical
+/// to before BUG-05.
+///
 /// # Errors
 /// `ForecastError::InvalidParameter { param: "threshold", .. }` if
 /// `opts.threshold` is `Some` and not finite or outside `[0, 1]`.
 /// Otherwise, the same errors as [`bocpd_trace`]
-/// (`InsufficientData`/`InvalidInput`).
+/// (`InsufficientData`/`InvalidInput`), or any error propagated from
+/// [`deseasonalize_for_changepoints`] when `opts.deseasonalize` is `true`.
 pub fn detect_changepoints_bocpd_with_options(
     values: &[f64],
     opts: &ChangepointOptions,
@@ -645,7 +746,17 @@ pub fn detect_changepoints_bocpd_with_options(
         }
     }
 
-    let trace = bocpd_trace(values, opts.hazard_lambda)?;
+    let transformed: Option<Vec<f64>> = if opts.deseasonalize {
+        Some(deseasonalize_for_changepoints(
+            values,
+            opts.seasonal_period,
+        )?)
+    } else {
+        None
+    };
+    let series: &[f64] = transformed.as_deref().unwrap_or(values);
+
+    let trace = bocpd_trace(series, opts.hazard_lambda)?;
 
     let is_changepoint: Vec<bool> = match opts.threshold {
         None => trace.is_changepoint,
@@ -1118,6 +1229,7 @@ mod tests {
         let opts = ChangepointOptions {
             hazard_lambda: 250.0,
             threshold: None,
+            ..Default::default()
         };
         let with_opts = detect_changepoints_bocpd_with_options(&step, &opts).unwrap();
         let base = detect_changepoints_bocpd(&step, 250.0, true).unwrap();
@@ -1159,6 +1271,7 @@ mod tests {
         let opts = ChangepointOptions {
             hazard_lambda: 250.0,
             threshold: Some(0.5),
+            ..Default::default()
         };
         let result = detect_changepoints_bocpd_with_options(&step, &opts).unwrap();
         let want: Vec<bool> = result
@@ -1181,6 +1294,7 @@ mod tests {
         let opts = ChangepointOptions {
             hazard_lambda: 250.0,
             threshold: Some(0.0),
+            ..Default::default()
         };
         let result = detect_changepoints_bocpd_with_options(&step, &opts).unwrap();
         assert!(
@@ -1202,6 +1316,7 @@ mod tests {
             let opts = ChangepointOptions {
                 hazard_lambda: 250.0,
                 threshold: Some(bad),
+                ..Default::default()
             };
             let result = detect_changepoints_bocpd_with_options(&step, &opts);
             match result {
@@ -1211,5 +1326,121 @@ mod tests {
                 other => panic!("threshold={bad}: expected InvalidParameter, got {other:?}"),
             }
         }
+    }
+
+    // -----------------------------------------------------------------
+    // Phase 20 plan 20-07 Task 1 (#287, BUG-05, D1-b): `deseasonalize`/
+    // `seasonal_period` on `ChangepointOptions`, and
+    // `deseasonalize_for_changepoints` itself.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn test_deseasonalize_false_reproduces_20_06_bit_for_bit() {
+        let b = issue287_series_b();
+        let opts_explicit_off = ChangepointOptions {
+            hazard_lambda: 250.0,
+            threshold: Some(0.5),
+            deseasonalize: false,
+            seasonal_period: None,
+        };
+        let opts_20_06_shape = ChangepointOptions {
+            hazard_lambda: 250.0,
+            threshold: Some(0.5),
+            ..Default::default()
+        };
+        let with_explicit_off =
+            detect_changepoints_bocpd_with_options(&b, &opts_explicit_off).unwrap();
+        let baseline = detect_changepoints_bocpd_with_options(&b, &opts_20_06_shape).unwrap();
+        assert_eq!(with_explicit_off.is_changepoint, baseline.is_changepoint);
+        assert_eq!(
+            with_explicit_off.changepoint_probability,
+            baseline.changepoint_probability
+        );
+        assert_eq!(with_explicit_off.changepoints, baseline.changepoints);
+
+        // And against the pre-deseasonalize detect_changepoints_bocpd
+        // directly, confirming deseasonalize: false is a true no-op.
+        let no_threshold_opts = ChangepointOptions {
+            hazard_lambda: 250.0,
+            ..Default::default()
+        };
+        let with_opts = detect_changepoints_bocpd_with_options(&b, &no_threshold_opts).unwrap();
+        let pre_existing = detect_changepoints_bocpd(&b, 250.0, true).unwrap();
+        assert_eq!(with_opts.is_changepoint, pre_existing.is_changepoint);
+        assert_eq!(
+            with_opts.changepoint_probability,
+            pre_existing.changepoint_probability
+        );
+        assert_eq!(with_opts.changepoints, pre_existing.changepoints);
+    }
+
+    #[test]
+    fn test_deseasonalize_true_threshold_flags_only_the_step_not_the_seasonal_cycle() {
+        // #287 panel series B (weekly seasonality, +15 level shift at index
+        // 50): the Phase 20 planner's measured table (20-07-PLAN.md
+        // "Planner-verified facts") pins this exact combination to flag
+        // only index 50.
+        let series = issue287_series_b();
+        let opts = ChangepointOptions {
+            hazard_lambda: 250.0,
+            threshold: Some(0.5),
+            deseasonalize: true,
+            seasonal_period: Some(7),
+        };
+        let result = detect_changepoints_bocpd_with_options(&series, &opts).unwrap();
+        assert_eq!(
+            result.changepoints,
+            vec![50],
+            "deseasonalize+threshold must flag only the step at index 50, got {:?}",
+            result.changepoints
+        );
+        assert!(!result.is_changepoint[0], "index 0 must never be flagged");
+        for i in 1..50 {
+            assert!(
+                !result.is_changepoint[i],
+                "index {i} (before the step) must not be flagged"
+            );
+        }
+    }
+
+    #[test]
+    fn test_deseasonalize_explicit_period_matches_auto_detection() {
+        let series = issue287_series_b();
+        let explicit = ChangepointOptions {
+            hazard_lambda: 250.0,
+            threshold: Some(0.5),
+            deseasonalize: true,
+            seasonal_period: Some(7),
+        };
+        let auto = ChangepointOptions {
+            hazard_lambda: 250.0,
+            threshold: Some(0.5),
+            deseasonalize: true,
+            seasonal_period: None,
+        };
+        let with_explicit = detect_changepoints_bocpd_with_options(&series, &explicit).unwrap();
+        let with_auto = detect_changepoints_bocpd_with_options(&series, &auto).unwrap();
+        assert_eq!(
+            with_explicit.is_changepoint, with_auto.is_changepoint,
+            "explicit seasonal_period=7 must match auto-detection on a period-7 series"
+        );
+        assert_eq!(
+            with_explicit.changepoint_probability,
+            with_auto.changepoint_probability
+        );
+    }
+
+    #[test]
+    fn test_deseasonalize_too_short_for_any_period_still_detrends_without_error() {
+        // n=10 cannot support period 7 under mstl_fit's own usability rule
+        // (n > 2*p => 10 > 14 is false), so seasonal removal must be
+        // skipped -- but the D1-b linear detrend ALWAYS runs, error-free.
+        let values: Vec<f64> = (0..10).map(|i| i as f64).collect();
+        let result = deseasonalize_for_changepoints(&values, Some(7)).unwrap();
+        let expected = detrend_linear(&values).unwrap().detrended;
+        assert_eq!(
+            result, expected,
+            "too-short-for-any-period series: deseasonalize must equal a plain linear detrend"
+        );
     }
 }

@@ -162,6 +162,8 @@ static void TsChangepointsAggFinalize(Vector &state_vector, AggregateInputData &
         ChangepointOptionsFFI opts;
         opts.hazard_lambda = data.params.hazard_lambda;
         opts.threshold = data.params.threshold;
+        opts.deseasonalize = data.params.deseasonalize;
+        opts.seasonal_period = data.params.seasonal_period;
 
         bool success = anofox_ts_detect_changepoints_bocpd_opts(
             sorted_values.data(),

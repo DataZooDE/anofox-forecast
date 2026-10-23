@@ -163,6 +163,7 @@ fn bocpd_with_options_threshold_matches_numpy_expected_threshold_0_5() {
         let opts = ChangepointOptions {
             hazard_lambda,
             threshold: Some(0.5),
+            ..Default::default()
         };
         let result = detect_changepoints_bocpd_with_options(&x, &opts).unwrap();
         assert_eq!(
