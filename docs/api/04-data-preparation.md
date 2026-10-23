@@ -66,6 +66,8 @@ CREATE TABLE clean_data AS
 SELECT * FROM ts_drop_short_by('nulls_filled', product_id, 20);
 ```
 
+The `_by` data-preparation functions (`ts_fill_gaps_by`, `ts_fill_forward_by`, and likewise `ts_stats_by`, `ts_detect_changepoints_by` and `ts_mstl_decomposition_by`) read their whole source regardless of plan shape: a view built from a UNION ALL, or a source in reversed or shuffled row order, gives the same result as the same rows in a date-ordered table.
+
 !!! warning "Do not chain table functions in CTEs"
     Chaining multiple `_by` table functions via CTEs (e.g., `ts_fill_gaps_by` → `ts_fill_forward_by`) can return **0 rows** under parallel execution. This is a DuckDB engine limitation where the FinalExecute output of one table-in-out operator is not visible to a downstream table-in-out operator within the same query.
 

@@ -66,6 +66,15 @@ returns the source table's column names and types (previously always
   output columns are unchanged. Cost: each call now sorts its source once
   (`ORDER BY ALL`) to give the computation a single input pipeline, about 0.04 s per
   1M rows in our measurement.
+  The same silent partial input hit the detection, statistics and data-preparation
+  macros `ts_detect_changepoints_by`, `ts_stats_by`, `ts_fill_gaps_by`,
+  `ts_fill_forward_by` (and the deprecated `ts_fill_forward_operator` over it) and
+  `ts_mstl_decomposition_by` when the source table name was a UNION ALL view: on a
+  3-series view of 45 rows per series, `ts_detect_changepoints_by` returned 31 rows
+  per series and `ts_fill_gaps_by` 93 of 252. They now read their whole source
+  (`ORDER BY ALL` single-pipeline input) and give identical results for UNION ALL,
+  reversed and shuffled sources. Signatures, output columns and default changepoint
+  outputs are unchanged.
 
 - **`ts_classify_seasonality_by` / `ts_classify_seasonality_agg` / `ts_classify_seasonality`
   reported a strong weekly series as non-seasonal with the wrong strength (#286).** The
