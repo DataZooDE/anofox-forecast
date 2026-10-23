@@ -20,6 +20,12 @@
 
 require anofox_forecast
 
+# ts_mstl_decomposition_by expands to to_json(params)/json_extract_string calls even for
+# an empty params MAP. json is statically linked in native builds (Phase 18, 18-01) and
+# `require json` activates it in the unittest harness, so this never skips natively
+# (same note as detection_decomposition.test).
+require json
+
 statement ok
 CREATE TABLE s2 AS SELECT id, (TIMESTAMP '2024-01-01' + INTERVAL (i) DAY) AS ds, base + 0.3 * i AS y FROM (VALUES ('A', 20.0), ('B', 40.0), ('C', 60.0)) t(id, base), range(84) r(i);
 
@@ -125,5 +131,171 @@ SELECT count(*) FROM (SELECT * FROM ts_stats_by('sv', id, ds, y, '1d') EXCEPT AL
 
 query I
 SELECT count(*) FROM (SELECT * FROM ts_stats_by('ut', id, ds, y, '1d') EXCEPT ALL SELECT * FROM ts_stats_by('sv', id, ds, y, '1d'));
+----
+0
+
+# =============================================================================
+# ts_fill_gaps_by ('1d'): the full 84-day grid per id = 252 rows with the 135 source
+# values (was 93 rows, 93 values on the UNION ALL view), identical on every shape.
+# =============================================================================
+
+query III
+SELECT id, count(*), count(y) FROM ts_fill_gaps_by('uv', id, ds, y, '1d') GROUP BY id ORDER BY id;
+----
+A	84	45
+B	84	45
+C	84	45
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_gaps_by('uv', id, ds, y, '1d') EXCEPT ALL SELECT * FROM ts_fill_gaps_by('ut', id, ds, y, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_gaps_by('ut', id, ds, y, '1d') EXCEPT ALL SELECT * FROM ts_fill_gaps_by('uv', id, ds, y, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_gaps_by('rv', id, ds, y, '1d') EXCEPT ALL SELECT * FROM ts_fill_gaps_by('ut', id, ds, y, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_gaps_by('ut', id, ds, y, '1d') EXCEPT ALL SELECT * FROM ts_fill_gaps_by('rv', id, ds, y, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_gaps_by('sv', id, ds, y, '1d') EXCEPT ALL SELECT * FROM ts_fill_gaps_by('ut', id, ds, y, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_gaps_by('ut', id, ds, y, '1d') EXCEPT ALL SELECT * FROM ts_fill_gaps_by('sv', id, ds, y, '1d'));
+----
+0
+
+# =============================================================================
+# ts_fill_forward_by ('1d', to 2024-03-31): the 45 source rows plus 7 appended days
+# per id = 52 rows, 45 values (was 273 rows, 93 values on the UNION ALL view, i.e.
+# the first branch alone extended to the target date). Only '1d' is used here: the
+# Phase 19 deferred WASM fill-forward bug affects calendar/hourly frequencies.
+# ts_fill_forward_operator (Phase 19 macro over ts_fill_forward_by) inherits the fix.
+# =============================================================================
+
+query IIII
+SELECT id, count(*), count(y), max(ds) FROM ts_fill_forward_by('uv', id, ds, y, TIMESTAMP '2024-03-31', '1d') GROUP BY id ORDER BY id;
+----
+A	52	45	2024-03-31 00:00:00
+B	52	45	2024-03-31 00:00:00
+C	52	45	2024-03-31 00:00:00
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_forward_by('uv', id, ds, y, TIMESTAMP '2024-03-31', '1d') EXCEPT ALL SELECT * FROM ts_fill_forward_by('ut', id, ds, y, TIMESTAMP '2024-03-31', '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_forward_by('ut', id, ds, y, TIMESTAMP '2024-03-31', '1d') EXCEPT ALL SELECT * FROM ts_fill_forward_by('uv', id, ds, y, TIMESTAMP '2024-03-31', '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_forward_by('rv', id, ds, y, TIMESTAMP '2024-03-31', '1d') EXCEPT ALL SELECT * FROM ts_fill_forward_by('ut', id, ds, y, TIMESTAMP '2024-03-31', '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_forward_by('ut', id, ds, y, TIMESTAMP '2024-03-31', '1d') EXCEPT ALL SELECT * FROM ts_fill_forward_by('rv', id, ds, y, TIMESTAMP '2024-03-31', '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_forward_by('sv', id, ds, y, TIMESTAMP '2024-03-31', '1d') EXCEPT ALL SELECT * FROM ts_fill_forward_by('ut', id, ds, y, TIMESTAMP '2024-03-31', '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_forward_by('ut', id, ds, y, TIMESTAMP '2024-03-31', '1d') EXCEPT ALL SELECT * FROM ts_fill_forward_by('sv', id, ds, y, TIMESTAMP '2024-03-31', '1d'));
+----
+0
+
+query III
+SELECT id, count(*), count(y) FROM ts_fill_forward_operator('uv', 'id', 'ds', 'y', TIMESTAMP '2024-03-31', '1d') GROUP BY id ORDER BY id;
+----
+A	52	45
+B	52	45
+C	52	45
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_forward_operator('uv', 'id', 'ds', 'y', TIMESTAMP '2024-03-31', '1d') EXCEPT ALL SELECT * FROM ts_fill_forward_operator('ut', 'id', 'ds', 'y', TIMESTAMP '2024-03-31', '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_forward_operator('ut', 'id', 'ds', 'y', TIMESTAMP '2024-03-31', '1d') EXCEPT ALL SELECT * FROM ts_fill_forward_operator('uv', 'id', 'ds', 'y', TIMESTAMP '2024-03-31', '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_forward_operator('rv', 'id', 'ds', 'y', TIMESTAMP '2024-03-31', '1d') EXCEPT ALL SELECT * FROM ts_fill_forward_operator('ut', 'id', 'ds', 'y', TIMESTAMP '2024-03-31', '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_forward_operator('ut', 'id', 'ds', 'y', TIMESTAMP '2024-03-31', '1d') EXCEPT ALL SELECT * FROM ts_fill_forward_operator('rv', 'id', 'ds', 'y', TIMESTAMP '2024-03-31', '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_forward_operator('sv', 'id', 'ds', 'y', TIMESTAMP '2024-03-31', '1d') EXCEPT ALL SELECT * FROM ts_fill_forward_operator('ut', 'id', 'ds', 'y', TIMESTAMP '2024-03-31', '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_forward_operator('ut', 'id', 'ds', 'y', TIMESTAMP '2024-03-31', '1d') EXCEPT ALL SELECT * FROM ts_fill_forward_operator('sv', 'id', 'ds', 'y', TIMESTAMP '2024-03-31', '1d'));
+----
+0
+
+# =============================================================================
+# ts_mstl_decomposition_by (seasonal_periods [7]): one row per id whose trend and
+# remainder cover all 45 rows, identical lists on every shape.
+# =============================================================================
+
+query IIIII
+SELECT id, len(trend), len(remainder), list_count(trend), periods FROM ts_mstl_decomposition_by('uv', id, ds, y, MAP{'seasonal_periods': '[7]'}) ORDER BY id;
+----
+A	45	45	45	[7]
+B	45	45	45	[7]
+C	45	45	45	[7]
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_mstl_decomposition_by('uv', id, ds, y, MAP{'seasonal_periods': '[7]'}) EXCEPT ALL SELECT * FROM ts_mstl_decomposition_by('ut', id, ds, y, MAP{'seasonal_periods': '[7]'}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_mstl_decomposition_by('ut', id, ds, y, MAP{'seasonal_periods': '[7]'}) EXCEPT ALL SELECT * FROM ts_mstl_decomposition_by('uv', id, ds, y, MAP{'seasonal_periods': '[7]'}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_mstl_decomposition_by('rv', id, ds, y, MAP{'seasonal_periods': '[7]'}) EXCEPT ALL SELECT * FROM ts_mstl_decomposition_by('ut', id, ds, y, MAP{'seasonal_periods': '[7]'}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_mstl_decomposition_by('ut', id, ds, y, MAP{'seasonal_periods': '[7]'}) EXCEPT ALL SELECT * FROM ts_mstl_decomposition_by('rv', id, ds, y, MAP{'seasonal_periods': '[7]'}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_mstl_decomposition_by('sv', id, ds, y, MAP{'seasonal_periods': '[7]'}) EXCEPT ALL SELECT * FROM ts_mstl_decomposition_by('ut', id, ds, y, MAP{'seasonal_periods': '[7]'}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_mstl_decomposition_by('ut', id, ds, y, MAP{'seasonal_periods': '[7]'}) EXCEPT ALL SELECT * FROM ts_mstl_decomposition_by('sv', id, ds, y, MAP{'seasonal_periods': '[7]'}));
 ----
 0

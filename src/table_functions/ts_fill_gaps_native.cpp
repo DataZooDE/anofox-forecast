@@ -1,6 +1,7 @@
 #include "duckdb_compat.hpp"
 #include "ts_fill_gaps_native.hpp"
 #include "anofox_fcst_ffi.h"
+#include "ts_collect_finalize.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/common/types/hash.hpp"
@@ -188,9 +189,8 @@ struct FillGapsSlot {
 
 struct TsFillGapsNativeLocalState : public LocalTableFunctionState {
     idx_t current_slot = 0;       // Which slot we're currently outputting from
-    bool owns_finalize = false;   // True if this thread owns finalize work
-    bool registered_collector = false;  // True if this thread called in_out
-    bool registered_finalizer = false;  // True if this thread entered finalize
+    bool owns_finalize = false;     // True if this thread owns finalize work
+    bool arrived_at_final = false;  // True once this thread reached finalize
 };
 
 // ============================================================================
@@ -279,13 +279,10 @@ struct TsFillGapsNativeGlobalState : public GlobalTableFunctionState {
     vector<unique_ptr<FillGapsSlot>> slots;
 
     // Only one thread can own finalize output to avoid batch index conflicts
-    // with DuckDB's PhysicalBatchInsert (used by CREATE TABLE AS SELECT)
-    std::atomic<bool> finalize_claimed{false};
-
-    // Barrier: track threads that collected data vs entered finalize
-    // Ensures all in_out calls complete before processing begins
-    std::atomic<idx_t> threads_collecting{0};
-    std::atomic<idx_t> threads_done_collecting{0};
+    // with DuckDB's PhysicalBatchInsert (used by CREATE TABLE AS SELECT), and only
+    // after every local state finished collecting: last-finalizer barrier
+    // (ts_collect_finalize.hpp).
+    TsCollectFinalizeBarrier barrier;
 
     idx_t MaxThreads() const override {
         return num_slots;
@@ -316,6 +313,7 @@ static unique_ptr<LocalTableFunctionState> TsFillGapsNativeInitLocal(
     ExecutionContext &context,
     TableFunctionInitInput &input,
     GlobalTableFunctionState *global_state) {
+    global_state->Cast<TsFillGapsNativeGlobalState>().barrier.RegisterLocal();
     return make_uniq<TsFillGapsNativeLocalState>();
 }
 
@@ -339,13 +337,9 @@ static OperatorResultType TsFillGapsNativeInOut(
 
     auto &bind_data = data_p.bind_data->Cast<TsFillGapsNativeBindData>();
     auto &gstate = data_p.global_state->Cast<TsFillGapsNativeGlobalState>();
-    auto &lstate = data_p.local_state->Cast<TsFillGapsNativeLocalState>();
 
-    // Register this thread as a collector (first call only)
-    if (!lstate.registered_collector) {
-        gstate.threads_collecting.fetch_add(1);
-        lstate.registered_collector = true;
-    }
+    // Late-row guard: rows after the finalize claim would be silently dropped.
+    gstate.barrier.AssertCollecting("_ts_fill_gaps_native");
 
     // Step 1: Collect all rows locally, grouped by slot (no locking)
     vector<vector<std::pair<string, TempRow>>> slot_batches(gstate.num_slots);
@@ -442,31 +436,22 @@ static OperatorFinalizeResultType TsFillGapsNativeFinalize(
     auto &gstate = data_p.global_state->Cast<TsFillGapsNativeGlobalState>();
     auto &lstate = data_p.local_state->Cast<TsFillGapsNativeLocalState>();
 
-    // Signal that this thread has entered finalize (done with in_out calls)
-    if (!lstate.registered_finalizer) {
-        if (lstate.registered_collector) {
-            gstate.threads_done_collecting.fetch_add(1);
-        }
-        lstate.registered_finalizer = true;
-    }
-
-    // Only one thread can own finalize output to avoid batch index conflicts
-    // with DuckDB's PhysicalBatchInsert (used by CREATE TABLE AS SELECT).
-    // After source exhaustion, all threads share the same sentinel batch index,
-    // so multi-thread output would cause duplicate batch index errors.
+    // Last-finalizer claim (ts_collect_finalize.hpp): the local state whose
+    // arrival completes the count of registered local states processes; every
+    // other one finishes at once (no spin-wait). Only one thread may own the
+    // output, to avoid batch index conflicts with DuckDB's PhysicalBatchInsert
+    // (used by CREATE TABLE AS SELECT): after source exhaustion all threads share
+    // the same sentinel batch index.
     if (!lstate.owns_finalize) {
-        bool expected = false;
-        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true)) {
+        if (lstate.arrived_at_final) {
+            return OperatorFinalizeResultType::FINISHED;
+        }
+        lstate.arrived_at_final = true;
+        if (!gstate.barrier.ArriveAtFinal()) {
             return OperatorFinalizeResultType::FINISHED;
         }
         lstate.owns_finalize = true;
         lstate.current_slot = 0;
-
-        // Wait for all threads that called in_out to enter finalize,
-        // ensuring all data has been collected before we process it
-        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load()) {
-            std::this_thread::yield();
-        }
     }
 
     // Process all slots sequentially on this single thread

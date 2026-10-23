@@ -424,10 +424,13 @@ ORDER BY group_col, date_col
     // Performance (1M rows, 10K groups):
     //   SQL macro:  181 MB peak memory
     //   Native:      11 MB peak memory (16x reduction)
+    // The native's input is (... FROM query_table(source) ORDER BY ALL): the ORDER BY is a
+    // single-pipeline breaker, so a UNION ALL view cannot hand the collect-then-finalize
+    // native several pipelines that finalize on partial input (#285, Phase 20 20-03).
     {"ts_fill_gaps_by", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_fill_gaps_native(
-    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
+    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR) ORDER BY ALL),
     frequency::VARCHAR
 )
 )",
@@ -445,10 +448,13 @@ SELECT * FROM _ts_fill_gaps_native(
     // Performance (1M rows, 10K groups):
     //   SQL macro:  127 MB peak memory
     //   Native:      11 MB peak memory (11x reduction)
+    // The native's input is (... FROM query_table(source) ORDER BY ALL): the ORDER BY is a
+    // single-pipeline breaker, so a UNION ALL view cannot hand the collect-then-finalize
+    // native several pipelines that finalize on partial input (#285, Phase 20 20-03).
     {"ts_fill_forward_by", {"source", "group_col", "date_col", "value_col", "target_date", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_fill_forward_native(
-    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
+    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR) ORDER BY ALL),
     target_date,
     frequency::VARCHAR
 )
@@ -514,10 +520,13 @@ WHERE group_col IN (
     // C++ API: ts_mstl_decomposition_by(table_name, group_col, date_col, value_col, params MAP)
     // Returns: TABLE with expanded decomposition columns
     // Uses native streaming implementation to avoid LIST() memory issues
+    // The native's input is (... FROM query_table(source) ORDER BY ALL): the ORDER BY is a
+    // single-pipeline breaker, so a UNION ALL view cannot hand the collect-then-finalize
+    // native several pipelines that finalize on partial input (#285, Phase 20 20-03).
     {"ts_mstl_decomposition_by", {"source", "group_col", "date_col", "value_col", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_mstl_decomposition_native(
-    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
+    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR) ORDER BY ALL),
     COALESCE(json_extract_string(to_json(params), '$.insufficient_data'), 'fail'),
     CAST(COALESCE(json_extract_string(to_json(params), '$.seasonal_periods'), json_extract_string(to_json(params), '$.periods'), '[]') AS INTEGER[])
 )
