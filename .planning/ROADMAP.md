@@ -90,7 +90,7 @@ Full detail: [milestones/v0.10.0-ROADMAP.md](milestones/v0.10.0-ROADMAP.md) · R
 - Integer phases (19, 20, 21): Planned milestone work
 - Decimal phases (e.g. 20.1): Urgent insertions (marked with INSERTED)
 
-- [ ] **Phase 19: WASM Traps & Distribution Pipeline** - The #289 WASM traps and the fill-forward hang are fixed; the upload script and a post-upload check stop broken WASM artifacts; wasm_mvp is decided; the CORS/stale-path changes are handed to the owner
+- [x] **Phase 19: WASM Traps & Distribution Pipeline** - The #289 WASM traps and the fill-forward hang are fixed; the upload script and a post-upload check stop broken WASM artifacts; wasm_mvp is decided; the CORS/stale-path changes are handed to the owner (completed 2026-10-23)
 - [ ] **Phase 20: Detection & Metric Bug Fixes** - `ts_mase_by` no longer depends on row order; seasonality classification agrees with `ts_stats_by`; changepoints ignore regular seasonal troughs and agree with their probability; period 7 is pinned
 - [ ] **Phase 21: Upstream AutoETS Spike & Ridge Conditioning Fixes** - AutoETS stops turning one-off spikes into a trend (anofox-forecast); the fold-level ridge chooses λ by conditioning (anofox-regression); delivered as upstream PRs for release
 - [ ] **Phase 22: Upstream Streaming Feature Builders** - anofox-forecast's regression feature engineering becomes standalone `(series, t, cfg) -> row` builders shared by the per-series and panel fits (upstream PR for release)
@@ -113,7 +113,7 @@ Full detail: [milestones/v0.10.0-ROADMAP.md](milestones/v0.10.0-ROADMAP.md) · R
   4. The `wasm_mvp` build either LOADs in DuckDB-Wasm on Node, or the `_setThrew is not defined` root cause is written up with a recorded decision (fix it, or stop shipping wasm_mvp and change the build/upload matrix to match).
   5. A handover note gives the owner the exact get.erpl.io CORS rule (GET/HEAD from `*`) and the list of stale old-version paths, ready to apply without further investigation.
 
-**Plans:** 4/4 plans executed
+**Plans:** 4/4 plans complete
 
 Plans:
 **Wave 1**
@@ -235,7 +235,7 @@ Extension phases execute in numeric order: 19 → 20 → 23 → 24 → 25. Phase
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 19. WASM Traps & Distribution Pipeline | 4/4 | In Progress|  |
+| 19. WASM Traps & Distribution Pipeline | 4/4 | Complete    | 2026-10-23 |
 | 20. Detection & Metric Bug Fixes | 0/TBD | Not started | - |
 | 21. Upstream AutoETS Spike & Ridge Conditioning Fixes | 0/TBD | Not started | - |
 | 22. Upstream Streaming Feature Builders | 0/TBD | Not started | - |
