@@ -196,6 +196,35 @@ case_constant_insample <- list(
   r_call = "accuracy(manual forecast object, const_test); insample is constant rep(3,20) -> scale 0 -> R returns Inf. Product policy (D-08): MASE is undefined here, returned as SQL NULL, not Inf."
 )
 
+# --- issue285_panel_{A,B,C}: the GitHub #285 panel (Phase 20, BUG-03) ---
+# SQL: id in A/B/C with base 20/40/60, i = 0..83, ds = 2024-01-01 + i days,
+#   y = base + 0.3*i + 5*sin(2*pi*i/7) + (id == 'B' && i >= 50 ? 15 : 0)
+#       + 1.6*cos(0.9*i) + 0.7*sin(1.7*i + base)
+# in-sample = y for ds < 2024-03-11 (i = 0..69, date order), evaluation
+# actual = y and forecast = y + 1 for i = 70..83, m = 7. ts_mase_by on the
+# date-sorted series must equal this whatever the input row order or plan shape.
+issue285_case <- function(id, base) {
+  i <- 0:83
+  y <- base + 0.3 * i + 5 * sin(2 * pi * i / 7) + ifelse(id == "B" & i >= 50, 15, 0) +
+    1.6 * cos(i * 0.9) + 0.7 * sin(i * 1.7 + base)
+  train <- y[i < 70]
+  test <- y[i >= 70]
+  fc_vals <- test + 1
+  fc <- make_manual_forecast(train, fc_vals, 7, c(11, 1))
+  list(
+    insample = as.numeric(train),
+    actual = as.numeric(test),
+    forecast = as.numeric(fc_vals),
+    seasonal_period = 7L,
+    mase_accuracy = accuracy_mase(fc, ts(test, start = c(11, 1), frequency = 7)),
+    mase_manual = mase_manual(test, fc_vals, train, 7),
+    r_call = sprintf("accuracy(manual forecast object (#285 series %s, base %d, 70 in-sample days, 14 test days, fc = y + 1, frequency 7), ts(test, start=c(11,1), frequency=7))", id, as.integer(base))
+  )
+}
+case_issue285_panel_A <- issue285_case("A", 20)
+case_issue285_panel_B <- issue285_case("B", 40)
+case_issue285_panel_C <- issue285_case("C", 60)
+
 tv <- provenance("r_mase", GENERATOR_PATH)$tool_versions
 tv$forecast <- as.character(packageVersion("forecast"))
 
@@ -215,7 +244,10 @@ mase_fixture <- list(
     det_m1 = case_det_m1,
     insample_na_m4 = case_insample_na_m4,
     test_na_m4 = case_test_na_m4,
-    constant_insample = case_constant_insample
+    constant_insample = case_constant_insample,
+    issue285_panel_A = case_issue285_panel_A,
+    issue285_panel_B = case_issue285_panel_B,
+    issue285_panel_C = case_issue285_panel_C
   )
 )
 

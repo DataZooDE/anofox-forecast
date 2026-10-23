@@ -2428,7 +2428,7 @@ FROM timing_data
     // C++ API: ts_mae_by(source, date_col, actual_col, forecast_col)
     {"ts_mae_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'mae')
+SELECT * FROM _ts_metrics_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, forecast_col, 'mae')
 )",
     "Computes Mean Absolute Error between actual and forecast columns per group. "
     "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
@@ -2441,7 +2441,7 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'ma
     // C++ API: ts_mse_by(source, date_col, actual_col, forecast_col)
     {"ts_mse_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'mse')
+SELECT * FROM _ts_metrics_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, forecast_col, 'mse')
 )",
     "Computes Mean Squared Error between actual and forecast columns per group. "
     "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
@@ -2454,7 +2454,7 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'ms
     // C++ API: ts_rmse_by(source, date_col, actual_col, forecast_col)
     {"ts_rmse_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'rmse')
+SELECT * FROM _ts_metrics_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, forecast_col, 'rmse')
 )",
     "Computes Root Mean Squared Error between actual and forecast columns per group. "
     "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
@@ -2467,7 +2467,7 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'rm
     // C++ API: ts_mape_by(source, date_col, actual_col, forecast_col)
     {"ts_mape_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'mape')
+SELECT * FROM _ts_metrics_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, forecast_col, 'mape')
 )",
     "Computes Mean Absolute Percentage Error between actual and forecast columns per group. "
     "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
@@ -2480,7 +2480,7 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'ma
     // C++ API: ts_smape_by(source, date_col, actual_col, forecast_col)
     {"ts_smape_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'smape')
+SELECT * FROM _ts_metrics_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, forecast_col, 'smape')
 )",
     "Computes Symmetric Mean Absolute Percentage Error between actual and forecast columns per group. "
     "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
@@ -2493,7 +2493,7 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'sm
     // C++ API: ts_r2_by(source, date_col, actual_col, forecast_col)
     {"ts_r2_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'r2')
+SELECT * FROM _ts_metrics_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, forecast_col, 'r2')
 )",
     "Computes R-squared (coefficient of determination) between actual and forecast columns per group. "
     "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
@@ -2506,7 +2506,7 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'r2
     // C++ API: ts_bias_by(source, date_col, actual_col, forecast_col)
     {"ts_bias_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'bias')
+SELECT * FROM _ts_metrics_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, forecast_col, 'bias')
 )",
     "Computes mean forecast bias between actual and forecast columns per group. "
     "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
@@ -2535,7 +2535,7 @@ SELECT * FROM _ts_mase_native((SELECT * FROM _ts_passthrough(source) ORDER BY AL
     // C++ API: ts_rmae_by(source, date_col, actual_col, pred1_col, pred2_col)
     {"ts_rmae_by", {"source", "date_col", "actual_col", "pred1_col", "pred2_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT * FROM _ts_rmae_native(source, date_col, actual_col, pred1_col, pred2_col)
+SELECT * FROM _ts_rmae_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, pred1_col, pred2_col)
 )",
     "Computes Relative MAE (MAE ratio between two models) per group. "
     "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
@@ -2548,7 +2548,7 @@ SELECT * FROM _ts_rmae_native(source, date_col, actual_col, pred1_col, pred2_col
     // C++ API: ts_coverage_by(source, date_col, actual_col, lower_col, upper_col)
     {"ts_coverage_by", {"source", "date_col", "actual_col", "lower_col", "upper_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT * FROM _ts_coverage_native(source, date_col, actual_col, lower_col, upper_col)
+SELECT * FROM _ts_coverage_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, lower_col, upper_col)
 )",
     "Computes prediction interval coverage rate per group. "
     "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
@@ -2561,7 +2561,7 @@ SELECT * FROM _ts_coverage_native(source, date_col, actual_col, lower_col, upper
     // C++ API: ts_quantile_loss_by(source, date_col, actual_col, forecast_col, quantile)
     {"ts_quantile_loss_by", {"source", "date_col", "actual_col", "forecast_col", "quantile", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT * FROM _ts_quantile_loss_native(source, date_col, actual_col, forecast_col, quantile)
+SELECT * FROM _ts_quantile_loss_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, forecast_col, quantile)
 )",
     "Computes quantile (pinball) loss at a specified quantile level per group. "
     "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "

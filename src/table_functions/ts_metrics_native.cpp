@@ -14,8 +14,6 @@
 #include <set>
 #include <mutex>
 #include <cmath>
-#include <atomic>
-#include <thread>
 
 namespace duckdb {
 
@@ -129,9 +127,7 @@ struct TsMetricsNativeGlobalState : public GlobalTableFunctionState {
     vector<MetricsOutputRow> results;
     bool processed = false;
     idx_t output_offset = 0;
-    std::atomic<bool> finalize_claimed{false};
-    std::atomic<idx_t> threads_collecting{0};
-    std::atomic<idx_t> threads_done_collecting{0};
+    TsCollectFinalizeBarrier barrier;
 };
 
 // ============================================================================
@@ -140,8 +136,7 @@ struct TsMetricsNativeGlobalState : public GlobalTableFunctionState {
 
 struct TsMetricsNativeLocalState : public LocalTableFunctionState {
     bool owns_finalize = false;
-    bool registered_collector = false;
-    bool registered_finalizer = false;
+    bool arrived_at_final = false;
 };
 
 // ============================================================================
@@ -344,6 +339,7 @@ static unique_ptr<LocalTableFunctionState> TsMetricsNativeInitLocal(
     ExecutionContext &context,
     TableFunctionInitInput &input,
     GlobalTableFunctionState *global_state) {
+    global_state->Cast<TsMetricsNativeGlobalState>().barrier.RegisterLocal();
     return make_uniq<TsMetricsNativeLocalState>();
 }
 
@@ -359,12 +355,8 @@ static OperatorResultType TsMetricsNativeInOut(
 
     auto &bind_data = data_p.bind_data->Cast<TsMetricsNativeBindData>();
     auto &gstate = data_p.global_state->Cast<TsMetricsNativeGlobalState>();
-    auto &lstate = data_p.local_state->Cast<TsMetricsNativeLocalState>();
 
-    if (!lstate.registered_collector) {
-        gstate.threads_collecting.fetch_add(1);
-        lstate.registered_collector = true;
-    }
+    gstate.barrier.AssertCollecting("_ts_metrics_native");
 
     // Extract batch locally first (no lock)
     struct LocalEntry {
@@ -432,20 +424,18 @@ static OperatorFinalizeResultType TsMetricsNativeFinalize(
     auto &gstate = data_p.global_state->Cast<TsMetricsNativeGlobalState>();
     auto &lstate = data_p.local_state->Cast<TsMetricsNativeLocalState>();
 
-    // Barrier + claim pattern
-    if (!lstate.registered_finalizer) {
-        if (lstate.registered_collector)
-            gstate.threads_done_collecting.fetch_add(1);
-        lstate.registered_finalizer = true;
-    }
-
+    // Last-finalizer claim (ts_collect_finalize.hpp): the local state whose
+    // arrival completes the count of registered local states processes; every
+    // other one finishes at once (no spin-wait).
     if (!lstate.owns_finalize) {
-        bool expected = false;
-        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true))
+        if (lstate.arrived_at_final) {
             return OperatorFinalizeResultType::FINISHED;
+        }
+        lstate.arrived_at_final = true;
+        if (!gstate.barrier.ArriveAtFinal()) {
+            return OperatorFinalizeResultType::FINISHED;
+        }
         lstate.owns_finalize = true;
-        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load())
-            std::this_thread::yield();
     }
 
     // Process all groups on first finalize call
@@ -980,15 +970,12 @@ struct TsRmaeNativeGlobalState : public GlobalTableFunctionState {
     vector<RmaeOutputRow> results;
     bool processed = false;
     idx_t output_offset = 0;
-    std::atomic<bool> finalize_claimed{false};
-    std::atomic<idx_t> threads_collecting{0};
-    std::atomic<idx_t> threads_done_collecting{0};
+    TsCollectFinalizeBarrier barrier;
 };
 
 struct TsRmaeNativeLocalState : public LocalTableFunctionState {
     bool owns_finalize = false;
-    bool registered_collector = false;
-    bool registered_finalizer = false;
+    bool arrived_at_final = false;
 };
 
 static unique_ptr<FunctionData> TsRmaeNativeBind(
@@ -1057,6 +1044,7 @@ static unique_ptr<GlobalTableFunctionState> TsRmaeNativeInitGlobal(
 
 static unique_ptr<LocalTableFunctionState> TsRmaeNativeInitLocal(
     ExecutionContext &context, TableFunctionInitInput &input, GlobalTableFunctionState *global_state) {
+    global_state->Cast<TsRmaeNativeGlobalState>().barrier.RegisterLocal();
     return make_uniq<TsRmaeNativeLocalState>();
 }
 
@@ -1065,12 +1053,8 @@ static OperatorResultType TsRmaeNativeInOut(
 
     auto &bind_data = data_p.bind_data->Cast<TsRmaeNativeBindData>();
     auto &gstate = data_p.global_state->Cast<TsRmaeNativeGlobalState>();
-    auto &lstate = data_p.local_state->Cast<TsRmaeNativeLocalState>();
 
-    if (!lstate.registered_collector) {
-        gstate.threads_collecting.fetch_add(1);
-        lstate.registered_collector = true;
-    }
+    gstate.barrier.AssertCollecting("_ts_rmae_native");
 
     // Extract batch locally first (no lock)
     struct LocalEntry {
@@ -1136,20 +1120,18 @@ static OperatorFinalizeResultType TsRmaeNativeFinalize(
     auto &gstate = data_p.global_state->Cast<TsRmaeNativeGlobalState>();
     auto &lstate = data_p.local_state->Cast<TsRmaeNativeLocalState>();
 
-    // Barrier + claim pattern
-    if (!lstate.registered_finalizer) {
-        if (lstate.registered_collector)
-            gstate.threads_done_collecting.fetch_add(1);
-        lstate.registered_finalizer = true;
-    }
-
+    // Last-finalizer claim (ts_collect_finalize.hpp): the local state whose
+    // arrival completes the count of registered local states processes; every
+    // other one finishes at once (no spin-wait).
     if (!lstate.owns_finalize) {
-        bool expected = false;
-        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true))
+        if (lstate.arrived_at_final) {
             return OperatorFinalizeResultType::FINISHED;
+        }
+        lstate.arrived_at_final = true;
+        if (!gstate.barrier.ArriveAtFinal()) {
+            return OperatorFinalizeResultType::FINISHED;
+        }
         lstate.owns_finalize = true;
-        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load())
-            std::this_thread::yield();
     }
 
     if (!gstate.processed) {
@@ -1275,15 +1257,12 @@ struct TsCoverageNativeGlobalState : public GlobalTableFunctionState {
     vector<CoverageOutputRow> results;
     bool processed = false;
     idx_t output_offset = 0;
-    std::atomic<bool> finalize_claimed{false};
-    std::atomic<idx_t> threads_collecting{0};
-    std::atomic<idx_t> threads_done_collecting{0};
+    TsCollectFinalizeBarrier barrier;
 };
 
 struct TsCoverageNativeLocalState : public LocalTableFunctionState {
     bool owns_finalize = false;
-    bool registered_collector = false;
-    bool registered_finalizer = false;
+    bool arrived_at_final = false;
 };
 
 static unique_ptr<FunctionData> TsCoverageNativeBind(
@@ -1352,6 +1331,7 @@ static unique_ptr<GlobalTableFunctionState> TsCoverageNativeInitGlobal(
 
 static unique_ptr<LocalTableFunctionState> TsCoverageNativeInitLocal(
     ExecutionContext &context, TableFunctionInitInput &input, GlobalTableFunctionState *global_state) {
+    global_state->Cast<TsCoverageNativeGlobalState>().barrier.RegisterLocal();
     return make_uniq<TsCoverageNativeLocalState>();
 }
 
@@ -1360,12 +1340,8 @@ static OperatorResultType TsCoverageNativeInOut(
 
     auto &bind_data = data_p.bind_data->Cast<TsCoverageNativeBindData>();
     auto &gstate = data_p.global_state->Cast<TsCoverageNativeGlobalState>();
-    auto &lstate = data_p.local_state->Cast<TsCoverageNativeLocalState>();
 
-    if (!lstate.registered_collector) {
-        gstate.threads_collecting.fetch_add(1);
-        lstate.registered_collector = true;
-    }
+    gstate.barrier.AssertCollecting("_ts_coverage_native");
 
     // Extract batch locally first (no lock)
     struct LocalEntry {
@@ -1431,20 +1407,18 @@ static OperatorFinalizeResultType TsCoverageNativeFinalize(
     auto &gstate = data_p.global_state->Cast<TsCoverageNativeGlobalState>();
     auto &lstate = data_p.local_state->Cast<TsCoverageNativeLocalState>();
 
-    // Barrier + claim pattern
-    if (!lstate.registered_finalizer) {
-        if (lstate.registered_collector)
-            gstate.threads_done_collecting.fetch_add(1);
-        lstate.registered_finalizer = true;
-    }
-
+    // Last-finalizer claim (ts_collect_finalize.hpp): the local state whose
+    // arrival completes the count of registered local states processes; every
+    // other one finishes at once (no spin-wait).
     if (!lstate.owns_finalize) {
-        bool expected = false;
-        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true))
+        if (lstate.arrived_at_final) {
             return OperatorFinalizeResultType::FINISHED;
+        }
+        lstate.arrived_at_final = true;
+        if (!gstate.barrier.ArriveAtFinal()) {
+            return OperatorFinalizeResultType::FINISHED;
+        }
         lstate.owns_finalize = true;
-        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load())
-            std::this_thread::yield();
     }
 
     if (!gstate.processed) {
@@ -1570,15 +1544,12 @@ struct TsQuantileLossNativeGlobalState : public GlobalTableFunctionState {
     vector<QuantileLossOutputRow> results;
     bool processed = false;
     idx_t output_offset = 0;
-    std::atomic<bool> finalize_claimed{false};
-    std::atomic<idx_t> threads_collecting{0};
-    std::atomic<idx_t> threads_done_collecting{0};
+    TsCollectFinalizeBarrier barrier;
 };
 
 struct TsQuantileLossNativeLocalState : public LocalTableFunctionState {
     bool owns_finalize = false;
-    bool registered_collector = false;
-    bool registered_finalizer = false;
+    bool arrived_at_final = false;
 };
 
 static unique_ptr<FunctionData> TsQuantileLossNativeBind(
@@ -1644,6 +1615,7 @@ static unique_ptr<GlobalTableFunctionState> TsQuantileLossNativeInitGlobal(
 
 static unique_ptr<LocalTableFunctionState> TsQuantileLossNativeInitLocal(
     ExecutionContext &context, TableFunctionInitInput &input, GlobalTableFunctionState *global_state) {
+    global_state->Cast<TsQuantileLossNativeGlobalState>().barrier.RegisterLocal();
     return make_uniq<TsQuantileLossNativeLocalState>();
 }
 
@@ -1652,12 +1624,8 @@ static OperatorResultType TsQuantileLossNativeInOut(
 
     auto &bind_data = data_p.bind_data->Cast<TsQuantileLossNativeBindData>();
     auto &gstate = data_p.global_state->Cast<TsQuantileLossNativeGlobalState>();
-    auto &lstate = data_p.local_state->Cast<TsQuantileLossNativeLocalState>();
 
-    if (!lstate.registered_collector) {
-        gstate.threads_collecting.fetch_add(1);
-        lstate.registered_collector = true;
-    }
+    gstate.barrier.AssertCollecting("_ts_quantile_loss_native");
 
     // Extract batch locally first (no lock)
     struct LocalEntry {
@@ -1719,20 +1687,18 @@ static OperatorFinalizeResultType TsQuantileLossNativeFinalize(
     auto &gstate = data_p.global_state->Cast<TsQuantileLossNativeGlobalState>();
     auto &lstate = data_p.local_state->Cast<TsQuantileLossNativeLocalState>();
 
-    // Barrier + claim pattern
-    if (!lstate.registered_finalizer) {
-        if (lstate.registered_collector)
-            gstate.threads_done_collecting.fetch_add(1);
-        lstate.registered_finalizer = true;
-    }
-
+    // Last-finalizer claim (ts_collect_finalize.hpp): the local state whose
+    // arrival completes the count of registered local states processes; every
+    // other one finishes at once (no spin-wait).
     if (!lstate.owns_finalize) {
-        bool expected = false;
-        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true))
+        if (lstate.arrived_at_final) {
             return OperatorFinalizeResultType::FINISHED;
+        }
+        lstate.arrived_at_final = true;
+        if (!gstate.barrier.ArriveAtFinal()) {
+            return OperatorFinalizeResultType::FINISHED;
+        }
         lstate.owns_finalize = true;
-        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load())
-            std::this_thread::yield();
     }
 
     if (!gstate.processed) {
