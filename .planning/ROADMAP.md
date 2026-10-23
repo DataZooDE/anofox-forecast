@@ -142,7 +142,36 @@ Plans:
   4. In `ts_detect_changepoints_agg`, `is_changepoint` is true exactly when `changepoint_probability` reaches the threshold (no unflagged row at p = 0.996), and `ts_detect_periods_by` returns period 7 on the #287 panel.
   5. Each fix is computed in Rust and pinned by a value-asserting test under `test/sql/correctness/` built from the issue's reproducer; `make audit` and `cargo fmt --check` stay green.
 
-**Plans**: TBD
+**Plans:** 7 plans (strictly sequential: shared build tree, CHANGELOG.md and ts_macros.cpp; 20-05 has a blocking user decision)
+
+Plans:
+**Wave 1**
+
+- [ ] 20-01-PLAN.md — BUG-04 (#286): classify_seasonality and the amplitude-modulation gate use ts_stats_by's STL strength; R tsfeatures reference; #286 pins (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 20-02-PLAN.md — BUG-03 (#285) tracer: diagnose the UNION ALL partial-finalize root cause; `_ts_passthrough` + MATERIALIZED input + single-executor natives for all 11 metric macros; R MASE reference; order/plan-shape pins (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 20-03-PLAN.md — BUG-03 audit: changepoints/stats/fill-gaps/fill-forward/MSTL `_by` macros union-safe; md5 pins freezing default changepoint outputs; union_source.test (wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 20-04-PLAN.md — BUG-03 audit: features/CV/panel/VAR `_by` macros union-safe; full in-out audit table; out-of-scope public in-out functions recorded as deferred (wave 4)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 20-05-PLAN.md — BUG-06 part 1: shared changepoint params parser, aggregate honours hazard_lambda and matches the table function; checkpoint: user decides deseasonalize transform (D1) and first-row threshold rule (D2) (wave 5)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 20-06-PLAN.md — BUG-06 part 2 + BUG-07: `threshold` key decided in Rust for both surfaces; numpy reference; period-7 pin (wave 6)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 20-07-PLAN.md — BUG-05: opt-in `deseasonalize` / `seasonal_period` per D1; R mstl reference; #287 acceptance; docs/example; Phase 20 gate and CI (wave 7)
 
 ### Phase 21: Upstream AutoETS Spike & Ridge Conditioning Fixes
 
