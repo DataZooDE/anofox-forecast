@@ -68,9 +68,8 @@ static void TsFeaturesListExecute(ClientContext &context, TableFunctionInput &da
         if (names) {
             for (size_t i = 0; i < n_names; i++) {
                 data.feature_names.push_back(names[i]);
-                free(names[i]);
             }
-            free(names);
+            anofox_free_ts_features_list(names, n_names);
         }
         data.initialized = true;
     }
@@ -157,9 +156,8 @@ static void TsFeaturesConfigTemplateExecute(ClientContext &context, TableFunctio
             for (size_t i = 0; i < n_names; i++) {
                 // Default params_json is empty object
                 data.features.push_back({names[i], "{}"});
-                free(names[i]);
             }
-            free(names);
+            anofox_free_ts_features_list(names, n_names);
         }
         data.initialized = true;
     }

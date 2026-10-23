@@ -3596,9 +3596,38 @@ pub unsafe extern "C" fn anofox_ts_features_list(
         }
 
         *out_names = names_ptr as *mut c_char;
+    } else {
+        *out_names = ptr::null_mut();
     }
 
     true
+}
+
+/// Free the feature-name array returned by `anofox_ts_features_list`.
+///
+/// # Safety
+/// `names` and `n_names` must be exactly the pointer and count that
+/// `anofox_ts_features_list` wrote into `*out_names`/`*out_count` for a
+/// single call — this releases every name and the array itself through the
+/// same allocator shim that allocated them (the size-prefixed WASM shim, or
+/// libc `malloc`/`free` on native). Manually `free()`-ing WASM-shim-allocated
+/// memory instead of calling this function reads/writes 8 bytes before the
+/// real allocation and corrupts the Emscripten heap (#289). `names` may be
+/// null (no-op). Call at most once per array returned by
+/// `anofox_ts_features_list`.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_free_ts_features_list(names: *mut *mut c_char, n_names: size_t) {
+    if names.is_null() {
+        return;
+    }
+
+    for i in 0..n_names {
+        let name_ptr = *names.add(i);
+        if !name_ptr.is_null() {
+            free(name_ptr as *mut core::ffi::c_void);
+        }
+    }
+    free(names as *mut core::ffi::c_void);
 }
 
 // ============================================================================
