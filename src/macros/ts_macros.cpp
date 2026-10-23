@@ -849,7 +849,7 @@ FROM (
 R"(
 SELECT group_col, forecast_step, date_col, yhat, model_name
 FROM _ts_forecast_panel_native(
-    (SELECT group_col, date_col, target_col::DOUBLE FROM query_table(source::VARCHAR)),
+    (SELECT group_col, date_col, target_col::DOUBLE FROM query_table(source::VARCHAR) ORDER BY ALL),
     horizon,
     frequency,
     method,
@@ -1048,7 +1048,7 @@ SELECT * FROM _ts_cv_forecast_native(
         date_col AS "__cv_dt__",
         target_col::DOUBLE AS "__cv_tgt__",
         *
-     FROM query_table(ml_folds::VARCHAR)),
+     FROM query_table(ml_folds::VARCHAR) ORDER BY ALL),
     method,
     params
 )
@@ -1748,7 +1748,7 @@ joined AS (
     JOIN src ON cv.__cv_grp = src.__src_grp AND cv.__cv_dt = src.__src_dt
 )
 SELECT * FROM _ts_cv_hydrate_native(
-    (SELECT * FROM joined),
+    (SELECT * FROM joined ORDER BY ALL),
     unknown_features,
     params
 )

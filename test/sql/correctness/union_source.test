@@ -432,3 +432,167 @@ query I
 SELECT count(*) FROM (SELECT * FROM ts_cv_split_by('ut', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}) EXCEPT ALL SELECT * FROM ts_cv_split_by('sv', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}));
 ----
 0
+
+# =============================================================================
+# Cross-validation inputs as UNION ALL / reversed / shuffled views. `cvt` is the
+# materialized fold table built from `ut`; `cvu` re-reads it as a UNION ALL with the
+# same scalar-subquery cut-off; `cvr` / `cvs` are reversed / shuffled. `sxt` adds a
+# row-varying feature column for ts_cv_hydrate_by, with the same four shapes.
+# =============================================================================
+
+statement ok
+CREATE TABLE cvt AS SELECT * FROM ts_cv_folds_by('ut', id, ds, y, 2, 5, MAP{});
+
+statement ok
+CREATE VIEW cvu AS SELECT * FROM cvt WHERE ds < TIMESTAMP '2024-02-01' UNION ALL SELECT * FROM cvt WHERE ds >= (SELECT min(ds) FROM f2);
+
+statement ok
+CREATE VIEW cvr AS SELECT * FROM cvt ORDER BY fold_id DESC, id DESC, ds DESC;
+
+statement ok
+CREATE VIEW cvs AS SELECT * FROM cvt ORDER BY hash(fold_id, id, ds);
+
+statement ok
+CREATE TABLE sxt AS SELECT id, ds, y, round(y * 2 + (epoch(ds) / 86400) % 7, 3)::DOUBLE AS temperature FROM ut;
+
+statement ok
+CREATE VIEW sxu AS SELECT * FROM sxt WHERE ds < TIMESTAMP '2024-02-01' UNION ALL SELECT * FROM sxt WHERE ds >= (SELECT min(ds) FROM f2);
+
+statement ok
+CREATE VIEW sxr AS SELECT * FROM sxt ORDER BY id, ds DESC;
+
+statement ok
+CREATE VIEW sxs AS SELECT * FROM sxt ORDER BY hash(id, ds);
+
+query I
+SELECT count(*) FROM cvu;
+----
+255
+
+# =============================================================================
+# ts_cv_forecast_by (Naive): one forecast per test row of every fold, trained on
+# all train rows, identical on every shape of the fold table.
+# =============================================================================
+
+query IIII
+SELECT fold_id, count(*), count(yhat), count(DISTINCT id) FROM ts_cv_forecast_by('cvu', id, ds, y, 'Naive', MAP{}) GROUP BY ALL ORDER BY ALL;
+----
+1	15	15	3
+2	15	15	3
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_forecast_by('cvu', id, ds, y, 'Naive', MAP{}) EXCEPT ALL SELECT * FROM ts_cv_forecast_by('cvt', id, ds, y, 'Naive', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_forecast_by('cvt', id, ds, y, 'Naive', MAP{}) EXCEPT ALL SELECT * FROM ts_cv_forecast_by('cvu', id, ds, y, 'Naive', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_forecast_by('cvr', id, ds, y, 'Naive', MAP{}) EXCEPT ALL SELECT * FROM ts_cv_forecast_by('cvt', id, ds, y, 'Naive', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_forecast_by('cvt', id, ds, y, 'Naive', MAP{}) EXCEPT ALL SELECT * FROM ts_cv_forecast_by('cvr', id, ds, y, 'Naive', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_forecast_by('cvs', id, ds, y, 'Naive', MAP{}) EXCEPT ALL SELECT * FROM ts_cv_forecast_by('cvt', id, ds, y, 'Naive', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_forecast_by('cvt', id, ds, y, 'Naive', MAP{}) EXCEPT ALL SELECT * FROM ts_cv_forecast_by('cvs', id, ds, y, 'Naive', MAP{}));
+----
+0
+
+# =============================================================================
+# ts_cv_hydrate_by (last_value): fold rows with the masked feature, identical when
+# both the fold table and the source are UNION ALL / reversed / shuffled.
+# =============================================================================
+
+query IIII
+SELECT fold_id, split, count(*), count(temperature) FROM ts_cv_hydrate_by('cvu', 'sxu', id, ds, ['temperature'], MAP{}) GROUP BY ALL ORDER BY ALL;
+----
+1	test	15	15
+1	train	105	105
+2	test	15	15
+2	train	120	120
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_hydrate_by('cvu', 'sxu', id, ds, ['temperature'], MAP{}) EXCEPT ALL SELECT * FROM ts_cv_hydrate_by('cvt', 'sxt', id, ds, ['temperature'], MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_hydrate_by('cvt', 'sxt', id, ds, ['temperature'], MAP{}) EXCEPT ALL SELECT * FROM ts_cv_hydrate_by('cvu', 'sxu', id, ds, ['temperature'], MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_hydrate_by('cvr', 'sxr', id, ds, ['temperature'], MAP{}) EXCEPT ALL SELECT * FROM ts_cv_hydrate_by('cvt', 'sxt', id, ds, ['temperature'], MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_hydrate_by('cvt', 'sxt', id, ds, ['temperature'], MAP{}) EXCEPT ALL SELECT * FROM ts_cv_hydrate_by('cvr', 'sxr', id, ds, ['temperature'], MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_hydrate_by('cvs', 'sxs', id, ds, ['temperature'], MAP{}) EXCEPT ALL SELECT * FROM ts_cv_hydrate_by('cvt', 'sxt', id, ds, ['temperature'], MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_hydrate_by('cvt', 'sxt', id, ds, ['temperature'], MAP{}) EXCEPT ALL SELECT * FROM ts_cv_hydrate_by('cvs', 'sxs', id, ds, ['temperature'], MAP{}));
+----
+0
+
+# =============================================================================
+# ts_forecast_panel_by (GlobalETS, horizon 3): one global fit over all 45 rows
+# per id, identical on every shape.
+# =============================================================================
+
+# Observed before the fix on the UNION ALL view: A 29.282066 (the first branch's
+# level alone) instead of 45.321346.
+query IIIIII
+SELECT id, count(*), count(yhat), min(model_name), round(min(yhat), 6), round(max(yhat), 6) FROM ts_forecast_panel_by('uv', id, ds, y, 'GlobalETS', 3, '1d', MAP{}) GROUP BY ALL ORDER BY ALL;
+----
+A	3	3	GlobalETS	45.321346	46.135993
+B	3	3	GlobalETS	65.252406	65.935473
+C	3	3	GlobalETS	85.252406	85.935473
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_panel_by('uv', id, ds, y, 'GlobalETS', 3, '1d', MAP{}) EXCEPT ALL SELECT * FROM ts_forecast_panel_by('ut', id, ds, y, 'GlobalETS', 3, '1d', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_panel_by('ut', id, ds, y, 'GlobalETS', 3, '1d', MAP{}) EXCEPT ALL SELECT * FROM ts_forecast_panel_by('uv', id, ds, y, 'GlobalETS', 3, '1d', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_panel_by('rv', id, ds, y, 'GlobalETS', 3, '1d', MAP{}) EXCEPT ALL SELECT * FROM ts_forecast_panel_by('ut', id, ds, y, 'GlobalETS', 3, '1d', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_panel_by('ut', id, ds, y, 'GlobalETS', 3, '1d', MAP{}) EXCEPT ALL SELECT * FROM ts_forecast_panel_by('rv', id, ds, y, 'GlobalETS', 3, '1d', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_panel_by('sv', id, ds, y, 'GlobalETS', 3, '1d', MAP{}) EXCEPT ALL SELECT * FROM ts_forecast_panel_by('ut', id, ds, y, 'GlobalETS', 3, '1d', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_panel_by('ut', id, ds, y, 'GlobalETS', 3, '1d', MAP{}) EXCEPT ALL SELECT * FROM ts_forecast_panel_by('sv', id, ds, y, 'GlobalETS', 3, '1d', MAP{}));
+----
+0
