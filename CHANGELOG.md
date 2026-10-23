@@ -90,6 +90,18 @@ returns the source table's column names and types (previously always
   to run (on a 2000-series panel, the sum of the 6000 forecasts moved by about
   0.0006). It now orders the series by group key, so it returns the same result on
   every run.
+  `ts_aggregate_hierarchy`, `ts_split_keys`, `ts_validate_separator` and the internal
+  `_ts_forecast_native` had the same defect, and had no macro wrapper to insert the
+  fix through (decisions_addendum_2's BUG-03 scope expansion): they are now table
+  macros with the same signatures and output columns, wrapping a renamed
+  `_ts_*_native` through the same `ORDER BY ALL` single-pipeline breaker.
+  `ts_forecast_by` itself (`GROUP BY` + `_ts_forecast_scalar`) was already correct
+  on UNION ALL sources -- it does not call `_ts_forecast_native` -- and is now
+  pinned against UNION ALL, reversed and shuffled sources; its speed is unchanged.
+  Measured on a 1M-row, 5000-series panel (median of 5 alternating runs against the
+  pre-fix build): the added sort costs at most about 0.02 s per call (`ts_mae_by`
+  0.242 -> 0.261 s, `ts_fill_gaps_by` 0.132 -> 0.148 s, `_ts_forecast_native`
+  Naive 0.401 -> 0.412 s).
 
 - **`ts_classify_seasonality_by` / `ts_classify_seasonality_agg` / `ts_classify_seasonality`
   reported a strong weekly series as non-seasonal with the wrong strength (#286).** The

@@ -143,6 +143,8 @@ Retail and IoT panels usually have composite keys (region × store × item). The
 | `ts_aggregate_hierarchy` | Sum-aggregate up a hierarchy level (region+store+item → region+store) |
 | `ts_validate_separator` | Verify separator string isn't present in the source columns |
 
+`ts_aggregate_hierarchy`, `ts_split_keys` and `ts_validate_separator` read their whole input regardless of plan shape (a UNION ALL source included); signatures are unchanged (#285).
+
 ```sql
 -- Setup: raw_hierarchy(ds, y, region_id, store_id, item_id) -- ts_combine_keys /
 -- ts_aggregate_hierarchy take a subquery source (date_col, value_col, id_cols...)

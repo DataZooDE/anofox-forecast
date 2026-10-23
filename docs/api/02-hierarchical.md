@@ -6,6 +6,8 @@
 
 When working with hierarchical time series data (e.g., region/store/item), you often need to combine multiple ID columns into a single `unique_id` for forecasting functions.
 
+`ts_aggregate_hierarchy`, `ts_split_keys` and `ts_validate_separator` read their whole input regardless of plan shape (a UNION ALL source included); call signatures are unchanged (#285).
+
 **Use this document to:**
 - Combine multiple ID columns into a single `unique_id` for forecasting
 - Create aggregated series at all hierarchy levels (total, region, store, item)
