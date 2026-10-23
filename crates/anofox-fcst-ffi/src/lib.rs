@@ -3496,12 +3496,32 @@ pub unsafe extern "C" fn anofox_ts_detect_changepoints_bocpd_opts(
             (*out_result).n_points = n;
 
             let is_cp_ptr = malloc(n * std::mem::size_of::<bool>()) as *mut bool;
+            if is_cp_ptr.is_null() {
+                if !out_error.is_null() {
+                    (*out_error).set_error(
+                        ErrorCode::AllocationError,
+                        "Failed to allocate is_changepoint",
+                    );
+                }
+                return false;
+            }
             for (i, &cp) in bocpd.is_changepoint.iter().enumerate() {
                 *is_cp_ptr.add(i) = cp;
             }
             (*out_result).is_changepoint = is_cp_ptr;
 
             let prob_ptr = malloc(n * std::mem::size_of::<c_double>()) as *mut c_double;
+            if prob_ptr.is_null() {
+                if !out_error.is_null() {
+                    (*out_error).set_error(
+                        ErrorCode::AllocationError,
+                        "Failed to allocate changepoint_probability",
+                    );
+                }
+                free_ptr((*out_result).is_changepoint as *mut core::ffi::c_void);
+                (*out_result).is_changepoint = ptr::null_mut();
+                return false;
+            }
             for (i, &p) in bocpd.changepoint_probability.iter().enumerate() {
                 *prob_ptr.add(i) = p;
             }
@@ -3511,6 +3531,19 @@ pub unsafe extern "C" fn anofox_ts_detect_changepoints_bocpd_opts(
             (*out_result).n_changepoints = n_cp;
             if n_cp > 0 {
                 let idx_ptr = malloc(n_cp * std::mem::size_of::<size_t>()) as *mut size_t;
+                if idx_ptr.is_null() {
+                    if !out_error.is_null() {
+                        (*out_error).set_error(
+                            ErrorCode::AllocationError,
+                            "Failed to allocate changepoint_indices",
+                        );
+                    }
+                    free_ptr((*out_result).is_changepoint as *mut core::ffi::c_void);
+                    free_ptr((*out_result).changepoint_probability as *mut core::ffi::c_void);
+                    (*out_result).is_changepoint = ptr::null_mut();
+                    (*out_result).changepoint_probability = ptr::null_mut();
+                    return false;
+                }
                 for (i, &c) in bocpd.changepoints.iter().enumerate() {
                     *idx_ptr.add(i) = c;
                 }
