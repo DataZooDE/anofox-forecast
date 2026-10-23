@@ -143,6 +143,58 @@ SELECT (_ts_detect_changepoints_bocpd([100.0, 100.0, 100.0, 100.0, 100.0, 100.0,
 true
 
 # =============================================================================
+# #287 default-output byte-identity pins (Phase 20, 20-03, T-20-08).
+# Captured on the pre-Phase-20-changepoint build (commit 21dfe7e, DuckDB v2.0.0)
+# BEFORE any Phase 20 change to the changepoint natives or macros. They must never
+# change (CONTEXT #287 decision 1 + addenda: the new deseasonalize/threshold options
+# are opt-in, default outputs stay byte-identical). The md5 covers id, date,
+# is_changepoint and the full-precision probability text of every row.
+# #287 panel: 3 series x 84 days, weekly seasonality, B +15 from day 50 (2024-02-20).
+# =============================================================================
+
+statement ok
+CREATE TABLE cp287 AS SELECT id, (TIMESTAMP '2024-01-01' + INTERVAL (i) DAY) AS ds, base + 0.3 * i + 5 * sin(2 * pi() * i / 7) + CASE WHEN id = 'B' AND i >= 50 THEN 15 ELSE 0 END + 1.6 * cos(i * 0.9) + 0.7 * sin(i * 1.7 + base) AS y FROM (VALUES ('A', 20.0), ('B', 40.0), ('C', 60.0)) t(id, base), range(84) r(i);
+
+query I
+SELECT md5(string_agg(id || '|' || ds || '|' || is_changepoint || '|' || changepoint_probability::VARCHAR, ',' ORDER BY id, ds)) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{});
+----
+40b71f3f330b63b30f5ca2f490bba6bf
+
+query I
+SELECT md5(string_agg(id || '|' || ds || '|' || is_changepoint || '|' || changepoint_probability::VARCHAR, ',' ORDER BY id, ds)) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'hazard_lambda': '50'});
+----
+30e6fc7372714db376be95f4d66d0bc5
+
+query I
+SELECT md5(string_agg(id || '|' || r.timestamp || '|' || r.is_changepoint || '|' || r.changepoint_probability::VARCHAR, ',' ORDER BY id, r.timestamp)) FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{})) AS r FROM cp287 GROUP BY id);
+----
+40b71f3f330b63b30f5ca2f490bba6bf
+
+# Readable form of the same default outputs: flagged dates per series.
+
+query II
+SELECT id, string_agg(ds::DATE::VARCHAR, ',' ORDER BY ds) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{}) WHERE is_changepoint GROUP BY id ORDER BY id;
+----
+A	2024-01-22,2024-01-29,2024-02-05,2024-02-12,2024-02-19,2024-02-26
+B	2024-01-29,2024-02-20
+C	2024-01-22,2024-01-29,2024-02-05,2024-02-12,2024-02-19,2024-02-26
+
+query II
+SELECT id, string_agg(r.timestamp::DATE::VARCHAR, ',' ORDER BY r.timestamp) FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{})) AS r FROM cp287 GROUP BY id) WHERE r.is_changepoint GROUP BY id ORDER BY id;
+----
+A	2024-01-22,2024-01-29,2024-02-05,2024-02-12,2024-02-19,2024-02-26
+B	2024-01-29,2024-02-20
+C	2024-01-22,2024-01-29,2024-02-05,2024-02-12,2024-02-19,2024-02-26
+
+query I
+SELECT round(max(changepoint_probability), 3) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{});
+----
+0.996
+
+statement ok
+DROP TABLE cp287;
+
+# =============================================================================
 # ts_decompose_seasonal / _ts_mstl_decomposition / ts_mstl_decomposition_by
 # (DET-04): additive identity trend+seasonal+remainder == input; constant
 # series decomposes to trend==input, seasonal==0 (cited from 15-01/15-04).
