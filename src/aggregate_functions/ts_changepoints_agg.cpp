@@ -210,7 +210,7 @@ static void TsChangepointsAggFinalize(Vector &state_vector, AggregateInputData &
         for (size_t j = 0; j < n; j++) {
             ts_child_data[current_size + j] = timestamp_t(sorted_timestamps[j]);
             val_child_data[current_size + j] = sorted_values[j];
-            cp_child_data[current_size + j] = cp_result.is_changepoint[j];
+            cp_child_data[current_size + j] = cp_result.is_changepoint ? cp_result.is_changepoint[j] : false;
             prob_child_data[current_size + j] = cp_result.changepoint_probability ?
                 cp_result.changepoint_probability[j] : 0.0;
         }
