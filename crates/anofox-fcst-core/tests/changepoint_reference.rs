@@ -18,7 +18,8 @@
 mod common;
 
 use anofox_fcst_core::changepoint::{
-    bocpd_trace, detect_changepoints, robust_noise_scale, CostFunction,
+    bocpd_trace, detect_changepoints, detect_changepoints_bocpd_with_options, robust_noise_scale,
+    ChangepointOptions, CostFunction,
 };
 use common::{assert_close, assert_vec_close, f64_vec, load_fixture, num, tolerance};
 
@@ -127,6 +128,53 @@ fn bocpd_behaviour_anchors() {
     assert_eq!(
         scaled_trace.changepoints, step3_trace.changepoints,
         "scaled == base (scale/shift invariance)"
+    );
+}
+
+/// Phase 20 plan 20-06 Task 3 (#287, BUG-06, D2-ii): `issue287_A/B/C`
+/// (the #287 panel's exact SQL formula, hazard_lambda 250) pin
+/// `detect_changepoints_bocpd_with_options`'s D2-ii threshold rule against
+/// the independent numpy reference's `expected_threshold_0_5` -- the
+/// indices `t >= 1` where the reference `prob[t] >= 0.5`.
+#[test]
+fn bocpd_with_options_threshold_matches_numpy_expected_threshold_0_5() {
+    let fx = load_fixture("changepoints/bocpd_cases.json");
+    let cases = fx["cases"].as_array().unwrap();
+    let case = |name: &str| {
+        cases
+            .iter()
+            .find(|c| c["name"] == name)
+            .unwrap_or_else(|| panic!("bocpd_cases.json: no case named {name:?}"))
+    };
+
+    let mut checked_at_least_one = false;
+    for name in ["issue287_A", "issue287_B", "issue287_C"] {
+        let c = case(name);
+        let expected = &c["expected"];
+        let want_threshold_flags: Vec<usize> = expected["expected_threshold_0_5"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{name}: fixture case has no 'expected_threshold_0_5' field"))
+            .iter()
+            .map(|v| v.as_u64().unwrap() as usize)
+            .collect();
+
+        let x = f64_vec(&c["x"]);
+        let hazard_lambda = num(&c["hazard_lambda"]);
+        let opts = ChangepointOptions {
+            hazard_lambda,
+            threshold: Some(0.5),
+        };
+        let result = detect_changepoints_bocpd_with_options(&x, &opts).unwrap();
+        assert_eq!(
+            result.changepoints, want_threshold_flags,
+            "{name}: threshold=0.5 flags"
+        );
+        assert!(!result.is_changepoint[0], "{name}: index 0 must never be flagged");
+        checked_at_least_one = true;
+    }
+    assert!(
+        checked_at_least_one,
+        "no issue287_* case carried expected_threshold_0_5 -- regenerate bocpd_cases.json"
     );
 }
 
