@@ -303,8 +303,10 @@ GROUP BY unique_id, fold_id, model_name;
 ## Deprecated: Table Macros
 
 > **Warning**: The `_by` table macros (`ts_mae_by`, `ts_rmse_by`, etc.) are deprecated.
-> They are ~2400x slower than scalar functions and have threading issues requiring
-> `SET threads=1` for correct results. Use scalar functions with `GROUP BY` instead.
+> They are ~2400x slower than scalar functions. Use scalar functions with `GROUP BY` instead.
+
+Their results do not depend on the row order of `source` or on `source` being a
+UNION ALL (#285); no pre-sorting and no `SET threads = 1` are needed.
 
 The following macros are deprecated and will be removed in a future version:
 - `ts_mae_by`, `ts_mse_by`, `ts_rmse_by`, `ts_mape_by`, `ts_smape_by`, `ts_r2_by`, `ts_bias_by`
@@ -313,7 +315,7 @@ The following macros are deprecated and will be removed in a future version:
 **Migration example:**
 
 ```sql
--- DEPRECATED (slow, threading issues)
+-- DEPRECATED (slow)
 SELECT * FROM ts_mae_by(
     (SELECT unique_id, ds, y, forecast FROM results),
     'ds', 'y', 'forecast'

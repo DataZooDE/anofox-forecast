@@ -53,6 +53,20 @@ returns the source table's column names and types (previously always
 
 ### Fixed
 
+- **The 11 metric macros returned NULL, or a value computed on part of the rows,
+  when the source was a UNION ALL (#285).** `ts_mae_by`, `ts_mse_by`, `ts_rmse_by`,
+  `ts_mape_by`, `ts_smape_by`, `ts_r2_by`, `ts_bias_by`, `ts_mase_by`, `ts_rmae_by`,
+  `ts_coverage_by` and `ts_quantile_loss_by` collect their input and compute at the
+  end. A UNION ALL (or another multi-pipeline subquery) feeds that step through
+  several pipelines, and the first pipeline to finish computed the results before the
+  other branch's rows arrived: `ts_mase_by` on the #285 panel returned NULL, and
+  `ts_mae_by` over a `y + 1` branch UNION ALL a `y + 3` branch returned exactly 1.0
+  (only the first branch). They now give the same result for every row order and plan
+  shape; `ts_mase_by` on the #285 panel matches R `forecast::accuracy`. Signatures and
+  output columns are unchanged. Cost: each call now sorts its source once
+  (`ORDER BY ALL`) to give the computation a single input pipeline, about 0.04 s per
+  1M rows in our measurement.
+
 - **`ts_classify_seasonality_by` / `ts_classify_seasonality_agg` / `ts_classify_seasonality`
   reported a strong weekly series as non-seasonal with the wrong strength (#286).** The
   Rust `classify_seasonality` passed the raw, undetrended series straight to fdars's own
