@@ -11,7 +11,7 @@
 # <copy_to_latest>      : Set this as the latest version ("true" / "false", default: "false")
 # <copy_to_versioned>   : Set this as a versioned version that will prevent its deletion
 
-set -e
+set -euo pipefail
 
 # Directory holding the downloaded build artifact. Defaults to the CI path
 # (/tmp/extension); overridable for local dry runs against a scratch copy
@@ -24,7 +24,7 @@ else
   ext="$EXTENSION_UPLOAD_DIR/$1.duckdb_extension"
 fi
 
-echo $ext
+echo "$ext"
 
 script_dir="$(dirname "$(readlink -f "$0")")"
 
@@ -52,22 +52,22 @@ if [[ $4 == wasm* ]]; then
   python3 "$script_dir/wasm_signature_sections.py" check "$ext"
 fi
 
-cat $ext > $ext.append
-truncate -s -256 $ext.append
+cat "$ext" > "$ext.append"
+truncate -s -256 "$ext.append"
 
 # (Optionally) Sign binary
-if [ "$DUCKDB_EXTENSION_SIGNING_PK" != "" ]; then
+if [ -n "${DUCKDB_EXTENSION_SIGNING_PK:-}" ]; then
   echo "$DUCKDB_EXTENSION_SIGNING_PK" > private.pem
-  $script_dir/../duckdb/scripts/compute-extension-hash.sh $ext.append > $ext.hash
-  openssl pkeyutl -sign -in $ext.hash -inkey private.pem -pkeyopt digest:sha256 -out $ext.sign
+  "$script_dir/../duckdb/scripts/compute-extension-hash.sh" "$ext.append" > "$ext.hash"
+  openssl pkeyutl -sign -in "$ext.hash" -inkey private.pem -pkeyopt digest:sha256 -out "$ext.sign"
   rm -f private.pem
 fi
 
 # Signature is always there, potentially defaulting to 256 zeros
-truncate -s 256 $ext.sign
+truncate -s 256 "$ext.sign"
 
 # append signature to extension binary
-cat $ext.sign >> $ext.append
+cat "$ext.sign" >> "$ext.append"
 
 # Post-guard (#272): the processed WASM artifact must still carry exactly
 # one duckdb_signature section, now ending at EOF with the freshly-appended
@@ -78,12 +78,10 @@ fi
 
 # compress extension binary
 if [[ $4 == wasm_* ]]; then
-  brotli < $ext.append > "$ext.compressed"
+  brotli < "$ext.append" > "$ext.compressed"
 else
-  gzip < $ext.append > "$ext.compressed"
+  gzip < "$ext.append" > "$ext.compressed"
 fi
-
-set -e
 
 # Upload manifest (#272, DIST-02): truncated fresh for this invocation, then
 # appended with one s3:// URI per successful upload below. The post-upload
@@ -93,7 +91,7 @@ set -e
 : > "$ext.uploaded"
 
 # Abort if AWS key is not set
-if [ -z "$AWS_ACCESS_KEY_ID" ]; then
+if [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
     echo "No AWS key found, skipping.."
     exit 0
 fi
@@ -102,10 +100,10 @@ fi
 if [[ $7 = 'true' ]]; then
   if [[ $4 == wasm* ]]; then
     dest="s3://$5/$1/$2/$3/$4/$1.duckdb_extension.wasm"
-    aws s3 cp $ext.compressed "$dest" --acl public-read --content-encoding br --content-type="application/wasm"
+    aws s3 cp "$ext.compressed" "$dest" --acl public-read --content-encoding br --content-type="application/wasm"
   else
     dest="s3://$5/$1/$2/$3/$4/$1.duckdb_extension.gz"
-    aws s3 cp $ext.compressed "$dest" --acl public-read
+    aws s3 cp "$ext.compressed" "$dest" --acl public-read
   fi
   echo "$dest" >> "$ext.uploaded"
 fi
@@ -114,10 +112,10 @@ fi
 if [[ $6 = 'true' ]]; then
   if [[ $4 == wasm* ]]; then
     dest="s3://$5/$3/$4/$1.duckdb_extension.wasm"
-    aws s3 cp $ext.compressed "$dest" --acl public-read --content-encoding br --content-type="application/wasm"
+    aws s3 cp "$ext.compressed" "$dest" --acl public-read --content-encoding br --content-type="application/wasm"
   else
     dest="s3://$5/$3/$4/$1.duckdb_extension.gz"
-    aws s3 cp $ext.compressed "$dest" --acl public-read
+    aws s3 cp "$ext.compressed" "$dest" --acl public-read
   fi
   echo "$dest" >> "$ext.uploaded"
 fi
