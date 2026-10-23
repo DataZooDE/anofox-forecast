@@ -8,7 +8,7 @@ compile+link CI leg cannot verify.
 
 1. The built `.wasm` artifact loads in the DuckDB-Wasm `eh` (exception-handling)
    bundle without signature errors.
-2. A curated set of 9 SQL test files (445 assertions) pass end-to-end.
+2. A curated set of 10 SQL test files (482 assertions) pass end-to-end.
 3. Optionally, the full 66-file suite can be exercised with `--all`.
 
 ## Requirements
@@ -89,7 +89,7 @@ v1.5.6 wasm_eh artifact to the v2.0.0 line together.
 
 | Command                          | What runs                                              |
 |----------------------------------|--------------------------------------------------------|
-| `node run.mjs`                   | 9-file curated subset (445 assertions, always green)   |
+| `node run.mjs`                   | 10-file curated subset (482 assertions, always green)  |
 | `node run.mjs --all`             | All 66 `.test` files under `test/sql/`                 |
 | `node run.mjs --file <f.test>`   | Single named file (relative to repo root)              |
 | `node run.mjs --ext <path>`      | Override the artifact path (also: `ANOFOX_WASM_EXT`)  |
@@ -112,14 +112,26 @@ Measured against a **fresh `wasm_eh` artifact built locally from HEAD**
 
 ### Skip-listed files (structurally WASM-infeasible)
 
-These four files are excluded from all runs (logged, never silent):
+These two files are excluded from all runs (logged, never silent):
 
 | File                              | Reason                                                        |
 |-----------------------------------|---------------------------------------------------------------|
-| `ts_features.test`                | WASM heap overflow in large TSFresh feature extraction        |
-| `ts_features_config.test`         | WASM heap overflow in large TSFresh feature extraction        |
 | `ts_forecast_mfles_stability.test`| UNNEST not supported in DuckDB v1.5.5 WASM engine            |
 | `ts_fill_forward_native.test`     | Emscripten abort trap (`___trap`) in WASM runtime            |
+
+`ts_features.test` and `ts_features_config.test` were previously skip-listed
+under the reason "WASM heap overflow in large TSFresh feature extraction" --
+empirically wrong (Plan 19-03, #289 BUG-02). The real trap was (1) a
+malloc/free allocator mismatch between the WASM-only size-prefixed Rust
+allocator and C++'s raw `free()`, compounded by (2) a WASM toolchain
+code-folding defect that misoptimizes `DATAZOO_GUARD`-wrapped function pairs
+sharing an identical signature across the two zero-argument catalog
+functions. Neither cause has anything to do with heap size or TSFresh's
+feature count -- see the comment on `RegisterTsFeaturesListFunction` in
+`src/table_functions/ts_features.cpp`. Both files are now un-skipped;
+`ts_features.test` is in `CURATED` (above), `ts_features_config.test` passes
+but is not curated (it exercises `ts_features_config_from_json`/`_csv`, not
+the fixed catalog functions, so it adds no incremental coverage for #289).
 
 ### Known failures in the 23 failing files — pre-existing test-suite debt
 

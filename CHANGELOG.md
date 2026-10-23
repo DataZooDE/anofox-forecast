@@ -48,6 +48,24 @@ returns the source table's column names and types (previously always
   It is now a table macro delegating to `ts_fill_forward_by`, which fixes all three:
   the macro binder resolves column names via `COLUMNS([param])` (no SQL text is
   built from user input), and `frequency` is honoured.
+- **`ts_features_list()` / `ts_features_config_template()` trapped DuckDB-Wasm
+  with "memory access out of bounds" (#289).** Two independent defects, both
+  specific to these two zero-argument catalog functions: (1) the FFI
+  feature-name array is allocated with this crate's own allocator shim (a
+  size-prefixed `std::alloc` shim on WASM, required because WASM has no
+  libc `free()` that carries its own size metadata), but C++ released it with
+  raw libc `free()`, corrupting the Emscripten heap on wasm32; (2) wrapping
+  both catalog functions' bind/execute pairs in the `DATAZOO_GUARD` error-hint
+  macro at the same time made the wasm_eh build miscompile, apparently a WASM
+  toolchain code-folding defect merging `GuardedFunction<...>::Call`
+  instantiations that share a signature but differ only in the baked-in
+  function pointer. Fixed by releasing the array through a new, paired
+  `anofox_free_ts_features_list` FFI function, and by no longer wrapping
+  these two functions in `DATAZOO_GUARD` (neither throws). Also: re-executing
+  a prepared statement over either function returned 117 rows then 0 on the
+  second `EXECUTE` (the output cursor lived in bind data, which is immutable
+  per-execution); state now lives in `init_global`, fixing this on every
+  target including native.
 
 ## [2026.10.22] - 2026-10-22 — macOS build on DuckDB v2.0.0
 

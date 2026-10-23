@@ -28,10 +28,15 @@ namespace duckdb {
 // C++ API compatible: Returns TABLE(column_name, feature_name, parameter_suffix, default_parameters, parameter_keys)
 // ============================================================================
 
-struct TsFeaturesListData : public TableFunctionData {
+// Per-execution state: the feature-name snapshot and output cursor live here,
+// NOT in bind data (bind data is immutable and shared across every execution
+// of a prepared statement -- see #289 BUG-02's second finding: a cursor kept
+// in bind data meant EXECUTE on the same prepared statement returned 117 rows
+// then 0 on the next EXECUTE). InitGlobal fetches and releases the FFI array
+// exactly once per query execution; Execute only ever reads this state.
+struct TsFeaturesListGlobalState : public GlobalTableFunctionState {
     vector<string> feature_names;
     idx_t current_idx = 0;
-    bool initialized = false;
 };
 
 static unique_ptr<FunctionData> TsFeaturesListBind(ClientContext &context, TableFunctionBindInput &input,
@@ -52,33 +57,40 @@ static unique_ptr<FunctionData> TsFeaturesListBind(ClientContext &context, Table
     names.push_back(MakeBindName("parameter_keys"));
     return_types.push_back(LogicalType(LogicalTypeId::VARCHAR));
 
-    return make_uniq<TsFeaturesListData>();
+    return make_uniq<TableFunctionData>();
+}
+
+static unique_ptr<GlobalTableFunctionState> TsFeaturesListInitGlobal(ClientContext &context,
+                                                                      TableFunctionInitInput &input) {
+    auto state = make_uniq<TsFeaturesListGlobalState>();
+
+    // Get feature names from FFI, exactly once per execution.
+    char *names_raw = nullptr;
+    size_t n_names = 0;
+    anofox_ts_features_list(&names_raw, &n_names);
+    char **names = reinterpret_cast<char**>(names_raw);
+
+    if (names) {
+        state->feature_names.reserve(n_names);
+        for (size_t i = 0; i < n_names; i++) {
+            if (names[i]) {
+                state->feature_names.push_back(names[i]);
+            }
+        }
+        anofox_free_ts_features_list(names, n_names);
+    }
+
+    return std::move(state);
 }
 
 static void TsFeaturesListExecute(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
-    auto &data = data_p.bind_data->CastNoConst<TsFeaturesListData>();
-
-    if (!data.initialized) {
-        // Get feature names from FFI
-        char *names_raw = nullptr;
-        size_t n_names = 0;
-        anofox_ts_features_list(&names_raw, &n_names);
-        char **names = reinterpret_cast<char**>(names_raw);
-
-        if (names) {
-            for (size_t i = 0; i < n_names; i++) {
-                data.feature_names.push_back(names[i]);
-            }
-            anofox_free_ts_features_list(names, n_names);
-        }
-        data.initialized = true;
-    }
+    auto &gstate = data_p.global_state->Cast<TsFeaturesListGlobalState>();
 
     idx_t count = 0;
     idx_t max_count = STANDARD_VECTOR_SIZE;
 
-    while (data.current_idx < data.feature_names.size() && count < max_count) {
-        const auto &name = data.feature_names[data.current_idx];
+    while (gstate.current_idx < gstate.feature_names.size() && count < max_count) {
+        const auto &name = gstate.feature_names[gstate.current_idx];
 
         // column_name: "value" (default column name for features)
         FlatDataMut<string_t>(output.data[0])[count] =
@@ -100,7 +112,7 @@ static void TsFeaturesListExecute(ClientContext &context, TableFunctionInput &da
         FlatDataMut<string_t>(output.data[4])[count] =
             StringVector::AddString(output.data[4], "");
 
-        data.current_idx++;
+        gstate.current_idx++;
         count++;
     }
 
@@ -108,7 +120,23 @@ static void TsFeaturesListExecute(ClientContext &context, TableFunctionInput &da
 }
 
 void RegisterTsFeaturesListFunction(ExtensionLoader &loader) {
-    TableFunction ts_features_list_func("ts_features_list", {}, DATAZOO_GUARD(ANOFOX_FORECAST_BANNER, TsFeaturesListExecute), DATAZOO_GUARD(ANOFOX_FORECAST_BANNER, TsFeaturesListBind));
+    // NOT wrapped in DATAZOO_GUARD (#289 BUG-02, bisected empirically): this
+    // extension's only other DATAZOO_GUARD-wrapped function pair below
+    // (ts_features_config_template) has Bind/Execute/InitGlobal signatures
+    // identical to this function's. When BOTH catalog functions' bind/execute
+    // pairs were DATAZOO_GUARD-wrapped together, the wasm_eh build traps with
+    // "memory access out of bounds" in DuckDB-Wasm even after the FFI
+    // allocator-pairing fix above -- isolated via controlled rebuilds: guarding
+    // either function alone (2 guarded instantiations of matching shape) is
+    // fine; guarding both together (4 instantiations, two pairs sharing a
+    // signature) traps. This points at a WASM toolchain code-folding/ICF
+    // defect merging GuardedFunction<...>::Call instantiations that share a
+    // signature but differ only in the baked-in function pointer, not at a
+    // bug in DATAZOO_GUARD's own logic. These two functions never throw
+    // (no validation, FFI always returns true), so the banner's issue-link
+    // enrichment has no practical loss here.
+    TableFunction ts_features_list_func("ts_features_list", {}, TsFeaturesListExecute, TsFeaturesListBind,
+                                         TsFeaturesListInitGlobal);
     {
         CreateTableFunctionInfo info(ts_features_list_func);
         FunctionDescription desc;
@@ -125,10 +153,11 @@ void RegisterTsFeaturesListFunction(ExtensionLoader &loader) {
 // C++ API compatible config template output
 // ============================================================================
 
-struct TsFeaturesConfigTemplateData : public TableFunctionData {
+// Per-execution state: see TsFeaturesListGlobalState above for why this is
+// not bind data (#289 BUG-02's prepared-re-execution finding).
+struct TsFeaturesConfigTemplateGlobalState : public GlobalTableFunctionState {
     vector<pair<string, string>> features;  // (feature_name, params_json)
     idx_t current_idx = 0;
-    bool initialized = false;
 };
 
 static unique_ptr<FunctionData> TsFeaturesConfigTemplateBind(ClientContext &context, TableFunctionBindInput &input,
@@ -139,34 +168,41 @@ static unique_ptr<FunctionData> TsFeaturesConfigTemplateBind(ClientContext &cont
     names.push_back(MakeBindName("params_json"));
     return_types.push_back(LogicalType(LogicalTypeId::VARCHAR));
 
-    return make_uniq<TsFeaturesConfigTemplateData>();
+    return make_uniq<TableFunctionData>();
+}
+
+static unique_ptr<GlobalTableFunctionState>
+TsFeaturesConfigTemplateInitGlobal(ClientContext &context, TableFunctionInitInput &input) {
+    auto state = make_uniq<TsFeaturesConfigTemplateGlobalState>();
+
+    // Get feature names from FFI, exactly once per execution.
+    char *names_raw = nullptr;
+    size_t n_names = 0;
+    anofox_ts_features_list(&names_raw, &n_names);
+    char **names = reinterpret_cast<char**>(names_raw);
+
+    if (names) {
+        state->features.reserve(n_names);
+        for (size_t i = 0; i < n_names; i++) {
+            if (names[i]) {
+                // Default params_json is empty object
+                state->features.push_back({names[i], "{}"});
+            }
+        }
+        anofox_free_ts_features_list(names, n_names);
+    }
+
+    return std::move(state);
 }
 
 static void TsFeaturesConfigTemplateExecute(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
-    auto &data = data_p.bind_data->CastNoConst<TsFeaturesConfigTemplateData>();
-
-    if (!data.initialized) {
-        // Get feature names from FFI
-        char *names_raw = nullptr;
-        size_t n_names = 0;
-        anofox_ts_features_list(&names_raw, &n_names);
-        char **names = reinterpret_cast<char**>(names_raw);
-
-        if (names) {
-            for (size_t i = 0; i < n_names; i++) {
-                // Default params_json is empty object
-                data.features.push_back({names[i], "{}"});
-            }
-            anofox_free_ts_features_list(names, n_names);
-        }
-        data.initialized = true;
-    }
+    auto &gstate = data_p.global_state->Cast<TsFeaturesConfigTemplateGlobalState>();
 
     idx_t count = 0;
     idx_t max_count = STANDARD_VECTOR_SIZE;
 
-    while (data.current_idx < data.features.size() && count < max_count) {
-        const auto &feat = data.features[data.current_idx];
+    while (gstate.current_idx < gstate.features.size() && count < max_count) {
+        const auto &feat = gstate.features[gstate.current_idx];
 
         FlatDataMut<string_t>(output.data[0])[count] =
             StringVector::AddString(output.data[0], feat.first);
@@ -174,7 +210,7 @@ static void TsFeaturesConfigTemplateExecute(ClientContext &context, TableFunctio
         FlatDataMut<string_t>(output.data[1])[count] =
             StringVector::AddString(output.data[1], feat.second);
 
-        data.current_idx++;
+        gstate.current_idx++;
         count++;
     }
 
@@ -182,7 +218,10 @@ static void TsFeaturesConfigTemplateExecute(ClientContext &context, TableFunctio
 }
 
 void RegisterTsFeaturesConfigTemplateFunction(ExtensionLoader &loader) {
-    TableFunction func("ts_features_config_template", {}, DATAZOO_GUARD(ANOFOX_FORECAST_BANNER, TsFeaturesConfigTemplateExecute), DATAZOO_GUARD(ANOFOX_FORECAST_BANNER, TsFeaturesConfigTemplateBind));
+    // NOT wrapped in DATAZOO_GUARD -- see the comment in
+    // RegisterTsFeaturesListFunction above (#289 BUG-02).
+    TableFunction func("ts_features_config_template", {}, TsFeaturesConfigTemplateExecute,
+                       TsFeaturesConfigTemplateBind, TsFeaturesConfigTemplateInitGlobal);
     {
         CreateTableFunctionInfo info(func);
         FunctionDescription desc;

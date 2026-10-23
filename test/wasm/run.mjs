@@ -44,11 +44,6 @@ const EXT_FILE = `${EXT_NAME}.duckdb_extension.wasm`;
 // Files that fail due to artifact-API drift or pre-existing test bugs are NOT
 // skipped; they appear in the --all failure list and are tracked in the SUMMARY.
 const SKIP_FILES = new Map([
-  // DuckDB-Wasm heap overflow: TSFresh feature extraction (117 features × many series)
-  // exceeds the default 32 MB WASM heap. Manifests as "memory access out of bounds".
-  ['test/sql/ts_features.test', 'WASM heap overflow in large TSFresh feature extraction'],
-  ['test/sql/ts_features_config.test', 'WASM heap overflow in large TSFresh feature extraction'],
-
   // DuckDB v1.5.5 WASM engine does not support UNNEST in this position (regression
   // vs 1.6+). The test exercises an UNNEST in a FROM clause that WASM 1.5.5 rejects.
   ['test/sql/ts_forecast_mfles_stability.test', 'UNNEST not supported in DuckDB v1.5.5 WASM engine'],
@@ -60,10 +55,13 @@ const SKIP_FILES = new Map([
   ['test/sql/ts_fill_forward_native.test', 'Emscripten abort trap (___trap) in WASM runtime'],
 ]);
 
-// Curated subset: 9 files verified green against the current WASM artifact.
+// Curated subset: 10 files verified green against the current WASM artifact.
 // Selected for breadth: core forecasting, CV, metrics, conformal, decomposition,
-// diagnostics, aggregation, period detection, and (Plan 19-01, #289) the
-// ts_fill_forward_operator deprecated macro + ts_fill_forward_by pins.
+// diagnostics, aggregation, period detection, (Plan 19-01, #289) the
+// ts_fill_forward_operator deprecated macro + ts_fill_forward_by pins, and
+// (Plan 19-03, #289 BUG-02) the ts_features_list/ts_features_config_template
+// catalog functions (the former "heap overflow" skip-list reason was wrong --
+// see the RegisterTsFeaturesListFunction comment in src/table_functions/ts_features.cpp).
 const CURATED = [
   'test/sql/ts_forecast_by.test',
   'test/sql/ts_metrics.test',
@@ -74,6 +72,7 @@ const CURATED = [
   'test/sql/ts_aggregate_hierarchy.test',
   'test/sql/ts_periods.test',
   'test/sql/ts_fill_forward_operator.test',
+  'test/sql/ts_features.test',
 ];
 
 function parseArgs(argv) {
