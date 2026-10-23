@@ -836,6 +836,20 @@ pub fn instantaneous_period(values: &[f64]) -> Result<InstantaneousPeriodResult>
 /// Uses Morlet wavelet to analyze how the amplitude of seasonality
 /// changes over time.
 ///
+/// The seasonality gate (whether the series is seasonal enough to run the
+/// wavelet modulation analysis at all) and the returned `seasonal_strength`
+/// use the SAME STL strength `ts_stats_by`/`classify_seasonality` use --
+/// `crate::stats::stl_strengths(values, &[period.round()])`'s
+/// `seasonality_strength` -- not fdars's own raw-series spectral strength
+/// (#286, BUG-04). When that strength is absent or below
+/// `seasonality_threshold`, this returns a `NonSeasonal` result without
+/// running the wavelet analysis; `seasonal_strength` is `NaN` when
+/// `stl_strengths` has no usable period (the FFI/C++ layer maps `NaN` to
+/// SQL `NULL`). Otherwise fdars's wavelet analysis runs (with its own
+/// seasonality gate disabled, since the gate above already decided
+/// `is_seasonal`) and its `is_seasonal`/`seasonal_strength` fields are
+/// overridden with the shared STL values.
+///
 /// # Arguments
 /// * `values` - Time series values
 /// * `period` - Seasonal period
@@ -875,15 +889,42 @@ pub fn detect_amplitude_modulation(
     let mod_thresh = modulation_threshold.unwrap_or(0.2);
     let seas_thresh = seasonality_threshold.unwrap_or(0.3);
 
+    // #286, BUG-04: gate on the shared STL strength, not fdars's own
+    // raw-series spectral strength.
+    let p = period.round() as usize;
+    let stl = crate::stats::stl_strengths(values, &[p])?;
+    let seasonal_strength = stl.seasonality_strength.unwrap_or(f64::NAN);
+    let is_seasonal = seasonal_strength.is_finite() && seasonal_strength >= seas_thresh;
+
+    if !is_seasonal {
+        return Ok(AmplitudeModulationResult {
+            is_seasonal: false,
+            seasonal_strength,
+            has_modulation: false,
+            modulation_type: AmplitudeModulationType::NonSeasonal,
+            modulation_score: 0.0,
+            amplitude_trend: 0.0,
+            wavelet_amplitude: Vec::new(),
+            time_points: Vec::new(),
+            scale: period,
+        });
+    }
+
     // fdars 0.47 / B2 fix: detect_amplitude_modulation_wavelet(data: &FdMatrix,
     // argvals, period, modulation_threshold, seasonality_threshold) -- matrix
     // built once as (1, n); thresholds are now plain f64 (no more Option
-    // wrapping needed on the fdars side).
+    // wrapping needed on the fdars side). The seasonality gate is disabled
+    // here (0.0) since the shared STL gate above already decided
+    // `is_seasonal`; fdars's own is_seasonal/seasonal_strength are
+    // overridden below.
     let mat = single_series_matrix(values)?;
-    let result =
-        fdars_detect_amplitude_modulation_wavelet(&mat, &argvals, period, mod_thresh, seas_thresh);
+    let fdars_result =
+        fdars_detect_amplitude_modulation_wavelet(&mat, &argvals, period, mod_thresh, 0.0);
+    let mut result: AmplitudeModulationResult = fdars_result.into();
+    result.is_seasonal = true;
+    result.seasonal_strength = seasonal_strength;
 
-    Ok(result.into())
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -1182,6 +1223,43 @@ mod tests {
 
         assert_eq!(result.modulation_type, AmplitudeModulationType::Emerging);
         assert!(result.has_modulation);
+    }
+
+    #[test]
+    fn test_detect_amplitude_modulation_issue286_weekly_is_seasonal() {
+        let values = issue286_weekly84();
+        let result = detect_amplitude_modulation(&values, 7.0, None, None).unwrap();
+
+        assert!(result.is_seasonal);
+        assert_ne!(result.modulation_type, AmplitudeModulationType::NonSeasonal);
+
+        let want = crate::stats::stl_strengths(&values, &[7])
+            .unwrap()
+            .seasonality_strength
+            .unwrap();
+        assert_eq!(result.seasonal_strength, want);
+    }
+
+    #[test]
+    fn test_detect_amplitude_modulation_noise_is_non_seasonal() {
+        // Same deterministic LCG noise used by the classify_seasonality
+        // white-noise test; its STL strength at period 12 is well below the
+        // default 0.3 gate.
+        let noise = deterministic_noise(120, 42);
+        let result = detect_amplitude_modulation(&noise, 12.0, None, None).unwrap();
+
+        assert!(!result.is_seasonal);
+        assert_eq!(result.modulation_type, AmplitudeModulationType::NonSeasonal);
+
+        let want = crate::stats::stl_strengths(&noise, &[12])
+            .unwrap()
+            .seasonality_strength
+            .unwrap_or(f64::NAN);
+        if want.is_nan() {
+            assert!(result.seasonal_strength.is_nan());
+        } else {
+            assert_eq!(result.seasonal_strength, want);
+        }
     }
 
     #[test]
