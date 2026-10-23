@@ -23,11 +23,11 @@ SQL users can produce, validate, combine, and interval-bound time-series forecas
 
 **Target features:**
 - Extension bugs: #289 (fill-forward operator: internal, quoted, frequency honoured; `ts_features_list` / `ts_features_config_template` WASM traps), #285 (`ts_mase_by` independent of row order), #286 (seasonality classification detrends first), #287 (changepoints don't flag a regular seasonal cycle; the agg's `is_changepoint` follows probability), #272 (upload script WASM signature, post-upload check, `wasm_mvp` `_setThrew`)
-- Output contract (#279-#284): discovery tags + `anofox_contract_version()`, consistent prediction columns + `level` (old names aliased for ONE release), long-form `ts_metrics_by`, long forms for list outputs + AutoARIMA inspect, changepoint events, Durbin-Watson `p_value`/`method`
+- Output contract (#279-#284): discovery tags + `anofox_contract_version()`, consistent prediction columns + `level` (additive; old names kept permanently), long-form `ts_metrics_by`, long forms for list outputs + AutoARIMA inspect, changepoint events, Durbin-Watson `p_value`/`method`
 - Upstream crate fixes, released and consumed: #259 (AutoETS spike runaway), #258 (conditioning-aware ridge λ), #227 (standalone streaming feature builders)
 - Release closure: #288 closes once duckdb/community-extensions#3112 (v2026.10.22) is merged and verified
 
-**Locked decisions (2026-10-22):** #280 renames ship with old-name aliases for one release, then are removed; all three crate issues are in scope; #272 is code-only (the owner applies the get.erpl.io CORS rule and stale-path cleanup). Branch: `milestone/v0.11.0-issue-sweep`. Issue bodies: GitHub issues #227, #258, #259, #272, #279-#289.
+**Locked decisions (2026-10-22, alias policy revised 2026-10-23):** API compatibility is permanent: no public name, parameter or output column is ever removed or renamed (user: "I do not want that users have to change their code each time I publish a new version"); the #280 contract shape is added additively, and old names stay as permanent aliases. Enforced by Phase 20.1's API snapshot gate; all three crate issues are in scope; #272 is code-only (the owner applies the get.erpl.io CORS rule and stale-path cleanup). Branch: `milestone/v0.11.0-issue-sweep`. Issue bodies: GitHub issues #227, #258, #259, #272, #279-#289.
 
 ## Next Milestone Goals (carried candidates)
 

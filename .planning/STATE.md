@@ -6,12 +6,12 @@ current_phase: 20
 current_phase_name: Detection & Metric Bug Fixes
 status: executing
 stopped_at: Phase 19 complete, ready to plan Phase 20
-last_updated: "2026-10-23T08:09:14.668Z"
+last_updated: "2026-10-23T08:33:02.274Z"
 last_activity: 2026-10-23
 last_activity_desc: Phase 20 execution started
-state_head: f983958bb213e8e923c5725744742955eb6bff9a
+state_head: 7b2c6f7f84326cdf7de8996ac66f48e765e1a6af
 progress:
-  total_phases: 7
+  total_phases: 8
   completed_phases: 0
   total_plans: 11
   completed_plans: 4
@@ -99,6 +99,10 @@ None yet.
 | 261016-tjw | DuckDB 2.0-dev compat port (compat header, WASM Rust 1.86 pin, 2.0 CI job) | 2026-10-17 | 720c7c7 | [261016-tjw-port-anofox-statistics-duckdb-2-0-compat](./quick/261016-tjw-port-anofox-statistics-duckdb-2-0-compat/) |
 | 3 | Fix DuckDB v2.0.0 build (explicit extension target names, no-OpenSSL banner gate, duckdb-next CI -> v2.0.0) | 2026-10-21 | 4cab513 | — |
 | 261022-laz | Make DuckDB v2.0.0 the stable build line (submodules, distribution CI, keep v1.5.6 + v1.4.5 lines, retire duckdb-next, docs) | 2026-10-22 | 7f33142 | [261022-laz-make-duckdb-v2-0-0-the-stable-build-line](./quick/261022-laz-make-duckdb-v2-0-0-the-stable-build-line/) |
+
+### Roadmap Evolution
+
+- Phase 20.1 inserted after Phase 20: API Compatibility Gate: user directive 2026-10-23, no user code changes across releases (URGENT)
 
 ## Deferred Verification
 

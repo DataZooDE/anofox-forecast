@@ -28,9 +28,9 @@
 
 - [ ] **CTR-01**: `anofox_contract_version()` is registered and returns `'1'`. (#279)
 - [ ] **CTR-02**: Every result producer can be discovered via `tags['anofox.output']` and `tags['anofox.contract']` in `duckdb_functions()`, following anofox-statistics' pattern. (#279)
-- [ ] **CTR-03**: Conformal outputs (`ts_conformal_by`, `ts_conformal_apply_by`, `ts_conformal_calibrate`, `ts_interval_width_by`) keep the caller's group and date column names and use `yhat` / `yhat_lower` / `yhat_upper`. The old names stay as aliases for one release, with a deprecation note. (#280)
-- [ ] **CTR-04**: `ts_forecast_exog_by` emits `ds`, with `date` kept as an alias for one release. (#280)
-- [ ] **CTR-05**: `ts_forecast_var_by` returns the `ts_forecast_by` columns (`id` = the variable, `yhat`, plus intervals where the model provides them), with the old columns aliased for one release. (#280)
+- [ ] **CTR-03**: Conformal outputs (`ts_conformal_by`, `ts_conformal_apply_by`, `ts_conformal_calibrate`, `ts_interval_width_by`) keep the caller's group and date column names and use `yhat` / `yhat_lower` / `yhat_upper`. Delivered additively: existing columns stay unchanged permanently (API-01); the contract names come as new columns, a new function or an opt-in parameter. (#280)
+- [ ] **CTR-04**: `ts_forecast_exog_by` output can be consumed with a `ds` column, added additively; the existing `date` column stays (permanent compatibility, API-01). (#280)
+- [ ] **CTR-05**: `ts_forecast_var_by` returns the `ts_forecast_by` columns (`id` = the variable, `yhat`, plus intervals where the model provides them), delivered additively, with the existing columns kept permanently (API-01). (#280)
 - [ ] **CTR-06**: Every forecast and conformal output that has an interval carries a `level` column. (#280)
 - [ ] **CTR-07**: A long-form `ts_metrics_by` returns one row per (id, model, metric, value), matching the contract's `summary` schema, alongside the existing wide macros. (#281)
 - [ ] **CTR-08**: Long-form companions carrying `id` and `ds` exist for `ts_forecast`, `ts_forecast_agg`, `ts_mstl_decomposition_by`, `ts_forecast_explain_by`, `ts_detrend_by`, `ts_detect_peaks_by` and `ts_detect_periods_by`. (#282)
@@ -38,6 +38,13 @@
 - [ ] **CTR-10**: `ts_forecast_inspect_by` with AutoARIMA returns fitted values, residuals and named coefficients (ar1, ma1, …). (#282)
 - [ ] **CTR-11**: Changepoints are available as an events output, one row per changepoint, in the contract's `events` schema (`id, ds, kind = 'changepoint', severity, value`). (#283)
 - [ ] **CTR-12**: `ts_durbin_watson_by` (and the `dw_*` fields of `ts_residual_diagnostics_by`) return a documented approximate `p_value` and `method = 'Durbin-Watson'`. (#284)
+
+### API compatibility (user directive 2026-10-23)
+
+- [ ] **API-01**: `docs/API_STABILITY.md` defines the compatibility policy: no public name, parameter, parameter type or output column is ever removed, renamed or retyped; changes are additive only; deprecations are permanent working aliases; `_`-prefixed names are internal.
+- [ ] **API-02**: A checked-in API surface snapshot (public functions/macros/aggregates with parameters and types, plus table-function/macro output schemas), baselined on release v2026.10.22, and a CI gate that fails on removals, renames, retypes or changed output columns, and requires an API CHANGELOG entry for additions.
+- [ ] **API-03**: Earlier removal plans reversed: `ts_fill_forward_operator` and all #280 old names are permanent aliases; no "removed next release" wording remains.
+- [ ] **API-04**: The milestone's changes (Phases 19-20) pass the gate against the v2026.10.22 baseline; any break is fixed, not waived.
 
 ### Upstream crates
 
@@ -52,7 +59,6 @@
 
 ## Future Requirements
 
-- Remove the #280 old-name aliases (the release after v0.11.0's release).
 - Remove `ts_fill_forward_operator` and its `anofox_fcst_ts_fill_forward_operator` alias (the release after v0.11.0's release, with the #280 aliases). (#289)
 - v0.10.0 tech-debt candidates carried in PROJECT.md (integer `frequency` casts, params-header misuse checks, strict numeric MAP parsing, and so on).
 
@@ -68,6 +74,10 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
+| API-01 | Phase 20.1 | Pending |
+| API-02 | Phase 20.1 | Pending |
+| API-03 | Phase 20.1 | Pending |
+| API-04 | Phase 20.1 | Pending |
 | BUG-01 | Phase 19 | Complete |
 | BUG-02 | Phase 19 | Complete |
 | DIST-01 | Phase 19 | Complete |
@@ -100,7 +110,7 @@
 
 **Coverage:**
 
-- v1 requirements: 29 total
+- v1 requirements: 33 total
 - Mapped to phases: 29 (Phases 19-25)
 - Unmapped: 0
 

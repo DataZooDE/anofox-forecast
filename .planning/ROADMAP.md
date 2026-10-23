@@ -173,6 +173,23 @@ Plans:
 
 - [ ] 20-07-PLAN.md — BUG-05: opt-in `deseasonalize` / `seasonal_period` with the D1-b transform; R mstl reference; #287 acceptance; docs/skill/example for all changepoint keys; Phase 20 gate and CI (wave 7)
 
+### Phase 20.1: API Compatibility Gate (INSERTED)
+
+**Goal:** SQL that works on one release keeps working unchanged on every later release (user directive 2026-10-23: "I do not want that users have to change their code each time I publish a new version"). A written policy plus a CI gate against a baseline API snapshot make breaking changes impossible to ship by accident.
+**Requirements**: API-01, API-02, API-03, API-04
+**Depends on:** Phase 20 (Phases 23 and 24 depend on this phase)
+**Success Criteria** (what must be TRUE):
+
+  1. `docs/API_STABILITY.md` states the policy: public function/macro/aggregate names, parameter names, parameter types and output columns are never removed, renamed or retyped; changes are additive only (new functions, new optional parameters whose defaults preserve current results, new trailing output columns); deprecated names stay as permanent working aliases; `_`-prefixed names are internal and not covered.
+  2. A checked-in API surface snapshot (every public function/macro/aggregate with parameters and types, plus the output column names and types of every table function/macro) generated from release v2026.10.22 exists, and a CI job compares the current build against it: any removal, rename, retype or change to an existing output column fails the job; additions pass only with an "API" CHANGELOG entry.
+  3. The earlier removal plans are reversed: `ts_fill_forward_operator` and every #280 old name are documented as permanent aliases (no "removed next release" wording remains in CHANGELOG, docs, skills or REQUIREMENTS).
+  4. The milestone's changes so far (Phases 19-20) pass the gate against the v2026.10.22 baseline; any break found is fixed, not waived.
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 20.1 to break down)
+
 ### Phase 21: Upstream AutoETS Spike & Ridge Conditioning Fixes
 
 **Goal**: The upstream crates stop extrapolating a one-off spike as a persistent trend (AutoETS) and stop over-shrinking well-conditioned folds (ridge), delivered as PRs the user can merge and publish while the extension phases continue.
@@ -204,7 +221,7 @@ Plans:
 ### Phase 23: Contract Discovery & Prediction Columns
 
 **Goal**: anofox-visualization can discover the contract version and plot every forecast and interval output as a `prediction` without renaming a column, while existing queries keep working for one release through aliases.
-**Depends on**: Nothing hard (extension-side; runs after Phase 20 on the milestone branch)
+**Depends on**: Phase 20.1 (API Compatibility Gate: the contract changes must be additive and pass the API snapshot gate)
 **Requirements**: CTR-01, CTR-03, CTR-04, CTR-05, CTR-06
 **Success Criteria** (what must be TRUE):
 
@@ -219,7 +236,7 @@ Plans:
 ### Phase 24: Contract Long Forms, Events & Test Outputs
 
 **Goal**: Every result producer returns a contract-shaped table (summary, long form, events or test) and is discoverable through `duckdb_functions()` tags, so the visualization conformance harness no longer needs a hand-curated registry.
-**Depends on**: Phase 20 (the events and period long forms build on the corrected changepoints and periods), Phase 23 (the tags cover the renamed prediction outputs)
+**Depends on**: Phase 20 (the events and period long forms build on the corrected changepoints and periods), Phase 20.1 (API gate), Phase 23 (the tags cover the renamed prediction outputs)
 **Requirements**: CTR-02, CTR-07, CTR-08, CTR-09, CTR-11, CTR-12
 **Success Criteria** (what must be TRUE):
 
@@ -251,7 +268,7 @@ Plans:
 - **Parallel track:** Phases 21 and 22 run in the upstream repos (`~/projects/rust/anofox-forecast`, `~/projects/rust/anofox-regression`) on fix branches, with PRs for the user to review, merge and publish. They are numbered early so the crates.io release lead time overlaps the extension work in Phases 19-20 and 23-24. Phase 25 is the consumption gate.
 - **Extension phases are sequential:** 19 → 20 → 23 → 24 → 25 run one after another on `milestone/v0.11.0-issue-sweep` (`workflow.use_worktrees` is off).
 - **CTR-10 placement (checked on the built extension, 2026-10-22):** `ts_forecast_inspect_by(..., 'AutoARIMA')` returns 0 fitted values, `order_p/d/q` read 0/0/0 even when coefficients come back, and `feature_names` is NULL. In crate 0.16.2 `SARIMA::fitted_values()` returns `None`, and the non-seasonal ARIMA returns differenced-scale values. The crate-side accessor rides on the Phase 21 anofox-forecast branch; the extension-side mapping fix (order fields, coefficient names, level-scale fitted values) lands in Phase 25 with the crate consumption.
-- **Alias policy (locked 2026-10-22):** the #280 renames keep the old names as aliases for exactly one release, with a deprecation note. Removing them is a Future Requirement.
+- **Alias policy (REVISED 2026-10-23, user directive, supersedes 2026-10-22):** no existing output column or name is ever renamed or removed; the #280 contract shape is delivered additively (new trailing columns, new functions or an opt-in parameter), and any old name stays as a permanent working alias, with a deprecation note. Removing them is a Future Requirement.
 - **External gates:** crates.io releases are published by the user; duckdb/community-extensions#3112 is merged by DuckDB maintainers. DIST-05 can be verified as soon as #3112 lands, ahead of the rest of Phase 25.
 - **Owner actions (out of scope):** applying the get.erpl.io CORS rule and deleting stale paths; Phase 19 only documents them.
 - **Universal DoD (every requirement):** value assertions against a fixture, reproducer or closed form; `cargo test`, `cargo fmt --check` and `cargo clippy` green; `make audit` green (no statistics in C++/SQL); affected SQL run against the built v2.0.0 extension; examples and docs pass `make check-docs`; R / scipy / statsmodels reference checks wherever a statistic changes; v1.5.6 and v1.4.5 LTS CI lines green.
