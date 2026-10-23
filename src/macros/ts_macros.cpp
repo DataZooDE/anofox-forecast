@@ -655,7 +655,7 @@ ORDER BY od._dt
 R"(
 SELECT * FROM _ts_detect_changepoints_by_native(
     (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR) ORDER BY ALL),
-    COALESCE(TRY_CAST(params['hazard_lambda'] AS VARCHAR), '250.0')
+    params::MAP(VARCHAR, VARCHAR)
 )
 )",
     "Detects structural changepoints for each group using Bayesian Online Changepoint Detection.",

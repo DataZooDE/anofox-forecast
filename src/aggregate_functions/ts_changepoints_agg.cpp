@@ -1,5 +1,6 @@
 #include "anofox_forecast_extension.hpp"
 #include "anofox_fcst_ffi.h"
+#include "ts_changepoints_params.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/aggregate_function.hpp"
@@ -13,11 +14,11 @@ namespace duckdb {
 struct TsChangepointsAggStateData {
     vector<int64_t> timestamps;
     vector<double> values;
-    double hazard_lambda;
+    ChangepointParamSet params;
     bool include_probabilities;
     bool initialized;
 
-    TsChangepointsAggStateData() : hazard_lambda(250.0), include_probabilities(false), initialized(false) {}
+    TsChangepointsAggStateData() : include_probabilities(false), initialized(false) {}
 };
 
 // Trivially constructible state wrapper (just a pointer)
@@ -102,8 +103,14 @@ static void TsChangepointsAggUpdate(Vector inputs[], AggregateInputData &aggr_in
         }
 
         if (!state.data->initialized) {
-            // Parse params MAP if valid
-            // Default values already set in constructor
+            // Parse params MAP once per state (first row wins if a group's
+            // rows carry different MAPs -- documented behaviour, #287
+            // BUG-06): the same shared parser ts_detect_changepoints_by
+            // uses (Phase 20 20-06), so both consumers agree on
+            // hazard_lambda for identical inputs. Previously this block was
+            // empty and every key, including hazard_lambda, was silently
+            // ignored.
+            state.data->params = ParseChangepointParamSet(params_vec.GetValue(i));
             state.data->initialized = true;
         }
 
@@ -152,7 +159,7 @@ static void TsChangepointsAggFinalize(Vector &state_vector, AggregateInputData &
         bool success = anofox_ts_detect_changepoints_bocpd(
             sorted_values.data(),
             sorted_values.size(),
-            data.hazard_lambda,
+            data.params.hazard_lambda,
             true,  // always include probabilities for aggregate
             &cp_result,
             &error
