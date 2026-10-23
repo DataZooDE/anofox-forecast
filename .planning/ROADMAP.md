@@ -142,7 +142,7 @@ Plans:
   4. In `ts_detect_changepoints_agg`, with a `threshold` set, `is_changepoint` is true exactly when `changepoint_probability` reaches the threshold for every row after the first of each series (the first row, whose probability is always 1 − 1/hazard_lambda, e.g. 0.996, is never flagged; user decision D2-ii 2026-10-23), and `ts_detect_periods_by` returns period 7 on the #287 panel.
   5. Each fix is computed in Rust and pinned by a value-asserting test under `test/sql/correctness/` built from the issue's reproducer; `make audit` and `cargo fmt --check` stay green.
 
-**Plans:** 4/7 plans executed (strictly sequential: shared build tree, CHANGELOG.md and ts_macros.cpp; all autonomous, decisions D1-b/D2-ii and the UNION ALL scope expansion recorded in 20-CONTEXT.md)
+**Plans:** 5/7 plans executed (strictly sequential: shared build tree, CHANGELOG.md and ts_macros.cpp; all autonomous, decisions D1-b/D2-ii and the UNION ALL scope expansion recorded in 20-CONTEXT.md)
 
 Plans:
 **Wave 1**
@@ -163,7 +163,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 20-05-PLAN.md — BUG-03 scope expansion: `_ts_forecast_native`, `ts_aggregate_hierarchy`, `ts_split_keys`, `ts_validate_separator` union-safe with unchanged signatures; `ts_forecast_by` pinned on UNION ALL sources; 1M-row perf comparison against the baseline (forecast hot path, GROUP BY parallelism) (wave 5)
+- [x] 20-05-PLAN.md — BUG-03 scope expansion: `_ts_forecast_native`, `ts_aggregate_hierarchy`, `ts_split_keys`, `ts_validate_separator` union-safe with unchanged signatures; `ts_forecast_by` pinned on UNION ALL sources; 1M-row perf comparison against the baseline (forecast hot path, GROUP BY parallelism) (wave 5)
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
@@ -283,7 +283,7 @@ Extension phases execute in numeric order: 19 → 20 → 23 → 24 → 25. Phase
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 19. WASM Traps & Distribution Pipeline | 4/4 | Complete    | 2026-10-23 |
-| 20. Detection & Metric Bug Fixes | 4/7 | In Progress|  |
+| 20. Detection & Metric Bug Fixes | 5/7 | In Progress|  |
 | 21. Upstream AutoETS Spike & Ridge Conditioning Fixes | 0/TBD | Not started | - |
 | 22. Upstream Streaming Feature Builders | 0/TBD | Not started | - |
 | 23. Contract Discovery & Prediction Columns | 0/TBD | Not started | - |

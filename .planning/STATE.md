@@ -5,16 +5,16 @@ milestone_name: "Issue Sweep: Contract, Bugs, Crate Fixes"
 current_phase: 20
 current_phase_name: Detection & Metric Bug Fixes
 status: executing
-stopped_at: Completed 20-04-PLAN.md
-last_updated: "2026-10-23T15:01:10.404Z"
+stopped_at: Completed 20-05-PLAN.md
+last_updated: "2026-10-23T20:38:42.376Z"
 last_activity: 2026-10-23
 last_activity_desc: Phase 20 execution started
-state_head: 8ceaafab967b6431781184cd2986774905fe3157
+state_head: d35f1d42b92dcc26d16016ff68b9c20b8c60267e
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 11
-  completed_plans: 8
+  completed_plans: 9
   percent: 0
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-22 — milestone v0.11.0 started)
 ## Current Position
 
 Phase: 20 (Detection & Metric Bug Fixes) — EXECUTING
-Plan: 5 of 7
+Plan: 6 of 7
 Status: Ready to execute
 Last activity: 2026-10-23 — Phase 20 execution started
 
@@ -63,6 +63,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 20 P02 | 56min | 3 tasks | 15 files |
 | Phase 20 P03 | 43min | 3 tasks | 10 files |
 | Phase 20 P04 | 50min | 3 tasks | 10 files |
+| Phase 20 P05 | 75min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -89,6 +90,7 @@ Recent decisions affecting current work:
 - [Phase 20]: 20-03: #287 default changepoint outputs frozen as md5 pins (detection_decomposition.test, captured at 21dfe7e); 20-06/20-07 must keep them green
 - [Phase 20]: ts_forecast_panel_by fits the series in group-key order (groups std::map), not arrival order; the shared GlobalETS fit moved with intake interleaving (#285, 20-04 Rule 1)
 - [Phase 20]: CTE-fed native macros (ts_cv_hydrate_by) put the ORDER BY ALL breaker on the native's input (SELECT * FROM joined ORDER BY ALL); the CTEs stay unchanged
+- [Phase 20]: 20-05: collect-then-finalize natives without a macro front (ts_aggregate_hierarchy, ts_split_keys, ts_validate_separator, _ts_forecast_native) became table macros over renamed _ts_*_native, fed via (SELECT * FROM _ts_passthrough(source) ORDER BY ALL); internal '_' macros get no anofox_fcst_ alias (#285) — Keeps public names/signatures/output columns (Phase 20.1 rule) while inserting the single-pipeline breaker
 
 ### Pending Todos
 
@@ -154,8 +156,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-23T15:01:10.375Z
-Stopped at: Completed 20-04-PLAN.md
+Last session: 2026-10-23T20:38:38.023Z
+Stopped at: Completed 20-05-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 19`
 

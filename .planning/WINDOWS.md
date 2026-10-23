@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 6
+open_count: 7
 waived_count: 0
 fixed_count: 0
-total_count: 6
-last_updated: 2026-10-23T15:01:26.530Z
+total_count: 7
+last_updated: 2026-10-23T20:38:49.789Z
 ---
 
 # Broken Windows Ledger
@@ -21,6 +21,7 @@ last_updated: 2026-10-23T15:01:26.530Z
 | 4 | 17 | deviation | docs/api/07-forecasting.md |  | Pre-existing snippet-harness FAIL (sales_data example, untouched block) found during Task 4's --all sweep; reproduces identically on pre-Task-4 HEAD, not fixed (out of scope, deferred-items.md). | open |  | 2026-10-15T06:03:25.112Z |  |
 | 5 | 20 | unrun-verify | .github/workflows/MainDistributionPipeline.yml |  | 20-03 Task 3: branch MainDistributionPipeline (wasm-runtime-test on v1.5.6 curated subset incl. fill-forward pins; v1.4.5/v1.5.6/v2.0.0 builds) not run - pipeline does not trigger on branch push and a workflow_dispatch uploads to the bucket; needs user dispatch or the PR run | open |  | 2026-10-23T14:11:39.075Z |  |
 | 6 | 20 | unrun-verify | src/macros/ts_macros.cpp |  | 20-04: wasm-runtime-test and v1.4.5/v1.5.6/v2.0.0 MainDistributionPipeline jobs not run for the 7 feature/CV/panel/VAR macro changes; deferred to the end-of-Phase-20 dispatch | open |  | 2026-10-23T15:01:26.530Z |  |
+| 7 | 20 | unrun-verify | src/macros/ts_macros.cpp |  | 20-05: wasm-runtime-test and v1.4.5/v1.5.6/v2.0.0 MainDistributionPipeline jobs not run for the 4 new table macros (ts_aggregate_hierarchy, ts_split_keys, ts_validate_separator, _ts_forecast_native); deferred to the end-of-Phase-20 dispatch | open |  | 2026-10-23T20:38:49.789Z |  |
 
 ````json
 [
@@ -94,6 +95,18 @@ last_updated: 2026-10-23T15:01:26.530Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-23T15:01:26.530Z",
+    "resolved_at": null
+  },
+  {
+    "id": 7,
+    "kind": "unrun-verify",
+    "phase": "20",
+    "file": "src/macros/ts_macros.cpp",
+    "line": null,
+    "description": "20-05: wasm-runtime-test and v1.4.5/v1.5.6/v2.0.0 MainDistributionPipeline jobs not run for the 4 new table macros (ts_aggregate_hierarchy, ts_split_keys, ts_validate_separator, _ts_forecast_native); deferred to the end-of-Phase-20 dispatch",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-23T20:38:49.789Z",
     "resolved_at": null
   }
 ]
