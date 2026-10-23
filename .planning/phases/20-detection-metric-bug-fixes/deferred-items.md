@@ -6,6 +6,23 @@
 - `src/macros/ts_macros.cpp` (comment above the metric macros, ~line 2420) still says the table macros "have threading issues requiring SET threads=1 for correct results". That is stale after #285. It was not changed in 20-02 because the comment is outside Task 3's file list.
 - Upstream: the broadcast-exchange internal error above is a DuckDB v2.0.0 defect (it also hits the pre-20-02 baseline binary when a user wraps a native in a MATERIALIZED CTE: 30/30). It has not been reported yet.
 
+## From 20-07 (2026-10-23)
+
+- **`scripts/check_correctness_inventory.py` exits 1 with THREE missing names, not the
+  two 20-03/20-04 already logged below.** `MISSING ts_features_config_template` and
+  `MISSING ts_features_list` are the pre-existing Phase 19 BUG-02 entries (unchanged).
+  `MISSING _ts_forecast_scalar` is new to this report but NOT caused by this plan: the
+  backtick mention the script keys off (`` `_ts_forecast_scalar` ``) was added to
+  CHANGELOG `## [Unreleased]` by Phase 20 plan 20-02 (confirmed present, unchanged, in
+  CHANGELOG.md at the pre-20-07 commit `4a9694d`) and only ever appears inside a
+  `union_source.test` comment (`# ts_forecast_by: already union-safe (GROUP BY +
+  _ts_forecast_scalar); pinned ...`), never as an actual correctness-test call the
+  inventory script's coverage check recognises. This plan touched neither
+  `_ts_forecast_scalar` nor `union_source.test`. Every function this plan added to the
+  CHANGELOG (`ts_detect_changepoints_by`/`ts_detect_changepoints_agg`) IS covered. This
+  is a manual release-DoD gate (per 20-03's note below), so all three must be fixed
+  before the next tag.
+
 ## From 20-03 (2026-10-23)
 
 - **docs/api/04-data-preparation.md "Do not chain table functions in CTEs" warning may be stale.** Its own "broken" example (`WITH gaps_filled AS (ts_fill_gaps_by(...)), nulls_filled AS (ts_fill_nulls_const_by('gaps_filled', ...)) SELECT count(*) FROM ts_drop_short_by('nulls_filled', ...)`) on a 1M-row panel (5000 series x 200 days, every 11th row dropped) returned 999090 rows in 3/3 runs on BOTH the pre-20-03 binary (21dfe7e) and the 20-03 build, so the documented 0-row failure did not reproduce on DuckDB v2.0.0 at default threads. Not changed in 20-03: removing a workaround needs a pin across the v1.4.5/v1.5.6/v2.0.0 lines (memory: docs workarounds = open bugs).

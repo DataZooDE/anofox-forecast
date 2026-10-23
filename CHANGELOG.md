@@ -14,6 +14,24 @@ No signature changes. `ts_fill_forward_operator` changes implementation and now
 returns the source table's column names and types (previously always
 `group_col`/`date_col`/`value_col`, `TIMESTAMP`/`DOUBLE`).
 
+### Added
+
+- **`ts_detect_changepoints_by` and `ts_detect_changepoints_agg` gain `threshold`,
+  `deseasonalize` and `seasonal_period` params MAP keys (#287).** `threshold`
+  (optional, `[0, 1]`): when set, `is_changepoint = (changepoint_probability >=
+  threshold)` for every row after the first of each series (the first row is never
+  flagged); when unset, the existing MAP run-length-reset heuristic applies.
+  `deseasonalize` (strict bool, default `false`, opt-in only): removes the STL
+  seasonal component at `seasonal_period` (or the auto-detected period) AND a
+  linear trend before BOCPD, so a regular seasonal cycle stops producing
+  changepoints while a genuine level shift still survives as a step.
+  `seasonal_period` (strict non-negative integer, default `0` = auto-detect via
+  `ts_detect_periods_by`'s FFT primary period; only consulted when `deseasonalize`
+  is `true`). Both functions parse this params MAP through one shared C++ header
+  and decide `is_changepoint`/`changepoint_probability` through one Rust function,
+  so they return identical rows for identical inputs and params. Defaults are
+  unchanged (pinned by md5 in `test/sql/correctness/detection_decomposition.test`).
+
 ### Deprecated
 
 - **`ts_fill_forward_operator` and its `anofox_fcst_ts_fill_forward_operator`
@@ -52,6 +70,22 @@ returns the source table's column names and types (previously always
   handover (CORS rule, stale paths, redeploy steps).
 
 ### Fixed
+
+- **`ts_detect_changepoints_agg` silently ignored its entire `params` MAP
+  (#287).** Its "Parse params MAP if valid" block was empty, so `hazard_lambda`
+  (and every other key) stayed hardcoded at the default `250.0` regardless of
+  what was passed, while `ts_detect_changepoints_by` parsed the same key through
+  its own parser -- the two consumers could silently disagree on identical
+  inputs. Both now share one C++ params parser (`ts_changepoints_params.hpp`)
+  and one Rust decision function, so they return identical rows for identical
+  inputs and params; on a repro panel, `ts_detect_changepoints_agg(..,
+  MAP{'hazard_lambda': '50'})` now flags 8/6/6 changepoints across the panel's
+  three series (previously 6/2/6, i.e. unaffected by `hazard_lambda`).
+  `ts_detect_changepoints_agg`'s `is_changepoint` decision rule is also now
+  identical to `ts_detect_changepoints_by`'s -- previously it could leave a row
+  unflagged even at `changepoint_probability = 0.996`. `ts_detect_periods_by`
+  returning `primary_period = 7.0` on the #287 panel (already correct on main)
+  is now pinned by a regression test, closing out #287 end to end.
 
 - **The 11 metric macros returned NULL, or a value computed on part of the rows,
   when the source was a UNION ALL (#285).** `ts_mae_by`, `ts_mse_by`, `ts_rmse_by`,

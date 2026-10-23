@@ -295,6 +295,76 @@ GROUP BY series_id
 ORDER BY n_changepoints DESC;
 
 -- ============================================================================
+-- SECTION 7: Ignoring a Regular Seasonal Cycle (deseasonalize, #287, D1-b)
+-- ============================================================================
+-- A regular seasonal cycle (e.g. weekly traffic) can itself look like a
+-- sequence of changepoints to BOCPD, drowning out a genuine level shift.
+-- `deseasonalize` removes the STL seasonal component AND a linear trend
+-- before detection runs -- level shifts survive as steps, regular cycles
+-- do not. It is opt-in (default false); combine it with `threshold` to
+-- isolate genuine level shifts from the residual sensitivity around the
+-- shift that `deseasonalize` alone can still leave.
+
+.print ''
+.print '>>> SECTION 7: Ignoring a Regular Seasonal Cycle (deseasonalize)'
+.print '-----------------------------------------------------------------------------'
+
+-- Three weekly-seasonal series (84 days); only series B gets a genuine
+-- level shift of +15 starting day 50 (2024-02-20). A and C have no shift.
+CREATE OR REPLACE TABLE seasonal_panel AS
+SELECT
+    id,
+    (DATE '2024-01-01' + INTERVAL (i) DAY) AS ds,
+    base + 0.3 * i + 5 * sin(2 * pi() * i / 7)
+        + CASE WHEN id = 'B' AND i >= 50 THEN 15 ELSE 0 END
+        + 1.6 * cos(i * 0.9) + 0.7 * sin(i * 1.7 + base) AS y
+FROM (VALUES ('A', 20.0), ('B', 40.0), ('C', 60.0)) t(id, base), range(84) r(i);
+
+-- 7.1: Default (no deseasonalize) -- the weekly cycle itself produces
+-- several flagged dates on every series, including A and C which have no
+-- real shift at all.
+.print 'Section 7.1: Default detection (deseasonalize unset) -- weekly cycle itself flags changepoints'
+
+SELECT id, COUNT(*) FILTER (WHERE is_changepoint) AS n_changepoints
+FROM ts_detect_changepoints_by('seasonal_panel', id, ds, y, MAP{})
+GROUP BY id
+ORDER BY id;
+
+-- 7.2: deseasonalize alone (no threshold) -- A and C are now clean, but B
+-- still gets extra weekly-spaced flags besides the real shift (the reason
+-- to combine deseasonalize with threshold below).
+.print ''
+.print 'Section 7.2: deseasonalize=true alone -- A/C clean, B still has extra weekly-spaced flags'
+
+SELECT id, string_agg(ds::DATE::VARCHAR, ', ' ORDER BY ds) FILTER (WHERE is_changepoint) AS changepoint_dates
+FROM ts_detect_changepoints_by('seasonal_panel', id, ds, y, MAP{'deseasonalize': 'true'})
+GROUP BY id
+ORDER BY id;
+
+-- 7.3: deseasonalize + threshold=0.5 -- isolates exactly the genuine level
+-- shift: A and C flag nothing, B flags only 2024-02-20. Table function and
+-- aggregate agree row for row.
+.print ''
+.print 'Section 7.3: deseasonalize + threshold=0.5 (table function) -- isolates the real shift'
+
+SELECT id, string_agg(ds::DATE::VARCHAR, ', ' ORDER BY ds) FILTER (WHERE is_changepoint) AS changepoint_dates
+FROM ts_detect_changepoints_by('seasonal_panel', id, ds, y, MAP{'deseasonalize': 'true', 'threshold': '0.5'})
+GROUP BY id
+ORDER BY id;
+
+.print ''
+.print 'Section 7.4: Same options via ts_detect_changepoints_agg -- identical result'
+
+SELECT id, string_agg(r.timestamp::DATE::VARCHAR, ', ' ORDER BY r.timestamp) FILTER (WHERE r.is_changepoint) AS changepoint_dates
+FROM (
+    SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'deseasonalize': 'true', 'threshold': '0.5'})) AS r
+    FROM seasonal_panel
+    GROUP BY id
+)
+GROUP BY id
+ORDER BY id;
+
+-- ============================================================================
 -- CLEANUP
 -- ============================================================================
 
@@ -305,6 +375,7 @@ ORDER BY n_changepoints DESC;
 DROP TABLE IF EXISTS multi_series;
 DROP TABLE IF EXISTS retail_demand;
 DROP TABLE IF EXISTS sensor_data;
+DROP TABLE IF EXISTS seasonal_panel;
 
 .print 'All tables cleaned up.'
 .print ''

@@ -189,10 +189,16 @@ SELECT * FROM ts_forecast_by('sales', product_id, ds, y,
 ts_detect_changepoints_by(source, group_col, date_col, value_col, params) → TABLE
 ```
 
-Params:
+Params (Phase 20 20-06/20-07, #287 — `ts_detect_changepoints_by` and `ts_detect_changepoints_agg`
+parse this same params MAP through one shared C++ header and decide `is_changepoint`/
+`changepoint_probability` through one Rust function, so **both return identical rows for
+identical inputs and params**; all defaults below are unchanged since before Phase 20):
 | Key | Default | Description |
 |---|---|---|
 | `hazard_lambda` | 250.0 | Expected run length between changepoints. Lower → more changepoints (and more false alarms) |
+| `threshold` | unset | When set (`[0, 1]`), `is_changepoint = (changepoint_probability >= threshold)` for every row **after the first** of each series — the first row is never flagged. When unset, the existing MAP run-length-reset heuristic applies. Out-of-range/non-numeric throws, naming `threshold` |
+| `deseasonalize` | `false` | Strict bool (`true`/`false`/`1`/`0`). When `true`, removes the STL seasonal component at `seasonal_period` (or auto-detected) AND a linear trend before BOCPD (D1-b) — level shifts survive as steps, regular seasonal cycles stop producing changepoints. **Opt-in only**; defaults unaffected. Invalid value throws, naming `deseasonalize` |
+| `seasonal_period` | `0` (auto) | Strict non-negative integer; only consulted when `deseasonalize` is `true`. Negative/non-numeric throws, naming `seasonal_period` |
 
 Returns one row per input point with `<group_col>`, `<date_col>`, `is_changepoint BOOLEAN`,
 and `changepoint_probability DOUBLE` only — the value column is **not** included in the
@@ -204,13 +210,20 @@ SELECT product_id, ds, is_changepoint, changepoint_probability
 FROM ts_detect_changepoints_by('sales', product_id, ds, y,
     MAP{'hazard_lambda': '100'})
 WHERE is_changepoint;
+
+-- Ignore a weekly cycle, flag only a genuine sustained level shift (#287, D1-b)
+SELECT product_id, ds, is_changepoint
+FROM ts_detect_changepoints_by('sales', product_id, ds, y,
+    MAP{'deseasonalize': 'true', 'threshold': '0.5'})
+WHERE is_changepoint;
 ```
 
 Note: the single-series `ts_detect_changepoints` (no `group_col`) has a **different** output
 shape that DOES include the value column: `(date_col, value_col, is_changepoint,
 changepoint_probability)`. It is not a simple alias of the `_by` form.
 
-Also: `ts_detect_changepoints` (scalar) and `ts_detect_changepoints_agg` (aggregate).
+Also: `ts_detect_changepoints` (scalar) and `ts_detect_changepoints_agg` (aggregate, same params
+MAP as above — see `docs/api/06-changepoint-detection.md` for its signature/example).
 
 **Algorithm (Phase 15 plan 15-03, DET-02):** the series is standardised first
 (`z = (x - median(x)) / sigma_hat`, `sigma_hat` a MAD-of-first-differences robust

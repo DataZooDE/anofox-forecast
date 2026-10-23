@@ -33,6 +33,7 @@ docs/api/05a-decomposition.md	ts_seasonal_strength(values LIST(DOUBLE), period D
 docs/api/05b-peak-detection.md	ts_analyze_peak_timing_by(source, group_col, date_col, value_col, period, params) → TABLE(group_col, n_peaks, peak_times, variability_score, is_stable)
 docs/api/05b-peak-detection.md	ts_detect_peaks_by(source, group_col, date_col, value_col, params) → TABLE(group_col, peaks, n_peaks, inter_peak_distances, mean_period)
 docs/api/06-changepoint-detection.md	ts_detect_changepoints_by(source, group_col, date_col, value_col, params)
+docs/api/06-changepoint-detection.md	ts_detect_changepoints_agg(date_col, value_col, params) -- used with GROUP BY
 docs/api/07-forecasting.md	ts_auto_ensemble_inspect_by(
 docs/api/07-forecasting.md	ts_ensemble_inspect_by(
 docs/api/07-forecasting.md	ts_forecast_by(table_name, group_col, date_col, target_col, method, horizon, frequency, params?) → TABLE
