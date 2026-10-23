@@ -582,6 +582,41 @@ pub fn detect_changepoints_bocpd(
     })
 }
 
+/// Options for [`detect_changepoints_bocpd_with_options`] (#287, BUG-06,
+/// user decision D2-ii, 20-CONTEXT.md decisions_addendum_2).
+#[derive(Debug, Clone, Copy)]
+pub struct ChangepointOptions {
+    /// Expected run length between changepoints (same meaning as
+    /// [`detect_changepoints_bocpd`]'s `hazard_lambda`).
+    pub hazard_lambda: f64,
+    /// When `None` (default), `is_changepoint` is the existing MAP
+    /// run-length-reset heuristic ([`bocpd_trace`]'s `is_changepoint`).
+    /// When `Some(t)`, `is_changepoint[i] = i >= 1 && prob[i] >= t` for
+    /// every `i` -- D2-ii. Must be finite and in `[0, 1]` or
+    /// [`detect_changepoints_bocpd_with_options`] returns
+    /// `ForecastError::InvalidParameter`.
+    pub threshold: Option<f64>,
+}
+
+impl Default for ChangepointOptions {
+    fn default() -> Self {
+        Self {
+            hazard_lambda: 250.0,
+            threshold: None,
+        }
+    }
+}
+
+// RED STUB (20-06 Task 2): threshold is parsed into the options but not yet
+// honoured -- this intentionally fails the threshold-rule and validation
+// tests below until the GREEN commit implements the D2-ii rule.
+pub fn detect_changepoints_bocpd_with_options(
+    values: &[f64],
+    opts: &ChangepointOptions,
+) -> Result<BocpdResult> {
+    detect_changepoints_bocpd(values, opts.hazard_lambda, true)
+}
+
 /// Detect changepoints using Bayesian Online Changepoint Detection (simplified).
 /// Legacy function - use detect_changepoints_bocpd for C++ API compatibility.
 pub fn detect_changepoints_bayesian(values: &[f64], hazard_rate: f64) -> Result<ChangepointResult> {
@@ -996,5 +1031,120 @@ mod tests {
         let scaled: Vec<f64> = values.iter().map(|v| v * 100.0 + 7.0).collect();
         let scaled_trace = bocpd_trace(&scaled, 250.0).unwrap();
         assert_eq!(base.changepoints, scaled_trace.changepoints);
+    }
+
+    // -----------------------------------------------------------------
+    // Phase 20 plan 20-06 Task 2 (#287, BUG-06, D2-ii): threshold option,
+    // decided in Rust and shared by both SQL consumers via the FFI options
+    // struct (`detect_changepoints_bocpd_with_options`).
+    // -----------------------------------------------------------------
+
+    /// #287 panel's series B (84 days, weekly seasonality, +15 level shift
+    /// from day 50 / index 50): `base + 0.3*i + 5*sin(2*pi*i/7) + (i>=50 ?
+    /// 15 : 0) + 1.6*cos(i*0.9) + 0.7*sin(i*1.7+base)`, base = 40.0 -- the
+    /// exact SQL formula pinned in detection_decomposition.test.
+    fn issue287_series_b() -> Vec<f64> {
+        let base = 40.0;
+        (0..84_i64)
+            .map(|i| {
+                let i_f = i as f64;
+                base + 0.3 * i_f
+                    + 5.0 * (2.0 * std::f64::consts::PI * i_f / 7.0).sin()
+                    + if i >= 50 { 15.0 } else { 0.0 }
+                    + 1.6 * (i_f * 0.9).cos()
+                    + 0.7 * (i_f * 1.7 + base).sin()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_with_options_threshold_none_matches_detect_changepoints_bocpd() {
+        let mut step = vec![0.0; 50];
+        step.extend(vec![10.0; 50]);
+
+        let opts = ChangepointOptions {
+            hazard_lambda: 250.0,
+            threshold: None,
+        };
+        let with_opts = detect_changepoints_bocpd_with_options(&step, &opts).unwrap();
+        let base = detect_changepoints_bocpd(&step, 250.0, true).unwrap();
+        assert_eq!(with_opts.is_changepoint, base.is_changepoint, "step series: is_changepoint");
+        assert_eq!(
+            with_opts.changepoint_probability, base.changepoint_probability,
+            "step series: changepoint_probability"
+        );
+        assert_eq!(with_opts.changepoints, base.changepoints, "step series: changepoints");
+
+        let b = issue287_series_b();
+        let with_opts_b = detect_changepoints_bocpd_with_options(&b, &opts).unwrap();
+        let base_b = detect_changepoints_bocpd(&b, 250.0, true).unwrap();
+        assert_eq!(with_opts_b.is_changepoint, base_b.is_changepoint, "#287 series B: is_changepoint");
+        assert_eq!(
+            with_opts_b.changepoint_probability, base_b.changepoint_probability,
+            "#287 series B: changepoint_probability"
+        );
+        assert_eq!(with_opts_b.changepoints, base_b.changepoints, "#287 series B: changepoints");
+    }
+
+    #[test]
+    fn test_with_options_threshold_flags_every_row_after_first_at_or_above_threshold() {
+        let mut step = vec![0.0; 50];
+        step.extend(vec![10.0; 50]);
+
+        let opts = ChangepointOptions {
+            hazard_lambda: 250.0,
+            threshold: Some(0.5),
+        };
+        let result = detect_changepoints_bocpd_with_options(&step, &opts).unwrap();
+        let want: Vec<bool> = result
+            .changepoint_probability
+            .iter()
+            .enumerate()
+            .map(|(i, &p)| i >= 1 && p >= 0.5)
+            .collect();
+        assert_eq!(result.is_changepoint, want);
+        assert!(!result.is_changepoint[0], "index 0 must never be flagged");
+    }
+
+    #[test]
+    fn test_with_options_threshold_zero_flags_every_row_after_first() {
+        // threshold 0.0 flags every index except 0 (D2-ii): prob[i] >= 0.0
+        // is always true, but index 0 is excluded unconditionally.
+        let mut step = vec![0.0; 50];
+        step.extend(vec![10.0; 50]);
+
+        let opts = ChangepointOptions {
+            hazard_lambda: 250.0,
+            threshold: Some(0.0),
+        };
+        let result = detect_changepoints_bocpd_with_options(&step, &opts).unwrap();
+        assert!(
+            !result.is_changepoint[0],
+            "index 0 must never be flagged, even at threshold 0.0"
+        );
+        assert!(
+            result.is_changepoint[1..].iter().all(|&f| f),
+            "every row after the first must be flagged at threshold 0.0"
+        );
+    }
+
+    #[test]
+    fn test_with_options_threshold_out_of_range_is_invalid_parameter() {
+        let mut step = vec![0.0; 10];
+        step.extend(vec![10.0; 10]);
+
+        for bad in [1.5, -0.1, f64::NAN] {
+            let opts = ChangepointOptions {
+                hazard_lambda: 250.0,
+                threshold: Some(bad),
+            };
+            let result = detect_changepoints_bocpd_with_options(&step, &opts);
+            match result {
+                Err(ForecastError::InvalidParameter { param, .. }) => {
+                    assert_eq!(param, "threshold", "threshold={bad}");
+                }
+                other => panic!("threshold={bad}: expected InvalidParameter, got {other:?}"),
+            }
+        }
     }
 }
