@@ -142,7 +142,7 @@ Plans:
   4. In `ts_detect_changepoints_agg`, with a `threshold` set, `is_changepoint` is true exactly when `changepoint_probability` reaches the threshold for every row after the first of each series (the first row, whose probability is always 1 − 1/hazard_lambda, e.g. 0.996, is never flagged; user decision D2-ii 2026-10-23), and `ts_detect_periods_by` returns period 7 on the #287 panel.
   5. Each fix is computed in Rust and pinned by a value-asserting test under `test/sql/correctness/` built from the issue's reproducer; `make audit` and `cargo fmt --check` stay green.
 
-**Plans:** 3/7 plans executed (strictly sequential: shared build tree, CHANGELOG.md and ts_macros.cpp; all autonomous, decisions D1-b/D2-ii and the UNION ALL scope expansion recorded in 20-CONTEXT.md)
+**Plans:** 4/7 plans executed (strictly sequential: shared build tree, CHANGELOG.md and ts_macros.cpp; all autonomous, decisions D1-b/D2-ii and the UNION ALL scope expansion recorded in 20-CONTEXT.md)
 
 Plans:
 **Wave 1**
@@ -159,7 +159,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 20-04-PLAN.md — BUG-03 audit: features/CV/panel/VAR `_by` macros union-safe; full in-out audit table (wave 4)
+- [x] 20-04-PLAN.md — BUG-03 audit: features/CV/panel/VAR `_by` macros union-safe; full in-out audit table (wave 4)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
@@ -283,7 +283,7 @@ Extension phases execute in numeric order: 19 → 20 → 23 → 24 → 25. Phase
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 19. WASM Traps & Distribution Pipeline | 4/4 | Complete    | 2026-10-23 |
-| 20. Detection & Metric Bug Fixes | 3/7 | In Progress|  |
+| 20. Detection & Metric Bug Fixes | 4/7 | In Progress|  |
 | 21. Upstream AutoETS Spike & Ridge Conditioning Fixes | 0/TBD | Not started | - |
 | 22. Upstream Streaming Feature Builders | 0/TBD | Not started | - |
 | 23. Contract Discovery & Prediction Columns | 0/TBD | Not started | - |
