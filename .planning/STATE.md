@@ -5,16 +5,16 @@ milestone_name: "Issue Sweep: Contract, Bugs, Crate Fixes"
 current_phase: 20
 current_phase_name: Detection & Metric Bug Fixes
 status: executing
-stopped_at: Phase 19 complete, ready to plan Phase 20
-last_updated: "2026-10-23T08:33:02.274Z"
+stopped_at: Completed 20-01-PLAN.md
+last_updated: "2026-10-23T12:32:07.779Z"
 last_activity: 2026-10-23
 last_activity_desc: Phase 20 execution started
-state_head: 7b2c6f7f84326cdf7de8996ac66f48e765e1a6af
+state_head: 7e729045f21ec6f9052b17f9b1bea6d21afcd807
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 11
-  completed_plans: 4
+  completed_plans: 5
   percent: 0
 ---
 
@@ -30,8 +30,8 @@ See: .planning/PROJECT.md (updated 2026-10-22 — milestone v0.11.0 started)
 ## Current Position
 
 Phase: 20 (Detection & Metric Bug Fixes) — EXECUTING
-Plan: 1 of 7
-Status: Executing Phase 20
+Plan: 2 of 7
+Status: Ready to execute
 Last activity: 2026-10-23 — Phase 20 execution started
 
 Progress: [░░░░░░░░░░] 0%
@@ -59,6 +59,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 19 P02 | 20min | 3 tasks | 10 files |
 | Phase 19 P03 | 39min | 2 tasks | 9 files |
 | Phase 19 P04 | 5h 13min | 3 tasks | 5 files |
+| Phase 20 P01 | 4h22m | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -78,6 +79,7 @@ Recent decisions affecting current work:
 - [Phase 19]: docs/distribution/get-erpl-io.md documents the exact S3 CORS rule, the stale v1.5.4/v1.5.5 paths (frozen since 2026-07-17/2026-09-26), and redeploy steps for the bucket owner; this phase made no bucket changes and read no repository variables or secrets. — Per locked CONTEXT #272 decision 4: CORS and stale-path cleanup are owner/bucket-controlled actions, out of this phase's code-change scope. Evidence is a 134-row read-only HTTP probe log, never an aws command against the real bucket.
 - [Phase 19]: BUG-02 required TWO independent fixes, not one: the planned allocator-pairing fix AND removing DATAZOO_GUARD from both ts_features catalog functions (empirically bisected WASM toolchain code-folding defect when two guarded functions share a signature). — Verified by 7 controlled wasm_eh rebuilds; neither fix alone resolved the trap.
 - [Phase 19]: wasm_mvp: keep-mvp (user decision at Task 2 checkpoint) -- LOADs cleanly, zero mvp-only failures across 94 files; _setThrew is non-fatal upstream console noise in @duckdb/duckdb-wasm's own JS glue, not fixable in this repo — Deviates from the locked CONTEXT #272 upstream->drop default because the measured evidence does not match the #272 report's "fails to LOAD" framing that rule was written against
+- [Phase 20]: 20-01: classify_seasonality/detect_amplitude_modulation strength = shared stl_strengths (ts_stats_by); degenerate classify strength NULL, amplitude-modulation keeps NaN; values-only change, schema unchanged
 
 ### Pending Todos
 
@@ -141,8 +143,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-23T05:58:46.194Z
-Stopped at: Phase 19 complete, ready to plan Phase 20
+Last session: 2026-10-23T12:32:07.698Z
+Stopped at: Completed 20-01-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 19`
 
