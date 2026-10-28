@@ -47,12 +47,20 @@ struct TsForecastAggStateData {
     ForecastParamSet params;
     bool initialized;
 
+    // Set for a window frame (#297): a series the model cannot fit is reported in
+    // error_message instead of raising, so one short frame does not fail the query.
+    bool frame_mode = false;
+
     TsForecastAggStateData() : horizon(12), initialized(false) {}
 };
 
-// Trivially constructible state wrapper (just a pointer)
+struct TsForecastAggWindowScan;
+
+// Trivially constructible state wrapper (just pointers)
 struct TsForecastAggState {
     TsForecastAggStateData *data;
+    // Per-thread scan over the window partition, only used by the window callback.
+    TsForecastAggWindowScan *window;
 };
 
 // Bind data for dynamic column naming
@@ -169,6 +177,7 @@ struct TsForecastAggOperation {
     template <class STATE>
     static void Initialize(STATE &state) {
         state.data = nullptr;
+        state.window = nullptr;
     }
 
     template <class STATE, class OP>
@@ -420,7 +429,10 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
             // reported in this group's error_message field. Every other
             // error code keeps the pre-existing error_message + empty-lists
             // + NULL aic/bic/mse behavior unchanged.
-            if (error.code == INVALID_MODEL || error.code == INVALID_INPUT) {
+            // In a window frame (#297) a fit failure on the frame's rows (e.g. too
+            // few observations at the start of a sliding window) is reported in
+            // error_message like the other codes; an unknown model still raises.
+            if (error.code == INVALID_MODEL || (error.code == INVALID_INPUT && !data.frame_mode)) {
                 throw InvalidInputException(string(error.message));
             }
 
@@ -673,12 +685,95 @@ static void TsForecastAggCombine(Vector &state_vector, Vector &combined, Aggrega
     }
 }
 
+// ---------------------------------------------------------------------------
+// Window frames (#297): ts_forecast_agg(...) OVER (... ROWS / RANGE frame)
+//
+// DuckDB evaluates frames that span the whole partition with its constant
+// aggregator (Update over the partition, one Finalize). Every other frame
+// (sliding, expanding, ...) comes here, once per output row: the frame's rows
+// go through the regular Update into a scratch state, then Finalize, so a frame
+// gives exactly the GROUP BY result for those rows. The one difference is
+// frame_mode: a frame the model cannot fit reports why in error_message.
+// The per-row window callback exists on DuckDB 1.5 and 2.0 alike.
+// ---------------------------------------------------------------------------
+
+struct TsForecastAggWindowScan {
+    ColumnDataScanState scan;
+    DataChunk page;
+    bool initialized = false;
+};
+
+static void TsForecastAggWindow(AggregateInputData &aggr_input, const WindowPartitionInput &partition,
+                                const_data_ptr_t g_state, data_ptr_t l_state, const SubFrames &frames,
+                                Vector &result, idx_t rid) {
+    auto &lstate = *reinterpret_cast<TsForecastAggState *>(l_state);
+    if (!lstate.window) {
+        lstate.window = new TsForecastAggWindowScan();
+    }
+    auto &ws = *lstate.window;
+    if (!ws.initialized) {
+        partition.inputs->InitializeScan(ws.scan, partition.column_ids);
+        partition.inputs->InitializeScanChunk(ws.scan, ws.page);
+        ws.initialized = true;
+    }
+
+    TsForecastAggState frame_state;
+    frame_state.data = nullptr;
+    frame_state.window = nullptr;
+    Vector state_vec(LogicalType::POINTER);
+    auto state_ptrs = FlatDataMut<data_ptr_t>(state_vec);
+    SelectionVector sel(STANDARD_VECTOR_SIZE);
+
+    try {
+        for (auto &bounds : frames) {
+            idx_t row = bounds.start;
+            while (row < bounds.end) {
+                partition.inputs->Seek(row, ws.scan, ws.page);
+                const idx_t page_start = ws.scan.current_row_index;
+                const idx_t page_end = MinValue<idx_t>(ws.scan.next_row_index, bounds.end);
+                idx_t n = 0;
+                for (idx_t r = row; r < page_end; r++) {
+                    if (partition.filter_mask.RowIsValid(r)) {
+                        sel.set_index(n, r - page_start);
+                        state_ptrs[n] = reinterpret_cast<data_ptr_t>(&frame_state);
+                        n++;
+                    }
+                }
+                if (n > 0) {
+                    vector<Vector> inputs;
+                    inputs.reserve(ws.page.ColumnCount());
+                    for (idx_t c = 0; c < ws.page.ColumnCount(); c++) {
+                        inputs.emplace_back(ws.page.data[c], sel, n);
+                    }
+                    TsForecastAggUpdate(inputs.data(), aggr_input, inputs.size(), state_vec, n);
+                }
+                row = page_end;
+            }
+        }
+        if (frame_state.data) {
+            frame_state.data->frame_mode = true;
+        }
+        state_ptrs[0] = reinterpret_cast<data_ptr_t>(&frame_state);
+        Vector frame_result(result.GetType());
+        TsForecastAggFinalize(state_vec, aggr_input, frame_result, 1, 0);
+        result.SetValue(rid, frame_result.GetValue(0));
+    } catch (...) {
+        delete frame_state.data;
+        throw;
+    }
+    delete frame_state.data;
+}
+
 static void TsForecastAggDestructor(Vector &state_vector, AggregateInputData &aggr_input, idx_t count) {
     auto states = FlatDataMut<TsForecastAggState *>(state_vector);
     for (idx_t i = 0; i < count; i++) {
         if (states[i] && states[i]->data) {
             delete states[i]->data;
             states[i]->data = nullptr;
+        }
+        if (states[i] && states[i]->window) {
+            delete states[i]->window;
+            states[i]->window = nullptr;
         }
     }
 }
@@ -700,6 +795,9 @@ void RegisterTsForecastAggFunction(ExtensionLoader &loader) {
         ANOFOX_AGG_BIND(TsForecastAggBind),
         TsForecastAggDestructor
     );
+
+    // Sliding / expanding window frames (#297)
+    agg_func.SetWindowCallback(TsForecastAggWindow);
 
     AggregateFunctionSet func_set("anofox_fcst_ts_forecast_agg");
     func_set.AddFunction(agg_func);

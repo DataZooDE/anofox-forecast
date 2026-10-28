@@ -481,6 +481,43 @@ offending model/parameter:
   `ts_forecast_by` uses (see "Calendar stepping" above), with the frequency auto-detected
   from the observed dates instead of a declared `frequency` argument.
 
+### Rolling-origin forecasts with window frames
+
+`ts_forecast_agg` is also a window function. A sliding or expanding frame refits the
+model on each row's frame, the SQL-native form of a rolling-origin evaluation (next to
+[`ts_cv_folds_by`](08-cross-validation.md), which splits a fixed number of folds):
+
+```sql
+CREATE OR REPLACE TABLE rolling_demo AS
+SELECT i % 2 AS id, (TIMESTAMP '2024-01-01' + INTERVAL (i // 2) DAY) AS ds,
+       (10 + (i // 2) % 7 + 0.05 * (i // 2))::DOUBLE AS y
+FROM range(120) t(i);
+
+-- one-step-ahead forecast of every day from all the days before it, next to the actual
+SELECT id, ds, y,
+       (fc).point_forecast[1] AS yhat,
+       (fc).error_message
+FROM (
+    SELECT id, ds, y,
+           ts_forecast_agg(ds, y, 'SES', 1, MAP{}) OVER (
+               PARTITION BY id ORDER BY ds ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS fc
+    FROM rolling_demo)
+ORDER BY id, ds;
+```
+
+- Each frame gives exactly the `GROUP BY` result over the frame's rows (`FILTER` included).
+- A frame the model cannot fit, typically the first rows of the window, is **not** an
+  error for the query: its `error_message` says why (e.g. `Insufficient data: need at
+  least 3 observations, got 1`) and its forecast lists are empty. An empty frame (the
+  first row with `... AND 1 PRECEDING`) is `NULL`. An unknown model or params key still
+  raises.
+- A frame over the whole partition (`OVER (PARTITION BY id)`) fits once per partition,
+  as fast as `GROUP BY id`. Sliding and expanding frames fit once per row, so cost grows
+  with rows × frame length; keep frames bounded (`ROWS BETWEEN 199 PRECEDING AND ...`)
+  for the slower models.
+- The other `ts_*_agg` aggregates (`ts_stats_agg`, `ts_features_agg`, ...) work over
+  frames too (rolling statistics), with the same results as `GROUP BY` over the frame.
+
 ---
 
 ## Table Macros

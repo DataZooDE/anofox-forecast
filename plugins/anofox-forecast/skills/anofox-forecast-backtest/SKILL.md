@@ -102,6 +102,23 @@ Output columns: `fold_id`, `<group_col>`, `<date_col>`, `y` (renamed from target
 
 Params: same shape as `ts_forecast_by`. All model strings work (`'AutoETS'`, `'Laplace'`, `'HoltWinters'`, etc.). See `anofox-forecast-models` for the full catalogue.
 
+## Rolling-origin forecasts as a window function
+
+For a one-step-ahead (or h-step) forecast at every origin, `ts_forecast_agg` works over a
+window frame; each frame refits on its own rows (same result as `GROUP BY` over them):
+
+```sql
+SELECT product_id, ds, y, (fc).point_forecast[1] AS yhat, (fc).error_message
+FROM (SELECT product_id, ds, y,
+             ts_forecast_agg(ds::TIMESTAMP, y, 'SES', 1, MAP{}) OVER (
+                 PARTITION BY product_id ORDER BY ds ROWS BETWEEN 199 PRECEDING AND 1 PRECEDING) AS fc
+      FROM sales);
+```
+
+Frames too short for the model come back with `error_message` set and empty lists (the
+query does not fail); the empty first frame is `NULL`. Cost is one fit per row, so bound
+the frame for slow models and prefer `ts_cv_folds_by` when a few folds are enough.
+
 ## `ts_cv_hydrate_by` — attach features to fold rows
 
 If your model needs exogenous columns (features, calendar flags, promotions), the folds table lost them. Join them back:
