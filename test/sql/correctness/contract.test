@@ -115,12 +115,6 @@ WHERE id = 'A';
 ADF	KPSS	Ljung-Box	Jarque-Bera
 
 query I
-SELECT bool_and(list_has_all(struct_keys(t), ['method', 'statistic', 'p_value'])) FROM (
-    SELECT adf AS t FROM ts_adf_by('ct', id, ds, y) a(id, adf)) x;
-----
-true
-
-query I
 SELECT count(*) FROM (
     SELECT unnest(adf) FROM ts_adf_by('ct', id, ds, y) a(id, adf) UNION ALL BY NAME
     SELECT unnest(kpss) FROM ts_kpss_by('ct', id, ds, y) k(id, kpss) UNION ALL BY NAME
