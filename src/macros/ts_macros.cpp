@@ -564,6 +564,244 @@ FROM detrend_data
     "SELECT * FROM ts_detrend_by('sales', product_id, date, qty, 'cubic')",
     "decomposition"},
 
+    // =========================================================================
+    // Long-form companions (#282, CTR-08): one row per time point (or peak /
+    // period) carrying the caller's group and date columns, so nothing has to be
+    // unnested and joined back by list position. Each wraps the existing _by
+    // macro and maps list positions back to source rows; the values are
+    // unchanged.
+    // =========================================================================
+
+    // ts_mstl_decomposition_long_by: contract `decomposition` shape.
+    {"ts_mstl_decomposition_long_by", {"source", "group_col", "date_col", "value_col", nullptr},
+     {{"params", "MAP{}"}, {nullptr, nullptr}},
+R"(
+WITH _rows AS (
+    -- Every source row with its 1-based position in its series (by date) and
+    -- the series length. A list producer returns either one entry per row
+    -- (length _n) or one per row of the series with its leading/trailing NULLs
+    -- dropped (offset _lead, the number of leading NULL/NaN rows).
+    -- _g copies the group key for joins: a macro parameter name is only
+    -- substituted when unqualified, so qualified joins use _g.
+    SELECT group_col, date_col, group_col AS _g, value_col::DOUBLE AS _y,
+           row_number() OVER (PARTITION BY group_col ORDER BY date_col) AS _pos,
+           count(*) OVER (PARTITION BY group_col) AS _n
+    FROM query_table(source::VARCHAR)
+),
+_lead AS (
+    SELECT _g, coalesce(min(_pos) FILTER (WHERE _y IS NOT NULL AND NOT isnan(_y)), max(_pos) + 1) - 1 AS _lead
+    FROM _rows GROUP BY _g
+),
+_dec AS (
+    SELECT group_col AS _g, trend AS _trend, seasonal AS _seasonal, remainder AS _remainder, periods AS _periods
+    FROM ts_mstl_decomposition_by(source, group_col, date_col, value_col, params)
+),
+_idx AS (
+    SELECT r.*, d._trend, d._seasonal, d._remainder, d._periods,
+           -- NULL before the first non-NULL row (a negative index would count from the end).
+           CASE WHEN len(d._trend) = r._n THEN r._pos
+                WHEN r._pos > l._lead THEN r._pos - l._lead END AS _i
+    FROM _rows r
+    JOIN _lead l ON l._g IS NOT DISTINCT FROM r._g
+    JOIN _dec d ON d._g IS NOT DISTINCT FROM r._g
+)
+SELECT group_col, date_col, component, value
+FROM (
+    SELECT group_col, date_col,
+           unnest(
+               [{component: 'observed', value: _y}, {component: 'trend', value: _trend[_i]}]
+               || [{component: 'seasonal_' || _periods[k]::VARCHAR, value: _seasonal[k][_i]}
+                   FOR k IN generate_series(1, len(_periods))]
+               || [{component: 'remainder', value: _remainder[_i]}],
+               recursive := true)
+    FROM _idx
+)
+ORDER BY ALL
+)",
+    "Long form of ts_mstl_decomposition_by: one row per (group, date, component) with component in "
+    "observed, trend, seasonal_<period> (one per period), remainder -- the anofox contract "
+    "'decomposition' shape. Same params as ts_mstl_decomposition_by.",
+    "SELECT * FROM ts_mstl_decomposition_long_by('sales', product_id, date, qty, params := MAP{'seasonal_periods': '[7]'})",
+    "decomposition"},
+
+    // ts_detrend_long_by: one row per (group, date, component).
+    {"ts_detrend_long_by", {"source", "group_col", "date_col", "value_col", nullptr},
+     {{"method", "'auto'"}, {nullptr, nullptr}},
+R"(
+WITH _rows AS (
+    -- Every source row with its 1-based position in its series (by date) and
+    -- the series length. A list producer returns either one entry per row
+    -- (length _n) or one per row of the series with its leading/trailing NULLs
+    -- dropped (offset _lead, the number of leading NULL/NaN rows).
+    -- _g copies the group key for joins: a macro parameter name is only
+    -- substituted when unqualified, so qualified joins use _g.
+    SELECT group_col, date_col, group_col AS _g, value_col::DOUBLE AS _y,
+           row_number() OVER (PARTITION BY group_col ORDER BY date_col) AS _pos,
+           count(*) OVER (PARTITION BY group_col) AS _n
+    FROM query_table(source::VARCHAR)
+),
+_lead AS (
+    SELECT _g, coalesce(min(_pos) FILTER (WHERE _y IS NOT NULL AND NOT isnan(_y)), max(_pos) + 1) - 1 AS _lead
+    FROM _rows GROUP BY _g
+),
+_dt AS (
+    SELECT group_col AS _g, trend AS _trend, detrended AS _detrended, method AS _method
+    FROM ts_detrend_by(source, group_col, date_col, value_col, method)
+),
+_idx AS (
+    SELECT r.*, d._trend, d._detrended, d._method,
+           -- NULL before the first non-NULL row (a negative index would count from the end).
+           CASE WHEN len(d._trend) = r._n THEN r._pos
+                WHEN r._pos > l._lead THEN r._pos - l._lead END AS _i
+    FROM _rows r
+    JOIN _lead l ON l._g IS NOT DISTINCT FROM r._g
+    JOIN _dt d ON d._g IS NOT DISTINCT FROM r._g
+)
+-- SELECT * (not a column list): an unqualified `method` would be replaced by
+-- this macro's own method parameter.
+SELECT *
+FROM (
+    SELECT group_col, date_col,
+           unnest([{component: 'observed', value: _y},
+                   {component: 'trend', value: _trend[_i]},
+                   {component: 'detrended', value: _detrended[_i]}], recursive := true),
+           _method AS method
+    FROM _idx
+)
+ORDER BY ALL
+)",
+    "Long form of ts_detrend_by: one row per (group, date, component) with component in observed, "
+    "trend, detrended, plus the method used. method as ts_detrend_by (default 'auto').",
+    "SELECT * FROM ts_detrend_long_by('sales', product_id, date, qty, method := 'linear')",
+    "decomposition"},
+
+    // ts_detect_peaks_long_by: one row per detected peak (events-compatible).
+    {"ts_detect_peaks_long_by", {"source", "group_col", "date_col", "value_col", nullptr},
+     {{"params", "MAP{}"}, {nullptr, nullptr}},
+R"(
+WITH _rows AS (
+    -- Every source row with its 1-based position in its series (by date) and
+    -- the series length. A list producer returns either one entry per row
+    -- (length _n) or one per row of the series with its leading/trailing NULLs
+    -- dropped (offset _lead, the number of leading NULL/NaN rows).
+    -- _g copies the group key for joins: a macro parameter name is only
+    -- substituted when unqualified, so qualified joins use _g.
+    SELECT group_col, date_col, group_col AS _g, value_col::DOUBLE AS _y,
+           row_number() OVER (PARTITION BY group_col ORDER BY date_col) AS _pos,
+           count(*) OVER (PARTITION BY group_col) AS _n
+    FROM query_table(source::VARCHAR)
+),
+_lead AS (
+    SELECT _g, coalesce(min(_pos) FILTER (WHERE _y IS NOT NULL AND NOT isnan(_y)), max(_pos) + 1) - 1 AS _lead
+    FROM _rows GROUP BY _g
+),
+_pk AS (
+    SELECT group_col AS _g, unnest(peaks) AS _p
+    FROM ts_detect_peaks_by(source, group_col, date_col, value_col, params)
+)
+SELECT group_col, date_col, 'peak' AS kind, (pk._p).value AS value, (pk._p).prominence AS prominence
+FROM _pk pk
+JOIN _lead l ON l._g IS NOT DISTINCT FROM pk._g
+JOIN _rows r ON r._g IS NOT DISTINCT FROM pk._g AND r._pos = (pk._p).index + 1 + l._lead
+ORDER BY ALL
+)",
+    "Long form of ts_detect_peaks_by: one row per detected peak (group_col, date_col, kind = 'peak', "
+    "value, prominence), usable as anofox contract 'events'. Same params as ts_detect_peaks_by.",
+    "SELECT * FROM ts_detect_peaks_long_by('sales', product_id, date, qty, params := MAP{'min_prominence': '1.0'})",
+    "peak-detection"},
+
+    // ts_detect_periods_long_by: one row per detected period candidate.
+    {"ts_detect_periods_long_by", {"source", "group_col", "date_col", "value_col", nullptr},
+     {{"params", "MAP{}"}, {nullptr, nullptr}},
+R"(
+SELECT group_col, rank, (_c).period AS period, (_c).confidence AS confidence, (_c).strength AS strength,
+       (_c).amplitude AS amplitude, (_c).phase AS phase, (_c).iteration AS iteration,
+       (_c).matches_expected AS matches_expected, (_c).matched_expected_period AS matched_expected_period,
+       (_c).match_deviation AS match_deviation, (_c).period = primary_period AS is_primary, method
+FROM (
+    SELECT group_col, primary_period, method,
+           unnest(periods) AS _c, unnest(generate_series(1, len(periods))) AS rank
+    FROM ts_detect_periods_by(source, group_col, date_col, value_col, params)
+)
+ORDER BY ALL
+)",
+    "Long form of ts_detect_periods_by: one row per detected period candidate (group_col, rank, "
+    "period, confidence, strength, amplitude, phase, iteration, matches_expected, "
+    "matched_expected_period, match_deviation, is_primary, method). Same params as ts_detect_periods_by.",
+    "SELECT * FROM ts_detect_periods_long_by('sales', product_id, date, qty)",
+    "period-detection"},
+
+    // ts_forecast_fitted_by: in-sample long form of ts_forecast_agg (contract `obs`).
+    {"ts_forecast_fitted_by", {"source", "group_col", "date_col", "target_col", "method", nullptr},
+     {{"params", "MAP{}"}, {nullptr, nullptr}},
+R"(
+WITH _rows AS (
+    SELECT group_col, date_col, group_col AS _g, target_col::DOUBLE AS _y,
+           row_number() OVER (PARTITION BY group_col ORDER BY date_col) AS _pos
+    FROM query_table(source::VARCHAR)
+),
+_fit AS (
+    SELECT group_col AS _g, ts_forecast_agg(date_col, target_col::DOUBLE, method, 1, params) AS _f
+    FROM query_table(source::VARCHAR)
+    GROUP BY group_col
+)
+SELECT group_col, date_col, _y AS y, (f._f).insample_fitted[r._pos] AS fitted,
+       (f._f).residuals[r._pos] AS residual, (f._f).model_name AS model_name
+FROM _rows r JOIN _fit f ON r._g IS NOT DISTINCT FROM f._g
+ORDER BY ALL
+)",
+    "In-sample long form of ts_forecast_agg: one row per source row (group_col, date_col, y, fitted, "
+    "residual, model_name), the anofox contract 'obs' shape. fitted/residual are NULL where the model "
+    "has none (e.g. leading NULLs, warm-up). method and params as ts_forecast_by.",
+    "SELECT * FROM ts_forecast_fitted_by('sales', product_id, date, qty, 'AutoETS')",
+    "forecasting"},
+
+    // ts_forecast_explain_long_by: per-horizon decomposition, one row per
+    // (group, step, component). ds uses ts_forecast_by's calendar rule (a Naive
+    // _ts_forecast_scalar call supplies the future dates, typed as ts_forecast_by's).
+    {"ts_forecast_explain_long_by", {"source", "group_col", "date_col", "target_col", "method", "horizon", "frequency", nullptr},
+     {{"params", "MAP{}"}, {nullptr, nullptr}},
+R"(
+WITH _ex AS (
+    SELECT group_col AS _g, decomposition
+    FROM ts_forecast_explain_by(source, group_col, date_col, target_col, method, horizon, params := params)
+),
+_ds AS (
+    SELECT group_col, group_col AS _g,
+           [f.ds FOR f IN _ts_forecast_scalar(LIST(date_col ORDER BY date_col), LIST(target_col::DOUBLE ORDER BY date_col),
+                                               horizon, frequency::VARCHAR, 'Naive', MAP{})] AS _dates
+    FROM query_table(source::VARCHAR)
+    GROUP BY group_col
+),
+_comp AS (
+    SELECT d.*,
+           [{component: 'level', values: (e.decomposition).level},
+            {component: 'trend', values: (e.decomposition).trend},
+            {component: 'seasonal', values: (e.decomposition).seasonal},
+            {component: 'residual', values: (e.decomposition).residual}] AS _cs
+    FROM _ex e JOIN _ds d ON e._g IS NOT DISTINCT FROM d._g
+),
+_c AS (
+    SELECT group_col, _dates, unnest(_cs, recursive := true) FROM _comp
+)
+SELECT group_col, forecast_step, ds, component, value
+FROM (
+    SELECT group_col, component,
+           unnest(generate_series(1, len(values)))::INTEGER AS forecast_step,
+           unnest(_dates[1:len(values)]) AS ds,
+           unnest(values) AS value
+    FROM _c
+    WHERE values IS NOT NULL
+)
+ORDER BY group_col, forecast_step, component
+)",
+    "Long form of ts_forecast_explain_by: one row per (group, forecast_step, component) with ds (future "
+    "date, ts_forecast_by's calendar rule), component in level, trend, seasonal, residual (absent "
+    "components are omitted) and value. residual = point forecast - (level + trend + seasonal). "
+    "frequency as in ts_forecast_by.",
+    "SELECT * FROM ts_forecast_explain_long_by('sales', product_id, ds, y, 'ETS', 12, '1d', params := MAP{'seasonal_period': '7'})",
+    "forecasting"},
+
     // ts_classify_seasonality_by: Classify seasonality type per group
     // C++ API: ts_classify_seasonality_by(table_name, group_col, date_col, value_col, period)
     // Returns: TABLE(id, timing_classification, modulation_type, has_stable_timing, timing_variability,

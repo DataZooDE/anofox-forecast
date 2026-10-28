@@ -80,6 +80,12 @@ FROM range(0,48) t(g);
 SELECT * FROM ts_detect_periods_by('sea', id, ts, y, MAP{});
 ```
 
+### `ts_detect_periods_long_by` — one row per period candidate (#282)
+
+`ts_detect_periods_long_by(source, group_col, date_col, value_col, params := MAP{})` →
+`<group_col>, rank, period, confidence, strength, amplitude, phase, iteration,
+matches_expected, matched_expected_period, match_deviation, is_primary, method`.
+
 ### `ts_detect_periods_agg` — aggregate period detection
 
 The `GROUP BY` aggregate form of period detection — an alternative to the `_by` table macro above when you want the result inline in a larger aggregate query rather than as its own table-returning call. Overloads: `ts_detect_periods_agg(ts TIMESTAMP, value DOUBLE)` and `ts_detect_periods_agg(ts, value, method VARCHAR)`. Returns the same STRUCT as `ts_detect_multiple_periods` (`periods[]`, `n_periods`, `primary_period`, `method`).
@@ -328,6 +334,12 @@ input data** (not `0..1`); a plateau reports its midpoint index; `min_distance` 
 (the macro default) applies no distance filter. See `docs/api/05b-peak-detection.md` for the
 full parameter mapping.
 
+### `ts_detect_peaks_long_by` — one row per peak (#282)
+
+`ts_detect_peaks_long_by(source, group_col, date_col, value_col, params := MAP{})` →
+`<group_col>, <date_col>, kind = 'peak', value, prominence` (events-compatible; each peak on
+the source row it was found at).
+
 ### `ts_analyze_peak_timing_by`
 
 ```sql
@@ -365,6 +377,12 @@ SELECT periods FROM ts_mstl_decomposition_by('sales', product_id, ds, y, MAP{});
 -- []
 ```
 
+### `ts_mstl_decomposition_long_by` — long form (#282)
+
+`ts_mstl_decomposition_long_by(source, group_col, date_col, value_col, params := MAP{})` →
+`<group_col>, <date_col>, component, value` with component in `observed`, `trend`,
+`seasonal_<period>`, `remainder` (anofox contract `decomposition`; plot without unnesting).
+
 ### `ts_decompose_seasonal` (scalar) — fdars LOESS+Fourier, or R classical (centred moving-average)
 
 Signature `ts_decompose_seasonal(DOUBLE[] values, DOUBLE period [, VARCHAR method]) → STRUCT(trend DOUBLE[], seasonal DOUBLE[], remainder DOUBLE[], period DOUBLE, method VARCHAR)`.
@@ -394,6 +412,11 @@ ts_detrend_by(source, group_col, date_col, value_col, method) → TABLE
 name is a SQL error naming every valid choice — there is no silent fallback. `'loess'` and
 `'auto'` are `O(n^2)` in series length; prefer `'linear'`/`'quadratic'`/`'cubic'` on long
 series.
+
+### `ts_detrend_long_by` — long form (#282)
+
+`ts_detrend_long_by(source, group_col, date_col, value_col, method := 'auto')` →
+`<group_col>, <date_col>, component (observed / trend / detrended), value, method`.
 
 ### `ts_detrend` (scalar) — array-level trend removal
 

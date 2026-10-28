@@ -1370,6 +1370,11 @@ Returns per-group `decomposition` STRUCT with `level` / `trend` /
 components are `NULL`) plus `named_components_json` for family-specific
 extras. `raw_json` carries the untransformed payload.
 
+`residual` (#282) is the part of the point forecast the components do not explain:
+`yhat - (level + trend + seasonal + named components)`, computed in Rust from the same fitted
+model. It is ~0 for an additive decomposition and carries the interaction term for a
+multiplicative one, so `level + trend + seasonal + residual` always equals `yhat`.
+
 **Supported models (decomposition):** `ETS` (fixed spec), `MSTL`,
 `AutoMSTL`, `Theta`. Other models error with `does not implement Explainable`.
 
@@ -1382,6 +1387,32 @@ SELECT product_id,
 FROM ts_forecast_explain_by('sales', product_id, ds, y, 'ETS', 12,
     {seasonal_period: 12});
 ```
+
+### Long forms: `ts_forecast_explain_long_by` and `ts_forecast_fitted_by` (#282)
+
+```sql
+ts_forecast_explain_long_by(source, group_col, date_col, target_col, method, horizon, frequency,
+                            params := MAP{})
+ts_forecast_fitted_by(source, group_col, date_col, target_col, method, params := MAP{})
+```
+
+- `ts_forecast_explain_long_by` returns one row per `(group, forecast_step, component)`:
+  `<group_col>, forecast_step, ds, component, value`, with `component` in `level`, `trend`,
+  `seasonal`, `residual` (absent components omitted). `ds` follows `ts_forecast_by`'s calendar
+  rule for `frequency`, so it joins to `ts_forecast_by` output on `(id, forecast_step, ds)`.
+- `ts_forecast_fitted_by` is the in-sample long form of `ts_forecast_agg`: one row per source
+  row, `<group_col>, <date_col>, y, fitted, residual, model_name` (the anofox contract `obs`
+  shape). `fitted`/`residual` are `NULL` where the model has none (NULL input, warm-up).
+
+```sql
+SELECT * FROM ts_forecast_explain_long_by('sales', product_id, ds, y, 'ETS', 12, '1mo',
+    params := MAP{'seasonal_period': '12'});
+
+SELECT * FROM ts_forecast_fitted_by('sales', product_id, ds, y, 'AutoETS');
+```
+
+`ts_forecast` and `ts_forecast_agg` return lists; their long form is `ts_forecast_by` (one row
+per `id, forecast_step, ds`) for the horizon and `ts_forecast_fitted_by` for the in-sample part.
 
 ---
 

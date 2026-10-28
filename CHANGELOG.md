@@ -16,6 +16,17 @@ returns the source table's column names and types (previously always
 
 ### Added
 
+- **Long-form companions for list outputs (#282).** Each wraps the existing producer and maps
+  its lists back to the caller's group and date columns: `ts_mstl_decomposition_long_by`
+  (`component`, `value`: observed / trend / seasonal_<p> / remainder), `ts_detrend_long_by`,
+  `ts_detect_peaks_long_by` (one row per peak, events-compatible), `ts_detect_periods_long_by`
+  (one row per period candidate), `ts_forecast_fitted_by` (in-sample `y, fitted, residual`
+  per row, the long form of `ts_forecast_agg`'s lists) and `ts_forecast_explain_long_by`
+  (one row per step and component, with `ts_forecast_by`'s `ds`).
+- **`ts_forecast_explain_by` fills `residual` (#282).** Previously always NULL; now
+  `yhat - (level + trend + seasonal + named components)` from the same fitted model, so the
+  components plus the residual reconstruct the point forecast.
+
 - **Contract prediction columns on forecast and conformal outputs (#280).** Appended after
   the existing columns, which keep their names, types and positions:
   - `level` (interval coverage as a fraction, `NULL` without an interval) on

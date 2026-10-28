@@ -92,6 +92,19 @@ SELECT periods FROM ts_mstl_decomposition_by('sales', product_id, date, quantity
 
 ---
 
+### ts_mstl_decomposition_long_by
+
+Long form of `ts_mstl_decomposition_by` (#282): one row per `(group, date, component)`,
+`<group_col>, <date_col>, component, value`, with `component` in `observed`, `trend`,
+`seasonal_<period>` (one per period) and `remainder` — the anofox contract `decomposition`
+shape. Same `params` as `ts_mstl_decomposition_by`; values are the same list elements, mapped
+to their source dates.
+
+```sql
+SELECT * FROM ts_mstl_decomposition_long_by('sales', product_id, date, quantity,
+    params := MAP{'seasonal_periods': '[7]'});
+```
+
 ### ts_detrend_by
 
 Remove trend from grouped time series using polynomial fitting.
@@ -158,6 +171,16 @@ FROM ts_detrend_by('sensor_data', sensor_id, timestamp, reading, 'auto');
 - Use `ts_mstl_decomposition_by` when you need full seasonal decomposition (trend + seasonal + remainder)
 
 ---
+
+### ts_detrend_long_by
+
+Long form of `ts_detrend_by` (#282): `<group_col>, <date_col>, component, value, method`, with
+`component` in `observed`, `trend`, `detrended` (one row each per source row). Rows before the
+first / after the last non-NULL value have NULL `trend` and `detrended`.
+
+```sql
+SELECT * FROM ts_detrend_long_by('sales', product_id, date, quantity, method := 'linear');
+```
 
 ### ts_decompose_seasonal
 

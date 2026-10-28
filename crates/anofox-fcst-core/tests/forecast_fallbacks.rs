@@ -496,3 +496,80 @@ fn forecast_with_exog_honours_ets_spec_with_no_regressors() {
     let result = forecast_with_exog(&values, &options).expect("ETS(AAN) should fit");
     assert_eq!(result.model_name, "ETS(A,A,N)");
 }
+
+// ============================================================================
+// #282 (CTR-09): forecast_explain fills `residual` on the horizon with
+// point - (level + trend + seasonal + named), so the components plus the
+// residual reconstruct the model's own point forecast exactly.
+// ============================================================================
+
+fn explain_json(model: ModelType, ets_spec: Option<&str>, period: usize) -> serde_json::Value {
+    let options = ForecastOptions {
+        model,
+        horizon: 12,
+        seasonal_period: period,
+        auto_detect_seasonality: false,
+        ets_spec: ets_spec.map(str::to_string),
+        ..Default::default()
+    };
+    let json = forecast_explain(&air_passengers_values(), 12, &options).expect("explain");
+    serde_json::from_str(&json).expect("valid JSON")
+}
+
+fn component(v: &serde_json::Value, key: &str) -> Vec<f64> {
+    v.get(key)
+        .and_then(|c| c.as_array())
+        .map(|a| a.iter().map(|x| x.as_f64().unwrap()).collect())
+        .unwrap_or_default()
+}
+
+#[test]
+fn forecast_explain_residual_reconstructs_point_forecast() {
+    for (model, spec, period) in [
+        (ModelType::ETS, Some("AAA"), 12),
+        (ModelType::ETS, Some("MAM"), 12),
+        (ModelType::MSTL, None, 12),
+        (ModelType::Theta, None, 12),
+    ] {
+        let v = explain_json(model, spec, period);
+        let level = component(&v, "level");
+        let residual = component(&v, "residual");
+        assert_eq!(residual.len(), 12, "{model:?} {spec:?}: residual length");
+
+        // Point forecast from the same fitted model, via the forecaster.
+        let options = ForecastOptions {
+            model,
+            horizon: 12,
+            seasonal_period: period,
+            auto_detect_seasonality: false,
+            ets_spec: spec.map(str::to_string),
+            ..Default::default()
+        };
+        let point = forecast(&air_passengers_values(), &options)
+            .expect("forecast")
+            .point;
+
+        let trend = component(&v, "trend");
+        let seasonal = component(&v, "seasonal");
+        let named_map = v["named_components"]
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
+        for h in 0..12 {
+            let named: f64 = named_map
+                .values()
+                .map(|c| c.as_array().map(|a| a[h].as_f64().unwrap()).unwrap_or(0.0))
+                .sum();
+            let sum = level[h]
+                + trend.get(h).copied().unwrap_or(0.0)
+                + seasonal.get(h).copied().unwrap_or(0.0)
+                + named
+                + residual[h];
+            assert!(
+                (sum - point[h]).abs() < 1e-6 * point[h].abs().max(1.0),
+                "{model:?} {spec:?} h={h}: components + residual = {sum}, point = {}",
+                point[h]
+            );
+        }
+    }
+}

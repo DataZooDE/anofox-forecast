@@ -1,0 +1,160 @@
+# name: test/sql/correctness/long_forms.test
+# description: #282 (CTR-08, CTR-09) -- long-form companions carrying the caller's
+#   group and date columns, and the filled ts_forecast_explain_by residual. Values are
+#   checked as identities against the list producers they wrap.
+# group: [sql]
+
+require anofox_forecast
+
+require json
+
+# Two series; B has 3 leading NULLs, so list producers that drop leading NULLs
+# must be mapped back with an offset.
+statement ok
+CREATE TABLE lf AS
+SELECT id, DATE '2024-01-01' + i::INT AS ds,
+       CASE WHEN id = 'B' AND i < 3 THEN NULL
+            ELSE 10 + 3 * sin(2 * pi() * i / 7) + 0.05 * i + 0.2 * cos(i * 1.3) END AS y
+FROM range(42) t(i), (VALUES ('A'), ('B')) v(id);
+
+# ---------------------------------------------------------------------------
+# ts_mstl_decomposition_long_by
+# ---------------------------------------------------------------------------
+query II
+SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM ts_mstl_decomposition_long_by('lf', id, ds, y, params := MAP{'seasonal_periods': '[7]'}));
+----
+id	VARCHAR
+ds	DATE
+component	VARCHAR
+value	DOUBLE
+
+# 4 components per source row; values are exactly the list elements.
+query II
+SELECT count(*), list(DISTINCT component ORDER BY component)
+FROM ts_mstl_decomposition_long_by('lf', id, ds, y, params := MAP{'seasonal_periods': '[7]'});
+----
+336	[observed, remainder, seasonal_7, trend]
+
+query I
+WITH l AS (SELECT * FROM ts_mstl_decomposition_long_by('lf', id, ds, y, params := MAP{'seasonal_periods': '[7]'})),
+w AS (SELECT id, unnest(trend) AS trend, unnest(seasonal[1]) AS s7, unnest(remainder) AS rem,
+             unnest(generate_series(1, len(trend))) AS pos
+      FROM ts_mstl_decomposition_by('lf', id, ds, y, MAP{'seasonal_periods': '[7]'})),
+p AS (SELECT id, ds, row_number() OVER (PARTITION BY id ORDER BY ds) AS pos FROM lf)
+SELECT count(*) FILTER (WHERE abs(l.value - CASE l.component WHEN 'trend' THEN w.trend WHEN 'seasonal_7' THEN w.s7 ELSE w.rem END) > 1e-12)
+FROM l JOIN p USING (id, ds) JOIN w USING (id, pos) WHERE l.component != 'observed';
+----
+0
+
+# ---------------------------------------------------------------------------
+# ts_detrend_long_by: trend + detrended = observed, aligned past leading NULLs
+# ---------------------------------------------------------------------------
+query I
+SELECT string_agg(column_name, ',') FROM (DESCRIBE SELECT * FROM ts_detrend_long_by('lf', id, ds, y, method := 'linear'));
+----
+id,ds,component,value,method
+
+query III
+WITH w AS (PIVOT (SELECT * EXCLUDE (method) FROM ts_detrend_long_by('lf', id, ds, y, method := 'linear')) ON component USING first(value))
+SELECT count(*) FILTER (WHERE observed IS NOT NULL),
+       count(*) FILTER (WHERE abs(trend + detrended - observed) > 1e-9),
+       count(*) FILTER (WHERE observed IS NULL AND (trend IS NOT NULL OR detrended IS NOT NULL))
+FROM w;
+----
+81	0	0
+
+# ---------------------------------------------------------------------------
+# ts_detect_peaks_long_by: every peak value is the source value at its date
+# ---------------------------------------------------------------------------
+query I
+SELECT string_agg(column_name, ',') FROM (DESCRIBE SELECT * FROM ts_detect_peaks_long_by('lf', id, ds, y));
+----
+id,ds,kind,value,prominence
+
+query III
+SELECT count(*) = (SELECT sum(n_peaks) FROM ts_detect_peaks_by('lf', id, ds, y, MAP{})),
+       bool_and(p.value = lf.y), min(kind)
+FROM ts_detect_peaks_long_by('lf', id, ds, y) p JOIN lf USING (id, ds);
+----
+true	true	peak
+
+# ---------------------------------------------------------------------------
+# ts_detect_periods_long_by: one row per candidate; the primary is flagged
+# ---------------------------------------------------------------------------
+query III
+SELECT count(*) = (SELECT sum(n_periods) FROM ts_detect_periods_by('lf', id, ds, y, MAP{})),
+       count(*) FILTER (WHERE is_primary) >= 2, min(period) FILTER (WHERE id = 'A' AND rank = 1)
+FROM ts_detect_periods_long_by('lf', id, ds, y);
+----
+true	true	7.0
+
+# ---------------------------------------------------------------------------
+# ts_forecast_fitted_by: fitted + residual = y; NULL where y is NULL
+# ---------------------------------------------------------------------------
+query I
+SELECT string_agg(column_name, ',') FROM (DESCRIBE SELECT * FROM ts_forecast_fitted_by('lf', id, ds, y, 'AutoETS'));
+----
+id,ds,y,fitted,residual,model_name
+
+query III
+SELECT count(*), count(*) FILTER (WHERE abs(fitted + residual - y) > 1e-9),
+       count(*) FILTER (WHERE y IS NULL AND fitted IS NOT NULL)
+FROM ts_forecast_fitted_by('lf', id, ds, y, 'AutoETS');
+----
+84	0	0
+
+# ---------------------------------------------------------------------------
+# ts_forecast_explain_by residual (CTR-09) and ts_forecast_explain_long_by:
+# level + trend + seasonal + residual = ts_forecast_by's yhat, on its ds.
+# ---------------------------------------------------------------------------
+query I
+SELECT bool_and(len((decomposition).residual) = 7)
+FROM ts_forecast_explain_by('lf', id, ds, y, 'ETS', 7, MAP{'seasonal_period': '7'});
+----
+true
+
+query I
+SELECT string_agg(column_name, ',') FROM (DESCRIBE SELECT * FROM ts_forecast_explain_long_by('lf', id, ds, y, 'ETS', 7, '1d', params := MAP{'seasonal_period': '7'}));
+----
+id,forecast_step,ds,component,value
+
+query II
+WITH e AS (
+    SELECT id, forecast_step, ds, sum(value) AS total
+    FROM ts_forecast_explain_long_by('lf', id, ds, y, 'ETS', 7, '1d', params := MAP{'seasonal_period': '7'})
+    GROUP BY ALL)
+SELECT count(*), count(*) FILTER (WHERE abs(e.total - f.yhat) > 1e-6 * abs(f.yhat))
+FROM e JOIN ts_forecast_by('lf', id, ds, y, 'ETS', 7, '1d', params := MAP{'seasonal_period': '7'}) f
+  USING (id, forecast_step, ds);
+----
+14	0
+
+# ---------------------------------------------------------------------------
+# Quoted identifiers keep the caller's names; UNION ALL sources match.
+# ---------------------------------------------------------------------------
+statement ok
+CREATE TABLE lf_q AS SELECT id AS "series id", ds AS "the date", y AS "y value" FROM lf;
+
+query I
+SELECT string_agg(column_name, ',') FROM (DESCRIBE SELECT * FROM ts_detect_peaks_long_by('lf_q', "series id", "the date", "y value"));
+----
+series id,the date,kind,value,prominence
+
+statement ok
+CREATE VIEW lf_v AS SELECT * FROM lf WHERE id = 'A' UNION ALL SELECT * FROM lf WHERE id = 'B';
+
+query I
+SELECT count(*) FROM (
+    SELECT * FROM ts_detrend_long_by('lf_v', id, ds, y, method := 'linear')
+    EXCEPT ALL SELECT * FROM ts_detrend_long_by('lf', id, ds, y, method := 'linear'));
+----
+0
+
+statement ok
+DROP VIEW lf_v;
+
+statement ok
+DROP TABLE lf_q;
+
+statement ok
+DROP TABLE lf;

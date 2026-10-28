@@ -213,6 +213,17 @@ SELECT * FROM ts_detect_periods_by('sales', product_id, date, value,
 
 ---
 
+### ts_detect_periods_long_by
+
+Long form of `ts_detect_periods_by` (#282): one row per period candidate, `<group_col>, rank,
+period, confidence, strength, amplitude, phase, iteration, matches_expected,
+matched_expected_period, match_deviation, is_primary, method`. Same `params` as
+`ts_detect_periods_by`. (Periods are not time points, so there is no date column.)
+
+```sql
+SELECT * FROM ts_detect_periods_long_by('sales', product_id, date, quantity);
+```
+
 ## Seasonality Analysis Workflow
 
 ### 1. Detect Seasonal Periods

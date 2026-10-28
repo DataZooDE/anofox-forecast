@@ -50,10 +50,10 @@ SELECT * FROM ts_cv_folds_by('sales', product_id, date, value, 3, 7,
 | [Hierarchical](02-hierarchical.md) | `ts_combine_keys`, `ts_aggregate_hierarchy` |
 | [Statistics](03-statistics.md) | `ts_stats`, `ts_quality_report`, `ts_data_quality` |
 | [Data Preparation](04-data-preparation.md) | `ts_drop_*`, `ts_fill_*`, `ts_diff_by` |
-| [Period Detection](05-period-detection.md) | `ts_detect_periods_by`, `ts_detect_peaks_by`, `ts_analyze_peak_timing_by` |
-| [Decomposition](05a-decomposition.md) | `ts_mstl_decomposition_by`, `ts_classify_seasonality_by` |
+| [Period Detection](05-period-detection.md) | `ts_detect_periods_by`, `ts_detect_periods_long_by`, `ts_detect_peaks_by`, `ts_detect_peaks_long_by`, `ts_analyze_peak_timing_by` |
+| [Decomposition](05a-decomposition.md) | `ts_mstl_decomposition_by`, `ts_mstl_decomposition_long_by`, `ts_detrend_long_by`, `ts_classify_seasonality_by` |
 | [Changepoint Detection](06-changepoint-detection.md) | `ts_detect_changepoints`, `ts_detect_changepoints_by`, `ts_detect_changepoints_events_by` |
-| [Forecasting](07-forecasting.md) | `ts_forecast`, `ts_forecast_by`, `ts_forecast_exog` |
+| [Forecasting](07-forecasting.md) | `ts_forecast`, `ts_forecast_by`, `ts_forecast_exog`, `ts_forecast_fitted_by`, `ts_forecast_explain_long_by` |
 | [Cross-Validation](08-cross-validation.md) | `ts_cv_folds_by`, `ts_cv_split_by`, `ts_cv_forecast_by` |
 | [Evaluation Metrics](09-evaluation-metrics.md) | `ts_metrics_by`, `ts_mae_by`, `ts_rmse_by`, `ts_coverage_by`, ... |
 | [Feature Extraction](20-feature-extraction.md) | `ts_features_by`, `ts_features_table` |

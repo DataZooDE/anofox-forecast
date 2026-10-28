@@ -788,6 +788,16 @@ Per-horizon decomposition. Returns `TABLE(group_col, decomposition STRUCT(horizo
 
 Supported models: `ETS` (fixed spec), `MSTL`, `AutoMSTL`, `Theta`. Others raise `does not implement Explainable`.
 
+`residual` (#282) = `yhat - (level + trend + seasonal + named)` from the same fit (≈0 for
+additive models), so the four components always sum to the point forecast.
+
+Long forms (#282): `ts_forecast_explain_long_by(source, group_col, date_col, target_col, method,
+horizon, frequency, params := MAP{})` → `<group_col>, forecast_step, ds, component, value`
+(joins to `ts_forecast_by` on `id, forecast_step, ds`), and `ts_forecast_fitted_by(source,
+group_col, date_col, target_col, method, params := MAP{})` → in-sample `<group_col>,
+<date_col>, y, fitted, residual, model_name` per source row (long form of `ts_forecast_agg`'s
+`insample_fitted` / `residuals` lists).
+
 ```sql
 -- Reconstruct: yhat = level + trend + seasonal + residual
 SELECT product_id, (decomposition).level, (decomposition).trend, (decomposition).seasonal
