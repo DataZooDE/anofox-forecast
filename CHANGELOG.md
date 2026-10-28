@@ -16,6 +16,12 @@ returns the source table's column names and types (previously always
 
 ### Added
 
+- **`ts_metrics_by` (#281).** Long-form forecast accuracy metrics: one row per group and
+  metric, `<group columns>, metric, value` (the anofox contract `summary` schema). `metrics`
+  (default `['mae','mse','rmse','mape','smape','r2','bias']`) may also include `'mase'`
+  (with `seasonal_period`, as `ts_mase_by`). Values equal the wide one-metric macros, which
+  stay unchanged.
+
 - **`ts_detect_changepoints_events_by` (#283).** Changepoints as events: one row per
   detected changepoint, `<group_col>, <date_col>, kind = 'changepoint', severity, value`
   (the anofox contract `events` schema). Same detection and `params` MAP as

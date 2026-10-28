@@ -55,7 +55,7 @@ SELECT * FROM ts_cv_folds_by('sales', product_id, date, value, 3, 7,
 | [Changepoint Detection](06-changepoint-detection.md) | `ts_detect_changepoints`, `ts_detect_changepoints_by`, `ts_detect_changepoints_events_by` |
 | [Forecasting](07-forecasting.md) | `ts_forecast`, `ts_forecast_by`, `ts_forecast_exog` |
 | [Cross-Validation](08-cross-validation.md) | `ts_cv_folds_by`, `ts_cv_split_by`, `ts_cv_forecast_by` |
-| [Evaluation Metrics](09-evaluation-metrics.md) | `ts_mae_by`, `ts_rmse_by`, `ts_coverage_by`, ... |
+| [Evaluation Metrics](09-evaluation-metrics.md) | `ts_metrics_by`, `ts_mae_by`, `ts_rmse_by`, `ts_coverage_by`, ... |
 | [Feature Extraction](20-feature-extraction.md) | `ts_features_by`, `ts_features_table` |
 | [Conformal Prediction](11-conformal-prediction.md) | `ts_conformal_by`, `ts_conformal_calibrate` |
 

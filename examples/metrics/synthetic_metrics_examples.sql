@@ -245,6 +245,14 @@ SELECT * FROM ts_mae_by((SELECT model, date, actual, predicted FROM model_backte
 .print ''
 .print 'MSTL should have lower MAE because it captures weekly seasonality'
 
+.print ''
+.print 'Long form (#281): one row per (product, model, metric) with ts_metrics_by'
+
+SELECT * FROM ts_metrics_by(
+    (SELECT product_id, model, date, actual, predicted FROM model_backtest),
+    'date', 'actual', 'predicted', metrics := ['mae', 'rmse', 'bias'])
+ORDER BY metric, model;
+
 -- ============================================================================
 -- SECTION 6: Combined Metrics Summary
 -- ============================================================================

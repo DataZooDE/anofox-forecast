@@ -153,6 +153,22 @@ Pattern: `SELECT group, ts_<metric>(LIST(actual ORDER BY ds), LIST(pred ORDER BY
 | `ts_quantile_loss` | `(actual, forecast, q) → DOUBLE` | Quantile loss at level q |
 | `ts_mqloss` | `(actual, quantiles[], levels[]) → DOUBLE` | Multi-quantile CRPS-adjacent |
 
+### Long form: several metrics at once (`ts_metrics_by`, #281)
+
+`ts_metrics_by(source, date_col, actual_col, forecast_col, metrics := ['mae','mse','rmse','mape','smape','r2','bias'], seasonal_period := 1)`
+returns one row per group and metric (`<group columns>, metric, value`), the anofox contract
+`summary` shape. `source` is a subquery; every column other than the three named ones is a
+key, so a model column stays. `metrics` may include `'mase'` (uses forecast-NULL history rows,
+as `ts_mase_by`).
+
+```sql
+-- cv_results: e.g. ts_cv_forecast_by output (unique_id, model_name, ds, y, yhat)
+SELECT * FROM ts_metrics_by(
+    (SELECT 'A' AS unique_id, 'Naive' AS model_name, DATE '2024-01-01' + i::INT AS ds,
+            i::DOUBLE AS y, i + 1.0 AS yhat FROM range(10) t(i)),
+    'ds', 'y', 'yhat', metrics := ['mae', 'rmse']);
+```
+
 ### Model comparison across CV folds
 
 ```sql

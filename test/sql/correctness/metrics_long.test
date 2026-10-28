@@ -1,0 +1,97 @@
+# name: test/sql/correctness/metrics_long.test
+# description: ts_metrics_by -- long-form forecast accuracy metrics, one row per
+#   (group, metric) in the anofox contract `summary` shape (#281, CTR-07). Not json-gated.
+# group: [sql]
+
+require anofox_forecast
+
+# Two ids x two models, 10 dates. actual = i + 1; rows i < 5 are in-sample
+# (forecast NULL); for i >= 5, forecast = actual + d * (1 + i % 3) with d = 1
+# (model a) or d = -2 (model b). Errors for i = 5..9: a -> 3,1,2,3,1;
+# b -> -6,-2,-4,-6,-2. Hand values: a: MAE 2, MSE 24/5 = 4.8; b: MAE 4,
+# MSE 96/5 = 19.2. MASE (lag 1): in-sample naive MAE of 1..5 is 1, so
+# MASE = MAE (a: 2, b: 4).
+statement ok
+CREATE TABLE ml AS
+SELECT id, m AS model, DATE '2024-01-01' + i::INT AS ds, i::DOUBLE + 1 AS actual,
+       CASE WHEN i < 5 THEN NULL
+            ELSE i + 1 + (CASE WHEN m = 'a' THEN 1 ELSE -2 END) * (1 + (i % 3)) END AS forecast
+FROM range(10) t(i), (VALUES ('x'), ('y')) g(id), (VALUES ('a'), ('b')) mm(m);
+
+# Schema: keys unchanged, then metric, value.
+query II
+SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM ts_metrics_by((SELECT id, model, ds, actual, forecast FROM ml), 'ds', 'actual', 'forecast'));
+----
+id	VARCHAR
+model	VARCHAR
+metric	VARCHAR
+value	DOUBLE
+
+# Default metrics: 7 per group, in the documented order.
+query I
+SELECT list(metric ORDER BY rowid) FROM (SELECT row_number() OVER () AS rowid, * FROM ts_metrics_by((SELECT id, model, ds, actual, forecast FROM ml), 'ds', 'actual', 'forecast')) WHERE id = 'x' AND model = 'a';
+----
+[mae, mse, rmse, mape, smape, r2, bias]
+
+query IIII
+SELECT id, model, metric, round(value, 10) FROM ts_metrics_by((SELECT id, model, ds, actual, forecast FROM ml), 'ds', 'actual', 'forecast', metrics := ['mae', 'mse', 'mase'])
+ORDER BY ALL;
+----
+x	a	mae	2.0
+x	a	mase	2.0
+x	a	mse	4.8
+x	b	mae	4.0
+x	b	mase	4.0
+x	b	mse	19.2
+y	a	mae	2.0
+y	a	mase	2.0
+y	a	mse	4.8
+y	b	mae	4.0
+y	b	mase	4.0
+y	b	mse	19.2
+
+# Every value equals the matching wide one-metric macro.
+query I
+WITH long AS (SELECT * FROM ts_metrics_by((SELECT id, model, ds, actual, forecast FROM ml), 'ds', 'actual', 'forecast', metrics := ['mae', 'mse', 'rmse', 'mape', 'smape', 'r2', 'bias', 'mase'])),
+wide AS (
+    SELECT id, model, 'mae' AS metric, mae AS value FROM ts_mae_by((SELECT id, model, ds, actual, forecast FROM ml), 'ds', 'actual', 'forecast')
+    UNION ALL SELECT id, model, 'mse', mse FROM ts_mse_by((SELECT id, model, ds, actual, forecast FROM ml), 'ds', 'actual', 'forecast')
+    UNION ALL SELECT id, model, 'rmse', rmse FROM ts_rmse_by((SELECT id, model, ds, actual, forecast FROM ml), 'ds', 'actual', 'forecast')
+    UNION ALL SELECT id, model, 'mape', mape FROM ts_mape_by((SELECT id, model, ds, actual, forecast FROM ml), 'ds', 'actual', 'forecast')
+    UNION ALL SELECT id, model, 'smape', smape FROM ts_smape_by((SELECT id, model, ds, actual, forecast FROM ml), 'ds', 'actual', 'forecast')
+    UNION ALL SELECT id, model, 'r2', r2 FROM ts_r2_by((SELECT id, model, ds, actual, forecast FROM ml), 'ds', 'actual', 'forecast')
+    UNION ALL SELECT id, model, 'bias', bias FROM ts_bias_by((SELECT id, model, ds, actual, forecast FROM ml), 'ds', 'actual', 'forecast')
+    UNION ALL SELECT id, model, 'mase', mase FROM ts_mase_by((SELECT id, model, ds, actual, forecast FROM ml), 'ds', 'actual', 'forecast')
+)
+SELECT count(*) FILTER (WHERE w.value IS NULL OR l.value IS NULL OR abs(w.value - l.value) > 1e-12) || '/' || count(*)
+FROM wide w FULL OUTER JOIN long l USING (id, model, metric);
+----
+0/32
+
+# Metric names are case-insensitive and de-duplicated; seasonal_period reaches MASE.
+query III
+SELECT model, metric, round(value, 10) FROM ts_metrics_by((SELECT model, ds, actual, forecast FROM ml WHERE id = 'x'), 'ds', 'actual', 'forecast', metrics := ['MAE', 'mae', 'Mase'], seasonal_period := 2)
+ORDER BY ALL;
+----
+a	mae	2.0
+a	mase	1.0
+b	mae	4.0
+b	mase	2.0
+
+# Unknown metric names fail.
+statement error
+SELECT * FROM ts_metrics_by((SELECT id, model, ds, actual, forecast FROM ml), 'ds', 'actual', 'forecast', metrics := ['foo']);
+----
+unknown metric 'foo'
+
+# UNION ALL source (#285 class) gives the same rows as the base table.
+query I
+SELECT count(*) FROM (
+    SELECT * FROM ts_metrics_by((SELECT id, model, ds, actual, forecast FROM ml WHERE id = 'x' UNION ALL SELECT id, model, ds, actual, forecast FROM ml WHERE id = 'y'), 'ds', 'actual', 'forecast', metrics := ['rmse', 'mase'])
+    EXCEPT ALL
+    SELECT * FROM ts_metrics_by((SELECT id, model, ds, actual, forecast FROM ml), 'ds', 'actual', 'forecast', metrics := ['rmse', 'mase']));
+----
+0
+
+statement ok
+DROP TABLE ml;

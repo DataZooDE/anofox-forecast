@@ -2629,6 +2629,33 @@ SELECT * FROM _ts_mase_native((SELECT * FROM _ts_passthrough(source) ORDER BY AL
     "SELECT * FROM ts_mase_by((SELECT product_id, date, actual, forecast FROM results), 'date', 'actual', 'forecast', seasonal_period := 4)",
     "metrics"},
 
+    // ts_metrics_by: long-form point-forecast metrics (#281, CTR-07). One row per
+    // group and metric: every source column except date/actual/forecast is a key
+    // (as in ts_mae_by), then metric VARCHAR, value DOUBLE -- the anofox contract
+    // `summary` shape (a model column, e.g. ts_cv_forecast_by's model_name, stays a key).
+    // mae/mse/rmse/mape/smape/r2/bias come from one _ts_metrics_long_native pass with
+    // the same values as the wide macros; 'mase' (in-sample rows = forecast NULL, as
+    // ts_mase_by) is appended from _ts_mase_native when requested.
+    {"ts_metrics_by", {"source", "date_col", "actual_col", "forecast_col", nullptr},
+     {{"metrics", "['mae', 'mse', 'rmse', 'mape', 'smape', 'r2', 'bias']"}, {"seasonal_period", "1"}, {nullptr, nullptr}},
+R"(
+SELECT * FROM _ts_metrics_long_native(
+    (SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, forecast_col,
+    [m FOR m IN metrics::VARCHAR[] IF lower(m) != 'mase'])
+UNION ALL
+SELECT * EXCLUDE (mase), 'mase' AS metric, mase AS value
+FROM _ts_mase_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, forecast_col, seasonal_period)
+WHERE list_contains([lower(m) FOR m IN metrics::VARCHAR[]], 'mase')
+)",
+    "Long-form forecast accuracy metrics per group: one row per (group, metric) with columns "
+    "<group columns>, metric VARCHAR, value DOUBLE (the anofox contract 'summary' shape). As in "
+    "ts_mae_by, every source column other than date_col/actual_col/forecast_col is a group key, so a "
+    "model column stays in the output. metrics (default ['mae','mse','rmse','mape','smape','r2','bias']) "
+    "may also contain 'mase', computed as ts_mase_by with seasonal_period (default 1). Values equal the "
+    "wide one-metric macros. source must be a subquery; the column names are quoted string literals.",
+    "SELECT * FROM ts_metrics_by((SELECT id, model_name, ds, y, yhat FROM cv), 'ds', 'y', 'yhat', metrics := ['mae', 'rmse', 'mase'], seasonal_period := 7)",
+    "metrics"},
+
     // ts_rmae_by: Compute Relative Mean Absolute Error with GROUP BY ALL
     // C++ API: ts_rmae_by(source, date_col, actual_col, pred1_col, pred2_col)
     {"ts_rmae_by", {"source", "date_col", "actual_col", "pred1_col", "pred2_col", nullptr}, {{nullptr, nullptr}},

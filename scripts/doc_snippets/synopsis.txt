@@ -148,3 +148,4 @@ plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_exog(
 plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_exog_by(
 plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_panel_by(
 plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_var_by(
+docs/api/09-evaluation-metrics.md	ts_metrics_by(source, date_col, actual_col, forecast_col,
