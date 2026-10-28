@@ -214,6 +214,7 @@ endif()
 # Extension sources
 set(EXTENSION_SOURCES
     src/anofox_forecast_extension.cpp
+    src/contract.cpp
     src/table_functions/ts_stats.cpp
     src/table_functions/ts_data_quality.cpp
     src/table_functions/ts_forecast.cpp

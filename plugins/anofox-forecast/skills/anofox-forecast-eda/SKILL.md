@@ -161,6 +161,12 @@ SET autoinstall_known_extensions = 1;
 SET autoload_known_extensions = 1;
 ```
 
+Every single-test STRUCT (`ts_adf`, `ts_kpss`, `ts_ljung_box`, `ts_jarque_bera`,
+`ts_durbin_watson`) carries `method`, `statistic` and `p_value`, so expanded rows UNION into one
+anofox contract `test` table (`SELECT unnest(adf) FROM ts_adf_by(...) a(id, adf) UNION ALL BY NAME ...`).
+Discover every contract producer with `SELECT function_name, tags['anofox.output'] FROM
+duckdb_functions() WHERE tags['anofox.contract'] IS NOT NULL` (#279).
+
 Seven functions in two groups. The combined-verdict functions (`ts_stationarity`, `ts_residual_diagnostics`) are the recommended entry points — they run the component tests internally and return a single adequacy flag.
 
 ### Stationarity trio

@@ -262,6 +262,40 @@ SELECT * FROM ts_cv_folds_by('sales', product_id, date, value, 3, 7, MAP{});
 
 ---
 
+## anofox Integration Contract (#279)
+
+anofox_forecast implements version `1` of the anofox integration contract
+(anofox-visualization `docs/plans/integration-contract.md`), shared with anofox-statistics:
+
+- `anofox_contract_version()` returns `'1'`. Whichever anofox extension loads first registers
+  it; the others reuse it, so loading several never conflicts.
+- Every function this extension registers carries the `duckdb_functions()` tag
+  `anofox.family = 'forecast'`.
+- Result producers whose output matches a contract schema also carry
+  `anofox.contract = '1'` and `anofox.output = '<schema>'`:
+
+| Schema | Producers |
+|---|---|
+| `prediction` | `ts_forecast_by`, `ts_forecast_exog_by`, `ts_forecast_ensemble_by`, `ts_forecast_panel_by`, `ts_forecast_var_by`, `ts_cv_forecast_by` |
+| `test` | `ts_adf_by`, `ts_kpss_by`, `ts_ljung_box_by`, `ts_jarque_bera_by`, `ts_durbin_watson_by` (expand the STRUCT column; it carries `method`, `statistic`, `p_value`) |
+| `summary` | `ts_metrics_by` |
+| `events` | `ts_detect_changepoints_events_by`, `ts_detect_peaks_long_by` |
+| `decomposition` | `ts_mstl_decomposition_long_by`, `ts_detrend_long_by`, `ts_forecast_explain_long_by` |
+| `obs` | `ts_forecast_fitted_by` |
+| `cv` | `ts_cv_folds_by` |
+
+```sql
+SELECT function_name, tags['anofox.output'] AS output
+FROM duckdb_functions()
+WHERE tags['anofox.contract'] IS NOT NULL AND tags['anofox.family'] = 'forecast';
+```
+
+Not tagged yet: the conformal outputs (`ts_conformal_by`, `ts_conformal_apply_by`) carry
+`yhat`/`yhat_lower`/`yhat_upper`/`level` but their date column is literally named `date_col`.
+Each tagged producer's required columns are pinned in `test/sql/correctness/contract.test`.
+
+---
+
 ## Return Type Conventions
 
 ### Scalar Functions

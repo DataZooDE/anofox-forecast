@@ -1,0 +1,197 @@
+# name: test/sql/correctness/contract.test
+# description: #279 (CTR-01, CTR-02) -- anofox integration contract: version function,
+#   duckdb_functions() tags, and each tagged producer carries the required columns of
+#   its schema (anofox-visualization docs/plans/integration-contract.md).
+# group: [sql]
+
+require anofox_forecast
+
+require json
+
+query I
+SELECT anofox_contract_version();
+----
+1
+
+# Every function this extension registers carries anofox.family.
+query I
+SELECT count(*) FROM duckdb_functions()
+WHERE (function_name LIKE 'ts\_%' ESCAPE '\' OR function_name LIKE 'anofox\_fcst\_%' ESCAPE '\')
+  AND (tags['anofox.family'] IS NULL OR tags['anofox.family'] != 'forecast');
+----
+0
+
+# The tagged producers and their schemas.
+query III
+SELECT DISTINCT function_name, tags['anofox.output'], tags['anofox.contract'] FROM duckdb_functions()
+WHERE tags['anofox.contract'] IS NOT NULL ORDER BY 2, 1;
+----
+ts_cv_folds_by	cv	1
+ts_detrend_long_by	decomposition	1
+ts_forecast_explain_long_by	decomposition	1
+ts_mstl_decomposition_long_by	decomposition	1
+ts_detect_changepoints_events_by	events	1
+ts_detect_peaks_long_by	events	1
+ts_forecast_fitted_by	obs	1
+ts_cv_forecast_by	prediction	1
+ts_forecast_by	prediction	1
+ts_forecast_ensemble_by	prediction	1
+ts_forecast_exog_by	prediction	1
+ts_forecast_panel_by	prediction	1
+ts_forecast_var_by	prediction	1
+ts_metrics_by	summary	1
+ts_adf_by	test	1
+ts_durbin_watson_by	test	1
+ts_jarque_bera_by	test	1
+ts_kpss_by	test	1
+ts_ljung_box_by	test	1
+
+# ---------------------------------------------------------------------------
+# Required columns per schema. Inputs use the contract's own key names
+# (id, ds), so a caller-named column shows up under the contract name.
+# ---------------------------------------------------------------------------
+statement ok
+CREATE TABLE ct AS
+SELECT id, DATE '2024-01-01' + i::INT AS ds,
+       10 + 3 * sin(2 * pi() * i / 7) + 0.05 * i + (CASE WHEN id = 'B' AND i >= 30 THEN 8 ELSE 0 END) AS y,
+       cos(i) AS y2, 0.5 * i AS x
+FROM range(56) t(i), (VALUES ('A'), ('B')) v(id);
+
+statement ok
+CREATE TABLE ct_fut AS SELECT id, DATE '2024-02-26' + i::INT AS ds, 0.5 * (56 + i) AS x FROM range(7) t(i), (VALUES ('A'), ('B')) v(id);
+
+statement ok
+CREATE TABLE ct_folds AS SELECT * FROM ts_cv_folds_by('ct', id, ds, y, 2, 7);
+
+statement ok
+CREATE TABLE ct_var AS SELECT ds, y, y2 FROM ct WHERE id = 'A';
+
+# prediction: model id (model_name), ds, yhat
+query I
+SELECT list_has_all(list(column_name), ['model_name', 'ds', 'yhat', 'yhat_lower', 'yhat_upper', 'level'])
+FROM (DESCRIBE SELECT * FROM ts_forecast_by('ct', id, ds, y, 'AutoETS', 7, '1d'));
+----
+true
+
+query I
+SELECT list_has_all(list(column_name), ['model_name', 'ds', 'yhat', 'level'])
+FROM (DESCRIBE SELECT * FROM ts_forecast_exog_by('ct', id, ds, y, ['x'], 'ct_fut', ds, ['x'], '1d', 'AutoARIMA', 7, MAP{}));
+----
+true
+
+query I
+SELECT list_has_all(list(column_name), ['model_name', 'ds', 'yhat', 'level'])
+FROM (DESCRIBE SELECT * FROM ts_forecast_ensemble_by('ct', id, ds, y, ['Naive', 'SES'], 7, '1d'));
+----
+true
+
+query I
+SELECT list_has_all(list(column_name), ['model_name', 'ds', 'yhat'])
+FROM (DESCRIBE SELECT * FROM ts_forecast_panel_by('ct', id, ds, y, 'GlobalETS', 7, '1d'));
+----
+true
+
+query I
+SELECT list_has_all(list(column_name), ['model_name', 'ds', 'yhat', 'id', 'level'])
+FROM (DESCRIBE SELECT * FROM ts_forecast_var_by('ct_var', 'ds', ['y', 'y2'], 3, '1d'));
+----
+true
+
+query I
+SELECT list_has_all(list(column_name), ['model_name', 'ds', 'yhat', 'y', 'split', 'level'])
+FROM (DESCRIBE SELECT * FROM ts_cv_forecast_by('ct_folds', id, ds, y, 'Naive', MAP{}));
+----
+true
+
+# test: method, statistic, p_value (the STRUCT expanded)
+query IIII
+SELECT (adf).method, (kpss).method, (lb).method, (jb).method
+FROM ts_adf_by('ct', id, ds, y) a(id, adf)
+JOIN ts_kpss_by('ct', id, ds, y) k(id, kpss) USING (id)
+JOIN ts_ljung_box_by('ct', id, ds, y) l(id, lb) USING (id)
+JOIN ts_jarque_bera_by('ct', id, ds, y) j(id, jb) USING (id)
+WHERE id = 'A';
+----
+ADF	KPSS	Ljung-Box	Jarque-Bera
+
+query I
+SELECT bool_and(list_has_all(struct_keys(t), ['method', 'statistic', 'p_value'])) FROM (
+    SELECT adf AS t FROM ts_adf_by('ct', id, ds, y) a(id, adf)) x;
+----
+true
+
+query I
+SELECT count(*) FROM (
+    SELECT unnest(adf) FROM ts_adf_by('ct', id, ds, y) a(id, adf) UNION ALL BY NAME
+    SELECT unnest(kpss) FROM ts_kpss_by('ct', id, ds, y) k(id, kpss) UNION ALL BY NAME
+    SELECT unnest(lb) FROM ts_ljung_box_by('ct', id, ds, y) l(id, lb) UNION ALL BY NAME
+    SELECT unnest(jb) FROM ts_jarque_bera_by('ct', id, ds, y) j(id, jb) UNION ALL BY NAME
+    SELECT unnest(dw) FROM ts_durbin_watson_by('ct', id, ds, y) d(id, dw))
+WHERE method IS NOT NULL AND statistic IS NOT NULL AND p_value IS NOT NULL;
+----
+10
+
+# summary: metric, value (+ the model column the caller keeps)
+query I
+SELECT list_has_all(list(column_name), ['metric', 'value'])
+FROM (DESCRIBE SELECT * FROM ts_metrics_by((SELECT id, ds, y, y AS f FROM ct), 'ds', 'y', 'f'));
+----
+true
+
+# events: ds, kind (+ severity/value)
+query II
+SELECT list_has_all(list(column_name), ['ds', 'kind', 'severity', 'value']), 1
+FROM (DESCRIBE SELECT * FROM ts_detect_changepoints_events_by('ct', id, ds, y));
+----
+true	1
+
+query I
+SELECT list_has_all(list(column_name), ['ds', 'kind', 'value'])
+FROM (DESCRIBE SELECT * FROM ts_detect_peaks_long_by('ct', id, ds, y));
+----
+true
+
+# decomposition: id, ds, component, value
+query I
+SELECT list_has_all(list(column_name), ['id', 'ds', 'component', 'value'])
+FROM (DESCRIBE SELECT * FROM ts_mstl_decomposition_long_by('ct', id, ds, y, params := MAP{'seasonal_periods': '[7]'}));
+----
+true
+
+query I
+SELECT list_has_all(list(column_name), ['id', 'ds', 'component', 'value'])
+FROM (DESCRIBE SELECT * FROM ts_detrend_long_by('ct', id, ds, y));
+----
+true
+
+query I
+SELECT list_has_all(list(column_name), ['id', 'ds', 'component', 'value'])
+FROM (DESCRIBE SELECT * FROM ts_forecast_explain_long_by('ct', id, ds, y, 'ETS', 7, '1d', params := MAP{'seasonal_period': '7'}));
+----
+true
+
+# obs: y, fitted, residual (+ ds as the row key, model_name)
+query I
+SELECT list_has_all(list(column_name), ['ds', 'y', 'fitted', 'residual', 'model_name'])
+FROM (DESCRIBE SELECT * FROM ts_forecast_fitted_by('ct', id, ds, y, 'AutoETS'));
+----
+true
+
+# cv: fold_id, split, ds, id, y
+query I
+SELECT list_has_all(list(column_name), ['fold_id', 'split', 'ds', 'id', 'y'])
+FROM (DESCRIBE SELECT * FROM ts_cv_folds_by('ct', id, ds, y, 2, 7));
+----
+true
+
+statement ok
+DROP TABLE ct_var;
+
+statement ok
+DROP TABLE ct_folds;
+
+statement ok
+DROP TABLE ct_fut;
+
+statement ok
+DROP TABLE ct;

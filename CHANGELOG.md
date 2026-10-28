@@ -16,6 +16,15 @@ returns the source table's column names and types (previously always
 
 ### Added
 
+- **anofox integration contract (#279).** `anofox_contract_version()` returns `'1'`
+  (registered only if no other anofox extension already did, so anofox_statistics and
+  anofox_forecast load together). Every function carries the `duckdb_functions()` tag
+  `anofox.family = 'forecast'`; 19 result producers also carry `anofox.contract = '1'` and
+  `anofox.output` (`prediction`, `test`, `summary`, `events`, `decomposition`, `obs`, `cv`) --
+  see `docs/api/00-api-design.md`. `ts_adf`, `ts_kpss`, `ts_ljung_box` and `ts_jarque_bera`
+  (and their `_by` macros) append `method` to their result STRUCT, so every test row is
+  self-describing.
+
 - **Long-form companions for list outputs (#282).** Each wraps the existing producer and maps
   its lists back to the caller's group and date columns: `ts_mstl_decomposition_long_by`
   (`component`, `value`: observed / trend / seasonal_<p> / remainder), `ts_detrend_long_by`,

@@ -1,6 +1,7 @@
 #define DUCKDB_EXTENSION_MAIN
 
 #include "anofox_forecast_extension.hpp"
+#include "contract.hpp"
 #include "anofox_fcst_ffi.h"
 #include "ts_forecast_panel_native.hpp"     // Phase 2: GLOB-01..03
 #include "ts_forecast_var_native.hpp"       // Phase 3: CLAS-03
@@ -24,6 +25,11 @@ const datazoo::BannerInfo ANOFOX_FORECAST_BANNER {
 namespace duckdb {
 
 static void LoadInternal(ExtensionLoader &loader) {
+    // Contract (#279): snapshot the catalog before registering anything, so the
+    // tagging pass at the end only tags this extension's own entries.
+    auto preexisting_functions = SnapshotSystemFunctionNames(loader);
+    RegisterContractVersionFunction(loader, preexisting_functions);
+
     // Auto-load json extension (required for STRUCT params syntax in table macros)
     auto &db = loader.GetDatabaseInstance();
     ExtensionHelper::TryAutoLoadExtension(db, "json");
@@ -212,6 +218,8 @@ static void LoadInternal(ExtensionLoader &loader) {
         }
     );
 #endif
+
+    ApplyContractTags(loader, preexisting_functions);
 
 	datazoo::RegisterBannerOption(loader);
 	// Last, so a load that fails earlier never advertises itself. Silent unless
