@@ -220,6 +220,17 @@ FROM ts_detect_changepoints_by('sales', product_id, ds, y,
 WHERE is_changepoint;
 ```
 
+**Events form (#283):** `ts_detect_changepoints_events_by(source, group_col, date_col,
+value_col, params := MAP{})` returns one row per detected changepoint — `<group_col>,
+<date_col>, kind = 'changepoint', severity ('alarm' if value >= 0.5 else 'warning'),
+value = changepoint_probability` — the anofox contract `events` schema. Same detection and
+params as above; prefer it over `WHERE is_changepoint` when plotting or alerting.
+
+```sql
+SELECT * FROM ts_detect_changepoints_events_by('sales', product_id, ds, y,
+    params := MAP{'deseasonalize': 'true'});
+```
+
 Note: the single-series `ts_detect_changepoints` (no `group_col`) has a **different** output
 shape that DOES include the value column: `(date_col, value_col, is_changepoint,
 changepoint_probability)`. It is not a simple alias of the `_by` form.

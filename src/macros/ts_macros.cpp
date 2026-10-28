@@ -662,6 +662,33 @@ SELECT * FROM _ts_detect_changepoints_by_native(
     "SELECT * FROM ts_detect_changepoints_by('sales', product_id, date, qty)",
     "changepoint-detection"},
 
+    // ts_detect_changepoints_events_by: one row per detected changepoint in the
+    // anofox contract `events` shape (#283, CTR-11). Same detection, params and
+    // union-safety as ts_detect_changepoints_by (it is a filter over that macro);
+    // group/date columns keep the caller's names.
+    // severity: 'alarm' when changepoint_probability >= 0.5, else 'warning' (the
+    // MAP run-length heuristic can flag a row whose probability is below 0.5).
+    {"ts_detect_changepoints_events_by", {"source", "group_col", "date_col", "value_col", nullptr},
+     {{"params", "MAP{}"}, {nullptr, nullptr}},
+R"(
+SELECT
+    group_col,
+    date_col,
+    'changepoint' AS kind,
+    CASE WHEN changepoint_probability >= 0.5 THEN 'alarm' ELSE 'warning' END AS severity,
+    changepoint_probability AS value
+FROM ts_detect_changepoints_by(source, group_col, date_col, value_col, params::MAP(VARCHAR, VARCHAR))
+WHERE is_changepoint
+ORDER BY ALL
+)",
+    "Changepoints as events: one row per detected changepoint (group_col, date_col, kind = "
+    "'changepoint', severity, value = changepoint_probability), the anofox contract 'events' schema. "
+    "Same detection and params MAP as ts_detect_changepoints_by (hazard_lambda, threshold, "
+    "deseasonalize, seasonal_period). severity is 'alarm' when changepoint_probability >= 0.5, "
+    "else 'warning'.",
+    "SELECT * FROM ts_detect_changepoints_events_by('sales', product_id, date, qty, params := MAP{'threshold': '0.5'})",
+    "changepoint-detection"},
+
     // ts_forecast: Generate forecasts for a single series (table-based)
     // C++ API: ts_forecast(table_name, date_col, target_col, method, horizon, params?)
     {"ts_forecast", {"source", "date_col", "target_col", "method", "horizon", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},

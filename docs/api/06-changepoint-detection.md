@@ -249,6 +249,40 @@ GROUP BY product_id;
 > is_changepoint, changepoint_probability)`. Notably it INCLUDES the value column (unlike
 > `ts_detect_changepoints_by`, which omits it) and has no series identifier column at all.
 
+### ts_detect_changepoints_events_by
+
+Changepoints as **events**: one row per detected changepoint instead of one row per input
+row (#283). The shape is the anofox integration contract's `events` schema, so
+anofox-visualization's `anofox_plot_events` (or the `events :=` overlay of
+`anofox_plot_prediction`) reads it directly.
+
+**Signature:**
+```sql
+ts_detect_changepoints_events_by(source, group_col, date_col, value_col, params := MAP{})
+```
+
+Detection and every `params` key (`hazard_lambda`, `threshold`, `deseasonalize`,
+`seasonal_period`) are exactly those of `ts_detect_changepoints_by`: the events are its rows
+`WHERE is_changepoint`.
+
+**Returns:**
+
+| Column | Type | Description |
+|---|---|---|
+| `<group_col>` | (input type) | Series identifier, caller's column name |
+| `<date_col>` | (input type) | Date of the changepoint, caller's column name |
+| `kind` | VARCHAR | Always `'changepoint'` |
+| `severity` | VARCHAR | `'alarm'` when `value >= 0.5`, else `'warning'` |
+| `value` | DOUBLE | `changepoint_probability` of that row |
+
+A series without a detected changepoint contributes no rows.
+
+**Example:**
+```sql
+SELECT * FROM ts_detect_changepoints_events_by('sales', product_id, date, quantity,
+    params := MAP{'threshold': '0.5'});
+```
+
 ---
 
 ## Aggregate Function

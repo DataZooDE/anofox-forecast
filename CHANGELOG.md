@@ -16,6 +16,12 @@ returns the source table's column names and types (previously always
 
 ### Added
 
+- **`ts_detect_changepoints_events_by` (#283).** Changepoints as events: one row per
+  detected changepoint, `<group_col>, <date_col>, kind = 'changepoint', severity, value`
+  (the anofox contract `events` schema). Same detection and `params` MAP as
+  `ts_detect_changepoints_by`; `value` is the changepoint probability and `severity` is
+  `'alarm'` when it is at least 0.5, else `'warning'`.
+
 - **`ts_durbin_watson` / `ts_durbin_watson_by` return `p_value` and `method` (#284).**
   Two fields appended to the result STRUCT: `p_value`, an approximate two-sided p-value
   for H0 "no first-order autocorrelation" (normal approximation with the exact null

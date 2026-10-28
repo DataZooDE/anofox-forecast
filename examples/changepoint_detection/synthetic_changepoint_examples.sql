@@ -366,6 +366,12 @@ FROM (
 GROUP BY id
 ORDER BY id;
 
+.print ''
+.print 'Section 7.5: Changepoints as events -- one row per changepoint (#283)'
+
+SELECT * FROM ts_detect_changepoints_events_by('seasonal_panel', id, ds, y,
+    params := MAP{'deseasonalize': 'true', 'threshold': '0.5'});
+
 -- ============================================================================
 -- CLEANUP
 -- ============================================================================
