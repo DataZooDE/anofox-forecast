@@ -137,11 +137,17 @@ static unique_ptr<FunctionData> TsForecastAggBind(ClientContext &context, Aggreg
                                                    vector<unique_ptr<Expression>> &arguments) {
     auto bind_data = make_uniq<TsForecastAggBindData>();
 
+    // params is declared ANY so a STRUCT, MAP, VARIANT or {} binds as given (#300);
+    // Update parses whichever it is through ParseForecastParamSet.
+    if (arguments.size() > 4) {
+        SetArgumentTypeOf(function, 4, ReturnTypeOf(*arguments[4]));
+    }
+
     // Default confidence level
     bind_data->confidence_level = 0.90;
 
     if (arguments.size() > 4 && arguments[4]->IsFoldable()) {
-        Value params_value = ExpressionExecutor::EvaluateScalar(context, *arguments[4]);
+        Value params_value = NormalizeParamsValue(ExpressionExecutor::EvaluateScalar(context, *arguments[4]));
         if (!params_value.IsNull()) {
             // Fails fast at bind time for unknown keys even when the
             // params MAP is otherwise empty/constant (10-VERIFICATION.md
@@ -683,7 +689,7 @@ void RegisterTsForecastAggFunction(ExtensionLoader &loader) {
     AggregateFunction agg_func(
         "anofox_fcst_ts_forecast_agg",
         {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE), LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::INTEGER),
-         LogicalType::MAP(LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::VARCHAR))},
+         LogicalType::ANY},  // params: MAP, STRUCT, VARIANT or {} (#300)
         GetForecastAggResultType(),
         AggregateFunction::StateSize<TsForecastAggState>,
         AggregateFunction::StateInitialize<TsForecastAggState, TsForecastAggOperation>,

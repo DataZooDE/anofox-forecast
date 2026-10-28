@@ -378,7 +378,7 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
 
     // Parse params (index 2)
     if (input.inputs.size() >= 3 && !input.inputs[2].IsNull()) {
-        auto &params = input.inputs[2];
+        auto params = NormalizeParamsValue(input.inputs[2]);
         ValidateParamKeys(params);
         bind_data->model_spec = ParseStringFromParams(params, "model", "");
         bind_data->seasonal_period = ParseInt64FromParams(params, "seasonal_period", 0);

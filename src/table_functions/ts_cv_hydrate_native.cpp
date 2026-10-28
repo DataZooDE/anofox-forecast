@@ -351,7 +351,7 @@ static unique_ptr<FunctionData> TsCvHydrateNativeBind(
 
     // Parse params MAP (input.inputs[2])
     if (input.inputs.size() >= 3 && !input.inputs[2].IsNull()) {
-        auto &params = input.inputs[2];
+        auto params = NormalizeParamsValue(input.inputs[2]);
         ValidateHydrateParams(params);
         bind_data->strategy = ParseStringParamForHydrate(params, "strategy", "last_value");
         bind_data->fill_value = ParseStringParamForHydrate(params, "fill_value", "");

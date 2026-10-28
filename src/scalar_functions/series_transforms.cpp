@@ -165,10 +165,34 @@ static void TsIsConstantExecute(DataChunk &args, ExpressionState &state, Vector 
 }
 
 // ============================================================================
+// _ts_params_map(params ANY) -> MAP(VARCHAR, VARCHAR)
+// The SQL macros read option values with params['key']. A cast to
+// MAP(VARCHAR, VARCHAR) handles STRUCT and MAP, but not VARIANT (no
+// VARIANT -> MAP cast exists); this goes through the same normalization as
+// the C++ parsers, without depending on the json extension.
+// ============================================================================
+
+static void TsParamsMapExecute(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto &params = args.data[0];
+	for (idx_t i = 0; i < args.size(); i++) {
+		result.SetValue(i, ParamsAsVarcharMap(params.GetValue(i)));
+	}
+}
+
+// ============================================================================
 // Registration
 // ============================================================================
 
 void RegisterTsSeriesTransformFunctions(ExtensionLoader &loader) {
+	ScalarFunction params_map_func("_ts_params_map", {LogicalType::ANY},
+	                               LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR), TsParamsMapExecute);
+	MarkFallible(params_map_func);
+	SetNullHandlingOf(params_map_func, FunctionNullHandling::SPECIAL_HANDLING);
+
+	CreateScalarFunctionInfo params_map_info(params_map_func);
+	params_map_info.internal = true;
+	loader.RegisterFunction(params_map_info);
+
 	ScalarFunction diff_func(
 	    "_ts_diff", {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::INTEGER, LogicalType::INTEGER},
 	    LogicalType::LIST(LogicalType::DOUBLE), TsDiffExecute);

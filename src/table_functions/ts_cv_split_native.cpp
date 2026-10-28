@@ -202,7 +202,7 @@ static unique_ptr<FunctionData> TsCvSplitNativeBind(
     // Parse params MAP (parameter index 3)
     Value params_value;
     if (input.inputs.size() > 3 && !input.inputs[3].IsNull()) {
-        params_value = input.inputs[3];
+        params_value = NormalizeParamsValue(input.inputs[3]);
         bind_data->window_type = ParseStringParam(params_value, "window_type", "expanding");
         bind_data->min_train_size = ParseIntParam(params_value, "min_train_size", 1);
         bind_data->gap = ParseIntParam(params_value, "gap", 0);

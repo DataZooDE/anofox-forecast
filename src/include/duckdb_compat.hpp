@@ -28,6 +28,11 @@
 #include "duckdb/common/vector/string_vector.hpp"
 #include "duckdb/common/vector/struct_vector.hpp"
 #endif
+// Up to 1.5 VariantValue (a different struct, without GetValue) lives in its own
+// header; from 2.0 on it is declared in value.hpp.
+#if __has_include("duckdb/common/types/variant_value.hpp")
+#include "duckdb/common/types/variant_value.hpp"
+#endif
 #endif
 
 #include <string>
@@ -548,6 +553,93 @@ inline vector<unique_ptr<ParsedExpression>> ParseExpressionList(const std::strin
 	return compat_detail::ParseExpressionList(static_cast<Parser *>(nullptr), list, 0);
 }
 
+
+//===--------------------------------------------------------------------===//
+// VARIANT options
+//===--------------------------------------------------------------------===//
+
+namespace compat_detail {
+template <class VV>
+auto UnwrapVariant(const Value &v, int) -> decltype(VV::GetValue(v)) {
+	return VV::GetValue(v);
+}
+template <class VV>
+Value UnwrapVariant(const Value &, long) {
+	throw InvalidInputException("params of type VARIANT need DuckDB 2.0 or later; pass a STRUCT "
+	                            "({'seasonal_period': 7, 'model': 'AAA'}) or a MAP instead");
+}
+template <class VV, class = void>
+struct HasVariantGetValue : std::false_type {};
+template <class VV>
+struct HasVariantGetValue<VV, decltype(void(VV::GetValue(std::declval<const Value &>())))> : std::true_type {};
+} // namespace compat_detail
+
+//! Whether VARIANT values can be unwrapped (VariantValue::GetValue, DuckDB 2.0+).
+constexpr bool kHasVariantUnwrap = compat_detail::HasVariantGetValue<VariantValue>::value;
+
+//! A params/options argument as the STRUCT or MAP the parsers understand. A VARIANT
+//! (e.g. `{'seasonal_period': 7}::VARIANT`, or a value read from a VARIANT column) is
+//! unwrapped to the value it holds, and a MAP(VARCHAR, VARIANT) gets its values
+//! unwrapped. Without this the parsers, which branch on MAP / STRUCT, silently
+//! ignored every key of a VARIANT. On DuckDB < 2.0 a VARIANT raises instead.
+inline Value NormalizeParamsValue(const Value &params) {
+	if (params.IsNull()) {
+		return params;
+	}
+	if (params.type().id() == LogicalTypeId::VARIANT) {
+		return NormalizeParamsValue(compat_detail::UnwrapVariant<VariantValue>(params, 0));
+	}
+	if (params.type().id() == LogicalTypeId::MAP &&
+	    MapType::ValueType(params.type()).id() == LogicalTypeId::VARIANT) {
+		auto &entries = MapValue::GetChildren(params);
+		vector<Value> keys;
+		vector<Value> values;
+		for (auto &entry : entries) {
+			auto &kv = StructValue::GetChildren(entry);
+			keys.push_back(kv[0]);
+			if (kv[1].IsNull()) {
+				values.push_back(Value(LogicalType::VARCHAR));
+			} else {
+				// Before 2.0 a VARIANT entry can't be unwrapped, but its text form is
+				// what the parsers always read from MAP values.
+				values.push_back(Value(kHasVariantUnwrap ? NormalizeParamsValue(kv[1]).ToString() : kv[1].ToString()));
+			}
+		}
+		return Value::MAP(MapType::KeyType(params.type()), LogicalType::VARCHAR, std::move(keys), std::move(values));
+	}
+	return params;
+}
+
+//! A params/options argument as MAP(VARCHAR, VARCHAR), the form the SQL macros and the
+//! MAP-typed natives read: STRUCT children, MAP values and VARIANT contents become their
+//! text form (lists as '[7, 30]'), NULL becomes an empty map.
+inline Value ParamsAsVarcharMap(const Value &params_in) {
+	const Value params = NormalizeParamsValue(params_in);
+	vector<Value> keys;
+	vector<Value> values;
+	auto add = [&](const string &key, const Value &val) {
+		keys.push_back(Value(key));
+		values.push_back(val.IsNull() ? Value(LogicalType::VARCHAR) : Value(val.ToString()));
+	};
+	if (params.IsNull()) {
+		// no params
+	} else if (params.type().id() == LogicalTypeId::MAP) {
+		for (auto &entry : MapValue::GetChildren(params)) {
+			auto &kv = StructValue::GetChildren(entry);
+			add(kv[0].ToString(), kv[1]);
+		}
+	} else if (params.type().id() == LogicalTypeId::STRUCT) {
+		auto &children = StructValue::GetChildren(params);
+		auto &child_types = StructType::GetChildTypes(params.type());
+		for (idx_t i = 0; i < child_types.size(); i++) {
+			add(NameString(child_types[i].first), children[i]);
+		}
+	} else {
+		throw InvalidInputException("params must be a STRUCT or MAP (e.g. {'alpha': 0.1}), got %s",
+		                            params.type().ToString());
+	}
+	return Value::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR, std::move(keys), std::move(values));
+}
 
 } // namespace duckdb
 

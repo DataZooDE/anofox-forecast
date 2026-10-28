@@ -73,6 +73,11 @@ section for the full per-model table.
    ts_forecast_by(..., 'HoltWinters', 12, '1d', MAP{'seasonal_period': '7'})
    ```
 
+   Never mix numbers and strings in one MAP literal: `MAP{'seasonal_period': 7, 'model': 'AAA'}`
+   fails with `Could not convert string 'AAA' to INT32` (DuckDB types MAP values uniformly). Use
+   the STRUCT. The aggregates (`ts_forecast_agg`, `ts_detect_changepoints_agg`) accept the same
+   forms. On DuckDB 2.0, `{}` means "no params" and a `VARIANT` holding the options also works.
+
 5. **The `_by` output renames the target column to `y`** and adds `forecast_step`, `yhat`, `yhat_lower`, `yhat_upper`, `model_name`.
 
 6. **`ts_forecast_agg` takes `(date, value, model, horizon, params)` directly** — no `LIST(...)` wrapping.
@@ -509,7 +514,7 @@ SELECT * FROM ts_cv_folds_by('ens_series', id, ds, y, 3, 5, MAP{});
 For custom `GROUP BY` shapes.
 
 ```sql
-ts_forecast_agg(date_col TIMESTAMP, value_col DOUBLE, method VARCHAR, horizon INTEGER, params MAP)
+ts_forecast_agg(date_col TIMESTAMP, value_col DOUBLE, method VARCHAR, horizon INTEGER, params STRUCT or MAP)
     → STRUCT(point_forecast DOUBLE[], lower_<pct> DOUBLE[], upper_<pct> DOUBLE[], model_name VARCHAR, insample_fitted DOUBLE[], ...)
 ```
 
