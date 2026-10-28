@@ -504,6 +504,11 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
     names.push_back(MakeBindName("model_name"));
     return_types.push_back(LogicalType::VARCHAR);
 
+    // Appended (#280, CTR-06): interval coverage as a fraction (confidence_level);
+    // NULL on rows without an interval.
+    names.push_back(MakeBindName("level"));
+    return_types.push_back(LogicalType::DOUBLE);
+
     return bind_data;
 }
 
@@ -838,6 +843,11 @@ static OperatorFinalizeResultType TsCvForecastNativeFinalize(
 
         // model_name
         output.data[8].SetValue(i, Value(row.model_name));
+
+        // level (#280)
+        output.data[9].SetValue(i, (std::isnan(row.lower_90) && std::isnan(row.upper_90))
+            ? Value(LogicalType::DOUBLE)
+            : Value::DOUBLE(bind_data.confidence_level));
     }
 
     gstate.output_offset += to_output;

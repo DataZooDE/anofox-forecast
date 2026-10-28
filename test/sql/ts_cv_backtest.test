@@ -69,13 +69,13 @@ GROUP BY fold_id ORDER BY fold_id;
 2	2
 3	2
 
-# Test output has correct number of columns (9)
+# Test output has correct number of columns (9 + level appended in #280)
 query I
 SELECT COUNT(*) FROM (
     DESCRIBE SELECT * FROM ts_cv_forecast_by('cv_folds', id, ds, value, 'Naive', MAP{})
 );
 ----
-9
+10
 
 # Test point forecasts are non-null
 query I

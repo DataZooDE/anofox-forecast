@@ -213,7 +213,10 @@ ts_conformal_by(backtest_results VARCHAR, group_col COLUMN, date_col COLUMN,
 ```
 
 Returns one row per `(group_col, date_col)`. `date_col` is required and orders/pairs every
-row — forecasts are never value-sorted. Params:
+row — forecasts are never value-sorted. Output columns are named literally `group_col` /
+`date_col` / `point` / `lower` / `upper` (kept for compatibility); `yhat`, `yhat_lower`,
+`yhat_upper` (same values) and `level` (= `1 - alpha`) are appended at the end (#280), as on
+`ts_conformal_apply_by`. Params:
 
 | Key | Default | Description |
 |---|---|---|

@@ -1,0 +1,152 @@
+# name: test/sql/correctness/prediction_columns.test
+# description: #280 (CTR-03..06) -- appended contract prediction columns. Every
+#   existing column keeps its name, type and position (API-01); the contract names
+#   (yhat / yhat_lower / yhat_upper, ds, id) and a level column come after them.
+#   Not json-gated.
+# group: [sql]
+
+require anofox_forecast
+
+statement ok
+CREATE TABLE pc AS
+SELECT id, DATE '2024-01-01' + i::INT AS ds,
+       10 + 3 * sin(2 * pi() * i / 7) + 0.1 * i + (CASE WHEN id = 'B' THEN 5 ELSE 0 END) + 0.3 * cos(i * 1.7) AS y,
+       0.5 * i AS x, cos(i) + 0.2 * sin(i / 3.0) AS y2
+FROM range(60) t(i), (VALUES ('A'), ('B')) v(id);
+
+# ---------------------------------------------------------------------------
+# ts_forecast_by: level appended; equals confidence_level (default 0.90)
+# ---------------------------------------------------------------------------
+query I
+SELECT string_agg(column_name, ',') FROM (DESCRIBE SELECT * FROM ts_forecast_by('pc', id, ds, y, 'AutoETS', 7, '1d'));
+----
+id,forecast_step,ds,yhat,yhat_lower,yhat_upper,model_name,level
+
+query II
+SELECT min(level), max(level) FROM ts_forecast_by('pc', id, ds, y, 'AutoETS', 7, '1d');
+----
+0.9	0.9
+
+query II
+SELECT min(level), max(level) FROM ts_forecast_by('pc', id, ds, y, 'AutoETS', 7, '1d', params := MAP{'confidence_level': '0.8'});
+----
+0.8	0.8
+
+# Two levels stack into nested fans: one row per (id, step, level).
+query II
+SELECT count(*), count(DISTINCT level) FROM (
+    SELECT * FROM ts_forecast_by('pc', id, ds, y, 'AutoETS', 7, '1d', params := MAP{'confidence_level': '0.8'})
+    UNION ALL
+    SELECT * FROM ts_forecast_by('pc', id, ds, y, 'AutoETS', 7, '1d', params := MAP{'confidence_level': '0.95'}));
+----
+28	2
+
+# ---------------------------------------------------------------------------
+# ts_forecast_ensemble_by: level = confidence_level
+# ---------------------------------------------------------------------------
+query II
+SELECT min(level), max(level) FROM ts_forecast_ensemble_by('pc', id, ds, y, ['Naive', 'AutoETS'], 7, '1d', confidence_level := 0.85);
+----
+0.85	0.85
+
+# ---------------------------------------------------------------------------
+# ts_cv_forecast_by: level appended after model_name
+# ---------------------------------------------------------------------------
+statement ok
+CREATE TABLE pc_folds AS SELECT * FROM ts_cv_folds_by('pc', id, ds, y, 2, 7);
+
+query I
+SELECT string_agg(column_name, ',') FROM (DESCRIBE SELECT * FROM ts_cv_forecast_by('pc_folds', id, ds, y, 'Naive', MAP{}));
+----
+fold_id,id,ds,y,split,yhat,yhat_lower,yhat_upper,model_name,level
+
+query I
+SELECT bool_and(level = 0.9) FROM ts_cv_forecast_by('pc_folds', id, ds, y, 'Naive', MAP{}) WHERE yhat_lower IS NOT NULL;
+----
+true
+
+# ---------------------------------------------------------------------------
+# ts_forecast_var_by: id / yhat / yhat_lower / yhat_upper / model_name / level
+# appended; VAR has no interval, so bounds and level are NULL.
+# ---------------------------------------------------------------------------
+statement ok
+CREATE TABLE pc_var AS SELECT ds, y, y2 FROM pc WHERE id = 'A';
+
+query I
+SELECT string_agg(column_name, ',') FROM (DESCRIBE SELECT * FROM ts_forecast_var_by('pc_var', 'ds', ['y', 'y2'], 3, '1d'));
+----
+variable,forecast_step,ds,forecast_value,id,yhat,yhat_lower,yhat_upper,model_name,level
+
+query IIIIII
+SELECT count(*), bool_and(id = variable), bool_and(yhat = forecast_value),
+       count(yhat_lower) + count(yhat_upper), min(model_name), count(level)
+FROM ts_forecast_var_by('pc_var', 'ds', ['y', 'y2'], 3, '1d');
+----
+6	true	true	0	VAR	0
+
+# ---------------------------------------------------------------------------
+# Conformal: yhat / yhat_lower / yhat_upper duplicate point / lower / upper;
+# level = nominal_level = 1 - alpha.
+# ---------------------------------------------------------------------------
+statement ok
+CREATE TABLE pc_bt AS
+SELECT g, DATE '2024-01-01' + i::INT AS ds, 100.0 + (i % 5) * 2 - 4 AS actual, 100.0 AS forecast, NULL::DOUBLE AS point
+FROM range(30) t(i), (VALUES ('A'), ('B')) v(g)
+UNION ALL
+SELECT g, DATE '2024-02-01' + i::INT, NULL, NULL, 50.0 + i
+FROM range(3) t(i), (VALUES ('A'), ('B')) v(g);
+
+query I
+SELECT string_agg(column_name, ',') FROM (DESCRIBE SELECT * FROM ts_conformal_by('pc_bt', g, ds, actual, forecast, point, params := {'alpha': 0.1}));
+----
+group_col,date_col,point,lower,upper,coverage,nominal_level,conformity_score,n_calibration,calibration_insufficient,method,yhat,yhat_lower,yhat_upper,level
+
+query IIII
+SELECT count(*), bool_and(yhat = point AND yhat_lower = lower AND yhat_upper = upper),
+       bool_and(level = nominal_level), min(level)
+FROM ts_conformal_by('pc_bt', g, ds, actual, forecast, point, params := {'alpha': 0.2});
+----
+6	true	true	0.8
+
+statement ok
+CREATE TABLE pc_cal AS SELECT * FROM ts_conformal_calibrate('pc_bt', g, actual, forecast, params := {'alpha': 0.1});
+
+statement ok
+CREATE TABLE pc_fc AS SELECT g, ds, point AS fc FROM pc_bt WHERE point IS NOT NULL;
+
+query IIII
+SELECT count(*), bool_and(yhat = point AND yhat_lower = lower AND yhat_upper = upper), min(level), max(level)
+FROM ts_conformal_apply_by('pc_fc', g, ds, fc, 'pc_cal');
+----
+6	true	0.9	0.9
+
+# A hand-built calibration table without nominal_level still works; level is NULL.
+statement ok
+CREATE TABLE pc_cal_min AS SELECT group_col, method, conformity_score FROM pc_cal;
+
+query III
+SELECT count(*), count(level), bool_and(yhat_lower = lower)
+FROM ts_conformal_apply_by('pc_fc', g, ds, fc, 'pc_cal_min');
+----
+6	0	true
+
+statement ok
+DROP TABLE pc_cal_min;
+
+statement ok
+DROP TABLE pc_fc;
+
+statement ok
+DROP TABLE pc_cal;
+
+statement ok
+DROP TABLE pc_bt;
+
+statement ok
+DROP TABLE pc_var;
+
+statement ok
+DROP TABLE pc_folds;
+
+statement ok
+DROP TABLE pc;

@@ -729,7 +729,7 @@ FROM forecast_result
     // Supports both Polars-style ('1d', '1h', '30m', '1w', '1mo', '1q', '1y') and DuckDB INTERVAL ('1 day', '1 hour')
     {"ts_forecast_by", {"source", "group_col", "date_col", "target_col", "method", "horizon", "frequency", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
 R"(
-SELECT group_col, forecast_step, ds, yhat, yhat_lower, yhat_upper, model_name
+SELECT group_col, forecast_step, ds, yhat, yhat_lower, yhat_upper, model_name, level
 FROM (
     SELECT group_col,
            unnest(_ts_forecast_scalar(
@@ -779,7 +779,8 @@ SELECT * FROM _ts_forecast_native_impl((SELECT * FROM _ts_passthrough(source) OR
      {"source", "group_col", "date_col", "target_col", "members", "horizon", "frequency", nullptr},
      {{"combination_method", "''"}, {"seasonal_period", "0"}, {"confidence_level", "0.90"}, {nullptr, nullptr}},
 R"(
-SELECT group_col, forecast_step, ds, yhat, yhat_lower, yhat_upper, model_name
+SELECT group_col, forecast_step, ds, yhat, yhat_lower, yhat_upper, model_name,
+       CASE WHEN yhat_lower IS NULL AND yhat_upper IS NULL THEN NULL ELSE confidence_level::DOUBLE END AS level
 FROM (
     SELECT group_col,
            unnest(_ts_forecast_ensemble_native(
@@ -926,7 +927,16 @@ FROM _ts_forecast_panel_native(
      {"source", "date_col", "value_cols", "horizon", "frequency", nullptr},
      {{"p", "1"}, {"params", "MAP{}"}, {nullptr, nullptr}},
 R"(
-SELECT *
+-- Appended columns (#280, CTR-05): the ts_forecast_by names. id = variable,
+-- yhat = forecast_value; the crate's VAR returns point forecasts only, so
+-- yhat_lower / yhat_upper / level are NULL.
+SELECT *,
+    variable AS id,
+    forecast_value AS yhat,
+    NULL::DOUBLE AS yhat_lower,
+    NULL::DOUBLE AS yhat_upper,
+    'VAR' AS model_name,
+    NULL::DOUBLE AS level
 FROM _ts_forecast_var_native(
     (SELECT * FROM query_table(source::VARCHAR) ORDER BY ALL),
     horizon,
@@ -943,6 +953,8 @@ FROM _ts_forecast_var_native(
     "date_col is the name of the date column (VARCHAR string, e.g. 'ds'). "
     "p is the VAR lag order (default 1). "
     "forecast_value is a point forecast (no prediction intervals in v1). "
+    "Trailing columns id (= variable), yhat (= forecast_value), yhat_lower, yhat_upper (NULL), "
+    "model_name ('VAR') and level (NULL) match ts_forecast_by's names (#280). "
     "v1 is single-panel only (no group_col — one VAR fit for the entire input table).",
     "SELECT * FROM ts_forecast_var_by('returns', 'ds', ['equity','bond','fx'], 12, '1d', p:=2)",
     "forecasting"},
@@ -1285,7 +1297,11 @@ SELECT
     UNNEST((fcst).point) AS yhat,
     UNNEST((fcst).lower) AS yhat_lower,
     UNNEST((fcst).upper) AS yhat_upper,
-    (fcst).model AS model_name
+    (fcst).model AS model_name,
+    -- Appended (#280): ds (the same value as date, the name every other forecast
+    -- uses) and level (interval coverage; NULL without an interval).
+    UNNEST(_ts_future_dates(_dates, len((fcst).point)::INTEGER, (SELECT _interval FROM _freq))) AS ds,
+    (fcst).level AS level
 FROM forecast_data
 ORDER BY __exog_grp__, forecast_step
 )",
@@ -1856,7 +1872,12 @@ SELECT
     (conf_result).conformity_score AS conformity_score,
     (conf_result).n_calibration AS n_calibration,
     (conf_result).calibration_insufficient AS calibration_insufficient,
-    (conf_result).method AS method
+    (conf_result).method AS method,
+    -- Appended (#280): contract prediction names and the interval level.
+    UNNEST((conf_result).point) AS yhat,
+    UNNEST((conf_result).lower) AS yhat_lower,
+    UNNEST((conf_result).upper) AS yhat_upper,
+    (conf_result).nominal_level AS level
 FROM conformal_calc
 )",
     "One-step conformal prediction: calibrates on backtest residuals and applies to new forecasts, one row per (group, date).",
@@ -1949,7 +1970,11 @@ FROM calibrated
     {"ts_conformal_apply_by", {"forecast_results", "group_col", "date_col", "forecast_col", "calibration", nullptr}, {{"difficulty_col", "NULL"}, {nullptr, nullptr}},
 R"(
 WITH cal AS (
+    -- UNION ALL BY NAME with an empty typed row (#280): a calibration table
+    -- without a nominal_level column (hand-built) still binds, with NULL level.
     SELECT * FROM query_table(calibration::VARCHAR)
+    UNION ALL BY NAME
+    SELECT NULL::DOUBLE AS nominal_level WHERE false
 ),
 cal_dupe_check AS (
     -- NOTE: `cal.group_col` must stay qualified (never a bare `group_col`)
@@ -1977,7 +2002,9 @@ matched AS (
         pg._grp AS _grp,
         pg._points AS _points,
         COALESCE(direct.conformity_score, pooled.conformity_score, dupe_check._err) AS _score,
-        COALESCE(direct.method, pooled.method) AS _method
+        COALESCE(direct.method, pooled.method) AS _method,
+        -- level (#280): the matched calibration row's nominal_level.
+        TRY_CAST(COALESCE(direct.nominal_level, pooled.nominal_level) AS DOUBLE) AS _level
     FROM per_group pg
     CROSS JOIN cal_pooled_eligible eligible
     CROSS JOIN cal_dupe_check dupe_check
@@ -1990,6 +2017,7 @@ applied AS (
         _points,
         _method,
         _score,
+        _level,
         ts_conformal_intervals([pt.p FOR pt IN _points], _score, _method, [pt.d FOR pt IN _points]) AS _bounds
     FROM matched
 )
@@ -2000,7 +2028,12 @@ SELECT
     UNNEST((_bounds).lower) AS lower,
     UNNEST((_bounds).upper) AS upper,
     _method AS method,
-    _score AS conformity_score
+    _score AS conformity_score,
+    -- Appended (#280): contract prediction names and the interval level.
+    UNNEST(_points).p AS yhat,
+    UNNEST((_bounds).lower) AS yhat_lower,
+    UNNEST((_bounds).upper) AS yhat_upper,
+    _level AS level
 FROM applied
 )",
     "Applies a calibration table (from ts_conformal_calibrate) to new point forecasts, matching each group to its own row or a pooled row.",

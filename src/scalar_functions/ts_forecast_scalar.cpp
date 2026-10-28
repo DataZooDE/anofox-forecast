@@ -145,6 +145,9 @@ static unique_ptr<FunctionData> TsForecastScalarBind(
     struct_children.push_back(make_pair("yhat_lower", LogicalType::DOUBLE));
     struct_children.push_back(make_pair("yhat_upper", LogicalType::DOUBLE));
     struct_children.push_back(make_pair("model_name", LogicalType::VARCHAR));
+    // Appended (#280, CTR-06): interval coverage as a fraction; NULL when the
+    // model provides no interval.
+    struct_children.push_back(make_pair("level", LogicalType::DOUBLE));
 
     SetReturnTypeOf(bound_function, LogicalType::LIST(LogicalType::STRUCT(std::move(struct_children))));
 
@@ -402,6 +405,10 @@ static void TsForecastScalarExecute(DataChunk &args, ExpressionState &state, Vec
                     ? Value::DOUBLE(fcst_result.upper_bounds[i])
                     : Value(LogicalType::DOUBLE)));
             struct_values.push_back(make_pair("model_name", Value(string(fcst_result.model_name))));
+            struct_values.push_back(make_pair("level",
+                (fcst_result.lower_bounds != nullptr || fcst_result.upper_bounds != nullptr)
+                    ? Value::DOUBLE(opts.confidence_level)
+                    : Value(LogicalType::DOUBLE)));
 
             forecast_structs.push_back(Value::STRUCT(std::move(struct_values)));
         }

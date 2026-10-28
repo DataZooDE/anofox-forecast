@@ -1,0 +1,40 @@
+# name: test/sql/correctness/prediction_columns_exog.test
+# description: #280 (CTR-04, CTR-06) -- ts_forecast_exog_by appends ds (= date) and
+#   level. json-gated: ts_forecast_exog_by reads regressors through json_extract.
+# group: [sql]
+
+require anofox_forecast
+
+require json
+
+statement ok
+CREATE TABLE pc AS
+SELECT id, DATE '2024-01-01' + i::INT AS ds,
+       10 + 3 * sin(2 * pi() * i / 7) + 0.1 * i + (CASE WHEN id = 'B' THEN 5 ELSE 0 END) + 0.3 * cos(i * 1.7) AS y,
+       0.5 * i AS x
+FROM range(60) t(i), (VALUES ('A'), ('B')) v(id);
+
+# ---------------------------------------------------------------------------
+# ts_forecast_exog_by: ds (= date) and level appended
+# ---------------------------------------------------------------------------
+statement ok
+CREATE TABLE pc_fut AS
+SELECT id, DATE '2024-03-01' + i::INT AS ds, 0.5 * (60 + i) AS x
+FROM range(7) t(i), (VALUES ('A'), ('B')) v(id);
+
+query I
+SELECT string_agg(column_name, ',') FROM (DESCRIBE SELECT * FROM ts_forecast_exog_by('pc', id, ds, y, ['x'], 'pc_fut', ds, ['x'], '1d', 'AutoARIMA', 7, MAP{}));
+----
+id,forecast_step,date,yhat,yhat_lower,yhat_upper,model_name,ds,level
+
+query III
+SELECT count(*), bool_and(ds = date), bool_and(level = 0.9 OR (level IS NULL AND yhat_lower IS NULL))
+FROM ts_forecast_exog_by('pc', id, ds, y, ['x'], 'pc_fut', ds, ['x'], '1d', 'AutoARIMA', 7, MAP{});
+----
+14	true	true
+
+statement ok
+DROP TABLE pc_fut;
+
+statement ok
+DROP TABLE pc;

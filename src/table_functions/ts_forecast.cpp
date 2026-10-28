@@ -22,6 +22,8 @@ static LogicalType GetForecastResultType() {
     children.push_back(make_pair("aic", LogicalType(LogicalTypeId::DOUBLE)));
     children.push_back(make_pair("bic", LogicalType(LogicalTypeId::DOUBLE)));
     children.push_back(make_pair("mse", LogicalType(LogicalTypeId::DOUBLE)));
+    // Appended (#280, CTR-06): interval coverage as a fraction; NULL without an interval.
+    children.push_back(make_pair("level", LogicalType(LogicalTypeId::DOUBLE)));
     return LogicalType::STRUCT(std::move(children));
 }
 
@@ -154,6 +156,19 @@ static void SetStringField(Vector &result, idx_t field_idx, idx_t row_idx, const
     data[row_idx] = StringVector::AddString(StructEntry(children[field_idx]), value);
 }
 
+// level field (#280): the confidence level the interval was computed at, or
+// SQL NULL when the model returned no interval.
+static void SetLevelField(Vector &result, idx_t field_idx, idx_t row_idx, const ForecastResult &fcst_result,
+                          double confidence_level) {
+    auto &children = StructVector::GetEntries(result);
+    auto &level_vec = StructEntry(children[field_idx]);
+    if (!fcst_result.lower_bounds && !fcst_result.upper_bounds) {
+        FlatVector::SetNull(level_vec, row_idx, true);
+        return;
+    }
+    FlatDataMut<double>(level_vec)[row_idx] = confidence_level;
+}
+
 static void TsForecastFunction(DataChunk &args, ExpressionState &state, Vector &result) {
     auto &list_vec = args.data[0];
     auto &horizon_vec = args.data[1];
@@ -226,6 +241,7 @@ static void TsForecastFunction(DataChunk &args, ExpressionState &state, Vector &
         SetStructField<double>(result, 6, row_idx, fcst_result.aic);
         SetStructField<double>(result, 7, row_idx, fcst_result.bic);
         SetStructField<double>(result, 8, row_idx, fcst_result.mse);
+        SetLevelField(result, 9, row_idx, fcst_result, opts.confidence_level);
 
         // Free Rust-allocated memory
         anofox_free_forecast_result(&fcst_result);
@@ -598,6 +614,7 @@ static void TsForecastExogFunction(DataChunk &args, ExpressionState &state, Vect
         SetStructField<double>(result, 6, row_idx, fcst_result.aic);
         SetStructField<double>(result, 7, row_idx, fcst_result.bic);
         SetStructField<double>(result, 8, row_idx, fcst_result.mse);
+        SetLevelField(result, 9, row_idx, fcst_result, opts.confidence_level);
 
         anofox_free_forecast_result(&fcst_result);
     }
@@ -707,6 +724,7 @@ static void TsForecastWithModelFunction(DataChunk &args, ExpressionState &state,
         SetStructField<double>(result, 6, row_idx, fcst_result.aic);
         SetStructField<double>(result, 7, row_idx, fcst_result.bic);
         SetStructField<double>(result, 8, row_idx, fcst_result.mse);
+        SetLevelField(result, 9, row_idx, fcst_result, opts.confidence_level);
 
         anofox_free_forecast_result(&fcst_result);
     }

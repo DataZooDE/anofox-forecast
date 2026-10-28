@@ -53,7 +53,7 @@ SELECT COUNT(*) FROM (
     DESCRIBE SELECT * FROM ts_cv_forecast_by('cv_folds', series_id, ds, y, 'Naive', MAP{})
 );
 ----
-9
+10
 
 # Verify output column names
 query I
@@ -63,6 +63,7 @@ SELECT column_name FROM (
 ----
 ds
 fold_id
+level
 model_name
 series_id
 split

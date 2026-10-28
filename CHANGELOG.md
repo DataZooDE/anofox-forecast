@@ -16,6 +16,24 @@ returns the source table's column names and types (previously always
 
 ### Added
 
+- **Contract prediction columns on forecast and conformal outputs (#280).** Appended after
+  the existing columns, which keep their names, types and positions:
+  - `level` (interval coverage as a fraction, `NULL` without an interval) on
+    `ts_forecast_by`, `ts_forecast_ensemble_by`, `ts_cv_forecast_by`, `ts_forecast_exog_by`,
+    `ts_conformal_by` and `ts_conformal_apply_by`. Forecasts at two levels now stack into
+    nested fans with `UNION ALL`.
+  - `yhat`, `yhat_lower`, `yhat_upper` on `ts_conformal_by` and `ts_conformal_apply_by`
+    (the same values as `point`, `lower`, `upper`).
+  - `ds` on `ts_forecast_exog_by` (the same value as `date`).
+  - `id`, `yhat`, `yhat_lower`, `yhat_upper`, `model_name` and `level` on
+    `ts_forecast_var_by` (`id` = `variable`, `yhat` = `forecast_value`; VAR has no
+    interval, so the bounds and `level` are `NULL`).
+  - The internal `_ts_forecast` / `_ts_forecast_exog` result STRUCT gains a trailing
+    `level` field.
+  - An `INSERT INTO t SELECT * FROM <one of these>` into a table created with the old
+    column list now has more values than columns; select the stored columns explicitly
+    (or `ALTER TABLE t ADD COLUMN ...` for the new ones).
+
 - **`ts_metrics_by` (#281).** Long-form forecast accuracy metrics: one row per group and
   metric, `<group columns>, metric, value` (the anofox contract `summary` schema). `metrics`
   (default `['mae','mse','rmse','mape','smape','r2','bias']`) may also include `'mase'`

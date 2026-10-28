@@ -28,6 +28,10 @@ user-invocable: false
 
 36 forecasting models exposed by SQL via three call surfaces (table macro, aggregate, scalar) + `ts_forecast_var_by` for multivariate VAR.
 
+**`level` column (#280):** every forecast output with an interval ends with `level` (the
+interval coverage, `confidence_level`, default `0.9`; `NULL` without an interval), so two
+confidence levels stack into nested fans via `UNION ALL`.
+
 **Prediction intervals** (`yhat_lower`/`yhat_upper`) are each model's own crate-native
 interval (corrected formulas since anofox-forecast 0.16.0: Hyndman class-1/2/3 ETS
 variances, TBATS innovations state-space variance, GARCH centred on the conditional mean,
@@ -85,7 +89,7 @@ ts_forecast_by(
     horizon INTEGER,          -- number of periods ahead
     frequency VARCHAR,        -- '1d', '1mo', '1h', ...
     params MAP or STRUCT      -- model-specific config
-) → TABLE(group_col, forecast_step INT, ds, yhat DOUBLE, yhat_lower, yhat_upper, model_name)
+) → TABLE(group_col, forecast_step INT, ds, yhat DOUBLE, yhat_lower, yhat_upper, model_name, level)
 ```
 
 ## `ts_forecast_panel_by` (panel / global models)
@@ -167,7 +171,10 @@ ts_forecast_var_by(
     frequency  VARCHAR,     -- time step between observations
     p          INTEGER,     -- lag order (named param, default: 1)
     params     MAP          -- reserved for future use (default: MAP{})
-) → TABLE(variable VARCHAR, forecast_step BIGINT, <date_col>, forecast_value DOUBLE)
+) → TABLE(variable VARCHAR, forecast_step BIGINT, <date_col>, forecast_value DOUBLE,
+         id, yhat, yhat_lower, yhat_upper, model_name, level)
+-- trailing columns (#280): id = variable, yhat = forecast_value, model_name = 'VAR';
+-- VAR has no interval, so yhat_lower / yhat_upper / level are NULL
 ```
 
 **Output:** `k_vars × horizon` rows in long format. One row per (variable, forecast_step).
@@ -234,7 +241,7 @@ ts_forecast_exog_by(
     method            VARCHAR,     -- 'AutoARIMA', 'OptimizedTheta', 'MFLES'
     horizon           INTEGER,
     params            MAP or STRUCT
-) → TABLE(group_col, forecast_step INT, date TIMESTAMP, yhat DOUBLE, yhat_lower, yhat_upper, model_name)
+) → TABLE(group_col, forecast_step INT, date TIMESTAMP, yhat DOUBLE, yhat_lower, yhat_upper, model_name, ds, level)
 ```
 
 ```sql
@@ -308,7 +315,7 @@ ts_forecast_by(
     source VARCHAR, group_col COLUMN, date_col COLUMN, target_col COLUMN,
     'AutoEnsemble', horizon INTEGER, frequency VARCHAR,
     params MAP or STRUCT   -- top_k, combination_method, seasonal_period
-) → TABLE(group_col, forecast_step INT, ds, yhat DOUBLE, yhat_lower, yhat_upper, model_name)
+) → TABLE(group_col, forecast_step INT, ds, yhat DOUBLE, yhat_lower, yhat_upper, model_name, level)
 ```
 
 Params:
@@ -360,7 +367,7 @@ ts_forecast_ensemble_by(
     frequency VARCHAR,
     combination_method := 'mean',   -- named param
     seasonal_period := 0            -- named param
-) → TABLE(group_col, forecast_step INT, ds, yhat DOUBLE, yhat_lower DOUBLE, yhat_upper DOUBLE, model_name)
+) → TABLE(group_col, forecast_step INT, ds, yhat DOUBLE, yhat_lower DOUBLE, yhat_upper DOUBLE, model_name, level)
 ```
 
 ```sql

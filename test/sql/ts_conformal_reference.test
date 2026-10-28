@@ -267,7 +267,7 @@ true
 query I
 SELECT STRING_AGG(column_name, ',') FROM (DESCRIBE SELECT * FROM ts_conformal_apply_by('cfut', g, ds, fc, 'cal_by_group') LIMIT 0);
 ----
-group_col,date_col,point,lower,upper,method,conformity_score
+group_col,date_col,point,lower,upper,method,conformity_score,yhat,yhat_lower,yhat_upper,level
 
 # =============================================================================
 # 16-01 ts_interval_width_by

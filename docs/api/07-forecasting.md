@@ -538,6 +538,11 @@ so every public forecast surface agrees on dates (not just values) for the same 
 | `yhat` | DOUBLE | Point forecast |
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
+| `model_name` | VARCHAR | Model used |
+| `level` | DOUBLE | Interval coverage as a fraction (`confidence_level`, e.g. `0.9`); `NULL` when the model returns no interval. Appended in #280 |
+
+`level` lets forecasts at several confidence levels be stacked with `UNION ALL` into nested
+fans (one row per series, step and level), the anofox contract `prediction` shape.
 
 `yhat_lower` / `yhat_upper` come from each model's own crate-native prediction interval at
 `confidence_level` — see
@@ -575,6 +580,11 @@ Multi-series forecasting with exogenous variables. This is the **primary exogeno
 ```sql
 ts_forecast_exog_by(table_name, group_col, date_col, target_col, x_cols, future_table, future_date_col, future_x_cols, frequency, model, horizon, params?) → TABLE
 ```
+
+**Returns:** `id, forecast_step, date, yhat, yhat_lower, yhat_upper, model_name, ds, level`.
+`ds` (#280) holds the same value as `date`, under the name every other forecast uses; `level`
+is the interval coverage (`confidence_level`, default `0.9`), `NULL` without an interval. Both
+are appended after the existing columns, which are unchanged.
 
 **Exog-capable models** — every model below routes through the crate's own
 exogenous-regressor support (`CalendarAnnotations` + `predict_with_exog_intervals`); there
@@ -982,7 +992,8 @@ ts_forecast_ensemble_by(
     seasonal_period := 0,      -- shared period for all members; 0 = non-seasonal
     confidence_level := 0.90   -- confidence level for the combined forecast's interval
 ) → TABLE(group_col, forecast_step INT, date_col TIMESTAMP, yhat DOUBLE,
-          yhat_lower DOUBLE, yhat_upper DOUBLE, model_name VARCHAR)
+          yhat_lower DOUBLE, yhat_upper DOUBLE, model_name VARCHAR,
+          level DOUBLE)  -- level = confidence_level, NULL without an interval (#280)
 ```
 
 ### Parameters
@@ -1253,8 +1264,14 @@ ts_forecast_var_by(
     p          INTEGER,     -- lag order (named param, default: 1)
     params     MAP          -- reserved for future use (default: MAP{})
 )
-→ TABLE(variable VARCHAR, forecast_step BIGINT, <date_col>, forecast_value DOUBLE)
+→ TABLE(variable VARCHAR, forecast_step BIGINT, <date_col>, forecast_value DOUBLE,
+         id VARCHAR, yhat DOUBLE, yhat_lower DOUBLE, yhat_upper DOUBLE,
+         model_name VARCHAR, level DOUBLE)
 ```
+
+The trailing columns (#280) carry `ts_forecast_by`'s names: `id` = `variable`, `yhat` =
+`forecast_value`, `model_name = 'VAR'`. The crate's VAR returns point forecasts only, so
+`yhat_lower`, `yhat_upper` and `level` are `NULL`.
 
 ### Examples (verified end-to-end)
 
