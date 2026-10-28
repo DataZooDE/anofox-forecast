@@ -12,7 +12,7 @@ This milestone extends that SQL surface to reach crate capabilities that are cur
 
 ### Constraints
 
-- **Tech stack**: DuckDB extension built for v2.0.0 (stable), v1.5.6 and v1.4.5 LTS; Rust 1.89+ core via FFI; C++17. No new languages.
+- **Tech stack**: DuckDB extension built for v2.0.0 (stable) and v1.5.6 (v1.4.5 LTS dropped 2026-10-28, CI aligned with anofox-statistics); Rust 1.89+ core via FFI; C++17. No new languages.
 - **Architecture**: Parallelism stays at the DuckDB GROUP BY / scalar-function layer — no custom threading or table-in/table-out (established project rule).
 - **Dependencies**: `anofox-forecast` 0.15.10 and `anofox-regression` 0.5.15 (bumped clean in Phase 9, v0.10.0); further upstream statistical-correctness fixes (ADF/KPSS, diagnostics, conformal) are developed in Phase 11 against the upstream crate and consumed into this extension in Phase 17. Global-model steady-state ARIMA optimization remains tracked separately (awaiting a future crate release).
 - **Compatibility**: Must build and load across Linux/macOS/Windows and WASM; OpenSSL stays statically linked; verify clean-machine load (not just green CI).
@@ -34,7 +34,7 @@ This milestone extends that SQL surface to reach crate capabilities that are cur
 
 ## Runtime
 
-- DuckDB v2.0.0 (primary database engine; v1.5.6 and v1.4.5 LTS lines also built and shipped)
+- DuckDB v2.0.0 (primary database engine; v1.5.6 line also built and shipped)
 - Emscripten (WASM target builds via `wasm32-unknown-emscripten`)
 - Cargo (Rust) - Workspace root at `Cargo.toml` with 2 member crates
 - uv (Python) - Used for benchmark environment (`benchmark/pyproject.toml`)
@@ -79,7 +79,7 @@ This milestone extends that SQL surface to reach crate capabilities that are cur
 - C++ compiler supporting C++17 (GCC 14+ preferred on Linux due to symbol deduplication)
 - Python 3.11-3.12
 - DuckDB development headers (via the duckdb submodule, pinned to v2.0.0)
-- DuckDB v2.0.0, v1.5.6, or v1.4.5 LTS (one extension build per line)
+- DuckDB v2.0.0 or v1.5.6 (one extension build per line)
 - OpenSSL 1.1 or 3.x (static linking on Linux/Windows eliminates runtime .so/.dll deps)
 - macOS: CoreFoundation, SystemConfiguration frameworks
 - Windows: bcrypt library
@@ -289,7 +289,7 @@ This milestone extends that SQL surface to reach crate capabilities that are cur
 - **Circular imports:** None detected; dependency graph is strictly layered (SQL → C++ table/scalar → FFI → Rust core)
 - **WASM compatibility:** Rust FFI supports WASM via conditional compilation in Cargo.toml; fdars-core features gated by target_family; DuckDB extension layer is native-only
 - **Memory model:** ListVector for variable-length arrays; std::map for intermediate group data; all allocations freed in Finalize or on exception
-- **DuckDB version:** Built and tested on v2.0.0 (stable; submodule + extension-ci-tools v2.0-cyanoptera), v1.5.6 (v1.5-variegata) and v1.4.5 LTS (v1.4-andium) CI lines; uses C++17 standard; constexpr static members handled with forced C++17 in CMakeLists.txt
+- **DuckDB version:** Built and tested on v2.0.0 (stable; submodule + extension-ci-tools v2.0-cyanoptera), and v1.5.6 (v1.5-variegata) CI lines; uses C++17 standard; constexpr static members handled with forced C++17 in CMakeLists.txt
 
 ## Anti-Patterns
 

@@ -7,7 +7,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-BSL%201.1-blue.svg" alt="License: BSL 1.1"></a>
-  <a href="https://duckdb.org"><img src="https://img.shields.io/badge/DuckDB-2.0.0%20%7C%201.5.6%20%7C%201.4.5%20LTS-green.svg" alt="DuckDB"></a>
+  <a href="https://duckdb.org"><img src="https://img.shields.io/badge/DuckDB-2.0.0%20%7C%201.5.6-green.svg" alt="DuckDB"></a>
   <img src="https://img.shields.io/badge/build-passing-brightgreen.svg" alt="Build Status">
   <img src="https://img.shields.io/badge/Tests-295%20Rust%20tests%20passed-brightgreen.svg" alt="Tests">
   <a href="https://github.com/DataZooDE/anofox-forecast/actions/workflows/WasmTest.yml"><img src="https://github.com/DataZooDE/anofox-forecast/actions/workflows/WasmTest.yml/badge.svg?branch=main" alt="WASM"></a>
@@ -132,7 +132,7 @@ INSTALL anofox_forecast FROM 'http://get.erpl.io';
 LOAD anofox_forecast;
 ```
 
-(Use `FORCE INSTALL … FROM 'http://get.erpl.io';` to refresh an already-cached copy.) Builds are published there for DuckDB v2.0.0, v1.5.6 and v1.4.5 LTS.
+(Use `FORCE INSTALL … FROM 'http://get.erpl.io';` to refresh an already-cached copy.) Builds are published there for DuckDB v2.0.0 and v1.5.6.
 
 ### From Source
 
@@ -150,13 +150,13 @@ GEN=ninja make release       # With Ninja (faster)
 # build/release/extension/anofox_forecast/anofox_forecast.duckdb_extension
 ```
 
-The `duckdb` submodule is pinned to v2.0.0, so a source build targets DuckDB v2.0.0. To build for v1.5.6 or v1.4.5 LTS, check out the `duckdb` submodule at that tag and `extension-ci-tools` at `v1.5-variegata` / `v1.4-andium`.
+The `duckdb` submodule is pinned to v2.0.0, so a source build targets DuckDB v2.0.0. To build for v1.5.6, check out the `duckdb` submodule at that tag and `extension-ci-tools` at `v1.5-variegata` / `v1.4-andium`.
 
 > **🤖 Using an AI assistant?** Install the [Claude Code skills plugin](#-claude-code-skills-ai-pair-programming) so it knows the full SQL API.
 
 ## 🚀 Quick Start on M5 Dataset
 
-The forecast takes ~2 minutes on a Dell XPS 13. (Requires DuckDB v2.0.0, v1.5.6, or v1.4.5 LTS). This
+The forecast takes ~2 minutes on a Dell XPS 13. (Requires DuckDB v2.0.0 or v1.5.6). This
 loads `httpfs` and reads a remote parquet file, so it requires outbound network access and the
 `httpfs` extension binary and will error without either:
 

@@ -119,6 +119,13 @@ aws s3 rm "s3://$BUCKET/v1.5.4/" --recursive
 aws s3 rm "s3://$BUCKET/v1.5.5/" --recursive
 ```
 
+### Update 2026-10-28: the v1.4.5 LTS line is no longer built
+
+The pipeline dropped the v1.4.5 LTS (andium) line (aligned with anofox-statistics), so every
+`v1.4.5/*/anofox_forecast.*` object stops being refreshed from the next deploy on. They stay
+loadable as the last v1.4.5 builds; whether to keep or delete them is the owner's call. The
+table below predates the drop.
+
 ### Stale-within-a-current-line objects (arch excluded by the current build matrix)
 
 The `v1.4.5` (LTS) line excludes `windows_amd64`, `windows_amd64_rtools`, `windows_amd64_mingw`, `osx_arm64`, and `osx_amd64` from its CI matrix today (see `.github/workflows/MainDistributionPipeline.yml`'s `duckdb-lts-build` comments: a dead vcpkg OpenSSL baseline for `windows_amd64`, and a `macos-26` runner SDK/linker break for the `osx_*` archs, both first hit 2026-10-16). Objects for those archs under the `v1.4.5` latest-tree path are therefore **not refreshed by the current pipeline**, even though `v1.4.5` itself is a current line:

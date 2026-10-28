@@ -10,6 +10,15 @@ use the semver numbering this project started with.
 
 ## [Unreleased]
 
+### Changed — build and distribution
+
+- **DuckDB v1.4.5 LTS is no longer built or published.** CI now builds the v2.0.0 and v1.5.6
+  lines only, aligned with anofox-statistics: pull requests run a linux_amd64 fast lane (the
+  full platform matrix runs on `main`, tags, manual dispatch and PRs labelled `full-ci`),
+  deploys require a passing smoke test, and a non-blocking ASAN/UBSAN job and Rust coverage
+  report were added. Existing v1.4.5 binaries on get.erpl.io stay as the last builds for that
+  line. Windows builds keep shipping for both remaining lines.
+
 No signature changes. `ts_fill_forward_operator` changes implementation and now
 returns the source table's column names and types (previously always
 `group_col`/`date_col`/`value_col`, `TIMESTAMP`/`DOUBLE`).

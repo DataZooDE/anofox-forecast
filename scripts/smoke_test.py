@@ -18,7 +18,7 @@ Usage:
 
 DuckDB v2.0.0 renamed its CLI release assets to ``duckdb-cli-<os>-<arch>.tar.gz``
 (v1.x shipped ``duckdb_cli-<os>-<arch>.zip``). Both names are tried per arch, so
-this one script keeps working across the v1.4.5, v1.5.6 and v2.0.0 lines.
+this one script keeps working across the v1.5.6 and v2.0.0 lines.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ SMOKE_QUERY = "SELECT count(*) AS n FROM ts_features_list();"
 # `duckdb_cli-<os>-<arch>.zip` to `duckdb-cli-<os>-<arch>.tar.gz`. Each tarball
 # holds a single bare `duckdb` (or `duckdb.exe`) at the archive root. Per arch
 # we list the >= 2.0 tarball name first and the legacy v1.x zip name second, so
-# one script serves the v1.4.5, v1.5.6 and v2.0.0 (and later) lines -- whichever
+# one script serves the v1.5.6 and v2.0.0 (and later) lines -- whichever
 # asset the requested `duckdb_version` actually published.
 ARCH_TO_CLI_ASSETS: dict[str, tuple[str, ...]] = {
     "linux_amd64": ("duckdb-cli-linux-amd64.tar.gz", "duckdb_cli-linux-amd64.zip"),
