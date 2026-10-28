@@ -1,0 +1,85 @@
+# name: test/sql/ts_variables.test
+# description: #303 - forecasting scripts parameterized with SQL variables. Method,
+#   horizon, frequency and params built from getvariable() are accepted everywhere,
+#   including the bind-time constants (confidence_level names ts_forecast_agg's
+#   lower_<pct> / upper_<pct> fields). DuckDB 2.0 adds the $name shorthand
+#   (duckdb/duckdb#21194), tested through v2_or.
+# group: [sql]
+
+require anofox_forecast
+
+statement ok
+CREATE MACRO v2_or(sql, fallback) AS TABLE
+    SELECT * FROM query(CASE WHEN version() >= 'v2' THEN sql ELSE fallback END);
+
+statement ok
+CREATE TABLE vs AS
+SELECT i % 2 AS id, DATE '2024-01-01' + (i // 2)::INT AS ds, ((i // 2) % 7)::DOUBLE + i * 0.01 AS y
+FROM range(200) t(i);
+
+statement ok
+SET VARIABLE method = 'HoltWinters';
+
+statement ok
+SET VARIABLE horizon = 5;
+
+statement ok
+SET VARIABLE freq = '1d';
+
+statement ok
+SET VARIABLE season = 7;
+
+statement ok
+SET VARIABLE conf = 0.8;
+
+# table macro: every argument from a variable
+query II
+SELECT count(*), max(level)
+FROM ts_forecast_by('vs', id, ds, y, getvariable('method'), getvariable('horizon'), getvariable('freq'),
+                    params := {'seasonal_period': getvariable('season'), 'confidence_level': getvariable('conf')});
+----
+10	0.8
+
+# same rows as the literal call
+query I
+SELECT count(*) FROM (
+    SELECT * FROM ts_forecast_by('vs', id, ds, y, getvariable('method'), getvariable('horizon'), getvariable('freq'),
+                                 params := {'seasonal_period': getvariable('season'), 'confidence_level': getvariable('conf')})
+    EXCEPT ALL
+    SELECT * FROM ts_forecast_by('vs', id, ds, y, 'HoltWinters', 5, '1d', params := {'seasonal_period': 7, 'confidence_level': 0.8}));
+----
+0
+
+# aggregate: confidence_level from a variable still folds at bind (lower_80 / upper_80)
+query I
+SELECT bool_and((f).lower_80[1] < (f).upper_80[1])
+FROM (SELECT ts_forecast_agg(ds::TIMESTAMP, y, getvariable('method'), getvariable('horizon'),
+                             {'seasonal_period': getvariable('season'), 'confidence_level': getvariable('conf')}) AS f
+      FROM vs GROUP BY id);
+----
+true
+
+# CV: horizon from a variable
+query I
+SELECT count(DISTINCT fold_id) FROM ts_cv_folds_by('vs', id, ds, y, 2, getvariable('horizon'), MAP{});
+----
+2
+
+# conformal: alpha derived from a variable
+statement ok
+CREATE TABLE vs_bt AS SELECT id, ds, y, y + 0.1 * sin(ds - DATE '2024-01-01') AS fc, y AS p FROM vs;
+
+query I
+SELECT DISTINCT nominal_level FROM ts_conformal_by('vs_bt', id, ds, y, fc, p, params := {'alpha': 1 - getvariable('conf')});
+----
+0.8
+
+# DuckDB 2.0: the $name shorthand
+query II
+FROM v2_or($$
+    SELECT count(*), max(level)
+    FROM ts_forecast_by('vs', id, ds, y, $method, $horizon, $freq,
+                        params := {'seasonal_period': $season, 'confidence_level': $conf})
+$$, $$SELECT 10, 0.8$$);
+----
+10	0.8

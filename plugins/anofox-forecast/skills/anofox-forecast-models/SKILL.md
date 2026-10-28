@@ -77,6 +77,8 @@ section for the full per-model table.
    fails with `Could not convert string 'AAA' to INT32` (DuckDB types MAP values uniformly). Use
    the STRUCT. The aggregates (`ts_forecast_agg`, `ts_detect_changepoints_agg`) accept the same
    forms. On DuckDB 2.0, `{}` means "no params" and a `VARIANT` holding the options also works.
+   Shared settings can live in SQL variables (`SET VARIABLE horizon = 14;` then
+   `getvariable('horizon')`, or `$horizon` on 2.0) in any argument, params included.
 
 5. **The `_by` output renames the target column to `y`** and adds `forecast_step`, `yhat`, `yhat_lower`, `yhat_upper`, `model_name`.
 

@@ -165,6 +165,33 @@ SELECT * FROM ts_cv_folds_by('sales', product_id, date, value, 3, 7,
     {'gap': 2, 'clip_horizon': true}::VARIANT);
 ```
 
+### Parameterized scripts (variables)
+
+Scripts that repeat the same settings (horizon, frequency, model, seasonal period,
+confidence level, CV folds) can keep them in SQL variables, set once at the top.
+Every argument accepts them, including the ones fixed at bind time (`confidence_level`
+still names `ts_forecast_agg`'s `lower_<pct>` / `upper_<pct>` fields):
+
+```sql
+SET VARIABLE horizon = 14;
+SET VARIABLE season = 7;
+SET VARIABLE conf = 0.8;
+
+SELECT * FROM ts_forecast_by('sales', product_id, date, value, 'HoltWinters',
+    getvariable('horizon'), '1d',
+    params := {'seasonal_period': getvariable('season'), 'confidence_level': getvariable('conf')});
+
+SELECT * FROM ts_cv_folds_by('sales', product_id, date, value, 3, getvariable('horizon'), MAP{});
+```
+
+**DuckDB 2.0+:** `$name` is shorthand for `getvariable('name')`:
+
+```sql
+-- DuckDB 2.0+
+SET VARIABLE horizon = 14;
+SELECT * FROM ts_forecast_by('sales', product_id, date, value, 'SES', $horizon, '1d');
+```
+
 ---
 
 ## API Coverage Matrix
