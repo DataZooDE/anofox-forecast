@@ -148,7 +148,12 @@ true
 # BEFORE any Phase 20 change to the changepoint natives or macros. They must never
 # change (CONTEXT #287 decision 1 + addenda: the new deseasonalize/threshold options
 # are opt-in, default outputs stay byte-identical). The md5 covers id, date,
-# is_changepoint and the full-precision probability text of every row.
+# is_changepoint and the probability of every row rounded to 9 decimals: the
+# full-precision text differed in its last digits on the CI runners (sin/cos in the
+# fixture and libm/FMA differences across CPUs), so the full-precision pin only held
+# on the capturing machine. The rounded md5s were computed on a build whose
+# full-precision md5s still matched the captured pre-Phase-20 values
+# (40b71f3f.../30e6fc73...), so they pin the same outputs.
 # #287 panel: 3 series x 84 days, weekly seasonality, B +15 from day 50 (2024-02-20).
 # =============================================================================
 
@@ -156,19 +161,19 @@ statement ok
 CREATE TABLE cp287 AS SELECT id, (TIMESTAMP '2024-01-01' + INTERVAL (i) DAY) AS ds, base + 0.3 * i + 5 * sin(2 * pi() * i / 7) + CASE WHEN id = 'B' AND i >= 50 THEN 15 ELSE 0 END + 1.6 * cos(i * 0.9) + 0.7 * sin(i * 1.7 + base) AS y FROM (VALUES ('A', 20.0), ('B', 40.0), ('C', 60.0)) t(id, base), range(84) r(i);
 
 query I
-SELECT md5(string_agg(id || '|' || ds || '|' || is_changepoint || '|' || changepoint_probability::VARCHAR, ',' ORDER BY id, ds)) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{});
+SELECT md5(string_agg(id || '|' || ds || '|' || is_changepoint || '|' || round(changepoint_probability, 9)::VARCHAR, ',' ORDER BY id, ds)) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{});
 ----
-40b71f3f330b63b30f5ca2f490bba6bf
+083042b082bc53142e3232b612736daf
 
 query I
-SELECT md5(string_agg(id || '|' || ds || '|' || is_changepoint || '|' || changepoint_probability::VARCHAR, ',' ORDER BY id, ds)) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'hazard_lambda': '50'});
+SELECT md5(string_agg(id || '|' || ds || '|' || is_changepoint || '|' || round(changepoint_probability, 9)::VARCHAR, ',' ORDER BY id, ds)) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'hazard_lambda': '50'});
 ----
-30e6fc7372714db376be95f4d66d0bc5
+d8674561e9f706fa44a924abacd94e87
 
 query I
-SELECT md5(string_agg(id || '|' || r.timestamp || '|' || r.is_changepoint || '|' || r.changepoint_probability::VARCHAR, ',' ORDER BY id, r.timestamp)) FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{})) AS r FROM cp287 GROUP BY id);
+SELECT md5(string_agg(id || '|' || r.timestamp || '|' || r.is_changepoint || '|' || round(r.changepoint_probability, 9)::VARCHAR, ',' ORDER BY id, r.timestamp)) FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{})) AS r FROM cp287 GROUP BY id);
 ----
-40b71f3f330b63b30f5ca2f490bba6bf
+083042b082bc53142e3232b612736daf
 
 # Readable form of the same default outputs: flagged dates per series.
 

@@ -2912,7 +2912,7 @@ SELECT * FROM _ts_mase_native((SELECT * FROM _ts_passthrough(source) ORDER BY AL
 R"(
 SELECT * FROM _ts_metrics_long_native(
     (SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, forecast_col,
-    [m FOR m IN metrics::VARCHAR[] IF lower(m) != 'mase'])
+    list_filter(metrics::VARCHAR[], lambda m: lower(m) != 'mase'))
 UNION ALL
 SELECT * EXCLUDE (mase), 'mase' AS metric, mase AS value
 FROM _ts_mase_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, forecast_col, seasonal_period)
