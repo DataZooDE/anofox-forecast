@@ -3,7 +3,7 @@
 use crate::error::{ForecastError, Result};
 use crate::stats::{sample_excess_kurtosis_g2, sample_skewness_g1, template_match_counts};
 use rustfft::{num_complex::Complex, FftPlanner};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Extract all available features from a time series.
 pub fn extract_features(values: &[f64]) -> Result<HashMap<String, f64>> {
@@ -933,7 +933,10 @@ fn permutation_entropy(values: &[f64], order: usize) -> f64 {
     }
 
     let n = values.len();
-    let mut pattern_counts: HashMap<Vec<usize>, usize> = HashMap::new();
+    // BTreeMap, not HashMap: the f64 sum below must not depend on the per-process
+    // random hash iteration order, or identical series give results that differ
+    // in the last bits between runs / threads (#299).
+    let mut pattern_counts: BTreeMap<Vec<usize>, usize> = BTreeMap::new();
 
     for i in 0..=n - order {
         let window = &values[i..i + order];
@@ -986,7 +989,8 @@ fn has_duplicate_value(values: &[f64], target: f64) -> bool {
 }
 
 fn reoccurring_stats(values: &[f64]) -> (f64, f64, f64, f64) {
-    let mut value_counts: HashMap<u64, usize> = HashMap::new();
+    // BTreeMap so the f64 sums below run in a fixed order (see permutation_entropy).
+    let mut value_counts: BTreeMap<u64, usize> = BTreeMap::new();
     for &v in values {
         *value_counts.entry(canonical_bits(v)).or_insert(0) += 1;
     }
