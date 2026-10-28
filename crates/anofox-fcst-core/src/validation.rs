@@ -520,15 +520,54 @@ pub struct DurbinWatsonOut {
     pub statistic: f64,
     /// Interpretation label (positive_strong / positive_weak / none / negative_weak / negative_strong).
     pub interpretation: &'static str,
+    /// Approximate two-sided p-value for H0: no first-order autocorrelation
+    /// (see [`durbin_watson_p_value`]); `NaN` when undefined.
+    pub p_value: f64,
 }
 
 /// Durbin-Watson first-order autocorrelation statistic on residuals (RESID-02).
 pub fn durbin_watson(residuals: &[f64]) -> DurbinWatsonOut {
     let r = validation::durbin_watson(residuals);
+    let degenerate = residuals.iter().all(|&e| e == 0.0);
+    let p_value = if degenerate {
+        f64::NAN
+    } else {
+        durbin_watson_p_value(r.statistic, residuals.len())
+    };
     DurbinWatsonOut {
         statistic: r.statistic,
         interpretation: autocorrelation_label(r.interpretation),
+        p_value,
     }
+}
+
+/// Approximate two-sided p-value of a Durbin-Watson statistic (#284).
+///
+/// Normal approximation with the exact null moments of `d` for residuals
+/// taken as given (no regressors, so `k = 0`; the statistic is not
+/// demeaned): with the DW matrix `A`, `P = tr(A) = 2(n-1)` and
+/// `Q = tr(A^2) = 6n - 8`, giving `E[d] = P/n` and
+/// `Var[d] = 2(Q - P E[d]) / (n(n+2))`. This is the moment formula of R
+/// `lmtest::dwtest(exact = FALSE)` evaluated at a design with no columns;
+/// `p = 2 min(Φ(z), 1 - Φ(z))` with `z = (d - E[d]) / sd(d)`.
+///
+/// Returns `NaN` for `n < 3` or a non-finite statistic.
+pub fn durbin_watson_p_value(statistic: f64, n: usize) -> f64 {
+    if n < 3 || !statistic.is_finite() {
+        return f64::NAN;
+    }
+    use statrs::distribution::{ContinuousCDF, Normal};
+    let nf = n as f64;
+    let p = 2.0 * (nf - 1.0);
+    let q = 6.0 * nf - 8.0;
+    let mean = p / nf;
+    let var = 2.0 * (q - p * mean) / (nf * (nf + 2.0));
+    if var.is_nan() || var <= 0.0 {
+        return f64::NAN;
+    }
+    let z = (statistic - mean) / var.sqrt();
+    let cdf = Normal::new(0.0, 1.0).map(|d| d.cdf(z)).unwrap_or(f64::NAN);
+    (2.0 * cdf.min(1.0 - cdf)).clamp(0.0, 1.0)
 }
 
 /// Jarque-Bera normality test result.
@@ -564,6 +603,8 @@ pub struct ResidualDiagnosticsOut {
     pub lb_lags: usize,
     pub dw_statistic: f64,
     pub dw_interpretation: &'static str,
+    /// Approximate two-sided Durbin-Watson p-value (#284).
+    pub dw_p_value: f64,
     pub jb_statistic: f64,
     pub jb_p_value: f64,
     pub jb_skewness: f64,
@@ -599,6 +640,7 @@ pub fn residual_diagnostics(residuals: &[f64], alpha: f64) -> ResidualDiagnostic
         lb_lags: lb.lags,
         dw_statistic: dw.statistic,
         dw_interpretation: dw.interpretation,
+        dw_p_value: dw.p_value,
         jb_statistic: jb.statistic,
         jb_p_value: jb.p_value,
         jb_skewness: jb.skewness,

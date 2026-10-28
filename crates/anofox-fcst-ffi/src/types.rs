@@ -2061,6 +2061,8 @@ impl From<anofox_fcst_core::LjungBoxOut> for AnofoxLjungBoxResult {
 pub struct AnofoxDurbinWatsonResult {
     pub statistic: c_double,
     pub interpretation: [c_char; 32],
+    /// Approximate two-sided p-value (#284).
+    pub p_value: c_double,
 }
 
 impl Default for AnofoxDurbinWatsonResult {
@@ -2068,6 +2070,7 @@ impl Default for AnofoxDurbinWatsonResult {
         Self {
             statistic: f64::NAN,
             interpretation: [0; 32],
+            p_value: f64::NAN,
         }
     }
 }
@@ -2120,6 +2123,8 @@ pub struct AnofoxResidualDiagnosticsResult {
     pub jb_skewness: c_double,
     pub jb_excess_kurtosis: c_double,
     pub adequate: bool,
+    /// Approximate two-sided Durbin-Watson p-value (#284).
+    pub dw_p_value: c_double,
 }
 
 impl Default for AnofoxResidualDiagnosticsResult {
@@ -2135,6 +2140,7 @@ impl Default for AnofoxResidualDiagnosticsResult {
             jb_skewness: f64::NAN,
             jb_excess_kurtosis: f64::NAN,
             adequate: false,
+            dw_p_value: f64::NAN,
         }
     }
 }

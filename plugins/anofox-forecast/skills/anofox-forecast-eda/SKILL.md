@@ -282,11 +282,13 @@ ORDER BY series_id;
 
 #### `ts_durbin_watson` / `ts_durbin_watson_by` — first-order autocorrelation
 
-DW statistic near 2 = no autocorrelation; < 2 = positive; > 2 = negative.
+DW statistic near 2 = no autocorrelation; < 2 = positive; > 2 = negative. The STRUCT also
+carries `p_value` (approximate two-sided, normal approximation as R
+`lmtest::dwtest(exact = FALSE)`) and `method = 'Durbin-Watson'`.
 
 ```sql
 -- Grouped macro (sourced from residuals.sql)
-SELECT series_id, (dw).statistic, (dw).interpretation
+SELECT series_id, (dw).statistic, (dw).interpretation, (dw).p_value, (dw).method
 FROM ts_durbin_watson_by('resids', series_id, ds, e) AS t(series_id, dw)
 ORDER BY series_id;
 ```

@@ -118,12 +118,27 @@ series_block <- function(y) {
 # series (fitdf 2 to exercise a non-zero correction even without a real
 # model). durbin_watson is the closed form sum(diff(values)^2)/sum(values^2)
 # -- no separate R call needed since this matches the extension's own
-# formula exactly.
+# formula exactly. durbin_watson_p_value (#284) is the two-sided normal
+# approximation with the exact null moments of lmtest::dwtest(exact = FALSE)
+# at a design with no columns (residuals taken as given; dwtest itself
+# rejects a zero-column design): E[d] = 2(n-1)/n,
+# Var[d] = 2((6n-8) - 2(n-1) E[d]) / (n(n+2)).
 
 arma11_fit <- arima(series$ar1[1:120], order = c(1, 0, 1))
 arma11_resid <- as.numeric(residuals(arma11_fit))
 diff_rw_full <- diff(series$rw)
 diff_rw30 <- diff_rw_full[1:30]
+
+dw_p_value <- function(values) {
+  n <- length(values)
+  d <- sum(diff(values)^2) / sum(values^2)
+  P <- 2 * (n - 1)
+  Q <- 6 * n - 8
+  m <- P / n
+  v <- 2 * (Q - P * m) / (n * (n + 2))
+  pz <- pnorm((d - m) / sqrt(v))
+  2 * min(pz, 1 - pz)
+}
 
 portmanteau_case <- function(name, r_call, values, lag, fitdf) {
   bt <- Box.test(values, lag = lag, type = "Ljung-Box", fitdf = fitdf)
@@ -136,7 +151,8 @@ portmanteau_case <- function(name, r_call, values, lag, fitdf) {
     statistic = as.numeric(bt$statistic),
     df = as.numeric(bt$parameter),
     p_value = as.numeric(bt$p.value),
-    durbin_watson = sum(diff(values)^2) / sum(values^2)
+    durbin_watson = sum(diff(values)^2) / sum(values^2),
+    durbin_watson_p_value = dw_p_value(values)
   )
 }
 
@@ -176,7 +192,8 @@ diag_fixture <- c(
       ),
       portmanteau_statistic_abs = 1e-9,
       portmanteau_p_value_abs = 1e-9,
-      dw_abs = 1e-12
+      dw_abs = 1e-12,
+      dw_p_value_abs = 1e-9
     ),
     series = list(
       air = series_block(series$air),

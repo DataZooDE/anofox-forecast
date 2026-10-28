@@ -15,7 +15,8 @@
     "notes": "p-values come from table interpolation / response-surface regressions in tseries/urca, not closed-form; consumer phases may tighten this tolerance with documented rationale.",
     "portmanteau_statistic_abs": 1e-09,
     "portmanteau_p_value_abs": 1e-09,
-    "dw_abs": 1e-12
+    "dw_abs": 1e-12,
+    "dw_p_value_abs": 1e-09
   },
   "series": {
     "air": {
@@ -749,7 +750,8 @@
       "statistic": 6.40542007298888,
       "df": 8,
       "p_value": 0.601916478272279,
-      "durbin_watson": 1.9988643706482
+      "durbin_watson": 1.9988643706482,
+      "durbin_watson_p_value": 0.931642168770348
     },
     "arma11_resid_lag20_fitdf2": {
       "name": "arma11_resid_lag20_fitdf2",
@@ -760,7 +762,8 @@
       "statistic": 14.8559313341977,
       "df": 18,
       "p_value": 0.671834559581856,
-      "durbin_watson": 1.9988643706482
+      "durbin_watson": 1.9988643706482,
+      "durbin_watson_p_value": 0.931642168770348
     },
     "diff_rw_lag40_fitdf2": {
       "name": "diff_rw_lag40_fitdf2",
@@ -771,7 +774,8 @@
       "statistic": 38.6835459228527,
       "df": 38,
       "p_value": 0.438648802479122,
-      "durbin_watson": 1.99497977489279
+      "durbin_watson": 1.99497977489279,
+      "durbin_watson_p_value": 0.9715555669633
     },
     "diff_rw30_lag6_fitdf2": {
       "name": "diff_rw30_lag6_fitdf2",
@@ -782,7 +786,8 @@
       "statistic": 8.3358540427107,
       "df": 4,
       "p_value": 0.0800218644335882,
-      "durbin_watson": 1.44894039079037
+      "durbin_watson": 1.44894039079037,
+      "durbin_watson_p_value": 0.170189557523526
     }
   }
 }

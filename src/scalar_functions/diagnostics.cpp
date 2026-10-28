@@ -676,6 +676,9 @@ static void TsDurbinWatsonFunction(DataChunk &args, ExpressionState &state, Vect
     auto stat_data = FlatDataMut<double>(StructEntry(e[0]));
     auto &interp_vec = StructEntry(e[1]);
     auto interp_data = FlatDataMut<string_t>(interp_vec);
+    auto pval_data = FlatDataMut<double>(StructEntry(e[2]));
+    auto &method_vec = StructEntry(e[3]);
+    auto method_data = FlatDataMut<string_t>(method_vec);
 
     vector<double> series;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
@@ -691,6 +694,8 @@ static void TsDurbinWatsonFunction(DataChunk &args, ExpressionState &state, Vect
         }
         stat_data[row_idx]   = r.statistic;
         interp_data[row_idx] = StringVector::AddString(interp_vec, r.interpretation);
+        pval_data[row_idx]   = r.p_value;
+        method_data[row_idx] = StringVector::AddString(method_vec, "Durbin-Watson");
     }
 }
 
@@ -756,6 +761,7 @@ static void TsResidualDiagnosticsFunction(DataChunk &args, ExpressionState &stat
     auto jb_skew = FlatDataMut<double>(StructEntry(e[7]));
     auto jb_kurt = FlatDataMut<double>(StructEntry(e[8]));
     auto adequate_data = FlatDataMut<bool>(StructEntry(e[9]));
+    auto dw_pval = FlatDataMut<double>(StructEntry(e[10]));
 
     vector<double> series;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
@@ -784,6 +790,7 @@ static void TsResidualDiagnosticsFunction(DataChunk &args, ExpressionState &stat
         jb_skew[row_idx] = r.jb_skewness;
         jb_kurt[row_idx] = r.jb_excess_kurtosis;
         adequate_data[row_idx] = r.adequate;
+        dw_pval[row_idx] = r.dw_p_value;
     }
 }
 
@@ -804,6 +811,9 @@ static child_list_t<LogicalType> DurbinWatsonStructChildren() {
     child_list_t<LogicalType> c;
     c.push_back(make_pair("statistic",      LogicalType(LogicalTypeId::DOUBLE)));
     c.push_back(make_pair("interpretation", LogicalType(LogicalTypeId::VARCHAR)));
+    // Appended (#284): existing fields keep their position.
+    c.push_back(make_pair("p_value",        LogicalType(LogicalTypeId::DOUBLE)));
+    c.push_back(make_pair("method",         LogicalType(LogicalTypeId::VARCHAR)));
     return c;
 }
 
@@ -828,6 +838,8 @@ static child_list_t<LogicalType> ResidualDiagnosticsStructChildren() {
     c.push_back(make_pair("jb_skewness",       LogicalType(LogicalTypeId::DOUBLE)));
     c.push_back(make_pair("jb_excess_kurtosis", LogicalType(LogicalTypeId::DOUBLE)));
     c.push_back(make_pair("adequate",          LogicalType(LogicalTypeId::BOOLEAN)));
+    // Appended (#284): existing fields keep their position.
+    c.push_back(make_pair("dw_p_value",        LogicalType(LogicalTypeId::DOUBLE)));
     return c;
 }
 
@@ -934,9 +946,13 @@ void RegisterTsDurbinWatsonFunction(ExtensionLoader &loader) {
         Fallible(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
                        LogicalType::STRUCT(DurbinWatsonStructChildren()), TsDurbinWatsonFunction)),
         "Durbin-Watson first-order autocorrelation statistic on residuals. Returns "
-        "STRUCT(statistic DOUBLE, interpretation VARCHAR); statistic in [0,4], ~2 means no "
-        "autocorrelation. interpretation is one of positive_strong / positive_weak / none / "
-        "negative_weak / negative_strong.",
+        "STRUCT(statistic DOUBLE, interpretation VARCHAR, p_value DOUBLE, method VARCHAR); "
+        "statistic in [0,4], ~2 means no autocorrelation. interpretation is one of "
+        "positive_strong / positive_weak / none / negative_weak / negative_strong. p_value is an "
+        "approximate two-sided p-value for H0: no first-order autocorrelation (normal "
+        "approximation with the exact null mean/variance of the statistic, as in R "
+        "lmtest::dwtest(exact = FALSE), residuals taken as given); NaN for n < 3 or all-zero "
+        "residuals. method = 'Durbin-Watson'.",
         "ts_durbin_watson(LIST(resid ORDER BY ds))");
 }
 
@@ -971,7 +987,8 @@ void RegisterTsResidualDiagnosticsFunction(ExtensionLoader &loader) {
         desc.description =
             "Combined residual adequacy report: Ljung-Box + Durbin-Watson + Jarque-Bera. "
             "Returns STRUCT(lb_statistic, lb_p_value, lb_lags, dw_statistic, dw_interpretation, "
-            "jb_statistic, jb_p_value, jb_skewness, jb_excess_kurtosis, adequate BOOLEAN). "
+            "jb_statistic, jb_p_value, jb_skewness, jb_excess_kurtosis, adequate BOOLEAN, "
+            "dw_p_value DOUBLE). dw_p_value is the approximate two-sided Durbin-Watson p-value. "
             "adequate = (lb_p_value > alpha); alpha defaults to 0.05. Jarque-Bera and "
             "Durbin-Watson are advisory and do not affect the adequacy verdict.";
         desc.examples = {"ts_residual_diagnostics(LIST(resid ORDER BY ds))",

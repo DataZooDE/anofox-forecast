@@ -2719,7 +2719,9 @@ FROM query_table(source::VARCHAR)
 GROUP BY group_col
 )",
     "Durbin-Watson first-order autocorrelation statistic on residuals per group. "
-    "Returns STRUCT(statistic, interpretation); statistic in [0,4], ~2 means no autocorrelation.",
+    "Returns STRUCT(statistic, interpretation, p_value, method); statistic in [0,4], ~2 means no "
+    "autocorrelation. p_value is an approximate two-sided p-value (normal approximation, as R "
+    "lmtest::dwtest(exact = FALSE)); method = 'Durbin-Watson'.",
     "SELECT group_col, (durbin_watson).statistic FROM ts_durbin_watson_by('resids', product_id, ds, e)",
     "diagnostics"},
 
@@ -2746,7 +2748,8 @@ GROUP BY group_col
 )",
     "Combined residual adequacy report per group: Ljung-Box + Durbin-Watson + Jarque-Bera. "
     "Returns STRUCT(lb_statistic, lb_p_value, lb_lags, dw_statistic, dw_interpretation, jb_statistic, "
-    "jb_p_value, jb_skewness, jb_excess_kurtosis, adequate). adequate = (lb_p_value > alpha), alpha default 0.05.",
+    "jb_p_value, jb_skewness, jb_excess_kurtosis, adequate, dw_p_value). adequate = (lb_p_value > alpha), "
+    "alpha default 0.05; dw_p_value is the approximate two-sided Durbin-Watson p-value.",
     "SELECT group_col, (residual_diagnostics).adequate FROM ts_residual_diagnostics_by('resids', product_id, ds, e)",
     "diagnostics"},
 

@@ -8197,6 +8197,7 @@ pub unsafe extern "C" fn anofox_ts_durbin_watson(
         Ok(r) => {
             (*out_result).statistic = r.statistic;
             copy_string_to_buffer(r.interpretation, &mut (*out_result).interpretation);
+            (*out_result).p_value = r.p_value;
             true
         }
         Err(_) => {
@@ -8301,6 +8302,7 @@ pub unsafe extern "C" fn anofox_ts_residual_diagnostics(
             (*out_result).jb_skewness = r.jb_skewness;
             (*out_result).jb_excess_kurtosis = r.jb_excess_kurtosis;
             (*out_result).adequate = r.adequate;
+            (*out_result).dw_p_value = r.dw_p_value;
             true
         }
         Err(_) => {

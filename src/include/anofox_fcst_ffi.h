@@ -1888,6 +1888,10 @@ typedef struct AnofoxLjungBoxResult {
 typedef struct AnofoxDurbinWatsonResult {
     double statistic;
     char interpretation[32];
+    /**
+     * Approximate two-sided p-value (#284).
+     */
+    double p_value;
 } AnofoxDurbinWatsonResult;
 
 /**
@@ -1918,6 +1922,10 @@ typedef struct AnofoxResidualDiagnosticsResult {
     double jb_skewness;
     double jb_excess_kurtosis;
     bool adequate;
+    /**
+     * Approximate two-sided Durbin-Watson p-value (#284).
+     */
+    double dw_p_value;
 } AnofoxResidualDiagnosticsResult;
 
 /**

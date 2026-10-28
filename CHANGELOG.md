@@ -16,6 +16,13 @@ returns the source table's column names and types (previously always
 
 ### Added
 
+- **`ts_durbin_watson` / `ts_durbin_watson_by` return `p_value` and `method` (#284).**
+  Two fields appended to the result STRUCT: `p_value`, an approximate two-sided p-value
+  for H0 "no first-order autocorrelation" (normal approximation with the exact null
+  moments of the statistic, as R `lmtest::dwtest(exact = FALSE)`; `NaN` for `n < 3`), and
+  `method = 'Durbin-Watson'`. `ts_residual_diagnostics` / `_by` append the same p-value as
+  `dw_p_value`. Existing fields keep their names, types and positions.
+
 - **`ts_detect_changepoints_by` and `ts_detect_changepoints_agg` gain `threshold`,
   `deseasonalize` and `seasonal_period` params MAP keys (#287).** `threshold`
   (optional, `[0, 1]`): when set, `is_changepoint = (changepoint_probability >=

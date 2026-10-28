@@ -167,3 +167,28 @@ fn durbin_watson_matches_closed_form_for_every_portmanteau_case() {
         );
     }
 }
+
+#[test]
+fn durbin_watson_p_value_matches_r_normal_approximation_for_every_portmanteau_case() {
+    let fx = load_fixture("r_diagnostics/stationarity_portmanteau.json");
+    let p_abs = tolerance(&fx, "dw_p_value_abs");
+
+    let cases = fx["portmanteau_cases"]
+        .as_object()
+        .expect("stationarity_portmanteau.json: 'portmanteau_cases' is not an object");
+
+    for (name, case) in cases {
+        let values = f64_vec(&case["values"]);
+        let want_p = num(&case["durbin_watson_p_value"]);
+
+        let got = durbin_watson(&values);
+
+        assert_close(
+            got.p_value,
+            want_p,
+            p_abs,
+            0.0,
+            &format!("{name} durbin_watson p_value"),
+        );
+    }
+}

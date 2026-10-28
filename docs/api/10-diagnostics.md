@@ -341,7 +341,17 @@ Durbin-Watson first-order autocorrelation statistic: the closed form
 the closed-form fixture value (which matches this formula exactly on both the R and Rust
 sides) in `portmanteau_reference.rs#durbin_watson_matches_closed_form_for_every_portmanteau_case`.
 
-- `ts_durbin_watson(residuals LIST(DOUBLE)) → STRUCT(statistic DOUBLE, interpretation VARCHAR)`
+- `ts_durbin_watson(residuals LIST(DOUBLE)) → STRUCT(statistic DOUBLE, interpretation VARCHAR, p_value DOUBLE, method VARCHAR)`
+
+`p_value` (#284) is an **approximate** two-sided p-value for H0: no first-order
+autocorrelation. It is a normal approximation that uses the exact null mean and variance of
+the statistic for residuals taken as given (no regressors, no demeaning), the moment formula
+of R `lmtest::dwtest(exact = FALSE)`: `E[d] = 2(n-1)/n`,
+`Var[d] = 2((6n-8) - 2(n-1)E[d]) / (n(n+2))`, `p = 2·min(Φ(z), 1-Φ(z))`. It is `NaN` for
+`n < 3` or all-zero residuals. Verified against the R reference in
+`portmanteau_reference.rs#durbin_watson_p_value_matches_r_normal_approximation_for_every_portmanteau_case`
+and `test/sql/correctness/diagnostics.test`. `method` is always `'Durbin-Watson'`. Both
+fields are appended after the existing ones.
 
 `interpretation` is a heuristic label from fixed thresholds on `statistic`: `< 0.5` →
 `positive_strong`, `< 1.5` → `positive_weak`, `<= 2.5` → `none`, `< 3.5` → `negative_weak`,
@@ -365,7 +375,8 @@ One-shot residual adequacy report combining all three tests.
 
 **Returned STRUCT**: `lb_statistic`, `lb_p_value`, `lb_lags`, `dw_statistic`,
 `dw_interpretation`, `jb_statistic`, `jb_p_value`, `jb_skewness`,
-`jb_excess_kurtosis`, `adequate BOOLEAN`.
+`jb_excess_kurtosis`, `adequate BOOLEAN`, `dw_p_value DOUBLE` (the approximate
+Durbin-Watson p-value above; appended in #284).
 
 **Adequacy rule**: `adequate = (lb_p_value > alpha)`, using the Ljung-Box gate with
 `fitted_params = 0` — the gate assumes raw residuals, not a model-corrected `df`. Durbin-Watson

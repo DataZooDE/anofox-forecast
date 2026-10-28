@@ -244,3 +244,56 @@ query I
 SELECT abs(ts_jarque_bera([1.0,-1.0,1.0,-1.0,1.0,-1.0,1.0,-1.0]::DOUBLE[]).statistic - 1.3333333333333333) < 1e-9;
 ----
 true
+
+# =============================================================================
+# ts_durbin_watson p_value / method (#284, CTR-12). p_value is the two-sided
+# normal approximation with the exact null moments of lmtest::dwtest(exact =
+# FALSE) at a zero-column design (residuals taken as given):
+#   E[d] = 2(n-1)/n, Var[d] = 2((6n-8) - 2(n-1) E[d]) / (n(n+2)).
+# R references (validation/reference/r/gen_diagnostics_reference.R, dw_p_value):
+#   alternating [1,-1]x4      -> 0.0049346717400553519 (negative autocorrelation)
+#   cumsum(sin(1:40))         -> 1.9762210475126698e-07 (d = 0.3458, positive)
+#   diff(rw)[1:30] fixture    -> 0.170189557523526 (stationarity_portmanteau.json)
+# =============================================================================
+
+query II
+SELECT abs(r.p_value - 0.0049346717400553519) < 1e-9, r.method
+FROM (SELECT ts_durbin_watson([1.0,-1.0,1.0,-1.0,1.0,-1.0,1.0,-1.0]::DOUBLE[]) AS r);
+----
+true	Durbin-Watson
+
+statement ok
+CREATE TABLE dw284 AS
+SELECT 'sin' AS id, DATE '2024-01-01' + INTERVAL (i) DAY AS ds,
+       sum(sin(i)) OVER (ORDER BY i) AS e
+FROM range(1, 41) t(i);
+
+query IIII
+SELECT id, abs((durbin_watson).statistic - 0.34576716223592519) < 1e-9,
+       abs((durbin_watson).p_value - 1.9762210475126698e-07) < 1e-12,
+       (durbin_watson).method
+FROM ts_durbin_watson_by('dw284', id, ds, e);
+----
+sin	true	true	Durbin-Watson
+
+# The residual-diagnostics report carries the same p-value as dw_p_value.
+query I
+SELECT abs((residual_diagnostics).dw_p_value - 1.9762210475126698e-07) < 1e-12
+FROM ts_residual_diagnostics_by('dw284', id, ds, e);
+----
+true
+
+# Fields were appended: the existing fields keep their positions.
+query I
+SELECT typeof(ts_durbin_watson([1.0,-1.0,1.0,-1.0,1.0,-1.0,1.0,-1.0]::DOUBLE[]));
+----
+STRUCT(statistic DOUBLE, interpretation VARCHAR, p_value DOUBLE, "method" VARCHAR)
+
+# n < 3: p_value is NaN (undefined), the statistic is still reported.
+query I
+SELECT isnan(ts_durbin_watson([1.0, 2.0]::DOUBLE[]).p_value);
+----
+true
+
+statement ok
+DROP TABLE dw284;
