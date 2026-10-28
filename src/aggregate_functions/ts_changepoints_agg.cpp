@@ -85,10 +85,14 @@ static void TsChangepointsAggUpdate(Vector inputs[], AggregateInputData &aggr_in
     ToUnified(val_vec, count, val_data);
     ToUnified(params_vec, count, params_data);
 
-    auto states = FlatDataMut<TsChangepointsAggState *>(state_vector);
+    // Window evaluation passes a constant or dictionary state vector, GROUP BY a
+    // flat one: read it through UnifiedVectorFormat so both are handled.
+    UnifiedVectorFormat state_data;
+    ToUnified(state_vector, count, state_data);
+    auto states = UnifiedVectorFormat::GetData<TsChangepointsAggState *>(state_data);
 
     for (idx_t i = 0; i < count; i++) {
-        auto &state = *states[i];
+        auto &state = *states[state_data.sel->get_index(i)];
 
         auto ts_idx = ts_data.sel->get_index(i);
         auto val_idx = val_data.sel->get_index(i);
