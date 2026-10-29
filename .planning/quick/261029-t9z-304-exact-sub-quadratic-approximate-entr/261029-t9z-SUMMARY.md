@@ -50,7 +50,7 @@ A profile at 160k rows after the entropy fix showed two other quadratic parts: `
 | `ts_stats_agg` 10k (SQL) | 0.19 s | 0.055 s |
 | `ts_stats_agg` 40k (SQL) | 2.52 s | 0.21 s |
 | `ts_stats_agg` 160k (SQL) | 44.5 s | 0.89 s |
-| `ts_stats_agg` 1M (SQL) | did not finish | 6.5 s, 409 MB peak RSS |
+| `ts_stats_agg` 1M (SQL) | not run (quadratic extrapolation ~20 min) | 6.5 s, 409 MB peak RSS |
 | `compute_ts_stats` 160k (Rust, ignored perf gate < 3 s) | ~44 s | 0.87 s |
 
 Verification after the follow-up:
