@@ -282,8 +282,9 @@ The same series can be built with plain SQL: `GROUP BY date, ROLLUP(...)` sums e
 level in one aggregation, and `GROUPING()` marks the rolled-up keys. The result has the
 same `unique_id`, date and value rows as `ts_aggregate_hierarchy` (tested in
 `test/sql/ts_grouping_sets.test`). This form is handy when the level values need another
-aggregate than `SUM`, or extra columns per level. On DuckDB 2.0 the coarser levels are
-computed from the finer ones (cascading aggregation).
+aggregate than `SUM`, or extra columns per level. It is also much faster: ~55x on 10k series
+x 365 days (0.15 s vs 8.3 s, `benchmark/duckdb2/README.md`, #305). On DuckDB 2.0 the coarser
+levels are computed from the finer ones (cascading aggregation).
 
 ```sql
 CREATE TABLE prepared_rollup AS
