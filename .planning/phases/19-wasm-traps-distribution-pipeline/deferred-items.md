@@ -3,7 +3,7 @@
 ### Plan 19-01
 
 - `_ts_fill_forward_native` has pre-existing, WASM-only bugs on calendar frequencies and on TIMESTAMP + hourly frequency, independent of the #289 nested-query/identifier/frequency-ignored bugs fixed in this plan.
-  status: open
+  status: resolved (2026-10-30, quick task 261029-wbq)
   **What:** On the identical v1.5.6 `wasm_eh` artifact (native vs. the Node DuckDB-Wasm harness):
   - `'1mo'` (monthly): WASM returns 2 rows, native returns 4.
   - `'1q'` (quarterly): WASM returns 216 rows, native returns 4.
@@ -16,7 +16,7 @@
   **Candidate for:** a separate GitHub issue (not filed in this plan) tracking the calendar/hourly `_ts_fill_forward_native` WASM-only bug.
 
 - `_ts_fill_forward_native` also silently zero-fills (returns exactly the original row count, no new rows, no error) in DuckDB-Wasm for a second, distinct trigger shape -- even at `'1d'`/`'2d'` frequencies previously assumed safe above.
-  status: open
+  status: resolved (2026-10-30, quick task 261029-wbq)
   **What:** Bisected directly against the v1.5.6 `wasm_eh` artifact built from this plan's own commit (`6745b28`), via `node test/wasm/run.mjs --file <scratch>.test` on throwaway tables never committed. `_ts_fill_forward_native` is untouched by this plan's diff (only a new, separate SQL macro entry was added), so the bug predates this plan. Observed with a single `g`/`d`/`v`-column table, `ts_fill_forward_by` called directly (no macro/operator involved):
   - `ts_fill_forward_by('t2', g, d, v, TIMESTAMP '2024-01-05', '1d')` on 1 group x 2 rows (`2024-01-01`, `2024-01-02`, step 1d) -- WASM: 2 (expected 5).
   - `ts_fill_forward_by('t3', g, d, v, TIMESTAMP '2024-01-06', '1d')` on 1 group x 3 rows (step 1d) -- WASM: 3 (expected 6). Same pattern through 6 rows (`t4`..`t6`), all single-group, step == frequency.
@@ -30,3 +30,26 @@
   **Mitigation applied here:** `test/sql/ts_fill_forward_operator.test`'s WASM-gated assertions all use >= 3 rows per group with a per-group date step that differs from the requested frequency (the `raw_sales` fixture, and the "weird" quoted-identifier fixture rewritten from 1 group/2 rows to 2 groups/3 rows each). The affected carried-over `ts_fill_forward_by` pins (`test_series` '2024-01-08' cases, the whole `single_group` section) and the original single-group "weird" quoted-identifier pin were moved to `test/sql/ts_fill_forward_native.test` (already WASM skip-listed), where they still run natively.
   **Candidate for:** the same separate GitHub issue as the calendar/hourly bug above (or a closely related one) tracking `_ts_fill_forward_native` WASM-only correctness gaps.
   **WR-02 (#272 review, 19-REVIEW.md) coverage-visibility note:** the mitigation above means this silent-data-loss bug has zero WASM CI coverage after Phase 19 -- native doesn't reproduce it, and the file carrying the pins (`test/sql/ts_fill_forward_native.test`) is skipped entirely on WASM for the unrelated `___trap` reason below, not gated for THIS bug. `test/wasm/run.mjs`'s `SKIP_FILES` entry for `test/sql/ts_fill_forward_native.test` now cross-references this exact item and names the three unprotected cases verbatim (`test_series` '2024-01-08', `single_group` '2024-01-05', `weird_single`). The harness (`test/wasm/sqllogic.mjs`) has no expected-failure/XFAIL marker -- only `statement ok`/`statement error`/`query` pass-or-fail records -- so a pinned-wrong-value test was rejected as a fix here: it would read as an assertion that the wrong row count is correct, which is worse than an explicit, cross-referenced skip. This item remains `status: open`; closing it requires either root-causing `_ts_fill_forward_native`'s WASM-only arithmetic bug or adding real XFAIL semantics to the harness, not a documentation change.
+
+### Resolution (2026-10-30, quick task 261029-wbq)
+
+Both `_ts_fill_forward_native` WASM-only items above share a single root cause: the toolchain, not the fill arithmetic.
+
+- **Cause.** WASM builds pinned Rust 1.86.0 (CMakeLists.txt). Rust up to at least 1.92 compiles `wasm32-unknown-emscripten` code with JS-based exception handling, giving 113 `invoke_*` trampoline imports in this extension. Inside the native-exception `wasm_eh` side module, that made ordinary Rust code compute wrong results:
+  - `fill_forward` returned the input unfilled, or stepped from a 1970 date.
+  - chrono conversions failed for about half of all days.
+  - Hourly fills aborted with "Rust panics must be rethrown".
+
+  C++ passed correct arguments throughout. The same code was correct when built with Rust 1.96 (0 `invoke_*` imports).
+- **Bisection** (v1.5.6 `wasm_eh`, `.planning/quick/261029-wbq-.../261029-wbq-repro.test`):
+  - 1.86, 1.88 and 1.92 fail 8 of 13 assertions.
+  - 1.96 and 1.98 pass 13 of 13.
+  - Ruled out along the way: `wasm-opt` (same result at `-O0`), static-data corruption (live tables are byte-identical to the file), chrono's own copy (correct when called out of line), and `std::regex`.
+- **Fix.**
+  - `wasm_eh` now pins Rust 1.96.0.
+  - `extension_config.cmake` sets the linked module's target features explicitly, so emsdk 3.1.71's binaryen v120 accepts it. Without that, it rejects `--enable-bulk-memory-opt`.
+  - Also fixed: the WASM allocator's 4-byte size header misaligned every i64/f64 array returned to C++. It now uses an 8-byte header.
+- **Coverage.**
+  - `test/sql/ts_fill_forward_native.test` is off the WASM skip list.
+  - The new `test/sql/ts_fill_forward_wasm_regression.test` pins the bisected cases.
+  - Both files are in CURATED: 12 files, 540 assertions, green on a CI-like build with the bundled binaryen.
