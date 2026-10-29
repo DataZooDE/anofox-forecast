@@ -2,7 +2,7 @@
 quick_id: 261029-t9z
 status: complete
 issue: 304
-commits: [890be302, 1894964a]
+commits: [890be302, 1894964a, 09d40ac9]
 ---
 
 # 261029-t9z: exact sub-quadratic approximate entropy (#304)
@@ -38,17 +38,23 @@ Executed inline (no sub-agents). The plan's three tasks were done as one code co
 | `ts_stats_agg` 40k (SQL) | 2.52 s | 1.63 s |
 | `ts_stats_agg` 160k (SQL) | 44.5 s | 24.1 s |
 
-## Remaining quadratic cost in ts_stats (not fixed here)
-Profile of `compute_ts_stats` at 160k rows, after the fix:
+## Follow-up in the same task (user approved last-bit drift): 09d40ac9
+A profile at 160k rows after the entropy fix showed two other quadratic parts: `detect_seasonality` took 21.4 s (direct ACF at every lag up to n/2), and `compute_stability` took 2.2 s (naive rolling means with window n/5).
+- **ACF by FFT** (Wiener-Khinchin) when `n * max_lag >= 4096 * 2048`. It agrees with direct sums to < 1e-11 on 5 test series, including a square wave with flat ACF runs. Peak comparisons in the FFT path use a 1e-10 tie tolerance. The detected periods are identical to the direct path in the test.
+- **Stability** uses a Neumaier-compensated sliding window sum from 4,096 rows. Means agree to 1e-12 relative and stability to 1e-9.
+- Below these sizes the original code runs unchanged, so existing pins are bit-identical.
 
-| part | time |
-|---|---:|
-| `seasonality::detect_seasonality` | 21.4 s |
-| `compute_stability` | 2.2 s |
-| entropy | 0.47 s |
-| `stl_strengths` | 0.41 s |
+## Final timings
+| | before | after |
+|---|---:|---:|
+| `ts_stats_agg` 10k (SQL) | 0.19 s | 0.055 s |
+| `ts_stats_agg` 40k (SQL) | 2.52 s | 0.21 s |
+| `ts_stats_agg` 160k (SQL) | 44.5 s | 0.89 s |
+| `ts_stats_agg` 1M (SQL) | did not finish | 6.5 s, 409 MB peak RSS |
+| `compute_ts_stats` 160k (Rust, ignored perf gate < 3 s) | ~44 s | 0.87 s |
 
-- `detect_seasonality` computes the direct ACF at every lag up to n/2.
-- `compute_stability` computes naive rolling means with window n/5.
-
-Fast versions (FFT ACF, sliding sums) are not bit-identical, so they need a decision on result drift. They are reported on #304.
+Verification after the follow-up:
+- the entropy probe diff is still empty
+- `cargo test -p anofox-fcst-core`: 679 passed, 0 failed
+- fmt and clippy are clean
+- the full sqllogictest suite passes: 6962 assertions in 109 test cases
