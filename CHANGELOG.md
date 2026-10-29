@@ -124,6 +124,10 @@ returns the source table's column names and types (previously always
     `n * max_lag >= 4096 * 2048`; ACF values agree with direct sums to ~1e-12.
   - `stability` slides its rolling-window sum (compensated) from 4,096 rows on.
   Shorter series keep the previous code paths, so their results are unchanged.
+- **`ts_aggregate_hierarchy` is ~10x faster (#305).** It reads the input vectors
+  directly, interns each key tuple once, and aggregates (unique_id, date) cells in
+  flat arrays instead of nested `std::map`s: 10,000 series x 365 days x 3 key levels
+  takes ~1.1 s instead of ~12 s. Output rows, order and sums are unchanged.
 - **`ts_detect_amplitude_modulation`'s seasonality gate and `seasonal_strength` now
   use the same STL strength as `ts_stats_by` / `ts_classify_seasonality_by` (#286),
   not fdars's own raw-series spectral strength.** Below the (default 0.3) threshold,
