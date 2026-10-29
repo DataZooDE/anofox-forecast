@@ -122,6 +122,7 @@ None yet.
 | 261016-tjw | DuckDB 2.0-dev compat port (compat header, WASM Rust 1.86 pin, 2.0 CI job) | 2026-10-17 | 720c7c7 | [261016-tjw-port-anofox-statistics-duckdb-2-0-compat](./quick/261016-tjw-port-anofox-statistics-duckdb-2-0-compat/) |
 | 3 | Fix DuckDB v2.0.0 build (explicit extension target names, no-OpenSSL banner gate, duckdb-next CI -> v2.0.0) | 2026-10-21 | 4cab513 | — |
 | 261022-laz | Make DuckDB v2.0.0 the stable build line (submodules, distribution CI, keep v1.5.6 + v1.4.5 lines, retire duckdb-next, docs) | 2026-10-22 | 7f33142 | [261022-laz-make-duckdb-v2-0-0-the-stable-build-line](./quick/261022-laz-make-duckdb-v2-0-0-the-stable-build-line/) |
+| 261029-dk2 | DuckDB 2.0 adoption #294-#303 (window crash fix, VARIANT/{} params, ROLLUP, rolling windows, state export, triggers, variables, benchmark), branch feat/duckdb2-adoption, inline (gsd-fast, no subagents) | 2026-10-29 | b64fc6e7 | — |
 
 ### Roadmap Evolution
 
