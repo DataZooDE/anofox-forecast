@@ -333,6 +333,67 @@ static void TsStatsAggCombine(Vector &state_vector, Vector &combined, AggregateI
     }
 }
 
+// State export (#298, DuckDB 2.0): ts_stats_agg(...) EXPORT_STATE gives the buffered
+// series as STRUCT(ds TIMESTAMP[], y DOUBLE[]) (a NULL y is a NULL value), to store,
+// merge with combine_aggr and finalize() later. An empty state exports as NULL.
+struct TsStatsAggExport {
+    static LogicalType ExportType() {
+        child_list_t<LogicalType> children;
+        children.push_back(MakeChild("ds", LogicalType::LIST(LogicalType::TIMESTAMP)));
+        children.push_back(MakeChild("y", LogicalType::LIST(LogicalType::DOUBLE)));
+        return LogicalType::STRUCT(std::move(children));
+    }
+    static idx_t StateSize() {
+        return sizeof(TsStatsAggState);
+    }
+    static Value Export(data_ptr_t state_p) {
+        auto &state = *reinterpret_cast<TsStatsAggState *>(state_p);
+        if (!state.data || !state.data->initialized) {
+            return Value(ExportType());
+        }
+        auto &data = *state.data;
+        vector<Value> ds;
+        vector<Value> y;
+        for (idx_t i = 0; i < data.timestamps.size(); i++) {
+            ds.push_back(Value::TIMESTAMP(timestamp_t(data.timestamps[i])));
+            y.push_back(data.validity[i] ? Value::DOUBLE(data.values[i]) : Value(LogicalType::DOUBLE));
+        }
+        vector<Value> fields;
+        fields.push_back(Value::LIST(LogicalType::TIMESTAMP, std::move(ds)));
+        fields.push_back(Value::LIST(LogicalType::DOUBLE, std::move(y)));
+        return Value::STRUCT(ExportType(), std::move(fields));
+    }
+    static void Import(const Value &entry, data_ptr_t state_p) {
+        auto &state = *reinterpret_cast<TsStatsAggState *>(state_p);
+        state.data = nullptr;
+        if (entry.IsNull()) {
+            return;
+        }
+        auto &fields = StructValue::GetChildren(entry);
+        if (fields[0].IsNull() || fields[1].IsNull()) {
+            throw InvalidInputException("Invalid ts_stats_agg state - ds and y cannot be NULL");
+        }
+        auto &ds = ListValue::GetChildren(fields[0]);
+        auto &y = ListValue::GetChildren(fields[1]);
+        if (ds.size() != y.size()) {
+            throw InvalidInputException("Invalid ts_stats_agg state - ds and y have different lengths (%d, %d)",
+                                        (int64_t)ds.size(), (int64_t)y.size());
+        }
+        auto data = new TsStatsAggStateData();
+        for (idx_t i = 0; i < ds.size(); i++) {
+            if (ds[i].IsNull()) {
+                delete data;
+                throw InvalidInputException("Invalid ts_stats_agg state - ds cannot contain NULL");
+            }
+            data->timestamps.push_back(ds[i].GetValue<timestamp_t>().value);
+            data->values.push_back(y[i].IsNull() ? 0.0 : y[i].GetValue<double>());
+            data->validity.push_back(!y[i].IsNull());
+        }
+        data->initialized = true;
+        state.data = data;
+    }
+};
+
 static void TsStatsAggDestructor(Vector &state_vector, AggregateInputData &aggr_input, idx_t count) {
     auto states = FlatDataMut<TsStatsAggState *>(state_vector);
     for (idx_t i = 0; i < count; i++) {
@@ -358,6 +419,9 @@ void RegisterTsStatsAggFunction(ExtensionLoader &loader) {
         nullptr,  // bind
         TsStatsAggDestructor
     );
+
+    // EXPORT_STATE / combine_aggr / finalize on DuckDB 2.0 (#298)
+    InstallStateExportOf<TsStatsAggExport>(agg_func);
 
     // Register ts_stats_agg
     AggregateFunctionSet ts_stats_agg_set("ts_stats_agg");

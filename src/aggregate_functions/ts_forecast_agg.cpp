@@ -45,6 +45,8 @@ struct TsForecastAggStateData {
     // seasonal_order/seasonal_period) this struct used to carry, each of
     // which silently dropped every other ts_forecast_by param.
     ForecastParamSet params;
+    // The params argument as given (MAP / STRUCT / ...), kept for state export (#298).
+    Value params_raw;
     bool initialized;
 
     // Set for a window frame (#297): a series the model cannot fit is reported in
@@ -276,6 +278,7 @@ static void TsForecastAggUpdate(Vector inputs[], AggregateInputData &aggr_input,
                 Value params_value =
                     params_data.validity.RowIsValid(params_idx) ? params_vec.GetValue(i) : Value();
                 state.data->params = ParseForecastParamSet(params_value);
+                state.data->params_raw = params_value;
             }
 
             // confidence_level determines the bound STRUCT's lower_<pct>/
@@ -341,6 +344,21 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
         }
 
         auto &data = *state.data;
+
+        // A state imported from EXPORT_STATE (#298) carries its own params, but
+        // finalize() binds without the original constant arguments, so the field
+        // names are those of the default confidence_level. Refuse rather than
+        // label a different interval as lower_<pct> / upper_<pct>.
+        {
+            auto &bind_data = aggr_input.bind_data->Cast<TsForecastAggBindData>();
+            if (std::abs(data.params.confidence_level - bind_data.confidence_level) > 1e-9) {
+                throw InvalidInputException(
+                    "ts_forecast_agg: this state's params set confidence_level = %f, but the result is bound for "
+                    "confidence_level = %f (finalize() of an exported state binds the default); export states "
+                    "with the default confidence_level, or aggregate the rows directly",
+                    data.params.confidence_level, bind_data.confidence_level);
+            }
+        }
 
         // Sort (timestamp, value, valid) together by timestamp (D-11/D-12):
         // an index sort, not a sort over pair<timestamp,value>, so the
@@ -764,6 +782,89 @@ static void TsForecastAggWindow(AggregateInputData &aggr_input, const WindowPart
     delete frame_state.data;
 }
 
+// ---------------------------------------------------------------------------
+// State export (#298, DuckDB 2.0): ts_forecast_agg(...) EXPORT_STATE gives
+// STRUCT(method, horizon, params MAP(VARCHAR, VARCHAR), ds TIMESTAMP[], y DOUBLE[])
+// -- the buffered series and its settings -- so states can be stored, merged with
+// combine_aggr (e.g. yesterday's state with today's rows) and forecast later with
+// finalize(). A NULL y is a NULL value; an empty state exports as NULL.
+// ---------------------------------------------------------------------------
+
+struct TsForecastAggExport {
+    static LogicalType ExportType() {
+        child_list_t<LogicalType> children;
+        children.push_back(MakeChild("method", LogicalType::VARCHAR));
+        children.push_back(MakeChild("horizon", LogicalType::INTEGER));
+        children.push_back(MakeChild("params", LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR)));
+        children.push_back(MakeChild("ds", LogicalType::LIST(LogicalType::TIMESTAMP)));
+        children.push_back(MakeChild("y", LogicalType::LIST(LogicalType::DOUBLE)));
+        return LogicalType::STRUCT(std::move(children));
+    }
+    static idx_t StateSize() {
+        return sizeof(TsForecastAggState);
+    }
+    static Value Export(data_ptr_t state_p) {
+        auto &state = *reinterpret_cast<TsForecastAggState *>(state_p);
+        if (!state.data || !state.data->initialized) {
+            return Value(ExportType());
+        }
+        auto &data = *state.data;
+        vector<Value> ds;
+        vector<Value> y;
+        ds.reserve(data.timestamps.size());
+        y.reserve(data.values.size());
+        for (idx_t i = 0; i < data.timestamps.size(); i++) {
+            ds.push_back(Value::TIMESTAMP(timestamp_t(data.timestamps[i])));
+            y.push_back(data.valid[i] ? Value::DOUBLE(data.values[i]) : Value(LogicalType::DOUBLE));
+        }
+        vector<Value> fields;
+        fields.push_back(Value(data.method));
+        fields.push_back(Value::INTEGER(data.horizon));
+        fields.push_back(ParamsAsVarcharMap(data.params_raw));
+        fields.push_back(Value::LIST(LogicalType::TIMESTAMP, std::move(ds)));
+        fields.push_back(Value::LIST(LogicalType::DOUBLE, std::move(y)));
+        return Value::STRUCT(ExportType(), std::move(fields));
+    }
+    static void Import(const Value &entry, data_ptr_t state_p) {
+        auto &state = *reinterpret_cast<TsForecastAggState *>(state_p);
+        state.data = nullptr;
+        state.window = nullptr;
+        if (entry.IsNull()) {
+            return;
+        }
+        auto &fields = StructValue::GetChildren(entry);
+        if (fields[0].IsNull() || fields[1].IsNull() || fields[3].IsNull() || fields[4].IsNull()) {
+            throw InvalidInputException("Invalid ts_forecast_agg state - method, horizon, ds and y cannot be NULL");
+        }
+        auto &ds = ListValue::GetChildren(fields[3]);
+        auto &y = ListValue::GetChildren(fields[4]);
+        if (ds.size() != y.size()) {
+            throw InvalidInputException("Invalid ts_forecast_agg state - ds and y have different lengths (%d, %d)",
+                                        (int64_t)ds.size(), (int64_t)y.size());
+        }
+        auto data = new TsForecastAggStateData();
+        try {
+            data->method = fields[0].GetValue<string>();
+            data->horizon = fields[1].GetValue<int32_t>();
+            data->params_raw = fields[2];
+            data->params = ParseForecastParamSet(fields[2]);
+            for (idx_t i = 0; i < ds.size(); i++) {
+                if (ds[i].IsNull()) {
+                    throw InvalidInputException("Invalid ts_forecast_agg state - ds cannot contain NULL");
+                }
+                data->timestamps.push_back(ds[i].GetValue<timestamp_t>().value);
+                data->values.push_back(y[i].IsNull() ? 0.0 : y[i].GetValue<double>());
+                data->valid.push_back(!y[i].IsNull());
+            }
+        } catch (...) {
+            delete data;
+            throw;
+        }
+        data->initialized = true;
+        state.data = data;
+    }
+};
+
 static void TsForecastAggDestructor(Vector &state_vector, AggregateInputData &aggr_input, idx_t count) {
     auto states = FlatDataMut<TsForecastAggState *>(state_vector);
     for (idx_t i = 0; i < count; i++) {
@@ -798,6 +899,8 @@ void RegisterTsForecastAggFunction(ExtensionLoader &loader) {
 
     // Sliding / expanding window frames (#297)
     agg_func.SetWindowCallback(TsForecastAggWindow);
+    // EXPORT_STATE / combine_aggr / finalize on DuckDB 2.0 (#298)
+    InstallStateExportOf<TsForecastAggExport>(agg_func);
 
     AggregateFunctionSet func_set("anofox_fcst_ts_forecast_agg");
     func_set.AddFunction(agg_func);

@@ -518,6 +518,49 @@ ORDER BY id, ds;
 - The other `ts_*_agg` aggregates (`ts_stats_agg`, `ts_features_agg`, ...) work over
   frames too (rolling statistics), with the same results as `GROUP BY` over the frame.
 
+### Stored states and incremental refits (DuckDB 2.0+)
+
+On DuckDB 2.0 the aggregate state of `ts_forecast_agg` and `ts_stats_agg` can be exported
+with `EXPORT_STATE`, stored in a table, merged with `combine_aggr` and turned into the
+result later with `finalize`. A refit then combines yesterday's stored state with
+today's new rows instead of rescanning the history:
+
+```sql
+-- DuckDB 2.0+
+CREATE OR REPLACE TABLE history AS
+SELECT i % 2 AS id, (TIMESTAMP '2024-01-01' + INTERVAL (i // 2) DAY) AS ds,
+       (10 + (i // 2) % 7)::DOUBLE AS y
+FROM range(120) t(i);
+
+-- once: one state per series
+CREATE OR REPLACE TABLE fc_state AS
+SELECT id, ts_forecast_agg(ds, y, 'SES', 7, MAP{}) EXPORT_STATE AS st FROM history GROUP BY id;
+
+-- each day: merge the new rows' state into the stored one ...
+CREATE OR REPLACE TABLE new_rows AS
+SELECT id, TIMESTAMP '2024-03-01' AS ds, 12.0 AS y FROM (VALUES (0), (1)) t(id);
+
+CREATE OR REPLACE TABLE fc_state AS
+SELECT id, combine_aggr(st) AS st FROM (
+    SELECT id, st FROM fc_state
+    UNION ALL
+    SELECT id, ts_forecast_agg(ds, y, 'SES', 7, MAP{}) EXPORT_STATE FROM new_rows GROUP BY id)
+GROUP BY id;
+
+-- ... and forecast from it
+SELECT id, (finalize(st)).point_forecast FROM fc_state ORDER BY id;
+```
+
+- `finalize(st)` gives exactly the aggregate over all the rows that went into the
+  state(s); the exported state is the buffered series plus method, horizon and params
+  (`STRUCT(method, horizon, params, ds, y)` for `ts_forecast_agg`, `STRUCT(ds, y)` for
+  `ts_stats_agg`). The state grows with the history: this saves the rescan, not memory.
+- `finalize` cannot see the original constant arguments, so the result's interval fields
+  are those of the default `confidence_level` (`lower_90` / `upper_90`); finalizing a
+  state built with another `confidence_level` is an error.
+- DuckDB 1.5.6 refuses `EXPORT_STATE` for these aggregates ("custom destructors"); there,
+  aggregate the rows directly.
+
 ---
 
 ## Table Macros

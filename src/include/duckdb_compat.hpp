@@ -641,6 +641,84 @@ inline Value ParamsAsVarcharMap(const Value &params_in) {
 	return Value::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR, std::move(keys), std::move(values));
 }
 
+//===--------------------------------------------------------------------===//
+// Aggregate state export (DuckDB 2.0: agg(...) EXPORT_STATE, combine_aggr, finalize)
+//===--------------------------------------------------------------------===//
+//
+// An exporter EXP describes a pointer-backed state in plain Values, so it compiles on
+// every line:
+//   static LogicalType ExportType();
+//   static idx_t StateSize();                              // sizeof(STATE)
+//   static Value Export(data_ptr_t state);                 // a NULL Value for an empty state
+//   static void Import(const Value &entry, data_ptr_t state); // entry may be NULL
+// InstallStateExportOf<EXP>(function) wires it through SetStateExportCallbacks on 2.0 and
+// is a no-op before. The 2.0-only callback types are taken from that setter's own
+// signature, so nothing here names them and 1.5 never instantiates the template.
+
+namespace compat_detail {
+template <class T>
+struct MemberFnArgs;
+template <class C, class R, class... A>
+struct MemberFnArgs<R (C::*)(A...)> {
+	template <size_t I>
+	using Arg = typename std::tuple_element<I, std::tuple<A...>>::type;
+};
+
+template <class F, class EXP>
+struct StateExportCallbacks {
+	using Setter = MemberFnArgs<decltype(&F::SetStateExportCallbacks)>;
+	using GetTypeFn = typename Setter::template Arg<0>;
+	using ExportFn = typename Setter::template Arg<1>;
+	using ImportFn = typename Setter::template Arg<2>;
+	using LayoutInput = typename std::remove_reference<typename FunctionTraits<GetTypeFn>::template Arg<0>>::type;
+	using Layout = decltype(std::declval<GetTypeFn>()(std::declval<LayoutInput &>()));
+	using FinalizeInput = typename std::remove_reference<typename FunctionTraits<ExportFn>::template Arg<1>>::type;
+	using ImportInput = typename std::remove_reference<typename FunctionTraits<ImportFn>::template Arg<0>>::type;
+
+	static Layout GetType(LayoutInput &) {
+		Layout layout;
+		layout.type = EXP::ExportType();
+		layout.total_state_size = AlignValue<idx_t>(EXP::StateSize());
+		return layout;
+	}
+	static void Export(Vector &states, FinalizeInput &, Vector &result, idx_t count, idx_t offset) {
+		auto ptrs = FlatDataMut<data_ptr_t>(states);
+		for (idx_t i = 0; i < count; i++) {
+			result.SetValue(offset + i, EXP::Export(ptrs[i]));
+		}
+	}
+	static void Import(ImportInput &input) {
+		const idx_t count = input.input_vec.size();
+		for (idx_t i = 0; i < count; i++) {
+			EXP::Import(input.input_vec.GetValue(i), input.dest_buffer + i * input.layout.total_state_size);
+		}
+	}
+};
+
+template <class F, class EXP>
+auto InstallStateExport(F &fn, int) -> decltype(&F::SetStateExportCallbacks, void()) {
+	using CB = StateExportCallbacks<F, EXP>;
+	fn.SetStateExportCallbacks(&CB::GetType, &CB::Export, &CB::Import);
+}
+template <class F, class EXP>
+void InstallStateExport(F &, long) {
+}
+
+template <class F, class = void>
+struct HasStateExport : std::false_type {};
+template <class F>
+struct HasStateExport<F, decltype(void(&F::SetStateExportCallbacks))> : std::true_type {};
+} // namespace compat_detail
+
+//! Whether aggregates can export / import their state (DuckDB 2.0+).
+constexpr bool kHasStateExport = compat_detail::HasStateExport<AggregateFunction>::value;
+
+//! Install EXP's state export / import on `function` (no-op without kHasStateExport).
+template <class EXP>
+void InstallStateExportOf(AggregateFunction &function) {
+	compat_detail::InstallStateExport<AggregateFunction, EXP>(function, 0);
+}
+
 } // namespace duckdb
 
 //! Wrap our callbacks for an AggregateFunction / ScalarFunction registration.
