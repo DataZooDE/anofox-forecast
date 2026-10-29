@@ -3,7 +3,7 @@
 #   EXPORT_STATE), stored, merged with combine_aggr and finalized later: an exported
 #   state finalizes to the direct aggregate, and combining partial states equals the
 #   aggregate over all their rows (incremental refits without rescanning history).
-#   v1.5 refuses EXPORT_STATE for aggregates with custom destructors (no unsafe path).
+#   v1.5 refuses EXPORT_STATE for aggregates with custom binders / destructors (no unsafe path).
 # group: [sql]
 
 require anofox_forecast
@@ -24,7 +24,7 @@ CREATE TABLE fc_states AS
 SELECT id, ds < TIMESTAMP '2024-02-01' AS early, ts_forecast_agg(ds, y, 'SES', 3, MAP{}) EXPORT_STATE AS st
 FROM se GROUP BY ALL;
 ----
-custom destructors
+Cannot use EXPORT_STATE on aggregate functions with custom
 
 # finalize(EXPORT_STATE) == the aggregate
 query I
@@ -81,7 +81,7 @@ statement maybe
 CREATE TABLE st_states AS
 SELECT id, ds < TIMESTAMP '2024-02-01' AS early, ts_stats_agg(ds, y) EXPORT_STATE AS st FROM se GROUP BY ALL;
 ----
-custom destructors
+Cannot use EXPORT_STATE on aggregate functions with custom
 
 query I
 FROM v2_or($$

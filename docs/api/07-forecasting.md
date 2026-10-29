@@ -558,7 +558,7 @@ SELECT id, (finalize(st)).point_forecast FROM fc_state ORDER BY id;
 - `finalize` cannot see the original constant arguments, so the result's interval fields
   are those of the default `confidence_level` (`lower_90` / `upper_90`); finalizing a
   state built with another `confidence_level` is an error.
-- DuckDB 1.5.6 refuses `EXPORT_STATE` for these aggregates ("custom destructors"); there,
+- DuckDB 1.5.6 refuses `EXPORT_STATE` for these aggregates ("Cannot use EXPORT_STATE on aggregate functions with custom ..."); there,
   aggregate the rows directly.
 
 ---
