@@ -6,10 +6,10 @@ current_phase: "20.1"
 current_phase_name: API Compatibility Gate
 status: planning
 stopped_at: Phase 20 complete, ready to plan Phase 20.1
-last_updated: "2026-10-23T23:18:05.349Z"
+last_updated: "2026-10-29T21:08:01.062Z"
 last_activity: 2026-10-24
 last_activity_desc: Phase 20 complete, transitioned to Phase 20.1
-state_head: afa772ff75b7bbdf6d8bab118226710609f64e79
+state_head: 1894964ae37e6982a7522f2c26ac52dd5fc262d7
 progress:
   total_phases: 8
   completed_phases: 1
@@ -32,7 +32,7 @@ See: .planning/PROJECT.md (updated 2026-10-24 — after Phase 20)
 Phase: 20.1 — API Compatibility Gate
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-10-24 — Phase 20 complete, transitioned to Phase 20.1
+Last activity: 2026-10-29 - Completed quick task 261029-t9z: #304 exact sub-quadratic approximate entropy
 
 Progress: [█░░░░░░░░░] 13%
 
@@ -123,6 +123,7 @@ None yet.
 | 3 | Fix DuckDB v2.0.0 build (explicit extension target names, no-OpenSSL banner gate, duckdb-next CI -> v2.0.0) | 2026-10-21 | 4cab513 | — |
 | 261022-laz | Make DuckDB v2.0.0 the stable build line (submodules, distribution CI, keep v1.5.6 + v1.4.5 lines, retire duckdb-next, docs) | 2026-10-22 | 7f33142 | [261022-laz-make-duckdb-v2-0-0-the-stable-build-line](./quick/261022-laz-make-duckdb-v2-0-0-the-stable-build-line/) |
 | 261029-dk2 | DuckDB 2.0 adoption #294-#303 (window crash fix, VARIANT/{} params, ROLLUP, rolling windows, state export, triggers, variables, benchmark), branch feat/duckdb2-adoption, inline (gsd-fast, no subagents) | 2026-10-29 | b64fc6e7 | — |
+| 261029-t9z | #304: exact sub-quadratic approximate entropy (rank-space range counting) | 2026-10-29 | 1894964a | [261029-t9z-304-exact-sub-quadratic-approximate-entr](./quick/261029-t9z-304-exact-sub-quadratic-approximate-entr/) |
 
 ### Roadmap Evolution
 
