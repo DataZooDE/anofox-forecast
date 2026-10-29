@@ -114,6 +114,12 @@ returns the source table's column names and types (previously always
 
 ### Changed
 
+- **Approximate / sample entropy is sub-quadratic in series length (#304).**
+  `ts_stats` (`entropy`) and `ts_features` (`sample_entropy`, `approximate_entropy`)
+  count template matches with exact rank-space range counting for long series, so
+  values are unchanged (bit-identical counts) while the entropy of a 160,000-row
+  series takes ~0.5 s instead of ~44 s. Short series keep the previous band search.
+  `ts_stats` default period detection and `stability` are still quadratic.
 - **`ts_detect_amplitude_modulation`'s seasonality gate and `seasonal_strength` now
   use the same STL strength as `ts_stats_by` / `ts_classify_seasonality_by` (#286),
   not fdars's own raw-series spectral strength.** Below the (default 0.3) threshold,
