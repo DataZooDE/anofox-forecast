@@ -54,36 +54,19 @@ const SKIP_FILES = new Map([
   // vs 1.6+). The test exercises an UNNEST in a FROM clause that WASM 1.5.5 rejects.
   ['test/sql/ts_forecast_mfles_stability.test', 'UNNEST not supported in DuckDB v1.5.5 WASM engine'],
 
-  // Emscripten abort trap: ts_fill_forward_native exercises an internal table function
-  // (_ts_fill_forward_native) that triggers an Emscripten WebAssembly.RuntimeError
-  // (___trap is not defined) in the WASM runtime. A separate ___trap import is
-  // missing from the eh bundle used here.
-  //
-  // WR-02 (#272 review, 19-REVIEW.md): skipping this whole file also removes WASM
-  // CI coverage of a SECOND, unrelated, pre-existing _ts_fill_forward_native bug
-  // this file's assertions happen to pin natively -- see
-  // .planning/phases/19-wasm-traps-distribution-pipeline/deferred-items.md
-  // ("silently zero-fills ... for a second, distinct trigger shape") for the full
-  // bisection. The specific WASM-unprotected cases living only in THIS file (lines
-  // ~336-409) are: `ts_fill_forward_by('test_series', ..., '2024-01-08', '1d'/'1
-  // day')` (single-group-or-step==frequency shape, WASM returns 10 not 16),
-  // `ts_fill_forward_by('single_group', ..., '2024-01-05', '1d')` (1-2 rows/group,
-  // WASM returns 3 not 5), and the single-group `weird_single` quoted-identifier
-  // `ts_fill_forward_operator` pin. None of these are exercised by any other file
-  // in CURATED or --all on WASM. This is a tracked deferral, not a fix: do not
-  // remove this skip entry without first root-causing and fixing the underlying
-  // _ts_fill_forward_native bug (deferred-items.md, Plan 19-01 entries).
-  ['test/sql/ts_fill_forward_native.test', 'Emscripten abort trap (___trap) in WASM runtime'],
 ]);
 
-// Curated subset: 10 files verified green against the current WASM artifact.
+// Curated subset: 12 files verified green against the current WASM artifact.
 // Selected for breadth: core forecasting, CV, metrics, conformal, decomposition,
 // diagnostics, aggregation, period detection, (Plan 19-01, #289) the
 // ts_fill_forward_operator deprecated macro + ts_fill_forward_by pins, and
 // (Plan 19-03, #289 BUG-02) the ts_features_list/ts_features_config_template
 // catalog functions (the previous skip-list reason -- a WASM memory-limit
 // theory -- was wrong; see the RegisterTsFeaturesListFunction comment in
-// src/table_functions/ts_features.cpp).
+// src/table_functions/ts_features.cpp), and (#289) ts_fill_forward_native.test
+// plus ts_fill_forward_wasm_regression.test: forward fills that came back
+// unfilled, 1970-dated or aborted on WASM until wasm_eh moved to a Rust
+// toolchain with native wasm exceptions (CMakeLists.txt, ANOFOX_WASM_RUST_TOOLCHAIN).
 const CURATED = [
   'test/sql/ts_forecast_by.test',
   'test/sql/ts_metrics.test',
@@ -95,6 +78,8 @@ const CURATED = [
   'test/sql/ts_periods.test',
   'test/sql/ts_fill_forward_operator.test',
   'test/sql/ts_features.test',
+  'test/sql/ts_fill_forward_native.test',
+  'test/sql/ts_fill_forward_wasm_regression.test',
 ];
 
 function parseArgs(argv) {

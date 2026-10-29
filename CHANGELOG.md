@@ -158,6 +158,17 @@ returns the source table's column names and types (previously always
 
 ### Fixed
 
+- **DuckDB-Wasm (`wasm_eh`): Rust code computed wrong results (#289).**
+  `ts_fill_forward_by` returned unfilled series, filled from 1970, or aborted on
+  hourly frequencies, but only in DuckDB-Wasm. WASM builds pinned Rust 1.86, whose
+  emscripten target uses JS-based exception handling (`invoke_*` trampolines). That
+  breaks inside a native-exception `wasm_eh` module. `wasm_eh` now builds its Rust
+  code with Rust 1.96 (native wasm exceptions), and the link declares its target
+  features explicitly so emsdk 3.1.71's binaryen accepts the module. The WASM
+  allocator also no longer returns 4-byte-aligned i64/f64 arrays.
+  `ts_fill_forward_native.test` is back in the WASM harness, which now runs 12
+  files and 540 assertions.
+
 - **`ts_detect_changepoints_agg` silently ignored its entire `params` MAP
   (#287).** Its "Parse params MAP if valid" block was empty, so `hazard_lambda`
   (and every other key) stayed hardcoded at the default `250.0` regardless of
