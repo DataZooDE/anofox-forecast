@@ -651,6 +651,7 @@ inline Value ParamsAsVarcharMap(const Value &params_in) {
 //   static idx_t StateSize();                              // sizeof(STATE)
 //   static Value Export(data_ptr_t state);                 // a NULL Value for an empty state
 //   static void Import(const Value &entry, data_ptr_t state); // entry may be NULL
+//   static void Destroy(data_ptr_t state);                 // free what Import allocated
 // InstallStateExportOf<EXP>(function) wires it through SetStateExportCallbacks on 2.0 and
 // is a no-op before. The 2.0-only callback types are taken from that setter's own
 // signature, so nothing here names them and 1.5 never instantiates the template.
@@ -689,8 +690,19 @@ struct StateExportCallbacks {
 	}
 	static void Import(ImportInput &input) {
 		const idx_t count = input.input_vec.size();
-		for (idx_t i = 0; i < count; i++) {
-			EXP::Import(input.input_vec.GetValue(i), input.dest_buffer + i * input.layout.total_state_size);
+		const idx_t stride = input.layout.total_state_size;
+		idx_t i = 0;
+		try {
+			for (; i < count; i++) {
+				EXP::Import(input.input_vec.GetValue(i), input.dest_buffer + i * stride);
+			}
+		} catch (...) {
+			// DuckDB does not destroy a batch whose import failed: free the entries
+			// imported so far (entry i cleans up after itself).
+			for (idx_t j = 0; j < i; j++) {
+				EXP::Destroy(input.dest_buffer + j * stride);
+			}
+			throw;
 		}
 	}
 };

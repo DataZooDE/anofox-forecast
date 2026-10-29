@@ -392,6 +392,11 @@ struct TsStatsAggExport {
         data->initialized = true;
         state.data = data;
     }
+    static void Destroy(data_ptr_t state_p) {
+        auto &state = *reinterpret_cast<TsStatsAggState *>(state_p);
+        delete state.data;
+        state.data = nullptr;
+    }
 };
 
 static void TsStatsAggDestructor(Vector &state_vector, AggregateInputData &aggr_input, idx_t count) {

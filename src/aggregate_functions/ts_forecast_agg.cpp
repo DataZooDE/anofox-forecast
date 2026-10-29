@@ -318,6 +318,16 @@ static void TsForecastAggUpdate(Vector inputs[], AggregateInputData &aggr_input,
 static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr_input,
                                   Vector &result, idx_t count, idx_t offset) {
     auto states = FlatDataMut<TsForecastAggState *>(state_vector);
+    // When Finalize throws, DuckDB does not run the state destructor on this batch
+    // (e.g. finalize() of exported states): free every state's data first.
+    auto release_states = [&]() {
+        for (idx_t j = 0; j < count; j++) {
+            if (states[j] && states[j]->data) {
+                delete states[j]->data;
+                states[j]->data = nullptr;
+            }
+        }
+    };
 
     auto &children = StructVector::GetEntries(result);
     auto &step_list = StructEntry(children[0]);      // forecast_step
@@ -352,11 +362,13 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
         {
             auto &bind_data = aggr_input.bind_data->Cast<TsForecastAggBindData>();
             if (std::abs(data.params.confidence_level - bind_data.confidence_level) > 1e-9) {
+                const double state_level = data.params.confidence_level;
+                release_states();
                 throw InvalidInputException(
                     "ts_forecast_agg: this state's params set confidence_level = %f, but the result is bound for "
                     "confidence_level = %f (finalize() of an exported state binds the default); export states "
                     "with the default confidence_level, or aggregate the rows directly",
-                    data.params.confidence_level, bind_data.confidence_level);
+                    state_level, bind_data.confidence_level);
             }
         }
 
@@ -451,7 +463,9 @@ static void TsForecastAggFinalize(Vector &state_vector, AggregateInputData &aggr
             // few observations at the start of a sliding window) is reported in
             // error_message like the other codes; an unknown model still raises.
             if (error.code == INVALID_MODEL || (error.code == INVALID_INPUT && !data.frame_mode)) {
-                throw InvalidInputException(string(error.message));
+                const string message(error.message);
+                release_states();
+                throw InvalidInputException(message);
             }
 
             // Set error message instead of returning null
@@ -862,6 +876,11 @@ struct TsForecastAggExport {
         }
         data->initialized = true;
         state.data = data;
+    }
+    static void Destroy(data_ptr_t state_p) {
+        auto &state = *reinterpret_cast<TsForecastAggState *>(state_p);
+        delete state.data;
+        state.data = nullptr;
     }
 };
 
