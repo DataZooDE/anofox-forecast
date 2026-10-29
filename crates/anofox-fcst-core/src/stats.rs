@@ -736,6 +736,37 @@ pub(crate) fn template_match_counts_band(x: &[f64], m: usize, r: f64) -> Vec<usi
     counts
 }
 
+/// From this length [`compute_stability`] slides its window sum instead of
+/// re-summing every window (O(n^2) with a window of n/5, #304).
+const SLIDING_STABILITY_MIN_LEN: usize = 4096;
+
+/// Means of every length-`window` window, by a running sum with Neumaier
+/// compensation (matches re-summing each window up to round-off).
+fn sliding_window_means(values: &[f64], window: usize) -> Vec<f64> {
+    let mut sum = 0.0f64;
+    let mut comp = 0.0f64;
+    let add = |sum: &mut f64, comp: &mut f64, v: f64| {
+        let t = *sum + v;
+        *comp += if sum.abs() >= v.abs() {
+            (*sum - t) + v
+        } else {
+            (v - t) + *sum
+        };
+        *sum = t;
+    };
+    for &v in &values[..window] {
+        add(&mut sum, &mut comp, v);
+    }
+    let mut means = Vec::with_capacity(values.len() - window + 1);
+    means.push((sum + comp) / window as f64);
+    for i in window..values.len() {
+        add(&mut sum, &mut comp, values[i]);
+        add(&mut sum, &mut comp, -values[i - window]);
+        means.push((sum + comp) / window as f64);
+    }
+    means
+}
+
 /// Compute stability as inverse of coefficient of variation of rolling means.
 fn compute_stability(values: &[f64]) -> f64 {
     if values.len() < 10 {
@@ -743,12 +774,13 @@ fn compute_stability(values: &[f64]) -> f64 {
     }
 
     let window = (values.len() / 5).max(3);
-    let mut rolling_means = Vec::new();
-
-    for i in 0..=(values.len() - window) {
-        let mean: f64 = values[i..i + window].iter().sum::<f64>() / window as f64;
-        rolling_means.push(mean);
-    }
+    let rolling_means = if values.len() < SLIDING_STABILITY_MIN_LEN {
+        (0..=(values.len() - window))
+            .map(|i| values[i..i + window].iter().sum::<f64>() / window as f64)
+            .collect()
+    } else {
+        sliding_window_means(values, window)
+    };
 
     if rolling_means.is_empty() {
         return f64::NAN;
@@ -961,6 +993,19 @@ mod tests {
         assert!(elapsed.as_secs_f64() < 1.0, "took {elapsed:?}");
     }
 
+    /// #304: all of `ts_stats` (default period detection, stability, entropy)
+    /// is sub-quadratic; 160k rows took ~44 s before.
+    #[test]
+    #[ignore]
+    fn ts_stats_perf_160k() {
+        let s: Vec<Option<f64>> = sin_mod97(160_000).into_iter().map(Some).collect();
+        let t = std::time::Instant::now();
+        let stats = compute_ts_stats(&s, 0).unwrap();
+        let elapsed = t.elapsed();
+        eprintln!("160k compute_ts_stats in {elapsed:?}: {stats:?}");
+        assert!(elapsed.as_secs_f64() < 3.0, "took {elapsed:?}");
+    }
+
     /// Timing table behind `RANK_SPACE_MIN_TEMPLATES_M2/M3`.
     #[test]
     #[ignore]
@@ -994,6 +1039,34 @@ mod tests {
                     eprintln!("n={n:5} {name:9} m={m}: rank-space {t_fast:?} band {t_band:?}");
                 }
             }
+        }
+    }
+
+    /// #304: sliding window means match re-summing each window.
+    #[test]
+    fn test_sliding_window_means_match_direct() {
+        let series: Vec<Vec<f64>> = vec![
+            sin_mod97(6000),
+            (0..6000).map(|i| 1e6 + (i as f64 * 0.37).sin()).collect(),
+            (0..6000).map(|i| ((i % 24) < 12) as u8 as f64).collect(),
+        ];
+        for x in &series {
+            let window = x.len() / 5;
+            let fast = sliding_window_means(x, window);
+            let direct: Vec<f64> = (0..=(x.len() - window))
+                .map(|i| x[i..i + window].iter().sum::<f64>() / window as f64)
+                .collect();
+            assert_eq!(fast.len(), direct.len());
+            for (a, b) in fast.iter().zip(&direct) {
+                assert!((a - b).abs() <= 1e-12 * b.abs().max(1.0), "{a} vs {b}");
+            }
+            let fast_stability = compute_stability(x);
+            let rm_mean = direct.iter().sum::<f64>() / direct.len() as f64;
+            let rm_std = (direct.iter().map(|v| (v - rm_mean).powi(2)).sum::<f64>()
+                / direct.len() as f64)
+                .sqrt();
+            let direct_stability = 1.0 / (rm_std / rm_mean.abs() + 0.01);
+            assert!((fast_stability - direct_stability).abs() <= 1e-9 * direct_stability);
         }
     }
 
