@@ -114,7 +114,8 @@ returns the source table's column names and types (previously always
 
 ### Changed
 
-- **anofox-forecast crate 0.16.2 → 0.18.0 (#259, #227, #258).** 0.18.0 adds a conditioning-aware
+- **anofox-forecast crate 0.16.2 → 0.18.1 (#259, #227, #258).** 0.18.1 stops the Laplace model
+  leaking a label string on every call (found by the ASAN job). 0.18.0 adds a conditioning-aware
   ridge backend at the crate level (#258), built on anofox-regression 0.7. 0.17.0: AutoETS no longer
   extrapolates one-off spikes as a trend. On a series with a spiky tail or more than
   20% zeros it considers only trend-free models, and caps tail spikes at 3× their
