@@ -16,7 +16,7 @@ name = "anofox-fcst-core"
 version = "0.1.0"
 dependencies = [
  "anofox-forecast",
- "anofox-regression",
+ "anofox-regression 0.5.15",
  "approx",
  "chrono",
  "faer",
@@ -41,11 +41,11 @@ dependencies = [
 
 [[package]]
 name = "anofox-forecast"
-version = "0.17.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "abf5dc360ed65d0735103760c030dba1c713fa81d83e52b720b86ea054ddefd5"
+checksum = "4995537920e257757fd88ed7671edc14893affab7bce717f2455055c18bccef8"
 dependencies = [
- "anofox-regression",
+ "anofox-regression 0.7.0",
  "anofox-statistics",
  "bincode",
  "chrono",
@@ -68,6 +68,19 @@ checksum = "3019bc956b33a5c0f3ca8f9683ea3cd785821468c511b9ef6eed011d3e2fbc7b"
 dependencies = [
  "argmin",
  "argmin-math",
+ "faer",
+ "getrandom 0.3.4",
+ "statrs",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "anofox-regression"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29dfd671ff8e72ad7f902c301362be7ba5a6feb7129ab4b12635202259cf7f6f"
+dependencies = [
+ "basin",
  "faer",
  "getrandom 0.3.4",
  "statrs",
@@ -184,6 +197,19 @@ name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
+
+[[package]]
+name = "basin"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9614873e06f84533eb94d679e138f5d44dd3124ec5a80a46cb6d2dcd0c12f789"
+dependencies = [
+ "num-traits",
+ "rand 0.10.3",
+ "rand_chacha 0.10.0",
+ "rand_distr 0.6.0",
+ "web-time",
+]
 
 [[package]]
 name = "bincode"
@@ -514,7 +540,7 @@ dependencies = [
  "nalgebra",
  "num-complex",
  "rand 0.8.6",
- "rand_distr",
+ "rand_distr 0.4.3",
  "rayon",
  "rustfft",
 ]
@@ -841,7 +867,7 @@ dependencies = [
  "num-rational",
  "num-traits",
  "rand 0.8.6",
- "rand_distr",
+ "rand_distr 0.4.3",
  "simba",
  "typenum",
 ]
@@ -1107,6 +1133,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rand"
+version = "0.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65c9fb96cbc91e3478eaae79a69fcd3f1ae4ad052e471fe6732fff548984b4af"
+dependencies = [
+ "rand_core 0.10.1",
+]
+
+[[package]]
 name = "rand_chacha"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1124,6 +1159,16 @@ checksum = "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb"
 dependencies = [
  "ppv-lite86",
  "rand_core 0.9.3",
+]
+
+[[package]]
+name = "rand_chacha"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e6af7f3e25ded52c41df4e0b1af2d047e45896c2f3281792ed68a1c243daedb"
+dependencies = [
+ "ppv-lite86",
+ "rand_core 0.10.1",
 ]
 
 [[package]]
@@ -1145,6 +1190,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "rand_core"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
+
+[[package]]
 name = "rand_distr"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1152,6 +1203,16 @@ checksum = "32cb0b9bc82b0a0876c2dd994a7e7a2683d3e7390ca40e6886785ef0c7e3ee31"
 dependencies = [
  "num-traits",
  "rand 0.8.6",
+]
+
+[[package]]
+name = "rand_distr"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4d431c2703ccf129de4d45253c03f49ebb22b97d6ad79ee3ecfc7e3f4862c1d8"
+dependencies = [
+ "num-traits",
+ "rand 0.10.3",
 ]
 
 [[package]]
