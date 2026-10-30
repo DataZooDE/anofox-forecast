@@ -114,6 +114,17 @@ returns the source table's column names and types (previously always
 
 ### Changed
 
+- **Changepoint detection deseasonalizes clearly seasonal series by default (#287).**
+  The `deseasonalize` param of `ts_detect_changepoints_by`, `ts_detect_changepoints_agg`,
+  `ts_detect_changepoints` and `ts_detect_changepoints_events_by` now defaults to `auto`.
+  A series counts as clearly seasonal when it has a usable period (given, or FFT-detected
+  with confidence ≥ 10), spans at least 3 cycles, and has STL seasonal strength ≥ 0.5.
+  Such a series is deseasonalized and detrended before BOCPD, with an effective threshold
+  of 0.5, so a weekly or monthly cycle is no longer reported as a run of changepoints.
+  On the #287 panel, only B's real level shift (2024-02-20) is flagged instead of every
+  weekly trough. Non-seasonal series run on the raw values exactly as before (on simulated
+  noise, trend and step series the gate never fires). `'deseasonalize': 'false'`
+  restores the previous output byte for byte; `true` keeps forcing it on.
 - **`ts_stats` is sub-quadratic in series length (#304): 160,000 rows take ~0.9 s
   instead of ~44 s, and a 1,000,000-row series finishes in ~6.5 s.**
   - Approximate / sample entropy (`ts_stats` `entropy`, `ts_features`

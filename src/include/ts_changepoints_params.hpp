@@ -50,14 +50,16 @@ namespace duckdb {
 // (unset -- the default MAP run-length-reset heuristic applies); range
 // validation ([0, 1], finiteness) happens in Rust
 // (detect_changepoints_bocpd_with_options, D2-ii), not here. `deseasonalize`
-// defaults to false (byte-identical to before BUG-05, #287). `seasonal_period`
-// is 0 (= auto-detect) by default; `seasonal_period` without `deseasonalize`
-// is accepted and has no effect -- it is only consulted when `deseasonalize`
-// is true.
+// is 'auto' by default (#287): Rust deseasonalizes only a clearly seasonal
+// series and otherwise runs on the raw values, byte-identical to
+// `deseasonalize: false`. `true` always deseasonalizes, `false` never does.
+// `seasonal_period` is 0 (= auto-detect) by default and is consulted when
+// deseasonalizing (explicitly or by 'auto').
 struct ChangepointParamSet {
     double hazard_lambda = 250.0;
     double threshold = std::numeric_limits<double>::quiet_NaN();
     bool deseasonalize = false;
+    bool auto_deseasonalize = true;
     int64_t seasonal_period = 0;
 };
 
@@ -119,21 +121,26 @@ inline ChangepointParamSet ParseChangepointParamSet(const Value &params_in) {
         }
     }
 
-    // deseasonalize (#287, BUG-05, D1-b): strict bool -- true/false/1/0,
-    // case-insensitive. Unlike hazard_lambda, a PRESENT but unparsable
-    // value throws naming the key instead of silently falling back to the
-    // default, matching threshold's "typo must not silently disable the
-    // feature" rule above.
+    // deseasonalize (#287, BUG-05, D1-b): true/false/1/0/auto,
+    // case-insensitive; 'auto' is the default. Unlike hazard_lambda, a
+    // PRESENT but unparsable value throws naming the key instead of silently
+    // falling back to the default, matching threshold's "typo must not
+    // silently disable the feature" rule above.
     Value deseasonalize_val = read_key("deseasonalize");
     if (!deseasonalize_val.IsNull()) {
         string lowered = StringUtil::Lower(deseasonalize_val.ToString());
         if (lowered == "true" || lowered == "1") {
             result.deseasonalize = true;
+            result.auto_deseasonalize = false;
         } else if (lowered == "false" || lowered == "0") {
             result.deseasonalize = false;
+            result.auto_deseasonalize = false;
+        } else if (lowered == "auto") {
+            result.deseasonalize = false;
+            result.auto_deseasonalize = true;
         } else {
             throw InvalidInputException(
-                "ts_detect_changepoints: invalid 'deseasonalize' value '%s' -- must be true/false/1/0",
+                "ts_detect_changepoints: invalid 'deseasonalize' value '%s' -- must be true/false/1/0/auto",
                 deseasonalize_val.ToString());
         }
     }

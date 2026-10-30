@@ -688,6 +688,59 @@ pub struct ChangepointOptions {
     /// boundary's `0` sentinel maps to this). Ignored when `deseasonalize`
     /// is `false`.
     pub seasonal_period: Option<usize>,
+    /// When `true` and `deseasonalize` is `false`, deseasonalize only if the
+    /// series is clearly seasonal ([`seasonal_period_for_auto`]). Otherwise
+    /// BOCPD runs on the raw values exactly as with `deseasonalize: false`.
+    /// This is the SQL default (#287).
+    pub auto_deseasonalize: bool,
+}
+
+/// STL seasonal strength from which `auto_deseasonalize` treats a series as
+/// seasonal. Stricter than `ts_classify_seasonality_by`'s 0.3 `is_seasonal`
+/// default because it changes a default output: on simulated series (n = 60..365)
+/// 0.3 called 63% of random walks and 24% of noisy level steps seasonal; 0.5
+/// together with the cycle and confidence gates below calls no noise, trend or
+/// step series seasonal and 6% of random walks, while keeping 94% of weakly and
+/// 100% of clearly seasonal series (#287).
+pub const AUTO_DESEASONALIZE_MIN_STRENGTH: f64 = 0.5;
+
+/// Minimum number of whole cycles the series must span for `auto_deseasonalize`.
+pub const AUTO_DESEASONALIZE_MIN_CYCLES: usize = 3;
+
+/// Minimum FFT detection confidence of an auto-detected period (not checked for
+/// an explicit `seasonal_period`).
+pub const AUTO_DESEASONALIZE_MIN_CONFIDENCE: f64 = 10.0;
+
+/// The period `auto_deseasonalize` would remove, or `None` when the series is
+/// not clearly seasonal. The period is `seasonal_period` (if `>= 2`) or the
+/// FFT-detected primary period with confidence at least
+/// [`AUTO_DESEASONALIZE_MIN_CONFIDENCE`]; it is kept only when the series spans
+/// at least [`AUTO_DESEASONALIZE_MIN_CYCLES`] cycles and its STL seasonal
+/// strength at that period is at least [`AUTO_DESEASONALIZE_MIN_STRENGTH`].
+/// Detection errors count as "not seasonal", so the caller falls back to the
+/// raw-values path.
+pub fn seasonal_period_for_auto(values: &[f64], seasonal_period: Option<usize>) -> Option<usize> {
+    let period = match seasonal_period {
+        Some(p) if p >= 2 => p,
+        _ => {
+            let detected = detect_periods(values, PeriodMethod::Fft, None, None).ok()?;
+            let primary = detected.primary_period.round();
+            let confidence = detected.periods.first().map_or(0.0, |p| p.confidence);
+            // Written positively so NaN (no period found) fails the check.
+            let usable = primary >= 2.0 && confidence >= AUTO_DESEASONALIZE_MIN_CONFIDENCE;
+            if !usable {
+                return None;
+            }
+            primary as usize
+        }
+    };
+    if values.len() < AUTO_DESEASONALIZE_MIN_CYCLES * period {
+        return None;
+    }
+    let strength = crate::stats::stl_strengths(values, &[period])
+        .ok()?
+        .seasonality_strength?;
+    (strength.is_finite() && strength >= AUTO_DESEASONALIZE_MIN_STRENGTH).then_some(period)
 }
 
 impl Default for ChangepointOptions {
@@ -697,6 +750,7 @@ impl Default for ChangepointOptions {
             threshold: None,
             deseasonalize: false,
             seasonal_period: None,
+            auto_deseasonalize: false,
         }
     }
 }
@@ -759,11 +813,21 @@ pub fn detect_changepoints_bocpd_with_options(
         }
     }
 
-    let transformed: Option<Vec<f64>> = if opts.deseasonalize {
-        Some(deseasonalize_for_changepoints(
-            values,
-            opts.seasonal_period,
-        )?)
+    // `auto_deseasonalize` (#287) resolves to an explicit period, or to the
+    // raw-values path when the series is not clearly seasonal.
+    let (deseasonalize, seasonal_period) = if opts.deseasonalize {
+        (true, opts.seasonal_period)
+    } else if opts.auto_deseasonalize {
+        match seasonal_period_for_auto(values, opts.seasonal_period) {
+            Some(p) => (true, Some(p)),
+            None => (false, None),
+        }
+    } else {
+        (false, None)
+    };
+
+    let transformed: Option<Vec<f64>> = if deseasonalize {
+        Some(deseasonalize_for_changepoints(values, seasonal_period)?)
     } else {
         None
     };
@@ -776,7 +840,7 @@ pub fn detect_changepoints_bocpd_with_options(
     // threshold to 0.5 rather than falling back to the MAP run-length-reset
     // heuristic -- see this function's doc comment for why. An explicit
     // threshold always wins; deseasonalize: false is never affected.
-    let effective_threshold = match (opts.deseasonalize, opts.threshold) {
+    let effective_threshold = match (deseasonalize, opts.threshold) {
         (true, None) => Some(0.5),
         (_, explicit) => explicit,
     };
@@ -1365,6 +1429,7 @@ mod tests {
             threshold: Some(0.5),
             deseasonalize: false,
             seasonal_period: None,
+            auto_deseasonalize: false,
         };
         let opts_20_06_shape = ChangepointOptions {
             hazard_lambda: 250.0,
@@ -1397,6 +1462,85 @@ mod tests {
         assert_eq!(with_opts.changepoints, pre_existing.changepoints);
     }
 
+    /// Deterministic noise in [-0.5, 0.5) for the auto-deseasonalize gate tests.
+    fn lcg_noise(n: usize, seed: u64) -> Vec<f64> {
+        let mut state = seed;
+        (0..n)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                (state >> 11) as f64 / (1u64 << 53) as f64 - 0.5
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_auto_deseasonalize_gate_rejects_non_seasonal_series() {
+        for (seed, n) in [(1u64, 60usize), (2, 84), (3, 120), (4, 200), (5, 365)] {
+            let noise = lcg_noise(n, seed);
+            let trend: Vec<f64> = noise
+                .iter()
+                .enumerate()
+                .map(|(i, e)| 0.3 * i as f64 + e)
+                .collect();
+            let step: Vec<f64> = noise
+                .iter()
+                .enumerate()
+                .map(|(i, e)| if i > n / 2 { 5.0 } else { 0.0 } + e)
+                .collect();
+            for (name, v) in [("noise", &noise), ("trend", &trend), ("step", &step)] {
+                assert_eq!(seasonal_period_for_auto(v, None), None, "{name}, n = {n}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_auto_deseasonalize_matches_explicit_on_seasonal_series() {
+        // #287 panel series B: weekly cycle + level shift at index 50.
+        let series = issue287_series_b();
+        assert_eq!(seasonal_period_for_auto(&series, None), Some(7));
+        let auto = detect_changepoints_bocpd_with_options(
+            &series,
+            &ChangepointOptions {
+                auto_deseasonalize: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let explicit = detect_changepoints_bocpd_with_options(
+            &series,
+            &ChangepointOptions {
+                deseasonalize: true,
+                seasonal_period: Some(7),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(auto.is_changepoint, explicit.is_changepoint);
+        assert_eq!(auto.changepoints, vec![50]);
+    }
+
+    #[test]
+    fn test_auto_deseasonalize_is_raw_path_on_non_seasonal_series() {
+        let mut series = lcg_noise(120, 9);
+        for v in series.iter_mut().skip(60) {
+            *v += 6.0;
+        }
+        let auto = detect_changepoints_bocpd_with_options(
+            &series,
+            &ChangepointOptions {
+                auto_deseasonalize: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let raw = detect_changepoints_bocpd_with_options(&series, &ChangepointOptions::default())
+            .unwrap();
+        assert_eq!(auto.is_changepoint, raw.is_changepoint);
+        assert_eq!(auto.changepoint_probability, raw.changepoint_probability);
+    }
+
     #[test]
     fn test_deseasonalize_true_threshold_flags_only_the_step_not_the_seasonal_cycle() {
         // #287 panel series B (weekly seasonality, +15 level shift at index
@@ -1409,6 +1553,7 @@ mod tests {
             threshold: Some(0.5),
             deseasonalize: true,
             seasonal_period: Some(7),
+            auto_deseasonalize: false,
         };
         let result = detect_changepoints_bocpd_with_options(&series, &opts).unwrap();
         assert_eq!(
@@ -1434,12 +1579,14 @@ mod tests {
             threshold: Some(0.5),
             deseasonalize: true,
             seasonal_period: Some(7),
+            auto_deseasonalize: false,
         };
         let auto = ChangepointOptions {
             hazard_lambda: 250.0,
             threshold: Some(0.5),
             deseasonalize: true,
             seasonal_period: None,
+            auto_deseasonalize: false,
         };
         let with_explicit = detect_changepoints_bocpd_with_options(&series, &explicit).unwrap();
         let with_auto = detect_changepoints_bocpd_with_options(&series, &auto).unwrap();
@@ -1498,12 +1645,14 @@ mod tests {
             threshold: None,
             deseasonalize: true,
             seasonal_period: Some(7),
+            auto_deseasonalize: false,
         };
         let deseasonalize_with_threshold = ChangepointOptions {
             hazard_lambda: 250.0,
             threshold: Some(0.5),
             deseasonalize: true,
             seasonal_period: Some(7),
+            auto_deseasonalize: false,
         };
 
         let only = detect_changepoints_bocpd_with_options(&series, &deseasonalize_only).unwrap();
@@ -1551,6 +1700,7 @@ mod tests {
             threshold: Some(0.0),
             deseasonalize: true,
             seasonal_period: Some(7),
+            auto_deseasonalize: false,
         };
         let result = detect_changepoints_bocpd_with_options(&series, &opts).unwrap();
         assert!(!result.is_changepoint[0], "index 0 must never be flagged");

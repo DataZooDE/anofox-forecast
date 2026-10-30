@@ -3490,6 +3490,7 @@ pub unsafe extern "C" fn anofox_ts_detect_changepoints_bocpd_opts(
                 threshold,
                 deseasonalize: (*opts).deseasonalize,
                 seasonal_period,
+                auto_deseasonalize: (*opts).auto_deseasonalize,
             },
         )
     }));

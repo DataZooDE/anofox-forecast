@@ -1048,6 +1048,11 @@ typedef struct ChangepointOptionsFFI {
     double threshold;
     bool deseasonalize;
     int64_t seasonal_period;
+    /**
+     * `deseasonalize: 'auto'` (the SQL default, #287): deseasonalize only a
+     * clearly seasonal series. Ignored when `deseasonalize` is `true`.
+     */
+    bool auto_deseasonalize;
 } ChangepointOptionsFFI;
 
 /**

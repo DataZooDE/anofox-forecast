@@ -143,11 +143,12 @@ SELECT (_ts_detect_changepoints_bocpd([100.0, 100.0, 100.0, 100.0, 100.0, 100.0,
 true
 
 # =============================================================================
-# #287 default-output byte-identity pins (Phase 20, 20-03, T-20-08).
-# Captured on the pre-Phase-20-changepoint build (commit 21dfe7e, DuckDB v2.0.0)
-# BEFORE any Phase 20 change to the changepoint natives or macros. They must never
-# change (CONTEXT #287 decision 1 + addenda: the new deseasonalize/threshold options
-# are opt-in, default outputs stay byte-identical). The md5 covers id, date,
+# #287 raw-path byte-identity pins (Phase 20, 20-03, T-20-08).
+# Captured on the pre-Phase-20-changepoint build (commit 21dfe7e, DuckDB v2.0.0).
+# Until #287 these were the DEFAULT outputs. The default is now
+# deseasonalize 'auto' (seasonal series are deseasonalized first; see the
+# block below), so the pins run with deseasonalize 'false', which must still
+# reproduce the pre-Phase-20 outputs byte for byte. The md5 covers id, date,
 # is_changepoint and the probability of every row rounded to 9 decimals: the
 # full-precision text differed in its last digits on the CI runners (sin/cos in the
 # fixture and libm/FMA differences across CPUs), so the full-precision pin only held
@@ -161,40 +162,73 @@ statement ok
 CREATE TABLE cp287 AS SELECT id, (TIMESTAMP '2024-01-01' + INTERVAL (i) DAY) AS ds, base + 0.3 * i + 5 * sin(2 * pi() * i / 7) + CASE WHEN id = 'B' AND i >= 50 THEN 15 ELSE 0 END + 1.6 * cos(i * 0.9) + 0.7 * sin(i * 1.7 + base) AS y FROM (VALUES ('A', 20.0), ('B', 40.0), ('C', 60.0)) t(id, base), range(84) r(i);
 
 query I
-SELECT md5(string_agg(id || '|' || ds || '|' || is_changepoint || '|' || round(changepoint_probability, 9)::VARCHAR, ',' ORDER BY id, ds)) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{});
+SELECT md5(string_agg(id || '|' || ds || '|' || is_changepoint || '|' || round(changepoint_probability, 9)::VARCHAR, ',' ORDER BY id, ds)) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'false'});
 ----
 083042b082bc53142e3232b612736daf
 
 query I
-SELECT md5(string_agg(id || '|' || ds || '|' || is_changepoint || '|' || round(changepoint_probability, 9)::VARCHAR, ',' ORDER BY id, ds)) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'hazard_lambda': '50'});
+SELECT md5(string_agg(id || '|' || ds || '|' || is_changepoint || '|' || round(changepoint_probability, 9)::VARCHAR, ',' ORDER BY id, ds)) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'hazard_lambda': '50', 'deseasonalize': 'false'});
 ----
 d8674561e9f706fa44a924abacd94e87
 
 query I
-SELECT md5(string_agg(id || '|' || r.timestamp || '|' || r.is_changepoint || '|' || round(r.changepoint_probability, 9)::VARCHAR, ',' ORDER BY id, r.timestamp)) FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{})) AS r FROM cp287 GROUP BY id);
+SELECT md5(string_agg(id || '|' || r.timestamp || '|' || r.is_changepoint || '|' || round(r.changepoint_probability, 9)::VARCHAR, ',' ORDER BY id, r.timestamp)) FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'deseasonalize': 'false'})) AS r FROM cp287 GROUP BY id);
 ----
 083042b082bc53142e3232b612736daf
 
-# Readable form of the same default outputs: flagged dates per series.
+# Readable form of the same raw-path outputs: flagged dates per series.
 
 query II
-SELECT id, string_agg(ds::DATE::VARCHAR, ',' ORDER BY ds) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{}) WHERE is_changepoint GROUP BY id ORDER BY id;
+SELECT id, string_agg(ds::DATE::VARCHAR, ',' ORDER BY ds) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'false'}) WHERE is_changepoint GROUP BY id ORDER BY id;
 ----
 A	2024-01-22,2024-01-29,2024-02-05,2024-02-12,2024-02-19,2024-02-26
 B	2024-01-29,2024-02-20
 C	2024-01-22,2024-01-29,2024-02-05,2024-02-12,2024-02-19,2024-02-26
 
 query II
-SELECT id, string_agg(r.timestamp::DATE::VARCHAR, ',' ORDER BY r.timestamp) FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{})) AS r FROM cp287 GROUP BY id) WHERE r.is_changepoint GROUP BY id ORDER BY id;
+SELECT id, string_agg(r.timestamp::DATE::VARCHAR, ',' ORDER BY r.timestamp) FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'deseasonalize': 'false'})) AS r FROM cp287 GROUP BY id) WHERE r.is_changepoint GROUP BY id ORDER BY id;
 ----
 A	2024-01-22,2024-01-29,2024-02-05,2024-02-12,2024-02-19,2024-02-26
 B	2024-01-29,2024-02-20
 C	2024-01-22,2024-01-29,2024-02-05,2024-02-12,2024-02-19,2024-02-26
 
 query I
-SELECT round(max(changepoint_probability), 3) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{});
+SELECT round(max(changepoint_probability), 3) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'false'});
 ----
 0.996
+
+# #287 default: deseasonalize 'auto'. All three series are clearly weekly
+# (STL strength >= 0.5 at period 7), so they are deseasonalized first and only
+# B's real level shift on 2024-02-20 is flagged, on both surfaces. 'auto' given
+# explicitly is the same as the default.
+
+query II
+SELECT id, string_agg(ds::DATE::VARCHAR, ',' ORDER BY ds) FILTER (is_changepoint) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{}) GROUP BY id ORDER BY id;
+----
+A	NULL
+B	2024-02-20
+C	NULL
+
+query II
+SELECT id, string_agg(r.timestamp::DATE::VARCHAR, ',' ORDER BY r.timestamp) FILTER (r.is_changepoint) FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{})) AS r FROM cp287 GROUP BY id) GROUP BY id ORDER BY id;
+----
+A	NULL
+B	2024-02-20
+C	NULL
+
+query I
+SELECT count(*) FROM (
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{})
+    EXCEPT ALL
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'auto'})
+);
+----
+0
+
+statement error
+SELECT count(*) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'maybe'});
+----
+must be true/false/1/0/auto
 
 # #287 agg/table parity (BUG-06): ts_detect_changepoints_agg previously
 # ignored its params MAP entirely (hazard_lambda stayed 250 regardless of
@@ -241,11 +275,13 @@ SELECT count(*) FROM (
 0
 
 # Aggregate honours hazard_lambda: flagged count per id with hazard_lambda 50
-# is 8/6/6 (previously ignored -> 6/2/6, per the 20-RESEARCH.md probe above).
+# on the raw series is 8/6/6 (previously ignored -> 6/2/6, per the
+# 20-RESEARCH.md probe above). deseasonalize 'false' keeps the raw path that
+# was pinned here before the #287 'auto' default.
 query I
 SELECT string_agg(id || ':' || cnt, ',' ORDER BY id) FROM (
     SELECT id, count(*) FILTER (WHERE r.is_changepoint) AS cnt
-    FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'hazard_lambda': '50'})) AS r FROM cp287 GROUP BY id)
+    FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'hazard_lambda': '50', 'deseasonalize': 'false'})) AS r FROM cp287 GROUP BY id)
     GROUP BY id
 );
 ----
@@ -256,10 +292,10 @@ A:8,B:6,C:6
 query I
 SELECT (
     SELECT string_agg(id || '|' || r.timestamp || '|' || r.is_changepoint || '|' || r.changepoint_probability::VARCHAR, ',' ORDER BY id, r.timestamp)
-    FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'hazard_lambda': '50'})) AS r FROM cp287 GROUP BY id)
+    FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'hazard_lambda': '50', 'deseasonalize': 'false'})) AS r FROM cp287 GROUP BY id)
 ) <> (
     SELECT string_agg(id || '|' || r.timestamp || '|' || r.is_changepoint || '|' || r.changepoint_probability::VARCHAR, ',' ORDER BY id, r.timestamp)
-    FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{})) AS r FROM cp287 GROUP BY id)
+    FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'deseasonalize': 'false'})) AS r FROM cp287 GROUP BY id)
 );
 ----
 true
@@ -461,16 +497,15 @@ SELECT count(*) FROM (
 ----
 0
 
-# Default outputs (no deseasonalize key) stay byte-identical to before
-# BUG-05 -- re-asserted here (the md5 pins near the top of this file already
-# cover this; this block documents WHY it must hold next to the opt-in keys
-# it sits beside).
+# Default (no deseasonalize key) is 'auto' since #287: on this clearly
+# seasonal panel it equals deseasonalize 'true' row for row. The raw path
+# ('false') keeps its pre-BUG-05 outputs (md5 pins near the top of this file).
 
 query I
 SELECT count(*) FROM (
     SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{})
     EXCEPT ALL
-    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'false'})
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'true'})
 );
 ----
 0

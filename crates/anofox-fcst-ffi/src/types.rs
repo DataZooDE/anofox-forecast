@@ -746,6 +746,9 @@ pub struct ChangepointOptionsFFI {
     pub threshold: c_double,
     pub deseasonalize: bool,
     pub seasonal_period: i64,
+    /// `deseasonalize: 'auto'` (the SQL default, #287): deseasonalize only a
+    /// clearly seasonal series. Ignored when `deseasonalize` is `true`.
+    pub auto_deseasonalize: bool,
 }
 
 /// Feature extraction result.
