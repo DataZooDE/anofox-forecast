@@ -114,6 +114,12 @@ returns the source table's column names and types (previously always
 
 ### Changed
 
+- **anofox-forecast crate 0.16.2 → 0.17.0 (#259, #227).** AutoETS no longer
+  extrapolates one-off spikes as a trend. On a series with a spiky tail or more than
+  20% zeros it considers only trend-free models, and caps tail spikes at 3× their
+  seasonal-position median. On the intermittent snapshot series, AutoETS / ETS now
+  select `(A,N,N)` instead of `(A,A,N)`. Series that are neither spiky nor
+  intermittent forecast exactly as before.
 - **Changepoint detection deseasonalizes clearly seasonal series by default (#287).**
   The `deseasonalize` param of `ts_detect_changepoints_by`, `ts_detect_changepoints_agg`,
   `ts_detect_changepoints` and `ts_detect_changepoints_events_by` now defaults to `auto`.
