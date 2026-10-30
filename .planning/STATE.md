@@ -6,10 +6,10 @@ current_phase: "20.1"
 current_phase_name: API Compatibility Gate
 status: planning
 stopped_at: Phase 20 complete, ready to plan Phase 20.1
-last_updated: "2026-10-29T23:09:45.766Z"
-last_activity: 2026-10-29
+last_updated: "2026-10-30T00:46:41.250Z"
+last_activity: 2026-10-30
 last_activity_desc: Phase 20 complete, transitioned to Phase 20.1
-state_head: 01da744cb19d80c543d28948302a756ab32a2fd5
+state_head: 045486fa1e09824c973366609bc6300d1f847a53
 progress:
   total_phases: 8
   completed_phases: 1
@@ -32,7 +32,7 @@ See: .planning/PROJECT.md (updated 2026-10-24 — after Phase 20)
 Phase: 20.1 — API Compatibility Gate
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-10-30 - Completed quick task 261029-wbq: #289 WASM Rust exception-handling toolchain fix
+Last activity: 2026-10-30 - Completed quick task 261030-2gw: #287 changepoint deseasonalize auto default
 
 Progress: [█░░░░░░░░░] 13%
 
@@ -126,6 +126,7 @@ None yet.
 | 261029-t9z | #304: exact sub-quadratic approximate entropy (rank-space range counting) | 2026-10-29 | 1894964a | [261029-t9z-304-exact-sub-quadratic-approximate-entr](./quick/261029-t9z-304-exact-sub-quadratic-approximate-entr/) |
 | 261029-vza | #305: ts_aggregate_hierarchy flat-array aggregation | 2026-10-29 | 4ddf62da | [261029-vza-305-ts-aggregate-hierarchy-flat-array-ag](./quick/261029-vza-305-ts-aggregate-hierarchy-flat-array-ag/) |
 | 261029-wbq | #289: _ts_fill_forward_native WASM-only wrong results (Rust EH toolchain) | 2026-10-30 | 01da744c | [261029-wbq-289-ts-fill-forward-native-wasm-only-wro](./quick/261029-wbq-289-ts-fill-forward-native-wasm-only-wro/) |
+| 261030-2gw | #287: changepoint deseasonalize auto default | 2026-10-30 | 045486fa | [261030-2gw-287-changepoint-deseasonalize-auto-defau](./quick/261030-2gw-287-changepoint-deseasonalize-auto-defau/) |
 
 ### Roadmap Evolution
 
