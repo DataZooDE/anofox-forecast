@@ -10,6 +10,8 @@ use the semver numbering this project started with.
 
 ## [Unreleased]
 
+## [2026.10.31] - 2026-10-31 — DuckDB 2.0 features, contract outputs, faster stats
+
 ### Changed — build and distribution
 
 - **DuckDB v1.4.5 LTS is no longer built or published.** CI now builds the v2.0.0 and v1.5.6
@@ -105,6 +107,25 @@ returns the source table's column names and types (previously always
   `deseasonalize` unset/`false` are unchanged (pinned by md5 in
   `test/sql/correctness/detection_decomposition.test`).
 
+- **Rolling-origin forecasts as window functions (#297).** `ts_forecast_agg(...) OVER (...)`
+  over sliding or expanding frames fits one forecast per frame, and each frame equals a GROUP BY
+  over its rows. A frame too short to fit reports in `error_message` instead of failing the
+  query. Works on DuckDB 1.5 and 2.0.
+- **Exportable aggregate states (#298, DuckDB 2.0).** `ts_forecast_agg` and `ts_stats_agg` support
+  `EXPORT_STATE`, `combine_aggr` and `finalize`, so partial states can be stored and merged later.
+  DuckDB 1.5 refuses `EXPORT_STATE` for these aggregates.
+- **ROLLUP / GROUPING SETS / CUBE (#299).** Every aggregate gives correct per-level results, and
+  `docs/api/02-hierarchical.md` has a ROLLUP hierarchy recipe that equals `ts_aggregate_hierarchy`.
+- **`params` in any form (#300).** STRUCT (the documented form), MAP, VARIANT, MAP(VARCHAR, VARIANT)
+  and the empty `{}` work everywhere. `ts_forecast_agg` and `ts_detect_changepoints_agg` accept
+  STRUCT too (their `params` widened from MAP to ANY).
+- **Monitoring with triggers (#302) and SQL variables (#303).** New guide
+  `docs/guides/04-monitoring-with-triggers.md` (interval-breach alerts, stale-series refresh on
+  DuckDB 2.0). Variables work in every argument, including `$name` on 2.0.
+- **DuckDB 2.0 benchmark (#296).** `benchmark/duckdb2/` compares v1.5.6 with v2.0.0 interleaved and
+  checksummed: 2.0 is 8–32% faster where the engine does the work, and within ±5% where the model
+  fit dominates.
+
 ### Deprecated
 
 - **`ts_fill_forward_operator` and its `anofox_fcst_ts_fill_forward_operator`
@@ -114,7 +135,8 @@ returns the source table's column names and types (previously always
 
 ### Changed
 
-- **anofox-forecast crate 0.16.2 → 0.18.1 (#259, #227, #258).** 0.18.1 stops the Laplace model
+- **anofox-forecast crate 0.16.2 → 0.19.0 (#259, #227, #258).** 0.19.0 adds incremental model
+  updates and compact model state at the crate level (no extension changes yet). 0.18.1 stops the Laplace model
   leaking a label string on every call (found by the ASAN job). 0.18.0 adds a conditioning-aware
   ridge backend at the crate level (#258), built on anofox-regression 0.7. 0.17.0: AutoETS no longer
   extrapolates one-off spikes as a trend. On a series with a spiky tail or more than
@@ -176,6 +198,15 @@ returns the source table's column names and types (previously always
   handover (CORS rule, stale paths, redeploy steps).
 
 ### Fixed
+
+- **`ts_*_agg` aggregates crashed as window functions (#294).** All seven read the state vector
+  as flat, but window evaluation passes a constant or dictionary vector. They now read it through
+  `UnifiedVectorFormat`. This affected DuckDB 1.5 as well.
+- **A top-level VARIANT `params` was silently ignored (#300).** Every key, unknown ones included,
+  had no effect. It is now unwrapped on 2.0 and raises a clear error on 1.5.
+- **`ts_features_agg` gave last-bit-different results between runs (#299).**
+  `permutation_entropy` and the reoccurring-value sums added floats in HashMap order; they now use
+  a deterministic order.
 
 - **DuckDB-Wasm (`wasm_eh`): Rust code computed wrong results (#289).**
   `ts_fill_forward_by` returned unfilled series, filled from 1970, or aborted on
