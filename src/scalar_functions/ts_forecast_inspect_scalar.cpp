@@ -179,7 +179,7 @@ static void TsForecastInspectScalarExecute(DataChunk &args, ExpressionState &sta
         Value params_val;
         auto p_idx = params_data.sel->get_index(row_idx);
         if (params_data.validity.RowIsValid(p_idx)) {
-            params_val = params_vec.GetValue(row_idx);
+            params_val = NormalizeParamsValue(params_vec.GetValue(row_idx));
         }
 
         ForecastOptions opts;
@@ -257,7 +257,7 @@ static void TsForecastExplainScalarExecute(DataChunk &args, ExpressionState &sta
         Value params_val;
         auto p_idx = params_data.sel->get_index(row_idx);
         if (params_data.validity.RowIsValid(p_idx)) {
-            params_val = params_vec.GetValue(row_idx);
+            params_val = NormalizeParamsValue(params_vec.GetValue(row_idx));
         }
 
         ForecastOptions opts;

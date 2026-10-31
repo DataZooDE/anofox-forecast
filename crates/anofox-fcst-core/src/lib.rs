@@ -26,6 +26,8 @@ pub mod stl;
 pub mod supsmu;
 pub mod validation;
 
+mod template_match;
+
 // Shared fixture loader (std + serde_json only) from
 // crates/anofox-fcst-core/tests/common/mod.rs, compiled into the library's
 // own cfg(test) build so inline #[cfg(test)] blocks (e.g. forecast.rs's

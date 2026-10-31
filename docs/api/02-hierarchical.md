@@ -276,6 +276,43 @@ SELECT * FROM ts_aggregate_hierarchy(
 );
 ```
 
+### All levels with GROUP BY ROLLUP
+
+The same series can be built with plain SQL: `GROUP BY date, ROLLUP(...)` sums every
+level in one aggregation, and `GROUPING()` marks the rolled-up keys. The result has the
+same `unique_id`, date and value rows as `ts_aggregate_hierarchy` (tested in
+`test/sql/ts_grouping_sets.test`). This form is handy when the level values need another
+aggregate than `SUM`, or extra columns per level. It is also much faster: ~55x on 10k series
+x 365 days (0.15 s vs 8.3 s, `benchmark/duckdb2/README.md`, #305). On DuckDB 2.0 the coarser
+levels are computed from the finer ones (cascading aggregation).
+
+```sql
+CREATE TABLE prepared_rollup AS
+SELECT CASE WHEN GROUPING(region_id) = 1 THEN 'AGGREGATED' ELSE region_id END || '|' ||
+       CASE WHEN GROUPING(store_id) = 1 THEN 'AGGREGATED' ELSE store_id END || '|' ||
+       CASE WHEN GROUPING(item_id) = 1 THEN 'AGGREGATED' ELSE item_id END AS unique_id,
+       sale_date,
+       SUM(quantity) AS quantity
+FROM raw_sales
+GROUP BY sale_date, ROLLUP(region_id, store_id, item_id);
+
+-- forecast every level in one call
+SELECT * FROM ts_forecast_by('prepared_rollup', unique_id, sale_date, quantity, 'Naive', 7, '1d');
+```
+
+The `ts_*_agg` aggregates also work under `ROLLUP` / `GROUPING SETS` / `CUBE` and give
+the same per-level results as separate `GROUP BY` queries, e.g. series statistics for
+every store, every region and overall in one pass:
+
+```sql
+SELECT region_id, store_id, ts_stats_agg(sale_date::TIMESTAMP, quantity) AS stats
+FROM raw_sales
+GROUP BY ROLLUP(region_id, store_id);
+```
+
+Here a region's series holds the raw rows of all its stores. Sum per date first (as in
+`prepared_rollup`) when the level series should be totals.
+
 ---
 
 ## Split Keys

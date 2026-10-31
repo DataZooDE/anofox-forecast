@@ -893,7 +893,9 @@ ORDER BY od._dt
 R"(
 SELECT * FROM _ts_detect_changepoints_by_native(
     (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR) ORDER BY ALL),
-    params::MAP(VARCHAR, VARCHAR)
+    -- not a cast: a STRUCT, MAP, VARIANT (2.0) or MAP(VARCHAR, VARIANT) all become the
+    -- MAP(VARCHAR, VARCHAR) the native takes (no VARIANT -> MAP cast exists)
+    _ts_params_map(params)
 )
 )",
     "Detects structural changepoints for each group using Bayesian Online Changepoint Detection.",
@@ -915,7 +917,7 @@ SELECT
     'changepoint' AS kind,
     CASE WHEN changepoint_probability >= 0.5 THEN 'alarm' ELSE 'warning' END AS severity,
     changepoint_probability AS value
-FROM ts_detect_changepoints_by(source, group_col, date_col, value_col, params::MAP(VARCHAR, VARCHAR))
+FROM ts_detect_changepoints_by(source, group_col, date_col, value_col, params)
 WHERE is_changepoint
 ORDER BY ALL
 )",
@@ -2071,8 +2073,8 @@ SELECT * FROM _ts_cv_hydrate_native(
 R"(
 WITH _params AS (
     SELECT
-        CAST(COALESCE((params::MAP(VARCHAR, VARCHAR))['alpha'], '0.1') AS DOUBLE) AS _alpha,
-        COALESCE((params::MAP(VARCHAR, VARCHAR))['method'], 'symmetric') AS _method
+        CAST(COALESCE(_ts_params_map(params)['alpha'], '0.1') AS DOUBLE) AS _alpha,
+        COALESCE(_ts_params_map(params)['method'], 'symmetric') AS _method
 ),
 per_group AS (
     SELECT
@@ -2147,9 +2149,9 @@ FROM conformal_calc
 R"(
 WITH _params AS (
     SELECT
-        CAST(COALESCE((params::MAP(VARCHAR, VARCHAR))['alpha'], '0.1') AS DOUBLE) AS _alpha,
-        COALESCE((params::MAP(VARCHAR, VARCHAR))['method'], 'symmetric') AS _method,
-        CAST(COALESCE((params::MAP(VARCHAR, VARCHAR))['pooled'], 'false') AS BOOLEAN) AS _pooled
+        CAST(COALESCE(_ts_params_map(params)['alpha'], '0.1') AS DOUBLE) AS _alpha,
+        COALESCE(_ts_params_map(params)['method'], 'symmetric') AS _method,
+        CAST(COALESCE(_ts_params_map(params)['pooled'], 'false') AS BOOLEAN) AS _pooled
 ),
 per_key AS (
     SELECT

@@ -344,7 +344,7 @@ static unique_ptr<FunctionData> TsCvFoldsBind(
 
     // Parse optional params MAP (index 3)
     if (input.inputs.size() >= 4 && !input.inputs[3].IsNull()) {
-        auto &params = input.inputs[3];
+        auto params = NormalizeParamsValue(input.inputs[3]);
 
         // Validate parameter names first
         ValidateParams(params);

@@ -129,24 +129,68 @@ For table macros operating on time series:
 
 ### Params Convention
 
-The `params` parameter supports both MAP and STRUCT syntax in **table macros** (v0.4.0+):
+`params` is a STRUCT or a MAP. **STRUCT is the recommended form**: values keep their own
+types, so numbers, strings, booleans and lists mix freely.
 
 ```sql
--- STRUCT allows mixed types (recommended for table macros)
 SELECT * FROM ts_cv_folds_by('sales', product_id, date, value, 3, 7,
     {'gap': 2, 'clip_horizon': true});
+```
 
--- MAP requires homogeneous string values (legacy, also works)
+A MAP also works, but DuckDB gives every value of a MAP literal **one** type. Strings
+everywhere is always safe:
+
+```sql
 SELECT * FROM ts_cv_folds_by('sales', product_id, date, value, 3, 7,
     MAP{'gap': '2', 'clip_horizon': 'true'});
 ```
 
-> **Note:** Aggregate functions (e.g., `ts_detect_changepoints_agg`, `ts_forecast_agg`) require **MAP syntax only**. STRUCT syntax is not supported for aggregate functions.
->
-> ```sql
-> -- Aggregate functions: use MAP syntax
-> SELECT ts_detect_changepoints_agg(ds, y, MAP{'hazard_lambda': '50'}) FROM data GROUP BY id;
-> ```
+Mixing numbers and strings in one MAP literal fails before the extension sees it, e.g.
+`MAP{'seasonal_period': 7, 'model': 'AAA'}` raises `Could not convert string 'AAA' to INT32`.
+Use the STRUCT `{'seasonal_period': 7, 'model': 'AAA'}` instead. Lists are native in a
+STRUCT (`{'seasonal_periods': [7, 365]}`) and quoted in a MAP (`MAP{'seasonal_periods': '[7, 365]'}`).
+
+The same forms are accepted by the table macros, the table functions and the aggregates
+(`ts_forecast_agg`, `ts_detect_changepoints_agg`). `NULL` or omitting `params` means
+"no params".
+
+**DuckDB 2.0+:** the empty STRUCT `{}` means "no params", and `params` may also be a
+`VARIANT` (for example options kept in a VARIANT column) or a `MAP(VARCHAR, VARIANT)`.
+Unknown keys are rejected the same way for every form.
+
+```sql
+-- DuckDB 2.0+
+SELECT * FROM ts_cv_folds_by('sales', product_id, date, value, 3, 7, {});
+SELECT * FROM ts_cv_folds_by('sales', product_id, date, value, 3, 7,
+    {'gap': 2, 'clip_horizon': true}::VARIANT);
+```
+
+### Parameterized scripts (variables)
+
+Scripts that repeat the same settings (horizon, frequency, model, seasonal period,
+confidence level, CV folds) can keep them in SQL variables, set once at the top.
+Every argument accepts them, including the ones fixed at bind time (`confidence_level`
+still names `ts_forecast_agg`'s `lower_<pct>` / `upper_<pct>` fields):
+
+```sql
+SET VARIABLE horizon = 14;
+SET VARIABLE season = 7;
+SET VARIABLE conf = 0.8;
+
+SELECT * FROM ts_forecast_by('sales', product_id, date, value, 'HoltWinters',
+    getvariable('horizon'), '1d',
+    params := {'seasonal_period': getvariable('season'), 'confidence_level': getvariable('conf')});
+
+SELECT * FROM ts_cv_folds_by('sales', product_id, date, value, 3, getvariable('horizon'), MAP{});
+```
+
+**DuckDB 2.0+:** `$name` is shorthand for `getvariable('name')`:
+
+```sql
+-- DuckDB 2.0+
+SET VARIABLE horizon = 14;
+SELECT * FROM ts_forecast_by('sales', product_id, date, value, 'SES', $horizon, '1d');
+```
 
 ---
 

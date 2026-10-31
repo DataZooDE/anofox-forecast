@@ -38,6 +38,7 @@
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
+#include "duckdb_compat.hpp"
 
 #include <cctype>
 #include <limits>
@@ -49,30 +50,25 @@ namespace duckdb {
 // (unset -- the default MAP run-length-reset heuristic applies); range
 // validation ([0, 1], finiteness) happens in Rust
 // (detect_changepoints_bocpd_with_options, D2-ii), not here. `deseasonalize`
-// defaults to false (byte-identical to before BUG-05, #287). `seasonal_period`
-// is 0 (= auto-detect) by default; `seasonal_period` without `deseasonalize`
-// is accepted and has no effect -- it is only consulted when `deseasonalize`
-// is true.
+// is 'auto' by default (#287): Rust deseasonalizes only a clearly seasonal
+// series and otherwise runs on the raw values, byte-identical to
+// `deseasonalize: false`. `true` always deseasonalizes, `false` never does.
+// `seasonal_period` is 0 (= auto-detect) by default and is consulted when
+// deseasonalizing (explicitly or by 'auto').
 struct ChangepointParamSet {
     double hazard_lambda = 250.0;
     double threshold = std::numeric_limits<double>::quiet_NaN();
     bool deseasonalize = false;
+    bool auto_deseasonalize = true;
     int64_t seasonal_period = 0;
 };
 
-// Reads hazard_lambda/threshold from a MAP(VARCHAR, VARCHAR) Value. (Code
-// review WR-05, 2026-10-24: this header previously also branched on a
-// STRUCT-typed params_value, mirroring ts_forecast_params.hpp's parser --
-// but unlike that header's consumers, BOTH of this header's call sites
-// (_ts_detect_changepoints_by_native's TableFunction signature and
-// ts_detect_changepoints_agg's AggregateFunction signature) declare the
-// params argument's type as exactly MAP(VARCHAR, VARCHAR), not
-// LogicalType::ANY, so DuckDB's binder never lets a bare STRUCT value
-// reach this function in the first place -- the STRUCT branch was
-// untested dead code. Removed rather than kept dead; if STRUCT-typed
-// params are wanted for these two functions later, that needs its own
-// decision to widen both declared signatures to LogicalType::ANY, not a
-// silent revival of this branch.) A NULL Value or a missing key falls
+// Reads hazard_lambda/threshold from the params Value. Any params form (MAP,
+// STRUCT, VARIANT, MAP of VARIANT, the empty STRUCT {}) is first turned into
+// MAP(VARCHAR, VARCHAR) by ParamsAsVarcharMap, so the reader below only knows
+// MAPs. (#300 widened ts_detect_changepoints_agg's params to ANY and routes
+// ts_detect_changepoints_by's macro through _ts_params_map, which supersedes
+// code review WR-05's MAP-only note.) A NULL Value or a missing key falls
 // back to the default. An
 // unparsable hazard_lambda falls back to the default -- this mirrors the
 // pre-existing leniency of ts_detect_changepoints_by's removed
@@ -82,8 +78,11 @@ struct ChangepointParamSet {
 // unparsable threshold throws InvalidInputException naming the key instead
 // of silently falling back to "unset" -- a typo'd threshold silently
 // disabling the feature would be a worse silent-drift bug than erroring.
-inline ChangepointParamSet ParseChangepointParamSet(const Value &params_value) {
+inline ChangepointParamSet ParseChangepointParamSet(const Value &params_in) {
     ChangepointParamSet result;
+    // Any params form (MAP, STRUCT, VARIANT, MAP of VARIANT) as the MAP(VARCHAR, VARCHAR)
+    // the reader below handles; NULL stays NULL (defaults).
+    const Value params_value = params_in.IsNull() ? params_in : ParamsAsVarcharMap(params_in);
     if (params_value.IsNull()) {
         return result;
     }
@@ -122,21 +121,26 @@ inline ChangepointParamSet ParseChangepointParamSet(const Value &params_value) {
         }
     }
 
-    // deseasonalize (#287, BUG-05, D1-b): strict bool -- true/false/1/0,
-    // case-insensitive. Unlike hazard_lambda, a PRESENT but unparsable
-    // value throws naming the key instead of silently falling back to the
-    // default, matching threshold's "typo must not silently disable the
-    // feature" rule above.
+    // deseasonalize (#287, BUG-05, D1-b): true/false/1/0/auto,
+    // case-insensitive; 'auto' is the default. Unlike hazard_lambda, a
+    // PRESENT but unparsable value throws naming the key instead of silently
+    // falling back to the default, matching threshold's "typo must not
+    // silently disable the feature" rule above.
     Value deseasonalize_val = read_key("deseasonalize");
     if (!deseasonalize_val.IsNull()) {
         string lowered = StringUtil::Lower(deseasonalize_val.ToString());
         if (lowered == "true" || lowered == "1") {
             result.deseasonalize = true;
+            result.auto_deseasonalize = false;
         } else if (lowered == "false" || lowered == "0") {
             result.deseasonalize = false;
+            result.auto_deseasonalize = false;
+        } else if (lowered == "auto") {
+            result.deseasonalize = false;
+            result.auto_deseasonalize = true;
         } else {
             throw InvalidInputException(
-                "ts_detect_changepoints: invalid 'deseasonalize' value '%s' -- must be true/false/1/0",
+                "ts_detect_changepoints: invalid 'deseasonalize' value '%s' -- must be true/false/1/0/auto",
                 deseasonalize_val.ToString());
         }
     }

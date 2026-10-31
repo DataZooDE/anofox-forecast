@@ -247,6 +247,7 @@ For complete function signatures, parameters, and detailed documentation, see th
 | **Getting Started** | Installation and first forecast | [Getting Started Guide](docs/guides/01-getting-started.md) |
 | **Model Selection** | Choose the right model | [Model Selection Guide](docs/guides/02-model-selection.md) |
 | **Cross-Validation** | Evaluate forecast accuracy | [Cross-Validation Guide](docs/guides/03-cross-validation.md) |
+| **Monitoring** | Alerts and forecast refreshes on INSERT (DuckDB 2.0) | [Monitoring with Triggers](docs/guides/04-monitoring-with-triggers.md) |
 
 ### API Documentation
 

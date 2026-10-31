@@ -498,7 +498,7 @@ static void TsForecastExogFunction(DataChunk &args, ExpressionState &state, Vect
         if (has_params) {
             auto p_idx = params_data.sel->get_index(row_idx);
             if (params_data.validity.RowIsValid(p_idx)) {
-                Value params_val = args.data[5].GetValue(row_idx);
+                Value params_val = NormalizeParamsValue(args.data[5].GetValue(row_idx));
                 ExogValidateParamKeys(params_val);
                 model_spec = ExogParseStringParam(params_val, "model", "");
                 seasonal_period = ExogParseInt64Param(params_val, "seasonal_period", 0);

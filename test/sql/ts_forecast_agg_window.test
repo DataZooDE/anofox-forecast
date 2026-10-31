@@ -1,0 +1,127 @@
+# name: test/sql/ts_forecast_agg_window.test
+# description: #297 - ts_forecast_agg over sliding / expanding window frames (rolling-
+#   origin forecasts). Each frame gives exactly the GROUP BY result over the frame's
+#   rows; a frame the model cannot fit (too few rows at the start of the window)
+#   reports why in error_message instead of failing the whole query; an empty frame
+#   is NULL. GROUP BY behaviour is unchanged (a too-short series still raises).
+# group: [sql]
+
+require anofox_forecast
+
+statement ok
+SET threads = 4;
+
+statement ok
+CREATE TABLE fw AS
+SELECT i % 2 AS id,
+       (TIMESTAMP '2024-01-01' + to_days((i // 2)::INT)) AS ds,
+       ((i // 2) % 7)::DOUBLE + (i // 2) * 0.05 + sin(i) AS y
+FROM range(160) t(i);
+
+statement ok
+CREATE TABLE fwn AS SELECT id, ds, y, row_number() OVER (PARTITION BY id ORDER BY ds) AS rn FROM fw;
+
+# sliding frame == GROUP BY over the same 10 rows, for every row
+query I
+WITH w AS (
+    SELECT id, rn, ts_forecast_agg(ds, y, 'SES', 3, MAP{}) OVER (PARTITION BY id ORDER BY ds ROWS BETWEEN 9 PRECEDING AND CURRENT ROW)::VARCHAR AS f
+    FROM fwn),
+g AS (
+    SELECT a.id, a.rn, ts_forecast_agg(b.ds, b.y, 'SES', 3, MAP{})::VARCHAR AS f
+    FROM fwn a JOIN fwn b ON a.id = b.id AND b.rn BETWEEN a.rn - 9 AND a.rn
+    GROUP BY a.id, a.rn)
+SELECT count(*) FROM w JOIN g USING (id, rn) WHERE w.f IS DISTINCT FROM g.f;
+----
+0
+
+# expanding origin, excluding the current row (one-step-ahead rolling forecast)
+query II
+WITH w AS (
+    SELECT id, rn, ts_forecast_agg(ds, y, 'Naive', 1, MAP{}) OVER (PARTITION BY id ORDER BY ds ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING)::VARCHAR AS f
+    FROM fwn),
+g AS (
+    SELECT a.id, a.rn, ts_forecast_agg(b.ds, b.y, 'Naive', 1, MAP{})::VARCHAR AS f
+    FROM fwn a JOIN fwn b ON a.id = b.id AND b.rn < a.rn
+    GROUP BY a.id, a.rn)
+SELECT count(*), count(*) FILTER (WHERE w.f IS DISTINCT FROM g.f) FROM w LEFT JOIN g USING (id, rn);
+----
+160	0
+
+# ... including the first row per id: an empty frame is NULL (and has no GROUP BY row)
+query II
+SELECT count(*), count(f)
+FROM (SELECT rn, ts_forecast_agg(ds, y, 'Naive', 1, MAP{}) OVER (PARTITION BY id ORDER BY ds ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS f FROM fwn)
+WHERE rn = 1;
+----
+2	0
+
+# too-short frames: reported in error_message, the query still returns every row
+query III
+SELECT count(*), count(f), count(*) FILTER (WHERE (f).error_message <> '')
+FROM (SELECT ts_forecast_agg(ds, y, 'ETS', 1, MAP{}) OVER (PARTITION BY id ORDER BY ds ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING) AS f FROM fw);
+----
+160	158	6
+
+query I
+SELECT DISTINCT (f).error_message LIKE '%nsufficient data%'
+FROM (SELECT ts_forecast_agg(ds, y, 'ETS', 1, MAP{}) OVER (PARTITION BY id ORDER BY ds ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING) AS f FROM fw)
+WHERE (f).error_message <> '';
+----
+true
+
+# ... and an error row has empty forecast lists
+query I
+SELECT DISTINCT len((f).point_forecast)
+FROM (SELECT ts_forecast_agg(ds, y, 'ETS', 1, MAP{}) OVER (PARTITION BY id ORDER BY ds ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING) AS f FROM fw)
+WHERE (f).error_message <> '';
+----
+0
+
+# GROUP BY is unchanged: a 3-row series fails AutoETS's fit with an INVALID_INPUT
+# error, which raises; in a frame the same 3 rows are reported in error_message
+statement error
+SELECT ts_forecast_agg(ds, y, 'ETS', 1, MAP{}) FROM fw WHERE ds < TIMESTAMP '2024-01-04' GROUP BY id;
+----
+AutoETS could not fit this series
+
+query I
+SELECT (f).error_message LIKE 'Invalid input: AutoETS could not fit this series%'
+FROM (SELECT rn, ts_forecast_agg(ds, y, 'ETS', 1, MAP{}) OVER (PARTITION BY id ORDER BY ds ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING) AS f FROM fwn)
+WHERE rn = 4 AND f IS NOT NULL
+LIMIT 1;
+----
+true
+
+# an unknown model still raises in a window
+statement error
+SELECT ts_forecast_agg(ds, y, 'NoSuchModel', 1, MAP{}) OVER (PARTITION BY id ORDER BY ds ROWS BETWEEN 9 PRECEDING AND CURRENT ROW) FROM fw;
+----
+NoSuchModel
+
+# unknown params keys still raise in a window
+statement error
+SELECT ts_forecast_agg(ds, y, 'Naive', 1, {'bogus': 1}) OVER (PARTITION BY id ORDER BY ds ROWS BETWEEN 9 PRECEDING AND CURRENT ROW) FROM fw;
+----
+Unknown parameter(s): 'bogus'
+
+# FILTER is honoured in a frame
+query I
+WITH w AS (
+    SELECT id, rn, ts_forecast_agg(ds, y, 'Naive', 2, MAP{}) FILTER (WHERE y > 3) OVER (PARTITION BY id ORDER BY ds ROWS BETWEEN 9 PRECEDING AND CURRENT ROW)::VARCHAR AS f
+    FROM fwn),
+g AS (
+    SELECT a.id, a.rn, ts_forecast_agg(b.ds, b.y, 'Naive', 2, MAP{}) FILTER (WHERE b.y > 3)::VARCHAR AS f
+    FROM fwn a JOIN fwn b ON a.id = b.id AND b.rn BETWEEN a.rn - 9 AND a.rn
+    GROUP BY a.id, a.rn)
+SELECT count(*) FROM w JOIN g USING (id, rn) WHERE w.f IS DISTINCT FROM g.f;
+----
+0
+
+# whole-partition frames still fit once per partition and equal GROUP BY
+query I
+SELECT count(*) FROM (
+    SELECT DISTINCT id, ts_forecast_agg(ds, y, 'SES', 3, MAP{}) OVER (PARTITION BY id)::VARCHAR AS f FROM fw
+    EXCEPT
+    SELECT id, ts_forecast_agg(ds, y, 'SES', 3, MAP{})::VARCHAR FROM fw GROUP BY id);
+----
+0

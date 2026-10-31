@@ -198,13 +198,13 @@ ts_detect_changepoints_by(source, group_col, date_col, value_col, params) → TA
 Params (Phase 20 20-06/20-07, #287 — `ts_detect_changepoints_by` and `ts_detect_changepoints_agg`
 parse this same params MAP through one shared C++ header and decide `is_changepoint`/
 `changepoint_probability` through one Rust function, so **both return identical rows for
-identical inputs and params**; all defaults below are unchanged since before Phase 20):
+identical inputs and params**; `deseasonalize` defaults to `auto` since #287):
 | Key | Default | Description |
 |---|---|---|
 | `hazard_lambda` | 250.0 | Expected run length between changepoints. Lower → more changepoints (and more false alarms) |
 | `threshold` | unset | When set (`[0, 1]`), `is_changepoint = (changepoint_probability >= threshold)` for every row **after the first** of each series — the first row is never flagged. When unset, the existing MAP run-length-reset heuristic applies. Out-of-range/non-numeric throws, naming `threshold` |
-| `deseasonalize` | `false` | Strict bool (`true`/`false`/`1`/`0`). When `true`, removes the STL seasonal component at `seasonal_period` (or auto-detected) AND a linear trend before BOCPD (D1-b) — level shifts survive as steps, regular seasonal cycles stop producing changepoints. When `true` and `threshold` is unset, the effective threshold defaults to `0.5` instead of the MAP run-length-reset heuristic (CR-02) — an explicit `threshold` always wins. **Opt-in only**; defaults with `deseasonalize` unset/`false` are unaffected. Invalid value throws, naming `deseasonalize` |
-| `seasonal_period` | `0` (auto) | Strict non-negative integer; only consulted when `deseasonalize` is `true`. Negative/non-numeric throws, naming `seasonal_period` |
+| `deseasonalize` | `auto` | `auto`/`true`/`false` (also `1`/`0`). Deseasonalizing removes the STL seasonal component at `seasonal_period` (or auto-detected) AND a linear trend before BOCPD (D1-b): level shifts survive as steps, and regular seasonal cycles stop producing changepoints. `auto` (default since #287) deseasonalizes only clearly seasonal series: a usable period, ≥ 3 cycles, STL strength ≥ 0.5. Other series run on the raw values. `false` = the pre-#287 raw behaviour. When deseasonalized and `threshold` is unset, the effective threshold is `0.5` (CR-02); an explicit `threshold` always wins. An invalid value throws, naming `deseasonalize` |
+| `seasonal_period` | `0` (auto) | Strict non-negative integer; consulted when deseasonalizing (`true`, or `auto` on a seasonal series). Negative/non-numeric throws, naming `seasonal_period` |
 
 Returns one row per input point with `<group_col>`, `<date_col>`, `is_changepoint BOOLEAN`,
 and `changepoint_probability DOUBLE` only — the value column is **not** included in the
@@ -218,8 +218,10 @@ FROM ts_detect_changepoints_by('sales', product_id, ds, y,
 WHERE is_changepoint;
 
 -- Ignore a weekly cycle, flag only a genuine sustained level shift (#287, D1-b).
+-- The default 'auto' already does this for clearly seasonal series; 'true' forces it.
 -- threshold unset here defaults to an effective 0.5 (CR-02) -- pass 'threshold': '0.5'
 -- explicitly for the identical result, or a different value to override it.
+-- MAP{'deseasonalize': 'false'} restores the pre-#287 raw behaviour.
 SELECT product_id, ds, is_changepoint
 FROM ts_detect_changepoints_by('sales', product_id, ds, y,
     MAP{'deseasonalize': 'true'})

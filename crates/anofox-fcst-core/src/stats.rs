@@ -625,11 +625,9 @@ fn compute_entropy_pincus(series: &[Option<f64>]) -> Option<f64> {
 
 /// Pincus approximate entropy: `ApEn = Phi(m) - Phi(m+1)`, `r = 0.2 * sample std dev`.
 ///
-/// Uses a sorted-band search (T-13-01): template start indices are sorted by their
-/// first coordinate, so each template's match count is found by binary-searching the
-/// `[x_i - r, x_i + r]` window on that coordinate before checking the remaining `m-1`
-/// (or `m`) coordinates via Chebyshev distance — avoiding the naive all-pairs O(n^2)
-/// loop for long series while producing identical counts.
+/// Match counts come from [`template_match_counts`]: exact rank-space range counting
+/// for long series (#304), the sorted-band search (T-13-01) for short ones; both
+/// give identical counts.
 fn approximate_entropy(x: &[f64], m: usize) -> f64 {
     let n = x.len() as f64;
     let mean = x.iter().sum::<f64>() / n;
@@ -655,21 +653,57 @@ fn phi(x: &[f64], m: usize, r: f64) -> f64 {
     sum_log / n_m as f64
 }
 
-/// Shared sorted-band template-match counter (Phase 14 Task 1, T-14-09):
-/// for each of the `n - m + 1` length-`m` templates starting at each index,
-/// counts the number of templates `j` (self included) within Chebyshev
-/// (max-abs) distance `<= r` of template `i`, returned in index order
-/// `0..n-m+1`.
+/// Below these template counts the band search is at least as fast as the
+/// rank-space counters (#304). Release timings, `sin(i) + i % 97` and uniform
+/// random series (`template_match_fast_threshold_table`):
+///
+/// | n      | m=2 rank / band | m=3 rank / band  |
+/// |-------:|----------------:|-----------------:|
+/// |  1,000 | 0.27 / 0.22 ms  |  1.2 / 0.29 ms   |
+/// |  2,000 | 0.64 / 0.78 ms  |  2.7 / 0.97 ms   |
+/// |  5,000 | 2.0 / 4.5 ms    |  7.5 / 5.8 ms    |
+/// | 10,000 | 4.5 / 17.8 ms   | 16.5 / 21.7 ms   |
+/// | 20,000 | 9.6 / 67.8 ms   | 35.2 / 85.5 ms   |
+const RANK_SPACE_MIN_TEMPLATES_M2: usize = 1_500;
+const RANK_SPACE_MIN_TEMPLATES_M3: usize = 8_000;
+
+/// Shared template-match counter (Phase 14 Task 1, T-14-09): for each of the
+/// `n - m + 1` length-`m` templates starting at each index, counts the number
+/// of templates `j` (self included) within Chebyshev (max-abs) distance `<= r`
+/// of template `i`, returned in index order `0..n-m+1`.
+///
+/// Long series with `m` in {2, 3}, finite values and a finite `r >= 0` use the
+/// exact rank-space counters in [`crate::template_match`] (sub-quadratic,
+/// #304); everything else uses [`template_match_counts_band`]. Both give
+/// identical counts. Callers that need NaN-safety should still short-circuit
+/// on NaN input before calling. Used by `ts_stats`'s Pincus approximate
+/// entropy ([`phi`], above) and `ts_features`'s
+/// `sample_entropy`/`approximate_entropy` (features.rs).
+pub(crate) fn template_match_counts(x: &[f64], m: usize, r: f64) -> Vec<usize> {
+    let n_m = x.len().saturating_sub(m) + 1;
+    let rank_space_ok =
+        r.is_finite() && r >= 0.0 && x.len() < (1 << 31) && x.iter().all(|v| v.is_finite());
+    match m {
+        2 if n_m >= RANK_SPACE_MIN_TEMPLATES_M2 && rank_space_ok => {
+            crate::template_match::count_m2(x, r)
+        }
+        3 if n_m >= RANK_SPACE_MIN_TEMPLATES_M3 && rank_space_ok => {
+            crate::template_match::count_m3(x, r)
+        }
+        _ => template_match_counts_band(x, m, r),
+    }
+}
+
+/// Sorted-band template-match counter: the exact reference and fallback for
+/// [`template_match_counts`]. Same contract.
 ///
 /// Sorts template-start indices by their first coordinate with
 /// [`f64::total_cmp`] (not `partial_cmp().unwrap()`, T-14-10) so a NaN
-/// element can never panic the sort -- callers that need NaN-safety should
-/// still short-circuit on NaN input before calling, since a NaN's
-/// `total_cmp` position does not participate meaningfully in a Chebyshev
-/// distance comparison. Used by `ts_stats`'s Pincus approximate entropy
-/// ([`phi`], above) and `ts_features`'s `sample_entropy`/`approximate_entropy`
-/// (features.rs).
-pub(crate) fn template_match_counts(x: &[f64], m: usize, r: f64) -> Vec<usize> {
+/// element can never panic the sort -- a NaN's `total_cmp` position does not
+/// participate meaningfully in a Chebyshev distance comparison. Candidates are
+/// prefiltered to the band `!(v < xi - r) && v <= xi + r` on the first
+/// coordinate, then checked on all `m` coordinates. O(n^2) in the worst case.
+pub(crate) fn template_match_counts_band(x: &[f64], m: usize, r: f64) -> Vec<usize> {
     let n_m = x.len() - m + 1;
 
     // Sort template-start indices by their first coordinate for the band search.
@@ -702,6 +736,37 @@ pub(crate) fn template_match_counts(x: &[f64], m: usize, r: f64) -> Vec<usize> {
     counts
 }
 
+/// From this length [`compute_stability`] slides its window sum instead of
+/// re-summing every window (O(n^2) with a window of n/5, #304).
+const SLIDING_STABILITY_MIN_LEN: usize = 4096;
+
+/// Means of every length-`window` window, by a running sum with Neumaier
+/// compensation (matches re-summing each window up to round-off).
+fn sliding_window_means(values: &[f64], window: usize) -> Vec<f64> {
+    let mut sum = 0.0f64;
+    let mut comp = 0.0f64;
+    let add = |sum: &mut f64, comp: &mut f64, v: f64| {
+        let t = *sum + v;
+        *comp += if sum.abs() >= v.abs() {
+            (*sum - t) + v
+        } else {
+            (v - t) + *sum
+        };
+        *sum = t;
+    };
+    for &v in &values[..window] {
+        add(&mut sum, &mut comp, v);
+    }
+    let mut means = Vec::with_capacity(values.len() - window + 1);
+    means.push((sum + comp) / window as f64);
+    for i in window..values.len() {
+        add(&mut sum, &mut comp, values[i]);
+        add(&mut sum, &mut comp, -values[i - window]);
+        means.push((sum + comp) / window as f64);
+    }
+    means
+}
+
 /// Compute stability as inverse of coefficient of variation of rolling means.
 fn compute_stability(values: &[f64]) -> f64 {
     if values.len() < 10 {
@@ -709,12 +774,13 @@ fn compute_stability(values: &[f64]) -> f64 {
     }
 
     let window = (values.len() / 5).max(3);
-    let mut rolling_means = Vec::new();
-
-    for i in 0..=(values.len() - window) {
-        let mean: f64 = values[i..i + window].iter().sum::<f64>() / window as f64;
-        rolling_means.push(mean);
-    }
+    let rolling_means = if values.len() < SLIDING_STABILITY_MIN_LEN {
+        (0..=(values.len() - window))
+            .map(|i| values[i..i + window].iter().sum::<f64>() / window as f64)
+            .collect()
+    } else {
+        sliding_window_means(values, window)
+    };
 
     if rolling_means.is_empty() {
         return f64::NAN;
@@ -895,6 +961,120 @@ fn compute_trimmed_mean(sorted: &[f64], trim_proportion: f64) -> f64 {
 mod tests {
     use super::*;
     use approx::assert_relative_eq;
+
+    fn sin_mod97(n: usize) -> Vec<f64> {
+        (0..n).map(|i| (i as f64).sin() + (i % 97) as f64).collect()
+    }
+
+    /// #304: Pincus ApEn on 160k rows ran ~31-44 s with the band search alone.
+    /// Run with `cargo test --release -p anofox-fcst-core --lib
+    /// template_match_fast_perf -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn template_match_fast_perf_160k() {
+        let x = sin_mod97(40_000);
+        let r = 0.2 * sample_sd(&x);
+        for m in [2, 3] {
+            let t = std::time::Instant::now();
+            let fast = template_match_counts(&x, m, r);
+            let t_fast = t.elapsed();
+            let t = std::time::Instant::now();
+            let band = template_match_counts_band(&x, m, r);
+            let t_band = t.elapsed();
+            eprintln!("40k m={m}: rank-space {t_fast:?}, band {t_band:?}");
+            assert_eq!(fast, band, "m = {m}");
+        }
+
+        let x = sin_mod97(160_000);
+        let t = std::time::Instant::now();
+        let apen = approximate_entropy(&x, 2);
+        let elapsed = t.elapsed();
+        eprintln!("160k approximate_entropy = {apen} in {elapsed:?}");
+        assert!(elapsed.as_secs_f64() < 1.0, "took {elapsed:?}");
+    }
+
+    /// #304: all of `ts_stats` (default period detection, stability, entropy)
+    /// is sub-quadratic; 160k rows took ~44 s before.
+    #[test]
+    #[ignore]
+    fn ts_stats_perf_160k() {
+        let s: Vec<Option<f64>> = sin_mod97(160_000).into_iter().map(Some).collect();
+        let t = std::time::Instant::now();
+        let stats = compute_ts_stats(&s, 0).unwrap();
+        let elapsed = t.elapsed();
+        eprintln!("160k compute_ts_stats in {elapsed:?}: {stats:?}");
+        assert!(elapsed.as_secs_f64() < 3.0, "took {elapsed:?}");
+    }
+
+    /// Timing table behind `RANK_SPACE_MIN_TEMPLATES_M2/M3`.
+    #[test]
+    #[ignore]
+    fn template_match_fast_threshold_table() {
+        let mut state = 1u64;
+        let mut lcg = || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (state >> 11) as f64 / (1u64 << 53) as f64
+        };
+        for n in [250usize, 1000, 2000, 5000, 10000, 20000] {
+            let random: Vec<f64> = (0..n).map(|_| lcg()).collect();
+            for (name, x) in [("sin_mod97", sin_mod97(n)), ("random", random)] {
+                let r = 0.2 * sample_sd(&x);
+                for m in [2, 3] {
+                    let reps = 20;
+                    let t = std::time::Instant::now();
+                    for _ in 0..reps {
+                        std::hint::black_box(match m {
+                            2 => crate::template_match::count_m2(&x, r),
+                            _ => crate::template_match::count_m3(&x, r),
+                        });
+                    }
+                    let t_fast = t.elapsed() / reps;
+                    let t = std::time::Instant::now();
+                    for _ in 0..reps {
+                        std::hint::black_box(template_match_counts_band(&x, m, r));
+                    }
+                    let t_band = t.elapsed() / reps;
+                    eprintln!("n={n:5} {name:9} m={m}: rank-space {t_fast:?} band {t_band:?}");
+                }
+            }
+        }
+    }
+
+    /// #304: sliding window means match re-summing each window.
+    #[test]
+    fn test_sliding_window_means_match_direct() {
+        let series: Vec<Vec<f64>> = vec![
+            sin_mod97(6000),
+            (0..6000).map(|i| 1e6 + (i as f64 * 0.37).sin()).collect(),
+            (0..6000).map(|i| ((i % 24) < 12) as u8 as f64).collect(),
+        ];
+        for x in &series {
+            let window = x.len() / 5;
+            let fast = sliding_window_means(x, window);
+            let direct: Vec<f64> = (0..=(x.len() - window))
+                .map(|i| x[i..i + window].iter().sum::<f64>() / window as f64)
+                .collect();
+            assert_eq!(fast.len(), direct.len());
+            for (a, b) in fast.iter().zip(&direct) {
+                assert!((a - b).abs() <= 1e-12 * b.abs().max(1.0), "{a} vs {b}");
+            }
+            let fast_stability = compute_stability(x);
+            let rm_mean = direct.iter().sum::<f64>() / direct.len() as f64;
+            let rm_std = (direct.iter().map(|v| (v - rm_mean).powi(2)).sum::<f64>()
+                / direct.len() as f64)
+                .sqrt();
+            let direct_stability = 1.0 / (rm_std / rm_mean.abs() + 0.01);
+            assert!((fast_stability - direct_stability).abs() <= 1e-9 * direct_stability);
+        }
+    }
+
+    fn sample_sd(x: &[f64]) -> f64 {
+        let n = x.len() as f64;
+        let mean = x.iter().sum::<f64>() / n;
+        (x.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (n - 1.0)).sqrt()
+    }
 
     #[test]
     fn test_basic_stats() {

@@ -59,15 +59,20 @@ use libc::{free, malloc};
 //   [ usize header (size of data region) | data ... ]
 //                                         ^-- returned pointer
 //
-// Total allocation: size_of::<usize>() + size bytes, aligned to 8.
+// Total allocation: WASM_ALLOC_HEADER + size bytes, aligned to 8.
 // This is compatible across all alloc/free pairings in both lib.rs and allocation.rs
 // as long as both files use the identical header format (they do — see allocation.rs).
+/// Size-header bytes in front of each WASM allocation. 8, not
+/// `size_of::<usize>()` (4 on wasm32): the data region must stay 8-aligned for
+/// the i64/f64 arrays handed to C++, or every such array is misaligned (#289).
+#[cfg(target_family = "wasm")]
+const WASM_ALLOC_HEADER: usize = 8;
+
 #[cfg(target_family = "wasm")]
 unsafe fn malloc(size: usize) -> *mut core::ffi::c_void {
     use std::alloc::{alloc, Layout};
-    use std::mem::size_of;
     // Allocate header + data. Alignment 8 covers both usize (≤8 bytes) and f64 (8 bytes).
-    let total = size_of::<usize>()
+    let total = WASM_ALLOC_HEADER
         .checked_add(size)
         .expect("allocation size overflow");
     let layout = Layout::from_size_align(total, 8).expect("8-byte alignment is always valid");
@@ -78,20 +83,19 @@ unsafe fn malloc(size: usize) -> *mut core::ffi::c_void {
     // Store the data size (not the total) in the header for dealloc.
     *(base as *mut usize) = size;
     // Return pointer to the data region (after the header).
-    base.add(size_of::<usize>()) as *mut core::ffi::c_void
+    base.add(WASM_ALLOC_HEADER) as *mut core::ffi::c_void
 }
 
 #[cfg(target_family = "wasm")]
 unsafe fn free(ptr: *mut core::ffi::c_void) {
     use std::alloc::{dealloc, Layout};
-    use std::mem::size_of;
     if ptr.is_null() {
         return;
     }
     // Recover base pointer and stored size from the header.
-    let base = (ptr as *mut u8).sub(size_of::<usize>());
+    let base = (ptr as *mut u8).sub(WASM_ALLOC_HEADER);
     let size = *(base as *const usize);
-    let total = size_of::<usize>()
+    let total = WASM_ALLOC_HEADER
         .checked_add(size)
         .expect("allocation size overflow");
     let layout = Layout::from_size_align(total, 8).expect("8-byte alignment is always valid");
@@ -3486,6 +3490,7 @@ pub unsafe extern "C" fn anofox_ts_detect_changepoints_bocpd_opts(
                 threshold,
                 deseasonalize: (*opts).deseasonalize,
                 seasonal_period,
+                auto_deseasonalize: (*opts).auto_deseasonalize,
             },
         )
     }));

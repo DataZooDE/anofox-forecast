@@ -1,0 +1,137 @@
+# name: test/sql/ts_params_variant.test
+# description: #300 - params given as STRUCT, MAP, VARIANT, MAP(VARCHAR, VARIANT) or the
+#   empty STRUCT {} all mean the same options. A top-level VARIANT used to be silently
+#   ignored (every key, including unknown ones), because the parsers only branch on
+#   MAP / STRUCT; it is now unwrapped (DuckDB 2.0).
+# group: [sql]
+#
+# {} and VARIANT unwrapping exist only on DuckDB 2.0, so those queries go through
+# v2_or(sql, fallback): `sql` runs on 2.0, the constant `fallback` (the expected result)
+# on 1.5. The STRUCT / MAP checks run on both lines.
+
+require anofox_forecast
+
+statement ok
+CREATE MACRO v2_or(sql, fallback) AS TABLE
+    SELECT * FROM query(CASE WHEN version() >= 'v2' THEN sql ELSE fallback END);
+
+# same_rows(a, b): the two queries return the same rows (order-insensitive)
+statement ok
+CREATE MACRO same_rows(a, b) AS
+    (SELECT string_agg(x::VARCHAR, '|' ORDER BY x::VARCHAR) FROM query(a) x)
+    IS NOT DISTINCT FROM
+    (SELECT string_agg(x::VARCHAR, '|' ORDER BY x::VARCHAR) FROM query(b) x);
+
+statement ok
+CREATE TABLE pv AS
+SELECT 's' || (i % 3) AS id,
+       DATE '2024-01-01' + (i // 3)::INT AS ds,
+       ((i // 3) % 7)::DOUBLE * 3 + (i // 3) * 0.05 + CASE WHEN i // 3 > 60 THEN 8 ELSE 0 END + sin(i) + (i % 3) AS y
+FROM range(360) t(i);
+
+# --- portable: STRUCT == stringly MAP, mixed-type STRUCT (both lines) ---
+query I
+SELECT same_rows(
+    $$SELECT * FROM ts_forecast_by('pv', id, ds, y, 'ETS', 5, '1d', params := MAP{'model': 'ANN', 'seasonal_period': '7'})$$,
+    $$SELECT * FROM ts_forecast_by('pv', id, ds, y, 'ETS', 5, '1d', params := {'model': 'ANN', 'seasonal_period': 7})$$);
+----
+true
+
+query I
+SELECT same_rows(
+    $$SELECT * FROM ts_forecast_by('pv', id, ds, y, 'MSTL', 5, '1d', params := MAP{'seasonal_periods': '[7, 14]'})$$,
+    $$SELECT * FROM ts_forecast_by('pv', id, ds, y, 'MSTL', 5, '1d', params := {'seasonal_periods': [7, 14]})$$);
+----
+true
+
+# aggregates take any params form too (#300 widened them from MAP to ANY)
+query I
+SELECT same_rows(
+    $$SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'ETS', 5, MAP{'model': 'ANN'}) AS r FROM pv GROUP BY id$$,
+    $$SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'ETS', 5, {'model': 'ANN'}) AS r FROM pv GROUP BY id$$)
+   AND same_rows(
+    $$SELECT ts_detect_changepoints_agg(ds::TIMESTAMP, y, MAP{'hazard_lambda': '50'}) AS r FROM pv GROUP BY id$$,
+    $$SELECT ts_detect_changepoints_agg(ds::TIMESTAMP, y, {'hazard_lambda': 50}) AS r FROM pv GROUP BY id$$)
+   AND NOT same_rows(
+    $$SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'ETS', 5, {'model': 'ANN'}) AS r FROM pv GROUP BY id$$,
+    $$SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'ETS', 5, MAP{}) AS r FROM pv GROUP BY id$$);
+----
+true
+
+statement error
+SELECT ts_forecast_agg(ds::TIMESTAMP, y, 'ETS', 5, {'bogus': 1}) AS r FROM pv GROUP BY id;
+----
+Unknown parameter(s): 'bogus'
+
+# --- VARIANT params are applied, not ignored (2.0) ---
+query I
+FROM v2_or($$
+    SELECT DISTINCT model_name FROM ts_forecast_by('pv', id, ds, y, 'ETS', 5, '1d', params := {'model': 'ANN'}::VARIANT)
+$$, $$SELECT 'ETS(A,N,N)'$$);
+----
+ETS(A,N,N)
+
+statement error
+FROM v2_or($$
+    SELECT * FROM ts_forecast_by('pv', id, ds, y, 'ETS', 5, '1d', params := {'bogus': 1}::VARIANT)
+$$, $$SELECT * FROM ts_forecast_by('pv', id, ds, y, 'ETS', 5, '1d', params := {'bogus': 1})$$);
+----
+Unknown parameter(s): 'bogus'
+
+query I
+FROM v2_or($$
+    SELECT same_rows(
+        'SELECT * FROM ts_forecast_by(''pv'', id, ds, y, ''ETS'', 5, ''1d'', params := {''model'': ''ANN'', ''seasonal_period'': 7}::VARIANT)',
+        'SELECT * FROM ts_forecast_by(''pv'', id, ds, y, ''ETS'', 5, ''1d'', params := {''model'': ''ANN'', ''seasonal_period'': 7})')
+    AND same_rows(
+        'SELECT * FROM ts_forecast_by(''pv'', id, ds, y, ''ETS'', 5, ''1d'', params := MAP{''model'': ''ANN''::VARIANT, ''seasonal_period'': 7::VARIANT})',
+        'SELECT * FROM ts_forecast_by(''pv'', id, ds, y, ''ETS'', 5, ''1d'', params := {''model'': ''ANN'', ''seasonal_period'': 7})')
+    AND same_rows(
+        'SELECT * FROM ts_cv_folds_by(''pv'', id, ds, y, 2, 7, {''gap'': 1}::VARIANT)',
+        'SELECT * FROM ts_cv_folds_by(''pv'', id, ds, y, 2, 7, MAP{''gap'': ''1''})')
+    AND same_rows(
+        'SELECT * FROM ts_detect_changepoints_by(''pv'', id, ds, y, {''hazard_lambda'': 50}::VARIANT)',
+        'SELECT * FROM ts_detect_changepoints_by(''pv'', id, ds, y, MAP{''hazard_lambda'': ''50''})')
+    AND same_rows(
+        'SELECT * FROM ts_forecast_panel_by(''pv'', id, ds, y, ''GlobalETS'', 5, ''1d'', {''seasonal_period'': 7}::VARIANT)',
+        'SELECT * FROM ts_forecast_panel_by(''pv'', id, ds, y, ''GlobalETS'', 5, ''1d'', MAP{''seasonal_period'': ''7''})')
+    AND same_rows(
+        'SELECT * FROM ts_detect_changepoints_events_by(''pv'', id, ds, y, params := {''hazard_lambda'': 50}::VARIANT)',
+        'SELECT * FROM ts_detect_changepoints_events_by(''pv'', id, ds, y, params := MAP{''hazard_lambda'': ''50''})') AS ok
+$$, $$SELECT true$$);
+----
+true
+
+# --- {} means "no params" (2.0) ---
+query I
+FROM v2_or($$
+    SELECT same_rows(
+        'SELECT * FROM ts_forecast_by(''pv'', id, ds, y, ''ETS'', 5, ''1d'', params := {})',
+        'SELECT * FROM ts_forecast_by(''pv'', id, ds, y, ''ETS'', 5, ''1d'')')
+    AND same_rows(
+        'SELECT * FROM ts_forecast_by(''pv'', id, ds, y, ''ETS'', 5, ''1d'', params := {}::VARIANT)',
+        'SELECT * FROM ts_forecast_by(''pv'', id, ds, y, ''ETS'', 5, ''1d'')')
+    AND same_rows(
+        'SELECT * FROM ts_cv_folds_by(''pv'', id, ds, y, 2, 7, {})',
+        'SELECT * FROM ts_cv_folds_by(''pv'', id, ds, y, 2, 7, MAP{})')
+    AND same_rows(
+        'SELECT * FROM ts_detect_changepoints_by(''pv'', id, ds, y, {})',
+        'SELECT * FROM ts_detect_changepoints_by(''pv'', id, ds, y, MAP{})')
+    AND same_rows(
+        'SELECT * FROM ts_detect_changepoints_events_by(''pv'', id, ds, y, params := {})',
+        'SELECT * FROM ts_detect_changepoints_events_by(''pv'', id, ds, y)')
+    AND same_rows(
+        'SELECT * FROM ts_forecast_panel_by(''pv'', id, ds, y, ''GlobalETS'', 5, ''1d'', {})',
+        'SELECT * FROM ts_forecast_panel_by(''pv'', id, ds, y, ''GlobalETS'', 5, ''1d'', MAP{})')
+    AND same_rows(
+        'SELECT ts_forecast_agg(ds::TIMESTAMP, y, ''ETS'', 5, {}) AS r FROM pv GROUP BY id',
+        'SELECT ts_forecast_agg(ds::TIMESTAMP, y, ''ETS'', 5, MAP{}) AS r FROM pv GROUP BY id')
+    AND same_rows(
+        'SELECT ts_detect_changepoints_agg(ds::TIMESTAMP, y, {}) AS r FROM pv GROUP BY id',
+        'SELECT ts_detect_changepoints_agg(ds::TIMESTAMP, y, MAP{}) AS r FROM pv GROUP BY id')
+    AND same_rows(
+        'SELECT ts_forecast_agg(ds::TIMESTAMP, y, ''ETS'', 5, {''model'': ''ANN''}::VARIANT) AS r FROM pv GROUP BY id',
+        'SELECT ts_forecast_agg(ds::TIMESTAMP, y, ''ETS'', 5, {''model'': ''ANN''}) AS r FROM pv GROUP BY id') AS ok
+$$, $$SELECT true$$);
+----
+true

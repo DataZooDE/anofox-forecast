@@ -3,6 +3,8 @@
 #   `_by` table macros (BUG-03, #285, Phase 20 plans 20-03..20-05). Each macro must
 #   return the same rows over a UNION ALL view, a reversed-order view and a shuffled
 #   view as over the same rows materialized in a plain table.
+#   Every check runs twice: with preserve_insertion_order = false (DuckDB 2.0 runs
+#   UNION ALL branches in parallel then, duckdb/duckdb#24117, #296) and true (default).
 # group: [sql]
 #
 # #285 root cause (20-02): a UNION ALL source gives the in-out native several input
@@ -26,23 +28,31 @@ require anofox_forecast
 # (same note as detection_decomposition.test).
 require json
 
-statement ok
-CREATE TABLE s2 AS SELECT id, (TIMESTAMP '2024-01-01' + INTERVAL (i) DAY) AS ds, base + 0.3 * i AS y FROM (VALUES ('A', 20.0), ('B', 40.0), ('C', 60.0)) t(id, base), range(84) r(i);
+foreach pio false true
 
 statement ok
-CREATE TABLE f2 AS SELECT id, ds, y FROM s2 WHERE ds >= TIMESTAMP '2024-03-11';
+SET preserve_insertion_order = ${pio};
 
 statement ok
-CREATE VIEW uv AS SELECT id, ds, y FROM s2 WHERE ds < TIMESTAMP '2024-02-01' UNION ALL SELECT id, ds, y FROM s2 WHERE ds >= (SELECT min(ds) FROM f2);
+SET threads = 8;
 
 statement ok
-CREATE TABLE ut AS SELECT * FROM uv;
+CREATE OR REPLACE TABLE s2 AS SELECT id, (TIMESTAMP '2024-01-01' + INTERVAL (i) DAY) AS ds, base + 0.3 * i AS y FROM (VALUES ('A', 20.0), ('B', 40.0), ('C', 60.0)) t(id, base), range(84) r(i);
 
 statement ok
-CREATE VIEW rv AS SELECT * FROM ut ORDER BY id, ds DESC;
+CREATE OR REPLACE TABLE f2 AS SELECT id, ds, y FROM s2 WHERE ds >= TIMESTAMP '2024-03-11';
 
 statement ok
-CREATE VIEW sv AS SELECT * FROM ut ORDER BY hash(id, ds);
+CREATE OR REPLACE VIEW uv AS SELECT id, ds, y FROM s2 WHERE ds < TIMESTAMP '2024-02-01' UNION ALL SELECT id, ds, y FROM s2 WHERE ds >= (SELECT min(ds) FROM f2);
+
+statement ok
+CREATE OR REPLACE TABLE ut AS SELECT * FROM uv;
+
+statement ok
+CREATE OR REPLACE VIEW rv AS SELECT * FROM ut ORDER BY id, ds DESC;
+
+statement ok
+CREATE OR REPLACE VIEW sv AS SELECT * FROM ut ORDER BY hash(id, ds);
 
 query II
 SELECT id, count(*) FROM ut GROUP BY id ORDER BY id;
@@ -441,28 +451,28 @@ SELECT count(*) FROM (SELECT * FROM ts_cv_split_by('ut', id, ds, y, ['2024-01-20
 # =============================================================================
 
 statement ok
-CREATE TABLE cvt AS SELECT * FROM ts_cv_folds_by('ut', id, ds, y, 2, 5, MAP{});
+CREATE OR REPLACE TABLE cvt AS SELECT * FROM ts_cv_folds_by('ut', id, ds, y, 2, 5, MAP{});
 
 statement ok
-CREATE VIEW cvu AS SELECT * FROM cvt WHERE ds < TIMESTAMP '2024-02-01' UNION ALL SELECT * FROM cvt WHERE ds >= (SELECT min(ds) FROM f2);
+CREATE OR REPLACE VIEW cvu AS SELECT * FROM cvt WHERE ds < TIMESTAMP '2024-02-01' UNION ALL SELECT * FROM cvt WHERE ds >= (SELECT min(ds) FROM f2);
 
 statement ok
-CREATE VIEW cvr AS SELECT * FROM cvt ORDER BY fold_id DESC, id DESC, ds DESC;
+CREATE OR REPLACE VIEW cvr AS SELECT * FROM cvt ORDER BY fold_id DESC, id DESC, ds DESC;
 
 statement ok
-CREATE VIEW cvs AS SELECT * FROM cvt ORDER BY hash(fold_id, id, ds);
+CREATE OR REPLACE VIEW cvs AS SELECT * FROM cvt ORDER BY hash(fold_id, id, ds);
 
 statement ok
-CREATE TABLE sxt AS SELECT id, ds, y, round(y * 2 + (epoch(ds) / 86400) % 7, 3)::DOUBLE AS temperature FROM ut;
+CREATE OR REPLACE TABLE sxt AS SELECT id, ds, y, round(y * 2 + (epoch(ds) / 86400) % 7, 3)::DOUBLE AS temperature FROM ut;
 
 statement ok
-CREATE VIEW sxu AS SELECT * FROM sxt WHERE ds < TIMESTAMP '2024-02-01' UNION ALL SELECT * FROM sxt WHERE ds >= (SELECT min(ds) FROM f2);
+CREATE OR REPLACE VIEW sxu AS SELECT * FROM sxt WHERE ds < TIMESTAMP '2024-02-01' UNION ALL SELECT * FROM sxt WHERE ds >= (SELECT min(ds) FROM f2);
 
 statement ok
-CREATE VIEW sxr AS SELECT * FROM sxt ORDER BY id, ds DESC;
+CREATE OR REPLACE VIEW sxr AS SELECT * FROM sxt ORDER BY id, ds DESC;
 
 statement ok
-CREATE VIEW sxs AS SELECT * FROM sxt ORDER BY hash(id, ds);
+CREATE OR REPLACE VIEW sxs AS SELECT * FROM sxt ORDER BY hash(id, ds);
 
 query I
 SELECT count(*) FROM cvu;
@@ -605,16 +615,16 @@ SELECT count(*) FROM (SELECT * FROM ts_forecast_panel_by('ut', id, ds, y, 'Globa
 # =============================================================================
 
 statement ok
-CREATE TABLE wt AS SELECT (TIMESTAMP '2024-01-01' + INTERVAL (i) DAY) AS ds, round(10 + sin(i) + 0.1 * i, 6) AS y1, round(5 + cos(i * 0.7) + 0.05 * i, 6) AS y2 FROM range(84) r(i);
+CREATE OR REPLACE TABLE wt AS SELECT (TIMESTAMP '2024-01-01' + INTERVAL (i) DAY) AS ds, round(10 + sin(i) + 0.1 * i, 6) AS y1, round(5 + cos(i * 0.7) + 0.05 * i, 6) AS y2 FROM range(84) r(i);
 
 statement ok
-CREATE VIEW wu AS SELECT * FROM wt WHERE ds < TIMESTAMP '2024-02-15' UNION ALL SELECT * FROM wt WHERE ds >= (SELECT min(ds) FROM wt WHERE ds >= TIMESTAMP '2024-02-15');
+CREATE OR REPLACE VIEW wu AS SELECT * FROM wt WHERE ds < TIMESTAMP '2024-02-15' UNION ALL SELECT * FROM wt WHERE ds >= (SELECT min(ds) FROM wt WHERE ds >= TIMESTAMP '2024-02-15');
 
 statement ok
-CREATE VIEW wr AS SELECT * FROM wt ORDER BY ds DESC;
+CREATE OR REPLACE VIEW wr AS SELECT * FROM wt ORDER BY ds DESC;
 
 statement ok
-CREATE VIEW ws AS SELECT * FROM wt ORDER BY hash(ds);
+CREATE OR REPLACE VIEW ws AS SELECT * FROM wt ORDER BY hash(ds);
 
 # Observed before the fix on the UNION ALL view: y1 14.442128..14.449617 (the first
 # branch alone) instead of 19.071735..19.168724.
@@ -664,16 +674,16 @@ SELECT count(*) FROM (SELECT * FROM ts_forecast_var_by('wt', 'ds', ['y1', 'y2'],
 # =============================================================================
 
 statement ok
-CREATE TABLE pbig AS SELECT 's' || (i // 200) AS id, TIMESTAMP '2024-01-01' + INTERVAL (i % 200) DAY AS ds, (i % 200) * 0.1 + ((i * 7919) % 13) * 0.25 AS y FROM range(400000) r(i);
+CREATE OR REPLACE TABLE pbig AS SELECT 's' || (i // 200) AS id, TIMESTAMP '2024-01-01' + INTERVAL (i % 200) DAY AS ds, (i % 200) * 0.1 + ((i * 7919) % 13) * 0.25 AS y FROM range(400000) r(i);
 
 statement ok
-CREATE TABLE pbig_shuffled AS SELECT * FROM pbig ORDER BY hash(id, ds);
+CREATE OR REPLACE TABLE pbig_shuffled AS SELECT * FROM pbig ORDER BY hash(id, ds);
 
 statement ok
 SET threads = 1;
 
 statement ok
-CREATE TABLE pan_t1 AS SELECT * FROM ts_forecast_panel_by('pbig', id, ds, y, 'GlobalETS', 3, '1d', MAP{});
+CREATE OR REPLACE TABLE pan_t1 AS SELECT * FROM ts_forecast_panel_by('pbig', id, ds, y, 'GlobalETS', 3, '1d', MAP{});
 
 statement ok
 RESET threads;
@@ -714,22 +724,22 @@ SELECT count(*) FROM (SELECT * FROM pan_t1 EXCEPT ALL SELECT * FROM ts_forecast_
 # =============================================================================
 
 statement ok
-CREATE TABLE fs2 AS SELECT id, (TIMESTAMP '2024-01-01' + INTERVAL (i) DAY) AS ds, base + 0.3 * i + 5 * sin(2 * pi() * i / 7) AS y FROM (VALUES ('A', 20.0), ('B', 40.0), ('C', 60.0)) t(id, base), range(84) r(i);
+CREATE OR REPLACE TABLE fs2 AS SELECT id, (TIMESTAMP '2024-01-01' + INTERVAL (i) DAY) AS ds, base + 0.3 * i + 5 * sin(2 * pi() * i / 7) AS y FROM (VALUES ('A', 20.0), ('B', 40.0), ('C', 60.0)) t(id, base), range(84) r(i);
 
 statement ok
-CREATE TABLE ff2 AS SELECT id, ds, y FROM fs2 WHERE ds >= TIMESTAMP '2024-03-11';
+CREATE OR REPLACE TABLE ff2 AS SELECT id, ds, y FROM fs2 WHERE ds >= TIMESTAMP '2024-03-11';
 
 statement ok
-CREATE VIEW fuv AS SELECT id, ds, y FROM fs2 WHERE ds < TIMESTAMP '2024-02-01' UNION ALL SELECT id, ds, y FROM fs2 WHERE ds >= (SELECT min(ds) FROM ff2);
+CREATE OR REPLACE VIEW fuv AS SELECT id, ds, y FROM fs2 WHERE ds < TIMESTAMP '2024-02-01' UNION ALL SELECT id, ds, y FROM fs2 WHERE ds >= (SELECT min(ds) FROM ff2);
 
 statement ok
-CREATE TABLE fut AS SELECT * FROM fuv;
+CREATE OR REPLACE TABLE fut AS SELECT * FROM fuv;
 
 statement ok
-CREATE VIEW frv AS SELECT * FROM fut ORDER BY id, ds DESC;
+CREATE OR REPLACE VIEW frv AS SELECT * FROM fut ORDER BY id, ds DESC;
 
 statement ok
-CREATE VIEW fsv AS SELECT * FROM fut ORDER BY hash(id, ds);
+CREATE OR REPLACE VIEW fsv AS SELECT * FROM fut ORDER BY hash(id, ds);
 
 # _ts_forecast_native: 9 forecast rows (3 ids x 3 horizon), sum(yhat) 548.917583
 # on every shape (was 484.871756 on `fuv` pre-fix: the UNION's first branch
@@ -823,19 +833,19 @@ SELECT count(*) FROM (SELECT * FROM ts_forecast_by('sv', id, ds, y, 'Theta', 7, 
 # =============================================================================
 
 statement ok
-CREATE TABLE hsales AS SELECT (DATE '2024-01-01' + INTERVAL (i) DAY) AS dt, 10.0 + i AS qty, region, store, item FROM (VALUES ('EU', 'S1', 'A'), ('EU', 'S1', 'B'), ('US', 'S2', 'C')) t(region, store, item), range(20) r(i);
+CREATE OR REPLACE TABLE hsales AS SELECT (DATE '2024-01-01' + INTERVAL (i) DAY) AS dt, 10.0 + i AS qty, region, store, item FROM (VALUES ('EU', 'S1', 'A'), ('EU', 'S1', 'B'), ('US', 'S2', 'C')) t(region, store, item), range(20) r(i);
 
 statement ok
-CREATE VIEW huv AS SELECT * FROM hsales WHERE dt < DATE '2024-01-11' UNION ALL SELECT * FROM hsales WHERE dt >= (SELECT min(dt) FROM hsales WHERE dt >= DATE '2024-01-11');
+CREATE OR REPLACE VIEW huv AS SELECT * FROM hsales WHERE dt < DATE '2024-01-11' UNION ALL SELECT * FROM hsales WHERE dt >= (SELECT min(dt) FROM hsales WHERE dt >= DATE '2024-01-11');
 
 statement ok
-CREATE TABLE hut AS SELECT * FROM huv;
+CREATE OR REPLACE TABLE hut AS SELECT * FROM huv;
 
 statement ok
-CREATE VIEW hrv AS SELECT * FROM hut ORDER BY region DESC, store DESC, item DESC, dt DESC;
+CREATE OR REPLACE VIEW hrv AS SELECT * FROM hut ORDER BY region DESC, store DESC, item DESC, dt DESC;
 
 statement ok
-CREATE VIEW hsv AS SELECT * FROM hut ORDER BY hash(region, store, item, dt);
+CREATE OR REPLACE VIEW hsv AS SELECT * FROM hut ORDER BY hash(region, store, item, dt);
 
 query I
 SELECT count(*) FROM huv;
@@ -954,3 +964,5 @@ query I
 SELECT count(*) FROM (SELECT * FROM ts_validate_separator((SELECT region, store, item FROM hut)) EXCEPT ALL SELECT * FROM ts_validate_separator((SELECT region, store, item FROM hsv)));
 ----
 0
+
+endloop

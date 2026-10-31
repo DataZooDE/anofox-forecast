@@ -8,7 +8,7 @@ compile+link CI leg cannot verify.
 
 1. The built `.wasm` artifact loads in the DuckDB-Wasm `eh` (exception-handling)
    bundle without signature errors.
-2. A curated set of 10 SQL test files (482 assertions) pass end-to-end.
+2. A curated set of 12 SQL test files (540 assertions) pass end-to-end.
 3. Optionally, the full 66-file suite can be exercised with `--all`.
 
 ## Requirements
@@ -93,7 +93,7 @@ v1.5.6 wasm_eh artifact to the v2.0.0 line together.
 
 | Command                          | What runs                                              |
 |----------------------------------|--------------------------------------------------------|
-| `node run.mjs`                   | 10-file curated subset (482 assertions, always green)  |
+| `node run.mjs`                   | 12-file curated subset (540 assertions, always green)  |
 | `node run.mjs --all`             | All 66 `.test` files under `test/sql/`                 |
 | `node run.mjs --file <f.test>`   | Single named file (relative to repo root)              |
 | `node run.mjs --ext <path>`      | Override the artifact path (also: `ANOFOX_WASM_EXT`)  |

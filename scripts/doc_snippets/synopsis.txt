@@ -141,7 +141,7 @@ plugins/anofox-forecast/skills/anofox-forecast-eda/SKILL.md	ts_stats_agg(date_co
 plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_auto_ensemble_inspect_by(
 plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_ensemble_inspect_by(
 plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast(source VARCHAR, date_col COLUMN, target_col COLUMN,
-plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_agg(date_col TIMESTAMP, value_col DOUBLE, method VARCHAR, horizon INTEGER, params MAP)
+plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_agg(date_col TIMESTAMP, value_col DOUBLE, method VARCHAR, horizon INTEGER, params STRUCT or MAP)
 plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_by(
 plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_ensemble_by(
 plugins/anofox-forecast/skills/anofox-forecast-models/SKILL.md	ts_forecast_exog(source, date_col, target_col, xreg_cols,

@@ -348,6 +348,49 @@ fn make_argvals(n: usize) -> Vec<f64> {
     (0..n).map(|i| i as f64).collect()
 }
 
+/// `n * max_lag` from which [`detect_seasonality`] computes the ACF by FFT
+/// (e.g. n = 4096 with the default `max_lag = n / 2`).
+const FFT_ACF_MIN_WORK: u64 = 4096 * 2048;
+
+/// Tolerance on ACF differences in the FFT path (FFT round-off is ~1e-14).
+const FFT_ACF_TIE_TOL: f64 = 1e-10;
+
+/// ACF at lags `1..=max_lag` by direct summation, normalized by `variance`
+/// (the sum of squared deviations).
+fn acf_direct(values: &[f64], mean: f64, variance: f64, max_lag: usize) -> Vec<f64> {
+    (1..=max_lag)
+        .map(|lag| {
+            let mut sum = 0.0;
+            for i in 0..(values.len() - lag) {
+                sum += (values[i] - mean) * (values[i + lag] - mean);
+            }
+            sum / variance
+        })
+        .collect()
+}
+
+/// [`acf_direct`] via the Wiener-Khinchin theorem: the inverse FFT of the
+/// power spectrum of the zero-padded centered series gives every lag's sum.
+fn acf_fft(values: &[f64], mean: f64, variance: f64, max_lag: usize) -> Vec<f64> {
+    use rustfft::{num_complex::Complex, FftPlanner};
+
+    let len = (2 * values.len()).next_power_of_two();
+    let mut buf: Vec<Complex<f64>> = values
+        .iter()
+        .map(|&v| Complex::new(v - mean, 0.0))
+        .chain(std::iter::repeat(Complex::new(0.0, 0.0)))
+        .take(len)
+        .collect();
+    let mut planner = FftPlanner::new();
+    planner.plan_fft_forward(len).process(&mut buf);
+    for c in buf.iter_mut() {
+        *c = Complex::new(c.norm_sqr(), 0.0);
+    }
+    planner.plan_fft_inverse(len).process(&mut buf);
+    let scale = len as f64 * variance;
+    buf[1..=max_lag].iter().map(|c| c.re / scale).collect()
+}
+
 /// Detect seasonal periods in a time series using autocorrelation.
 pub fn detect_seasonality(values: &[f64], max_period: Option<usize>) -> Result<Vec<i32>> {
     if values.len() < 4 {
@@ -371,21 +414,23 @@ pub fn detect_seasonality(values: &[f64], max_period: Option<usize>) -> Result<V
         return Ok(vec![]);
     }
 
-    let mut acf = Vec::with_capacity(max_lag);
-    for lag in 1..=max_lag {
-        let mut sum = 0.0;
-        for i in 0..(values.len() - lag) {
-            sum += (values[i] - mean) * (values[i + lag] - mean);
-        }
-        acf.push(sum / variance);
-    }
+    // Direct sums are O(n * max_lag); above the work budget the FFT gives the
+    // same ACF up to round-off in O(n log n) (#304). Peak comparisons then
+    // ignore differences below `tie_tol` so round-off cannot split a flat run.
+    let use_fft = values.len() as u64 * max_lag as u64 >= FFT_ACF_MIN_WORK;
+    let acf = if use_fft {
+        acf_fft(values, mean, variance, max_lag)
+    } else {
+        acf_direct(values, mean, variance, max_lag)
+    };
+    let tie_tol = if use_fft { FFT_ACF_TIE_TOL } else { 0.0 };
 
     // Find peaks in ACF
     let mut periods = Vec::new();
     let threshold = 0.1; // Minimum ACF value to consider
 
     for i in 1..(acf.len() - 1) {
-        if acf[i] > acf[i - 1] && acf[i] > acf[i + 1] && acf[i] > threshold {
+        if acf[i] > acf[i - 1] + tie_tol && acf[i] > acf[i + 1] + tie_tol && acf[i] > threshold {
             periods.push((i + 1) as i32);
         }
     }
@@ -930,6 +975,72 @@ pub fn detect_amplitude_modulation(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #304: the FFT ACF matches direct sums, and long series detect the
+    /// same periods on both paths.
+    #[test]
+    fn test_acf_fft_matches_direct() {
+        let mut state = 17u64;
+        let mut noise = || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (state >> 11) as f64 / (1u64 << 53) as f64 - 0.5
+        };
+        let n = 6000;
+        let series: Vec<(&str, Vec<f64>)> = vec![
+            (
+                "sin_mod97",
+                (0..n).map(|i| (i as f64).sin() + (i % 97) as f64).collect(),
+            ),
+            (
+                "weekly+noise",
+                (0..n)
+                    .map(|i| 10.0 + (2.0 * std::f64::consts::PI * i as f64 / 7.0).sin() + noise())
+                    .collect(),
+            ),
+            (
+                "square wave",
+                (0..n).map(|i| ((i % 24) < 12) as u8 as f64).collect(),
+            ),
+            (
+                "trend+12",
+                (0..n)
+                    .map(|i| 0.01 * i as f64 + ((i % 12) as f64))
+                    .collect(),
+            ),
+            ("noise", (0..n).map(|_| noise()).collect()),
+        ];
+        for (name, x) in &series {
+            let mean = x.iter().sum::<f64>() / n as f64;
+            let variance: f64 = x.iter().map(|v| (v - mean).powi(2)).sum();
+            let max_lag = n / 2;
+            let direct = acf_direct(x, mean, variance, max_lag);
+            let fft = acf_fft(x, mean, variance, max_lag);
+            let max_err = direct
+                .iter()
+                .zip(&fft)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0, f64::max);
+            assert!(max_err < 1e-11, "{name}: max |acf error| {max_err}");
+
+            // Same periods as the direct path on the full series.
+            assert!(n as u64 * max_lag as u64 >= FFT_ACF_MIN_WORK);
+            let mut expected: Vec<i32> = Vec::new();
+            for i in 1..(direct.len() - 1) {
+                if direct[i] > direct[i - 1] && direct[i] > direct[i + 1] && direct[i] > 0.1 {
+                    expected.push((i + 1) as i32);
+                }
+            }
+            expected.sort_by(|a, b| {
+                direct[*b as usize - 1]
+                    .partial_cmp(&direct[*a as usize - 1])
+                    .unwrap()
+            });
+            expected.truncate(5);
+            assert_eq!(detect_seasonality(x, None).unwrap(), expected, "{name}");
+        }
+    }
     use std::f64::consts::PI;
 
     fn generate_seasonal_series(n: usize, period: f64, amplitude: f64) -> Vec<f64> {

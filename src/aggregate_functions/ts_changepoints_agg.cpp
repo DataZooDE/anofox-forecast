@@ -85,10 +85,14 @@ static void TsChangepointsAggUpdate(Vector inputs[], AggregateInputData &aggr_in
     ToUnified(val_vec, count, val_data);
     ToUnified(params_vec, count, params_data);
 
-    auto states = FlatDataMut<TsChangepointsAggState *>(state_vector);
+    // Window evaluation passes a constant or dictionary state vector, GROUP BY a
+    // flat one: read it through UnifiedVectorFormat so both are handled.
+    UnifiedVectorFormat state_data;
+    ToUnified(state_vector, count, state_data);
+    auto states = UnifiedVectorFormat::GetData<TsChangepointsAggState *>(state_data);
 
     for (idx_t i = 0; i < count; i++) {
-        auto &state = *states[i];
+        auto &state = *states[state_data.sel->get_index(i)];
 
         auto ts_idx = ts_data.sel->get_index(i);
         auto val_idx = val_data.sel->get_index(i);
@@ -164,6 +168,7 @@ static void TsChangepointsAggFinalize(Vector &state_vector, AggregateInputData &
         opts.threshold = data.params.threshold;
         opts.deseasonalize = data.params.deseasonalize;
         opts.seasonal_period = data.params.seasonal_period;
+        opts.auto_deseasonalize = data.params.auto_deseasonalize;
 
         bool success = anofox_ts_detect_changepoints_bocpd_opts(
             sorted_values.data(),
@@ -258,13 +263,23 @@ static void TsChangepointsAggDestructor(Vector &state_vector, AggregateInputData
     }
 }
 
+// params is declared ANY so a STRUCT, MAP, VARIANT or {} binds as given (#300);
+// ParseChangepointParamSet reads whichever it is as MAP(VARCHAR, VARCHAR).
+static unique_ptr<FunctionData> TsChangepointsAggBind(ClientContext &context, AggregateBindFunction &function,
+                                                      vector<unique_ptr<Expression>> &arguments) {
+    if (arguments.size() > 2) {
+        SetArgumentTypeOf(function, 2, ReturnTypeOf(*arguments[2]));
+    }
+    return nullptr;
+}
+
 void RegisterTsDetectChangepointsAggFunction(ExtensionLoader &loader) {
     // Create aggregate function with 3 parameters:
     // (date_col, value_col, params MAP)
     AggregateFunction agg_func(
         "ts_detect_changepoints_agg",
         {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE),
-         LogicalType::MAP(LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::VARCHAR))},
+         LogicalType::ANY},  // params: MAP, STRUCT, VARIANT or {} (#300)
         GetChangepointsAggResultType(),
         AggregateFunction::StateSize<TsChangepointsAggState>,
         AggregateFunction::StateInitialize<TsChangepointsAggState, TsChangepointsAggOperation>,
@@ -272,7 +287,7 @@ void RegisterTsDetectChangepointsAggFunction(ExtensionLoader &loader) {
         TsChangepointsAggCombine,
         ANOFOX_AGG_FINALIZE(TsChangepointsAggFinalize),
         nullptr,  // simple_update
-        nullptr,  // bind
+        ANOFOX_AGG_BIND(TsChangepointsAggBind),
         TsChangepointsAggDestructor
     );
 

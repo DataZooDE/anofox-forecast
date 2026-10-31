@@ -228,7 +228,7 @@ static unique_ptr<FunctionData> TsForecastPanelNativeBind(
 
     // Parse params (index 4)
     if (input.inputs.size() >= 5 && !input.inputs[4].IsNull()) {
-        auto &params = input.inputs[4];
+        auto params = NormalizeParamsValue(input.inputs[4]);
         ValidatePanelParamKeys(params);
         bind_data->seasonal_period = ParseInt64FromPanelParams(params, "seasonal_period", 0);
         bind_data->model_pool = ParseStringFromPanelParams(params, "model_pool", "");

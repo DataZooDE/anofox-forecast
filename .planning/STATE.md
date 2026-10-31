@@ -6,10 +6,10 @@ current_phase: "20.1"
 current_phase_name: API Compatibility Gate
 status: planning
 stopped_at: Phase 20 complete, ready to plan Phase 20.1
-last_updated: "2026-10-23T23:18:05.349Z"
-last_activity: 2026-10-24
+last_updated: "2026-10-30T00:46:41.250Z"
+last_activity: 2026-10-30
 last_activity_desc: Phase 20 complete, transitioned to Phase 20.1
-state_head: afa772ff75b7bbdf6d8bab118226710609f64e79
+state_head: 045486fa1e09824c973366609bc6300d1f847a53
 progress:
   total_phases: 8
   completed_phases: 1
@@ -32,7 +32,7 @@ See: .planning/PROJECT.md (updated 2026-10-24 — after Phase 20)
 Phase: 20.1 — API Compatibility Gate
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-10-24 — Phase 20 complete, transitioned to Phase 20.1
+Last activity: 2026-10-30 - Completed quick task 261030-2gw: #287 changepoint deseasonalize auto default
 
 Progress: [█░░░░░░░░░] 13%
 
@@ -122,6 +122,11 @@ None yet.
 | 261016-tjw | DuckDB 2.0-dev compat port (compat header, WASM Rust 1.86 pin, 2.0 CI job) | 2026-10-17 | 720c7c7 | [261016-tjw-port-anofox-statistics-duckdb-2-0-compat](./quick/261016-tjw-port-anofox-statistics-duckdb-2-0-compat/) |
 | 3 | Fix DuckDB v2.0.0 build (explicit extension target names, no-OpenSSL banner gate, duckdb-next CI -> v2.0.0) | 2026-10-21 | 4cab513 | — |
 | 261022-laz | Make DuckDB v2.0.0 the stable build line (submodules, distribution CI, keep v1.5.6 + v1.4.5 lines, retire duckdb-next, docs) | 2026-10-22 | 7f33142 | [261022-laz-make-duckdb-v2-0-0-the-stable-build-line](./quick/261022-laz-make-duckdb-v2-0-0-the-stable-build-line/) |
+| 261029-dk2 | DuckDB 2.0 adoption #294-#303 (window crash fix, VARIANT/{} params, ROLLUP, rolling windows, state export, triggers, variables, benchmark), branch feat/duckdb2-adoption, inline (gsd-fast, no subagents) | 2026-10-29 | b64fc6e7 | — |
+| 261029-t9z | #304: exact sub-quadratic approximate entropy (rank-space range counting) | 2026-10-29 | 1894964a | [261029-t9z-304-exact-sub-quadratic-approximate-entr](./quick/261029-t9z-304-exact-sub-quadratic-approximate-entr/) |
+| 261029-vza | #305: ts_aggregate_hierarchy flat-array aggregation | 2026-10-29 | 4ddf62da | [261029-vza-305-ts-aggregate-hierarchy-flat-array-ag](./quick/261029-vza-305-ts-aggregate-hierarchy-flat-array-ag/) |
+| 261029-wbq | #289: _ts_fill_forward_native WASM-only wrong results (Rust EH toolchain) | 2026-10-30 | 01da744c | [261029-wbq-289-ts-fill-forward-native-wasm-only-wro](./quick/261029-wbq-289-ts-fill-forward-native-wasm-only-wro/) |
+| 261030-2gw | #287: changepoint deseasonalize auto default | 2026-10-30 | 045486fa | [261030-2gw-287-changepoint-deseasonalize-auto-defau](./quick/261030-2gw-287-changepoint-deseasonalize-auto-defau/) |
 
 ### Roadmap Evolution
 

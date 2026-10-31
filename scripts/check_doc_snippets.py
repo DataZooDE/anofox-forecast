@@ -40,7 +40,9 @@ Status per block: PASS, FAIL, EXPECTED-ERROR (keyed in
 scripts/doc_snippets/expected_errors.txt -- the block must still fail; a listed block
 that passes is a FAIL "expected error but passed"), SYNOPSIS (keyed in
 scripts/doc_snippets/synopsis.txt -- narrative placeholder, never executed),
-SKIP-NETWORK (network-looking block, never executed).
+SKIP-NETWORK (network-looking block, never executed), SKIP-VERSION (a block whose first
+line is `-- DuckDB 2.0+`, run only when the binary is DuckDB 2.0 or later, so the same docs
+validate against a v1.5.6 build; on 2.0 such a block runs and counts like any other).
 
 On a default full scan (no FILE args, no --changed-since), a stale
 expected_errors.txt / synopsis.txt key (its file or its first line no longer exists
@@ -293,6 +295,15 @@ def query_registered_function_names():
     return {line.strip() for line in out.splitlines() if line.strip()}
 
 
+def query_duckdb_major():
+    rc, out, err = run_block_safe("SELECT version();\n")
+    m = re.search(r"v(\d+)\.", out or "")
+    return int(m.group(1)) if rc == 0 and m else 0
+
+
+V2_ONLY_RE = re.compile(r"\A\s*--\s*DuckDB 2\.0\+")
+
+
 def collect_name_mentions(rel_path, text):
     """Return list of (name, line_no) identifier mentions to check against the
     registered function surface. SKILL.md frontmatter descriptions: every bare
@@ -366,9 +377,10 @@ def main():
     synopsis_keys = load_key_set(SYNOPSIS_FILE)
     removed_names = load_removed_names(REMOVED_NAMES_FILE)
     registered_names = query_registered_function_names()
+    duckdb_major = query_duckdb_major()
 
     rows = []  # (status, file, line, first_sql_line, detail)
-    status_counts = {"PASS": 0, "FAIL": 0, "EXPECTED-ERROR": 0, "SYNOPSIS": 0, "SKIP-NETWORK": 0, "STALE": 0}
+    status_counts = {"PASS": 0, "FAIL": 0, "EXPECTED-ERROR": 0, "SYNOPSIS": 0, "SKIP-NETWORK": 0, "SKIP-VERSION": 0, "STALE": 0}
 
     all_block_keys = set()
     all_mentioned_names = set()
@@ -406,6 +418,9 @@ def main():
             if NETWORK_RE.search(block_text):
                 status = "SKIP-NETWORK"
                 detail = "network-looking block (INSTALL/URL), not executed"
+            elif V2_ONLY_RE.search(block_text) and duckdb_major < 2:
+                status = "SKIP-VERSION"
+                detail = "DuckDB 2.0+ block, binary is older"
             elif key in synopsis_keys:
                 status = "SYNOPSIS"
                 detail = "narrative placeholder, not executed"
@@ -472,8 +487,9 @@ def main():
     e = status_counts.get("EXPECTED-ERROR", 0)
     s = status_counts.get("SYNOPSIS", 0)
     n = status_counts.get("SKIP-NETWORK", 0)
+    v = status_counts.get("SKIP-VERSION", 0)
     t = status_counts.get("STALE", 0)
-    print(f"check_doc_snippets: {p} PASS, {fcount} FAIL, {e} EXPECTED-ERROR, {s} SYNOPSIS, {n} SKIP-NETWORK, {t} STALE")
+    print(f"check_doc_snippets: {p} PASS, {fcount} FAIL, {e} EXPECTED-ERROR, {s} SYNOPSIS, {n} SKIP-NETWORK, {v} SKIP-VERSION, {t} STALE")
 
     return 1 if (fcount or t) else 0
 

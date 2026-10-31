@@ -474,6 +474,7 @@ static OperatorFinalizeResultType TsDetectChangepointsByFinalize(
             opts.threshold = bind_data.params.threshold;
             opts.deseasonalize = bind_data.params.deseasonalize;
             opts.seasonal_period = bind_data.params.seasonal_period;
+            opts.auto_deseasonalize = bind_data.params.auto_deseasonalize;
 
             bool success = anofox_ts_detect_changepoints_bocpd_opts(
                 sorted_values.data(),

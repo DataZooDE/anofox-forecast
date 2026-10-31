@@ -108,14 +108,26 @@ include_directories(src/include)
 
 # WASM-only Rust toolchain pin (native builds keep the workspace floor
 # rust-version = 1.89 and the rust-msrv CI job; no rust-toolchain.toml).
-# Rust >= 1.87 (LLVM 20) marks wasm objects with the bulk-memory-opt and
-# call-indirect-overlong target features. DuckDB CI's emsdk 3.1.71 bundles
-# binaryen v120, whose `wasm-opt -O3` rejects them
-# ("Unknown option '--enable-bulk-memory-opt'"), and the community-extensions
-# registry's DuckDB 2.0 build uses extension-ci-tools' Rust 1.97+. So WASM builds
-# pin Rust 1.86.0 through Corrosion's Rust_TOOLCHAIN. Remove the pin once DuckDB's
-# emsdk understands those features. Set ANOFOX_WASM_RUST_TOOLCHAIN to "" to disable.
-set(ANOFOX_WASM_RUST_TOOLCHAIN "1.86.0" CACHE STRING
+#
+# wasm_eh: Rust 1.96.0. Rust up to at least 1.92 compiles wasm32-unknown-emscripten
+# code with JS-based exception handling (113 `invoke_*` trampoline imports in this
+# extension), which is wrong inside a native-exception (wasm_eh) side module:
+# ts_fill_forward_by returned unfilled or 1970-dated series, hourly fills aborted
+# with "Rust panics must be rethrown" (#289). 1.96 emits native wasm exceptions
+# (no `invoke_*` imports). Its objects carry the bulk-memory-opt and
+# call-indirect-overlong target features, which the binaryen v120 bundled with
+# DuckDB CI's emsdk 3.1.71 rejects; extension_config.cmake therefore sets the
+# linked module's feature list explicitly for wasm_eh.
+#
+# wasm_mvp / wasm_threads: Rust 1.86.0 (JS exceptions match the mvp platform's
+# own exception handling; wasm_threads is unchanged).
+# Set ANOFOX_WASM_RUST_TOOLCHAIN to "" to build with the default toolchain.
+if("${DUCKDB_EXPLICIT_PLATFORM}" STREQUAL "wasm_eh")
+    set(_ANOFOX_WASM_RUST_DEFAULT "1.96.0")
+else()
+    set(_ANOFOX_WASM_RUST_DEFAULT "1.86.0")
+endif()
+set(ANOFOX_WASM_RUST_TOOLCHAIN "${_ANOFOX_WASM_RUST_DEFAULT}" CACHE STRING
     "Rust toolchain for WASM builds (empty: use the default toolchain)")
 if(WASM_BUILD AND NOT "${ANOFOX_WASM_RUST_TOOLCHAIN}" STREQUAL "")
     find_program(_ANOFOX_RUSTUP rustup HINTS "$ENV{CARGO_HOME}/bin" "$ENV{HOME}/.cargo/bin")
