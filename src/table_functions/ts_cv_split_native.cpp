@@ -1,6 +1,7 @@
 #include "duckdb_compat.hpp"
 #include "ts_cv_split_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // For ParseFrequencyToSeconds, etc.
+#include "ts_collect_finalize.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
 #include <algorithm>
@@ -107,10 +108,8 @@ struct TsCvSplitNativeGlobalState : public GlobalTableFunctionState {
     // Streaming output state
     idx_t output_offset = 0;
 
-    // Single-thread finalize + barrier
-    std::atomic<bool> finalize_claimed{false};
-    std::atomic<idx_t> threads_collecting{0};
-    std::atomic<idx_t> threads_done_collecting{0};
+    // Single-thread finalize: last-finalizer barrier (ts_collect_finalize.hpp)
+    TsCollectFinalizeBarrier barrier;
 
     idx_t MaxThreads() const override {
         return max_threads;
@@ -123,8 +122,7 @@ struct TsCvSplitNativeGlobalState : public GlobalTableFunctionState {
 
 struct TsCvSplitNativeLocalState : public LocalTableFunctionState {
     bool owns_finalize = false;
-    bool registered_collector = false;
-    bool registered_finalizer = false;
+    bool arrived_at_final = false;
 };
 
 // ============================================================================
@@ -204,7 +202,7 @@ static unique_ptr<FunctionData> TsCvSplitNativeBind(
     // Parse params MAP (parameter index 3)
     Value params_value;
     if (input.inputs.size() > 3 && !input.inputs[3].IsNull()) {
-        params_value = input.inputs[3];
+        params_value = NormalizeParamsValue(input.inputs[3]);
         bind_data->window_type = ParseStringParam(params_value, "window_type", "expanding");
         bind_data->min_train_size = ParseIntParam(params_value, "min_train_size", 1);
         bind_data->gap = ParseIntParam(params_value, "gap", 0);
@@ -297,6 +295,7 @@ static unique_ptr<LocalTableFunctionState> TsCvSplitNativeInitLocal(
     TableFunctionInitInput &input,
     GlobalTableFunctionState *global_state) {
 
+    global_state->Cast<TsCvSplitNativeGlobalState>().barrier.RegisterLocal();
     return make_uniq<TsCvSplitNativeLocalState>();
 }
 
@@ -312,13 +311,9 @@ static OperatorResultType TsCvSplitNativeInOut(
 
     auto &bind_data = data.bind_data->CastNoConst<TsCvSplitNativeBindData>();
     auto &gstate = data.global_state->Cast<TsCvSplitNativeGlobalState>();
-    auto &lstate = data.local_state->Cast<TsCvSplitNativeLocalState>();
 
-    // Register this thread as a collector (first call only)
-    if (!lstate.registered_collector) {
-        gstate.threads_collecting.fetch_add(1);
-        lstate.registered_collector = true;
-    }
+    // Late-row guard: rows after the finalize claim would be silently dropped.
+    gstate.barrier.AssertCollecting("_ts_cv_split_native");
 
     // Extract batch locally first
     vector<TsCvSplitInputRow> local_rows;
@@ -388,22 +383,18 @@ static OperatorFinalizeResultType TsCvSplitNativeFinalize(
     auto &gstate = data.global_state->Cast<TsCvSplitNativeGlobalState>();
     auto &lstate = data.local_state->Cast<TsCvSplitNativeLocalState>();
 
-    // Barrier + claim
-    if (!lstate.registered_finalizer) {
-        if (lstate.registered_collector) {
-            gstate.threads_done_collecting.fetch_add(1);
-        }
-        lstate.registered_finalizer = true;
-    }
+    // Last-finalizer claim (ts_collect_finalize.hpp): the local state whose
+    // arrival completes the count of registered local states processes; every
+    // other one finishes at once (no spin-wait).
     if (!lstate.owns_finalize) {
-        bool expected = false;
-        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true)) {
+        if (lstate.arrived_at_final) {
+            return OperatorFinalizeResultType::FINISHED;
+        }
+        lstate.arrived_at_final = true;
+        if (!gstate.barrier.ArriveAtFinal()) {
             return OperatorFinalizeResultType::FINISHED;
         }
         lstate.owns_finalize = true;
-        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load()) {
-            std::this_thread::yield();
-        }
     }
 
     // Preprocessing: group rows and compute output rows (done once)

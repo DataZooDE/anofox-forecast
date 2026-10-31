@@ -1,7 +1,9 @@
 #include "anofox_forecast_extension.hpp"
 #include "anofox_fcst_ffi.h"
+#include "ts_changepoints_params.hpp"
 #include "ts_fill_gaps_native.hpp"
 #include "ts_list_marshal.hpp"
+#include "ts_collect_finalize.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -11,7 +13,6 @@
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include <map>
 #include <mutex>
-#include <regex>
 #include <set>
 #include <atomic>
 #include <thread>
@@ -187,7 +188,7 @@ void RegisterTsDetectChangepointsBocpdFunction(ExtensionLoader &loader) {
 // Output: group_col (preserved name), date_col, is_changepoint, changepoint_probability
 
 struct TsDetectChangepointsByBindData : public TableFunctionData {
-    double hazard_lambda = 250.0;
+    ChangepointParamSet params;
     bool include_probabilities = true;  // Always include for row-level output
     string group_col_name;
     string date_col_name;
@@ -240,42 +241,14 @@ struct TsDetectChangepointsByGlobalState : public GlobalTableFunctionState {
     bool processed = false;
     idx_t output_offset = 0;
 
-    // Single-thread finalize + barrier
-    std::atomic<bool> finalize_claimed{false};
-    std::atomic<idx_t> threads_collecting{0};
-    std::atomic<idx_t> threads_done_collecting{0};
+    // Single-thread finalize: last-finalizer barrier (ts_collect_finalize.hpp)
+    TsCollectFinalizeBarrier barrier;
 };
 
 struct TsDetectChangepointsByLocalState : public LocalTableFunctionState {
     bool owns_finalize = false;
-    bool registered_collector = false;
-    bool registered_finalizer = false;
+    bool arrived_at_final = false;
 };
-
-// Parse hazard_lambda from params string (simple numeric value or JSON-like format)
-static double ParseHazardLambda(const string &params_str) {
-    string trimmed = params_str;
-    // Trim whitespace
-    while (!trimmed.empty() && (trimmed[0] == ' ' || trimmed[0] == '\t')) {
-        trimmed = trimmed.substr(1);
-    }
-    while (!trimmed.empty() && (trimmed.back() == ' ' || trimmed.back() == '\t')) {
-        trimmed.pop_back();
-    }
-
-    // Try direct numeric parsing first
-    try {
-        return std::stod(trimmed);
-    } catch (...) {}
-
-    // Try to extract hazard_lambda from JSON-like string
-    std::regex lambda_regex("hazard_lambda['\"]?\\s*[:=]\\s*['\"]?([0-9.]+)", std::regex::icase);
-    std::smatch match;
-    if (std::regex_search(params_str, match, lambda_regex)) {
-        return std::stod(match[1].str());
-    }
-    return 250.0;  // Default
-}
 
 static unique_ptr<FunctionData> TsDetectChangepointsByBind(
     ClientContext &context,
@@ -285,10 +258,11 @@ static unique_ptr<FunctionData> TsDetectChangepointsByBind(
 
     auto bind_data = make_uniq<TsDetectChangepointsByBindData>();
 
-    // Parse params from second argument
+    // Parse params from second argument (MAP(VARCHAR, VARCHAR)): single
+    // shared parser with ts_detect_changepoints_agg (#287, BUG-06, Phase 20
+    // 20-06), so both consumers agree on hazard_lambda for identical inputs.
     if (input.inputs.size() >= 2) {
-        string params_str = input.inputs[1].ToString();
-        bind_data->hazard_lambda = ParseHazardLambda(params_str);
+        bind_data->params = ParseChangepointParamSet(input.inputs[1]);
     }
 
     // Input table must have exactly 3 columns: group, date, value
@@ -346,6 +320,7 @@ static unique_ptr<LocalTableFunctionState> TsDetectChangepointsByInitLocal(
     ExecutionContext &context,
     TableFunctionInitInput &input,
     GlobalTableFunctionState *global_state) {
+    global_state->Cast<TsDetectChangepointsByGlobalState>().barrier.RegisterLocal();
     return make_uniq<TsDetectChangepointsByLocalState>();
 }
 
@@ -357,13 +332,9 @@ static OperatorResultType TsDetectChangepointsByInOut(
 
     auto &bind_data = data_p.bind_data->Cast<TsDetectChangepointsByBindData>();
     auto &gstate = data_p.global_state->Cast<TsDetectChangepointsByGlobalState>();
-    auto &lstate = data_p.local_state->Cast<TsDetectChangepointsByLocalState>();
 
-    // Register this thread as a collector (first call only)
-    if (!lstate.registered_collector) {
-        gstate.threads_collecting.fetch_add(1);
-        lstate.registered_collector = true;
-    }
+    // Late-row guard: rows after the finalize claim would be silently dropped.
+    gstate.barrier.AssertCollecting("_ts_detect_changepoints_by_native");
 
     // Extract batch locally (no lock)
     struct TempRow {
@@ -436,22 +407,18 @@ static OperatorFinalizeResultType TsDetectChangepointsByFinalize(
     auto &gstate = data_p.global_state->Cast<TsDetectChangepointsByGlobalState>();
     auto &lstate = data_p.local_state->Cast<TsDetectChangepointsByLocalState>();
 
-    // Barrier + claim
-    if (!lstate.registered_finalizer) {
-        if (lstate.registered_collector) {
-            gstate.threads_done_collecting.fetch_add(1);
-        }
-        lstate.registered_finalizer = true;
-    }
+    // Last-finalizer claim (ts_collect_finalize.hpp): the local state whose
+    // arrival completes the count of registered local states processes; every
+    // other one finishes at once (no spin-wait).
     if (!lstate.owns_finalize) {
-        bool expected = false;
-        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true)) {
+        if (lstate.arrived_at_final) {
+            return OperatorFinalizeResultType::FINISHED;
+        }
+        lstate.arrived_at_final = true;
+        if (!gstate.barrier.ArriveAtFinal()) {
             return OperatorFinalizeResultType::FINISHED;
         }
         lstate.owns_finalize = true;
-        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load()) {
-            std::this_thread::yield();
-        }
     }
 
     // Process all groups (single thread)
@@ -496,20 +463,32 @@ static OperatorFinalizeResultType TsDetectChangepointsByFinalize(
                 sorted_values.push_back(p.second);
             }
 
-            // Call Rust FFI
+            // Call Rust FFI (#287, BUG-06, D2-ii): shared options struct so
+            // both consumers decide is_changepoint identically for
+            // identical hazard_lambda/threshold.
             BocpdResult bocpd_result = {};
             AnofoxError error = {};
 
-            bool success = anofox_ts_detect_changepoints_bocpd(
+            ChangepointOptionsFFI opts;
+            opts.hazard_lambda = bind_data.params.hazard_lambda;
+            opts.threshold = bind_data.params.threshold;
+            opts.deseasonalize = bind_data.params.deseasonalize;
+            opts.seasonal_period = bind_data.params.seasonal_period;
+            opts.auto_deseasonalize = bind_data.params.auto_deseasonalize;
+
+            bool success = anofox_ts_detect_changepoints_bocpd_opts(
                 sorted_values.data(),
                 sorted_values.size(),
-                bind_data.hazard_lambda,
-                true,  // Always include probabilities
+                &opts,
                 &bocpd_result,
                 &error
             );
 
             if (!success) {
+                if (error.code == INVALID_INPUT) {
+                    throw InvalidInputException("ts_detect_changepoints_by: %s",
+                        error.message ? error.message : "invalid input");
+                }
                 // Output rows with default values on error instead of skipping
                 for (size_t i = 0; i < sorted_values.size(); i++) {
                     ChangepointOutputRow row;
@@ -608,11 +587,11 @@ static OperatorFinalizeResultType TsDetectChangepointsByFinalize(
 }
 
 void RegisterTsDetectChangepointsByFunction(ExtensionLoader &loader) {
-    // Internal native table function: _ts_detect_changepoints_by_native(TABLE, params_str)
+    // Internal native table function: _ts_detect_changepoints_by_native(TABLE, params)
     // Input table must have 3 columns: group_col, date_col, value_col
     // Called by ts_detect_changepoints_by SQL macro
     TableFunction func("_ts_detect_changepoints_by_native",
-        {LogicalType::TABLE, LogicalType(LogicalTypeId::VARCHAR)},
+        {LogicalType::TABLE, LogicalType::MAP(LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::VARCHAR))},
         nullptr,
         TsDetectChangepointsByBind,
         TsDetectChangepointsByInitGlobal,

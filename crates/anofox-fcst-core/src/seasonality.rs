@@ -348,6 +348,49 @@ fn make_argvals(n: usize) -> Vec<f64> {
     (0..n).map(|i| i as f64).collect()
 }
 
+/// `n * max_lag` from which [`detect_seasonality`] computes the ACF by FFT
+/// (e.g. n = 4096 with the default `max_lag = n / 2`).
+const FFT_ACF_MIN_WORK: u64 = 4096 * 2048;
+
+/// Tolerance on ACF differences in the FFT path (FFT round-off is ~1e-14).
+const FFT_ACF_TIE_TOL: f64 = 1e-10;
+
+/// ACF at lags `1..=max_lag` by direct summation, normalized by `variance`
+/// (the sum of squared deviations).
+fn acf_direct(values: &[f64], mean: f64, variance: f64, max_lag: usize) -> Vec<f64> {
+    (1..=max_lag)
+        .map(|lag| {
+            let mut sum = 0.0;
+            for i in 0..(values.len() - lag) {
+                sum += (values[i] - mean) * (values[i + lag] - mean);
+            }
+            sum / variance
+        })
+        .collect()
+}
+
+/// [`acf_direct`] via the Wiener-Khinchin theorem: the inverse FFT of the
+/// power spectrum of the zero-padded centered series gives every lag's sum.
+fn acf_fft(values: &[f64], mean: f64, variance: f64, max_lag: usize) -> Vec<f64> {
+    use rustfft::{num_complex::Complex, FftPlanner};
+
+    let len = (2 * values.len()).next_power_of_two();
+    let mut buf: Vec<Complex<f64>> = values
+        .iter()
+        .map(|&v| Complex::new(v - mean, 0.0))
+        .chain(std::iter::repeat(Complex::new(0.0, 0.0)))
+        .take(len)
+        .collect();
+    let mut planner = FftPlanner::new();
+    planner.plan_fft_forward(len).process(&mut buf);
+    for c in buf.iter_mut() {
+        *c = Complex::new(c.norm_sqr(), 0.0);
+    }
+    planner.plan_fft_inverse(len).process(&mut buf);
+    let scale = len as f64 * variance;
+    buf[1..=max_lag].iter().map(|c| c.re / scale).collect()
+}
+
 /// Detect seasonal periods in a time series using autocorrelation.
 pub fn detect_seasonality(values: &[f64], max_period: Option<usize>) -> Result<Vec<i32>> {
     if values.len() < 4 {
@@ -371,21 +414,23 @@ pub fn detect_seasonality(values: &[f64], max_period: Option<usize>) -> Result<V
         return Ok(vec![]);
     }
 
-    let mut acf = Vec::with_capacity(max_lag);
-    for lag in 1..=max_lag {
-        let mut sum = 0.0;
-        for i in 0..(values.len() - lag) {
-            sum += (values[i] - mean) * (values[i + lag] - mean);
-        }
-        acf.push(sum / variance);
-    }
+    // Direct sums are O(n * max_lag); above the work budget the FFT gives the
+    // same ACF up to round-off in O(n log n) (#304). Peak comparisons then
+    // ignore differences below `tie_tol` so round-off cannot split a flat run.
+    let use_fft = values.len() as u64 * max_lag as u64 >= FFT_ACF_MIN_WORK;
+    let acf = if use_fft {
+        acf_fft(values, mean, variance, max_lag)
+    } else {
+        acf_direct(values, mean, variance, max_lag)
+    };
+    let tie_tol = if use_fft { FFT_ACF_TIE_TOL } else { 0.0 };
 
     // Find peaks in ACF
     let mut periods = Vec::new();
     let threshold = 0.1; // Minimum ACF value to consider
 
     for i in 1..(acf.len() - 1) {
-        if acf[i] > acf[i - 1] && acf[i] > acf[i + 1] && acf[i] > threshold {
+        if acf[i] > acf[i - 1] + tie_tol && acf[i] > acf[i + 1] + tie_tol && acf[i] > threshold {
             periods.push((i + 1) as i32);
         }
     }
@@ -638,10 +683,52 @@ pub fn seasonal_strength_windowed(
     ))
 }
 
+/// fdars-core's own `classify_seasonality` classification rule (0.47.0,
+/// `src/seasonal/change.rs:579`), reproduced verbatim here because #286's
+/// fix (below) replaces fdars's `is_seasonal`/`seasonal_strength` inputs
+/// with the shared `stl_strengths` value but must keep the SAME decision
+/// tree fdars uses for `classification`: `NonSeasonal` when not seasonal;
+/// `IntermittentSeasonal` when the weak-season fraction exceeds 0.3 (and
+/// there is at least one cycle); `VariableTiming` when timing is not
+/// stable; else `StableSeasonal`.
+fn classify_seasonal_type(
+    is_seasonal: bool,
+    weak_seasons: &[usize],
+    cycle_strengths: &[f64],
+    has_stable_timing: bool,
+) -> SeasonalType {
+    if !is_seasonal {
+        return SeasonalType::NonSeasonal;
+    }
+    if !cycle_strengths.is_empty()
+        && (weak_seasons.len() as f64 / cycle_strengths.len() as f64) > 0.3
+    {
+        return SeasonalType::IntermittentSeasonal;
+    }
+    if !has_stable_timing {
+        return SeasonalType::VariableTiming;
+    }
+    SeasonalType::StableSeasonal
+}
+
 /// Classify the type of seasonality in a time series.
 ///
 /// Analyzes the series to determine if seasonality is stable, variable,
 /// intermittent, or absent.
+///
+/// `seasonal_strength` (and the `is_seasonal`/`classification` fields that
+/// depend on it) is the SAME STL strength `ts_stats_by` reports --
+/// `crate::stats::stl_strengths(values, &[period.round()])`'s
+/// `seasonality_strength` (tsfeatures' `F_S = max(0, 1 - Var(R)/Var(S+R))`
+/// on the R-matching STL decomposition), not fdars's own raw-series
+/// variance-explained measure. A non-integer `period` is rounded before
+/// this lookup. `seasonal_strength` is `NaN` when `stl_strengths` has no
+/// usable period or a degenerate (near-zero-variance) decomposition; the
+/// FFI/C++ marshalling layer maps that `NaN` to SQL `NULL`, matching
+/// `ts_stats_by`'s `seasonality_strength` NULL semantics (#286, BUG-04).
+/// `cycle_strengths`, `weak_seasons`, `has_stable_timing` and
+/// `timing_variability` still come from fdars's own analysis, which is
+/// orthogonal to the strength formula.
 ///
 /// # Arguments
 /// * `values` - Time series values
@@ -682,12 +769,32 @@ pub fn classify_seasonality(
 
     // fdars 0.47 / B2 fix: classify_seasonality(data: &FdMatrix, argvals, period, ...)
     // -- the matrix is built once as (1, n), not the swapped (n, 1) this
-    // function used to pass.
+    // function used to pass. fdars still supplies cycle_strengths,
+    // weak_seasons, has_stable_timing and timing_variability; its own
+    // is_seasonal/seasonal_strength/classification are overridden below
+    // (#286, BUG-04: fdars's raw-series strength disagreed with
+    // ts_stats_by's STL strength -- 0.156 vs 0.966 on the #286 series).
     let mat = single_series_matrix(values)?;
-    let result =
+    let fdars_result =
         fdars_classify_seasonality(&mat, &argvals, period, strength_threshold, timing_threshold);
+    let mut result: SeasonalityClassification = fdars_result.into();
 
-    Ok(result.into())
+    let p = period.round() as usize;
+    let stl = crate::stats::stl_strengths(values, &[p])?;
+    let seasonal_strength = stl.seasonality_strength.unwrap_or(f64::NAN);
+    let threshold = strength_threshold.unwrap_or(0.3);
+    let is_seasonal = seasonal_strength.is_finite() && seasonal_strength >= threshold;
+
+    result.seasonal_strength = seasonal_strength;
+    result.is_seasonal = is_seasonal;
+    result.classification = classify_seasonal_type(
+        is_seasonal,
+        &result.weak_seasons,
+        &result.cycle_strengths,
+        result.has_stable_timing,
+    );
+
+    Ok(result)
 }
 
 /// Detect changes in seasonality over time.
@@ -774,6 +881,20 @@ pub fn instantaneous_period(values: &[f64]) -> Result<InstantaneousPeriodResult>
 /// Uses Morlet wavelet to analyze how the amplitude of seasonality
 /// changes over time.
 ///
+/// The seasonality gate (whether the series is seasonal enough to run the
+/// wavelet modulation analysis at all) and the returned `seasonal_strength`
+/// use the SAME STL strength `ts_stats_by`/`classify_seasonality` use --
+/// `crate::stats::stl_strengths(values, &[period.round()])`'s
+/// `seasonality_strength` -- not fdars's own raw-series spectral strength
+/// (#286, BUG-04). When that strength is absent or below
+/// `seasonality_threshold`, this returns a `NonSeasonal` result without
+/// running the wavelet analysis; `seasonal_strength` is `NaN` when
+/// `stl_strengths` has no usable period (the FFI/C++ layer maps `NaN` to
+/// SQL `NULL`). Otherwise fdars's wavelet analysis runs (with its own
+/// seasonality gate disabled, since the gate above already decided
+/// `is_seasonal`) and its `is_seasonal`/`seasonal_strength` fields are
+/// overridden with the shared STL values.
+///
 /// # Arguments
 /// * `values` - Time series values
 /// * `period` - Seasonal period
@@ -813,20 +934,113 @@ pub fn detect_amplitude_modulation(
     let mod_thresh = modulation_threshold.unwrap_or(0.2);
     let seas_thresh = seasonality_threshold.unwrap_or(0.3);
 
+    // #286, BUG-04: gate on the shared STL strength, not fdars's own
+    // raw-series spectral strength.
+    let p = period.round() as usize;
+    let stl = crate::stats::stl_strengths(values, &[p])?;
+    let seasonal_strength = stl.seasonality_strength.unwrap_or(f64::NAN);
+    let is_seasonal = seasonal_strength.is_finite() && seasonal_strength >= seas_thresh;
+
+    if !is_seasonal {
+        return Ok(AmplitudeModulationResult {
+            is_seasonal: false,
+            seasonal_strength,
+            has_modulation: false,
+            modulation_type: AmplitudeModulationType::NonSeasonal,
+            modulation_score: 0.0,
+            amplitude_trend: 0.0,
+            wavelet_amplitude: Vec::new(),
+            time_points: Vec::new(),
+            scale: period,
+        });
+    }
+
     // fdars 0.47 / B2 fix: detect_amplitude_modulation_wavelet(data: &FdMatrix,
     // argvals, period, modulation_threshold, seasonality_threshold) -- matrix
     // built once as (1, n); thresholds are now plain f64 (no more Option
-    // wrapping needed on the fdars side).
+    // wrapping needed on the fdars side). The seasonality gate is disabled
+    // here (0.0) since the shared STL gate above already decided
+    // `is_seasonal`; fdars's own is_seasonal/seasonal_strength are
+    // overridden below.
     let mat = single_series_matrix(values)?;
-    let result =
-        fdars_detect_amplitude_modulation_wavelet(&mat, &argvals, period, mod_thresh, seas_thresh);
+    let fdars_result =
+        fdars_detect_amplitude_modulation_wavelet(&mat, &argvals, period, mod_thresh, 0.0);
+    let mut result: AmplitudeModulationResult = fdars_result.into();
+    result.is_seasonal = true;
+    result.seasonal_strength = seasonal_strength;
 
-    Ok(result.into())
+    Ok(result)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #304: the FFT ACF matches direct sums, and long series detect the
+    /// same periods on both paths.
+    #[test]
+    fn test_acf_fft_matches_direct() {
+        let mut state = 17u64;
+        let mut noise = || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (state >> 11) as f64 / (1u64 << 53) as f64 - 0.5
+        };
+        let n = 6000;
+        let series: Vec<(&str, Vec<f64>)> = vec![
+            (
+                "sin_mod97",
+                (0..n).map(|i| (i as f64).sin() + (i % 97) as f64).collect(),
+            ),
+            (
+                "weekly+noise",
+                (0..n)
+                    .map(|i| 10.0 + (2.0 * std::f64::consts::PI * i as f64 / 7.0).sin() + noise())
+                    .collect(),
+            ),
+            (
+                "square wave",
+                (0..n).map(|i| ((i % 24) < 12) as u8 as f64).collect(),
+            ),
+            (
+                "trend+12",
+                (0..n)
+                    .map(|i| 0.01 * i as f64 + ((i % 12) as f64))
+                    .collect(),
+            ),
+            ("noise", (0..n).map(|_| noise()).collect()),
+        ];
+        for (name, x) in &series {
+            let mean = x.iter().sum::<f64>() / n as f64;
+            let variance: f64 = x.iter().map(|v| (v - mean).powi(2)).sum();
+            let max_lag = n / 2;
+            let direct = acf_direct(x, mean, variance, max_lag);
+            let fft = acf_fft(x, mean, variance, max_lag);
+            let max_err = direct
+                .iter()
+                .zip(&fft)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0, f64::max);
+            assert!(max_err < 1e-11, "{name}: max |acf error| {max_err}");
+
+            // Same periods as the direct path on the full series.
+            assert!(n as u64 * max_lag as u64 >= FFT_ACF_MIN_WORK);
+            let mut expected: Vec<i32> = Vec::new();
+            for i in 1..(direct.len() - 1) {
+                if direct[i] > direct[i - 1] && direct[i] > direct[i + 1] && direct[i] > 0.1 {
+                    expected.push((i + 1) as i32);
+                }
+            }
+            expected.sort_by(|a, b| {
+                direct[*b as usize - 1]
+                    .partial_cmp(&direct[*a as usize - 1])
+                    .unwrap()
+            });
+            expected.truncate(5);
+            assert_eq!(detect_seasonality(x, None).unwrap(), expected, "{name}");
+        }
+    }
     use std::f64::consts::PI;
 
     fn generate_seasonal_series(n: usize, period: f64, amplitude: f64) -> Vec<f64> {
@@ -981,6 +1195,52 @@ mod tests {
         );
     }
 
+    /// The exact #286 repro series (BUG-04): n=84, a weekly (period 7)
+    /// sine plus a trend plus two off-period cosine/sine nuisance terms.
+    fn issue286_weekly84() -> Vec<f64> {
+        (0..84)
+            .map(|i| {
+                let t = i as f64;
+                20.0 + 0.3 * t
+                    + 5.0 * (2.0 * PI * t / 7.0).sin()
+                    + 1.6 * (t * 0.9).cos()
+                    + 0.7 * (t * 1.7 + 20.0).sin()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_classify_seasonality_issue286_weekly_is_stable_seasonal() {
+        let values = issue286_weekly84();
+        let result = classify_seasonality(&values, 7.0, None, None).unwrap();
+
+        assert!(result.is_seasonal);
+        assert_eq!(result.classification, SeasonalType::StableSeasonal);
+
+        let want = crate::stats::stl_strengths(&values, &[7])
+            .unwrap()
+            .seasonality_strength
+            .unwrap();
+        assert_eq!(
+            result.seasonal_strength, want,
+            "classify_seasonality's strength must come from the same stl_strengths call ts_stats_by uses (#286)"
+        );
+    }
+
+    #[test]
+    fn test_classify_seasonality_constant_series_is_non_seasonal_nan_strength() {
+        let values = vec![5.0_f64; 84];
+        let result = classify_seasonality(&values, 7.0, None, None).unwrap();
+
+        assert!(!result.is_seasonal);
+        assert_eq!(result.classification, SeasonalType::NonSeasonal);
+        assert!(
+            result.seasonal_strength.is_nan(),
+            "seasonal_strength = {}",
+            result.seasonal_strength
+        );
+    }
+
     #[test]
     fn test_classify_seasonality_white_noise_is_non_seasonal() {
         let noise = deterministic_noise(120, 42);
@@ -1074,6 +1334,43 @@ mod tests {
 
         assert_eq!(result.modulation_type, AmplitudeModulationType::Emerging);
         assert!(result.has_modulation);
+    }
+
+    #[test]
+    fn test_detect_amplitude_modulation_issue286_weekly_is_seasonal() {
+        let values = issue286_weekly84();
+        let result = detect_amplitude_modulation(&values, 7.0, None, None).unwrap();
+
+        assert!(result.is_seasonal);
+        assert_ne!(result.modulation_type, AmplitudeModulationType::NonSeasonal);
+
+        let want = crate::stats::stl_strengths(&values, &[7])
+            .unwrap()
+            .seasonality_strength
+            .unwrap();
+        assert_eq!(result.seasonal_strength, want);
+    }
+
+    #[test]
+    fn test_detect_amplitude_modulation_noise_is_non_seasonal() {
+        // Same deterministic LCG noise used by the classify_seasonality
+        // white-noise test; its STL strength at period 12 is well below the
+        // default 0.3 gate.
+        let noise = deterministic_noise(120, 42);
+        let result = detect_amplitude_modulation(&noise, 12.0, None, None).unwrap();
+
+        assert!(!result.is_seasonal);
+        assert_eq!(result.modulation_type, AmplitudeModulationType::NonSeasonal);
+
+        let want = crate::stats::stl_strengths(&noise, &[12])
+            .unwrap()
+            .seasonality_strength
+            .unwrap_or(f64::NAN);
+        if want.is_nan() {
+            assert!(result.seasonal_strength.is_nan());
+        } else {
+            assert_eq!(result.seasonal_strength, want);
+        }
     }
 
     #[test]

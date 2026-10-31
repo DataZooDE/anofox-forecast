@@ -16,11 +16,16 @@ use libc::{free, malloc};
 //   [ usize header (size of data region) | data ... ]
 //                                          ^-- returned pointer
 // Both files must match so that pointers allocated in one can be freed by the other.
+/// Size-header bytes in front of each WASM allocation. 8, not
+/// `size_of::<usize>()` (4 on wasm32): the data region must stay 8-aligned for
+/// the i64/f64 arrays handed to C++, or every such array is misaligned (#289).
+#[cfg(target_family = "wasm")]
+const WASM_ALLOC_HEADER: usize = 8;
+
 #[cfg(target_family = "wasm")]
 unsafe fn malloc(size: usize) -> *mut core::ffi::c_void {
     use std::alloc::{alloc, Layout};
-    use std::mem::size_of;
-    let total = size_of::<usize>()
+    let total = WASM_ALLOC_HEADER
         .checked_add(size)
         .expect("allocation size overflow");
     let layout = Layout::from_size_align(total, 8).expect("8-byte alignment is always valid");
@@ -29,19 +34,18 @@ unsafe fn malloc(size: usize) -> *mut core::ffi::c_void {
         return base as *mut core::ffi::c_void;
     }
     *(base as *mut usize) = size;
-    base.add(size_of::<usize>()) as *mut core::ffi::c_void
+    base.add(WASM_ALLOC_HEADER) as *mut core::ffi::c_void
 }
 
 #[cfg(target_family = "wasm")]
 unsafe fn free(ptr: *mut core::ffi::c_void) {
     use std::alloc::{dealloc, Layout};
-    use std::mem::size_of;
     if ptr.is_null() {
         return;
     }
-    let base = (ptr as *mut u8).sub(size_of::<usize>());
+    let base = (ptr as *mut u8).sub(WASM_ALLOC_HEADER);
     let size = *(base as *const usize);
-    let total = size_of::<usize>()
+    let total = WASM_ALLOC_HEADER
         .checked_add(size)
         .expect("allocation size overflow");
     let layout = Layout::from_size_align(total, 8).expect("8-byte alignment is always valid");

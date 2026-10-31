@@ -1,0 +1,103 @@
+# name: test/sql/ts_state_export.test
+# description: #298 - ts_forecast_agg / ts_stats_agg states can be exported (DuckDB 2.0
+#   EXPORT_STATE), stored, merged with combine_aggr and finalized later: an exported
+#   state finalizes to the direct aggregate, and combining partial states equals the
+#   aggregate over all their rows (incremental refits without rescanning history).
+#   v1.5 refuses EXPORT_STATE for aggregates with custom binders / destructors (no unsafe path).
+# group: [sql]
+
+require anofox_forecast
+
+statement ok
+CREATE MACRO v2_or(sql, fallback) AS TABLE
+    SELECT * FROM query(CASE WHEN version() >= 'v2' THEN sql ELSE fallback END);
+
+statement ok
+CREATE TABLE se AS
+SELECT i % 2 AS id, (TIMESTAMP '2024-01-01' + to_days((i // 2)::INT)) AS ds,
+       CASE WHEN i = 41 THEN NULL ELSE ((i // 2) % 7)::DOUBLE + (i // 2) * 0.05 END AS y
+FROM range(160) t(i);
+
+# v1.5: a clear refusal; v2.0: a state
+statement maybe
+CREATE TABLE fc_states AS
+SELECT id, ds < TIMESTAMP '2024-02-01' AS early, ts_forecast_agg(ds, y, 'SES', 3, MAP{}) EXPORT_STATE AS st
+FROM se GROUP BY ALL;
+----
+Cannot use EXPORT_STATE on aggregate functions with custom
+
+# finalize(EXPORT_STATE) == the aggregate
+query I
+FROM v2_or($$
+    SELECT bool_and(eq) FROM (
+        SELECT finalize(ts_forecast_agg(ds, y, 'SES', 3, MAP{}) EXPORT_STATE)::VARCHAR
+               = ts_forecast_agg(ds, y, 'SES', 3, MAP{})::VARCHAR AS eq
+        FROM se GROUP BY id)
+$$, $$SELECT true$$);
+----
+true
+
+# stored partial states (early / late rows per id) combined == the aggregate over all rows
+query I
+FROM v2_or($$
+    SELECT bool_and(c = d) FROM (
+        SELECT id, finalize(combine_aggr(st))::VARCHAR AS c FROM fc_states GROUP BY id
+    ) JOIN (
+        SELECT id, ts_forecast_agg(ds, y, 'SES', 3, MAP{})::VARCHAR AS d FROM se GROUP BY id
+    ) USING (id)
+$$, $$SELECT true$$);
+----
+true
+
+# the exported state is the buffered series and its settings (a NULL value stays NULL)
+query IIIII
+FROM v2_or($$
+    SELECT s.method, s.horizon, s.params, len(s.ds), list_count(s.y) FROM (
+        SELECT (ts_forecast_agg(ds, y, 'SES', 3, {'seasonal_period': 7}) EXPORT_STATE)::STRUCT(
+                   method VARCHAR, horizon INTEGER, params MAP(VARCHAR, VARCHAR), ds TIMESTAMP[], y DOUBLE[]) AS s
+        FROM se WHERE id = 1)
+$$, $$SELECT 'SES', 3, MAP{'seasonal_period': '7'}, 80, 79$$);
+----
+SES	3	{seasonal_period=7}	80	79
+
+# a state from another confidence_level cannot be finalized under the default field names
+statement error
+FROM v2_or($$
+    SELECT finalize(ts_forecast_agg(ds, y, 'SES', 3, {'confidence_level': 0.95}) EXPORT_STATE) FROM se
+$$, $$SELECT error('confidence_level')$$);
+----
+confidence_level
+
+# no rows: NULL like the aggregate
+query I
+FROM v2_or($$
+    SELECT finalize(ts_forecast_agg(ds, y, 'SES', 3, MAP{}) EXPORT_STATE) IS NULL FROM se WHERE false
+$$, $$SELECT true$$);
+----
+true
+
+# ts_stats_agg: same contract
+statement maybe
+CREATE TABLE st_states AS
+SELECT id, ds < TIMESTAMP '2024-02-01' AS early, ts_stats_agg(ds, y) EXPORT_STATE AS st FROM se GROUP BY ALL;
+----
+Cannot use EXPORT_STATE on aggregate functions with custom
+
+query I
+FROM v2_or($$
+    SELECT bool_and(c = d) FROM (
+        SELECT id, finalize(combine_aggr(st))::VARCHAR AS c FROM st_states GROUP BY id
+    ) JOIN (
+        SELECT id, ts_stats_agg(ds, y)::VARCHAR AS d FROM se GROUP BY id
+    ) USING (id)
+$$, $$SELECT true$$);
+----
+true
+
+# a hand-built state is validated
+statement error
+FROM v2_or($$
+    SELECT finalize(to_aggregate_state({'ds': [TIMESTAMP '2024-01-01'], 'y': [1.0, 2.0]}, 'ts_stats_agg', ['TIMESTAMP', 'DOUBLE']))
+$$, $$SELECT error('different lengths')$$);
+----
+different lengths

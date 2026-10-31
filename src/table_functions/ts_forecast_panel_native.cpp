@@ -3,6 +3,7 @@
 #include "ts_fill_gaps_native.hpp"  // ParseFrequencyWithType, date helpers, DateColumnType
 #include "ts_future_dates.hpp"     // StepFromFrequency, ComputeFutureDates (D-12)
 #include "anofox_fcst_ffi.h"
+#include "ts_collect_finalize.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
 #include <algorithm>
@@ -77,8 +78,7 @@ struct PanelOutputRow {
 
 struct TsForecastPanelNativeLocalState : public LocalTableFunctionState {
     bool owns_finalize = false;
-    bool registered_collector = false;
-    bool registered_finalizer = false;
+    bool arrived_at_final = false;
 };
 
 // ============================================================================
@@ -97,9 +97,8 @@ struct TsForecastPanelNativeGlobalState : public GlobalTableFunctionState {
     idx_t output_offset = 0;
     string deferred_error_message;  // set in n_kept<3 branch; thrown after DROPPED rows are flushed
 
-    std::atomic<bool> finalize_claimed{false};
-    std::atomic<idx_t> threads_collecting{0};
-    std::atomic<idx_t> threads_done_collecting{0};
+    // Single-thread finalize: last-finalizer barrier (ts_collect_finalize.hpp)
+    TsCollectFinalizeBarrier barrier;
 };
 
 // ============================================================================
@@ -229,7 +228,7 @@ static unique_ptr<FunctionData> TsForecastPanelNativeBind(
 
     // Parse params (index 4)
     if (input.inputs.size() >= 5 && !input.inputs[4].IsNull()) {
-        auto &params = input.inputs[4];
+        auto params = NormalizeParamsValue(input.inputs[4]);
         ValidatePanelParamKeys(params);
         bind_data->seasonal_period = ParseInt64FromPanelParams(params, "seasonal_period", 0);
         bind_data->model_pool = ParseStringFromPanelParams(params, "model_pool", "");
@@ -297,6 +296,7 @@ static unique_ptr<LocalTableFunctionState> TsForecastPanelNativeInitLocal(
     ExecutionContext &context,
     TableFunctionInitInput &input,
     GlobalTableFunctionState *global_state) {
+    global_state->Cast<TsForecastPanelNativeGlobalState>().barrier.RegisterLocal();
     return make_uniq<TsForecastPanelNativeLocalState>();
 }
 
@@ -312,13 +312,9 @@ static OperatorResultType TsForecastPanelNativeInOut(
 
     auto &bind_data = data_p.bind_data->Cast<TsForecastPanelNativeBindData>();
     auto &gstate = data_p.global_state->Cast<TsForecastPanelNativeGlobalState>();
-    auto &lstate = data_p.local_state->Cast<TsForecastPanelNativeLocalState>();
 
-    // Register this thread as a collector (first call only)
-    if (!lstate.registered_collector) {
-        gstate.threads_collecting.fetch_add(1);
-        lstate.registered_collector = true;
-    }
+    // Late-row guard: rows after the finalize claim would be silently dropped.
+    gstate.barrier.AssertCollecting("_ts_forecast_panel_native");
 
     // Extract batch locally (no lock)
     struct TempRow {
@@ -394,26 +390,35 @@ static OperatorFinalizeResultType TsForecastPanelNativeFinalize(
     auto &gstate = data_p.global_state->Cast<TsForecastPanelNativeGlobalState>();
     auto &lstate = data_p.local_state->Cast<TsForecastPanelNativeLocalState>();
 
-    // Barrier + CAS claim (copy verbatim from ts_forecast_native.cpp)
-    if (!lstate.registered_finalizer) {
-        if (lstate.registered_collector) {
-            gstate.threads_done_collecting.fetch_add(1);
-        }
-        lstate.registered_finalizer = true;
-    }
+    // Last-finalizer claim (ts_collect_finalize.hpp): the local state whose
+    // arrival completes the count of registered local states processes; every
+    // other one finishes at once (no spin-wait).
     if (!lstate.owns_finalize) {
-        bool expected = false;
-        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true)) {
+        if (lstate.arrived_at_final) {
+            return OperatorFinalizeResultType::FINISHED;
+        }
+        lstate.arrived_at_final = true;
+        if (!gstate.barrier.ArriveAtFinal()) {
             return OperatorFinalizeResultType::FINISHED;
         }
         lstate.owns_finalize = true;
-        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load()) {
-            std::this_thread::yield();
-        }
     }
 
     // Panel processing (single thread)
     if (!gstate.processed) {
+        // ------------------------------------------------------------------
+        // 0. Series order in the global fit = group key order (#285). The
+        //    shared-parameter fit depends on the order of the series rows in
+        //    the panel matrix, and group_order records ARRIVAL order, which
+        //    changes with the source's row order and with how parallel intake
+        //    interleaves chunks. Take the key order of the groups std::map so
+        //    the fit is the same for every row order.
+        // ------------------------------------------------------------------
+        gstate.group_order.clear();
+        for (const auto &entry : gstate.groups) {
+            gstate.group_order.push_back(entry.first);
+        }
+
         // ------------------------------------------------------------------
         // 1. Sort each series by date; build shared date grid (union of dates)
         // ------------------------------------------------------------------

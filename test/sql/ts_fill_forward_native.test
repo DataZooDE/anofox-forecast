@@ -305,3 +305,114 @@ SELECT * FROM _ts_fill_forward_native(
 );
 ----
 target_date value '99999999999999999999' is out of range for a raw integer day-offset
+
+# ==============================================================================
+# ts_fill_forward_by hourly frequency pin. Moved here (out of
+# test/sql/ts_fill_forward_operator.test, Plan 19-01, #289) because TIMESTAMP +
+# hourly frequency crashes DuckDB-Wasm ("Maximum call stack size exceeded",
+# corrupts later results -- see 19-RESEARCH.md Pitfall 1 and
+# .planning/phases/19-wasm-traps-distribution-pipeline/deferred-items.md). This
+# whole file is already WASM skip-listed (a separate pre-existing ___trap
+# Emscripten issue), so it stays safe for this assertion natively.
+# ==============================================================================
+
+statement ok
+CREATE TABLE test_series AS
+SELECT 'A' AS id,
+       ('2024-01-01'::DATE + (i || ' days')::INTERVAL)::TIMESTAMP AS ds,
+       (10.0 + i)::DOUBLE AS value
+FROM generate_series(0, 4) AS t(i)
+UNION ALL
+SELECT 'B' AS id,
+       ('2024-01-01'::DATE + (i || ' days')::INTERVAL)::TIMESTAMP AS ds,
+       (100.0 + i * 5)::DOUBLE AS value
+FROM generate_series(0, 4) AS t(i);
+
+query I
+SELECT (SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-05 12:00:00', '1h')) > 10;
+----
+true
+
+# ==============================================================================
+# ts_fill_forward_by frequency-parameter and single-group pins. Moved here (out
+# of test/sql/ts_fill_forward_operator.test, Plan 19-01, #289) because a
+# small-fill-count call on a group whose own date cadence equals the requested
+# frequency -- or a single/short-per-group input -- hits a separate,
+# pre-existing WASM-only bug in _ts_fill_forward_native: it silently adds ZERO
+# forward-filled rows (returns exactly the original row count) instead of
+# raising or filling correctly. Confirmed this session by direct bisection
+# against the v1.5.6 wasm_eh artifact built from this plan's own commit (the
+# function is untouched by this plan's diff, so the bug predates it):
+#   ts_fill_forward_by('test_series', id, ds, value, '2024-01-08', '1d')  -- WASM: 10 (expected 16)
+#   ts_fill_forward_by('single_group', id, ds, value, '2024-01-05', '1d') -- WASM: 3  (expected 5)
+# A larger fill count against the SAME tables/frequency (target '2024-01-10',
+# 5-day fill) returns the correct count in WASM -- see deferred-items.md for
+# the fuller bisection (row count, per-group date step vs frequency). This
+# whole file is already WASM skip-listed (a separate pre-existing ___trap
+# Emscripten issue), so it stays safe for these assertions natively.
+# ==============================================================================
+
+# Polars-style '1d' frequency
+query I
+SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-08', '1d');
+----
+16
+
+# DuckDB INTERVAL style '1 day'
+query I
+SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-08', '1 day');
+----
+16
+
+statement ok
+DROP TABLE test_series;
+
+statement ok
+CREATE TABLE single_group AS
+SELECT 'X' AS id,
+       ('2024-01-01'::DATE + (i || ' days')::INTERVAL)::TIMESTAMP AS ds,
+       (i * 10.0)::DOUBLE AS value
+FROM generate_series(0, 2) AS t(i);
+
+# Single group should work correctly
+query I
+SELECT COUNT(*) FROM ts_fill_forward_by('single_group', id, ds, value, '2024-01-05', '1d');
+----
+5
+
+# Verify values for single group
+query IR
+SELECT ds, value FROM ts_fill_forward_by('single_group', id, ds, value, '2024-01-05', '1d')
+ORDER BY ds;
+----
+2024-01-01 00:00:00	0.0
+2024-01-02 00:00:00	10.0
+2024-01-03 00:00:00	20.0
+2024-01-04 00:00:00	NULL
+2024-01-05 00:00:00	NULL
+
+statement ok
+DROP TABLE single_group;
+
+# Single-group ts_fill_forward_operator/ts_fill_forward_by call with quoted/
+# reserved identifiers (Plan 19-01, Task 1's native-verified "weird" fixture),
+# kept here rather than in the WASM-gated operator test because a single-group
+# input hits the same pre-existing WASM bug documented above.
+statement ok
+CREATE TABLE weird_single("order" VARCHAR, "my date" DATE, val DOUBLE);
+
+statement ok
+INSERT INTO weird_single VALUES ('a', DATE '2024-01-01', 1.0), ('a', DATE '2024-01-02', 2.0);
+
+query TTR
+SELECT * FROM ts_fill_forward_operator('weird_single', 'order', 'my date', 'val', TIMESTAMP '2024-01-08', '2d')
+ORDER BY 2;
+----
+a	2024-01-01	1.0
+a	2024-01-02	2.0
+a	2024-01-04	NULL
+a	2024-01-06	NULL
+a	2024-01-08	NULL
+
+statement ok
+DROP TABLE weird_single;

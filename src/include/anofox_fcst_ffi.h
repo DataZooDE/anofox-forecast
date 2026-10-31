@@ -1031,6 +1031,31 @@ typedef struct BocpdResult {
 } BocpdResult;
 
 /**
+ * Options for `anofox_ts_detect_changepoints_bocpd_opts` (#287, BUG-06,
+ * D2-ii; `deseasonalize`/`seasonal_period` added for BUG-05, D1-b).
+ * `hazard_lambda <= 0.0` means "unset" (defaults to 250.0, same
+ * convention as `anofox_ts_detect_changepoints_bocpd`'s own parameter).
+ * `threshold` is NaN when unset (the default MAP run-length-reset
+ * heuristic applies); otherwise it must be finite and in `[0, 1]` --
+ * range validation happens in `anofox_fcst_core`, not here. `deseasonalize`
+ * defaults to `false` (byte-identical to before BUG-05). `seasonal_period`
+ * is `0` for "auto-detect the period" or a negative value for "invalid"
+ * (both handled at the FFI boundary); a positive value is the explicit
+ * period.
+ */
+typedef struct ChangepointOptionsFFI {
+    double hazard_lambda;
+    double threshold;
+    bool deseasonalize;
+    int64_t seasonal_period;
+    /**
+     * `deseasonalize: 'auto'` (the SQL default, #287): deseasonalize only a
+     * clearly seasonal series. Ignored when `deseasonalize` is `true`.
+     */
+    bool auto_deseasonalize;
+} ChangepointOptionsFFI;
+
+/**
  * Feature extraction result.
  */
 typedef struct FeaturesResult {
@@ -1868,6 +1893,10 @@ typedef struct AnofoxLjungBoxResult {
 typedef struct AnofoxDurbinWatsonResult {
     double statistic;
     char interpretation[32];
+    /**
+     * Approximate two-sided p-value (#284).
+     */
+    double p_value;
 } AnofoxDurbinWatsonResult;
 
 /**
@@ -1898,6 +1927,10 @@ typedef struct AnofoxResidualDiagnosticsResult {
     double jb_skewness;
     double jb_excess_kurtosis;
     bool adequate;
+    /**
+     * Approximate two-sided Durbin-Watson p-value (#284).
+     */
+    double dw_p_value;
 } AnofoxResidualDiagnosticsResult;
 
 /**
@@ -2735,6 +2768,35 @@ bool anofox_ts_detect_changepoints_bocpd(const double *values,
                                          struct AnofoxError *out_error);
 
 /**
+ * BOCPD changepoint detection with an explicit `is_changepoint` decision
+ * rule (#287, BUG-06, user decision D2-ii; `deseasonalize`/
+ * `seasonal_period` added for BUG-05, D1-b): shared by both
+ * `ts_detect_changepoints_by` and `ts_detect_changepoints_agg` so they
+ * agree on hazard_lambda, threshold, deseasonalize and seasonal_period for
+ * identical inputs.
+ *
+ * `opts->threshold` NaN means "unset" (the default heuristic applies,
+ * reproducing [`anofox_ts_detect_changepoints_bocpd`] bit for bit).
+ * `opts->hazard_lambda <= 0.0` means "unset" (defaults to 250.0, same
+ * convention as the sibling export above). A set, out-of-range
+ * `opts->threshold` (not finite, or outside `[0, 1]`) returns an
+ * `INVALID_INPUT`-coded error naming `threshold` in the message.
+ * `opts->deseasonalize == false` (default) leaves `values` unchanged.
+ * `opts->seasonal_period == 0` means "auto-detect the period"; a negative
+ * value returns an `INVALID_INPUT`-coded error naming `seasonal_period`;
+ * a positive value is the explicit period.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null. Arrays must have the
+ * specified lengths.
+ */
+bool anofox_ts_detect_changepoints_bocpd_opts(const double *values,
+                                              size_t length,
+                                              const struct ChangepointOptionsFFI *opts,
+                                              struct BocpdResult *out_result,
+                                              struct AnofoxError *out_error);
+
+/**
  * Extract time series features.
  *
  * # Safety
@@ -2771,6 +2833,22 @@ void anofox_free_warnings(char **warnings, size_t n_warnings);
  * All pointer arguments must be valid and non-null.
  */
 bool anofox_ts_features_list(char **out_names, size_t *out_count);
+
+/**
+ * Free the feature-name array returned by `anofox_ts_features_list`.
+ *
+ * # Safety
+ * `names` and `n_names` must be exactly the pointer and count that
+ * `anofox_ts_features_list` wrote into `*out_names`/`*out_count` for a
+ * single call — this releases every name and the array itself through the
+ * same allocator shim that allocated them (the size-prefixed WASM shim, or
+ * libc `malloc`/`free` on native). Manually `free()`-ing WASM-shim-allocated
+ * memory instead of calling this function reads/writes 8 bytes before the
+ * real allocation and corrupts the Emscripten heap (#289). `names` may be
+ * null (no-op). Call at most once per array returned by
+ * `anofox_ts_features_list`.
+ */
+void anofox_free_ts_features_list(char **names, size_t n_names);
 
 /**
  * # Safety

@@ -1,5 +1,6 @@
 #include "anofox_forecast_extension.hpp"
 #include "anofox_fcst_ffi.h"
+#include "ts_changepoints_params.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/aggregate_function.hpp"
@@ -13,11 +14,11 @@ namespace duckdb {
 struct TsChangepointsAggStateData {
     vector<int64_t> timestamps;
     vector<double> values;
-    double hazard_lambda;
+    ChangepointParamSet params;
     bool include_probabilities;
     bool initialized;
 
-    TsChangepointsAggStateData() : hazard_lambda(250.0), include_probabilities(false), initialized(false) {}
+    TsChangepointsAggStateData() : include_probabilities(false), initialized(false) {}
 };
 
 // Trivially constructible state wrapper (just a pointer)
@@ -84,10 +85,14 @@ static void TsChangepointsAggUpdate(Vector inputs[], AggregateInputData &aggr_in
     ToUnified(val_vec, count, val_data);
     ToUnified(params_vec, count, params_data);
 
-    auto states = FlatDataMut<TsChangepointsAggState *>(state_vector);
+    // Window evaluation passes a constant or dictionary state vector, GROUP BY a
+    // flat one: read it through UnifiedVectorFormat so both are handled.
+    UnifiedVectorFormat state_data;
+    ToUnified(state_vector, count, state_data);
+    auto states = UnifiedVectorFormat::GetData<TsChangepointsAggState *>(state_data);
 
     for (idx_t i = 0; i < count; i++) {
-        auto &state = *states[i];
+        auto &state = *states[state_data.sel->get_index(i)];
 
         auto ts_idx = ts_data.sel->get_index(i);
         auto val_idx = val_data.sel->get_index(i);
@@ -102,8 +107,14 @@ static void TsChangepointsAggUpdate(Vector inputs[], AggregateInputData &aggr_in
         }
 
         if (!state.data->initialized) {
-            // Parse params MAP if valid
-            // Default values already set in constructor
+            // Parse params MAP once per state (first row wins if a group's
+            // rows carry different MAPs -- documented behaviour, #287
+            // BUG-06): the same shared parser ts_detect_changepoints_by
+            // uses (Phase 20 20-06), so both consumers agree on
+            // hazard_lambda for identical inputs. Previously this block was
+            // empty and every key, including hazard_lambda, was silently
+            // ignored.
+            state.data->params = ParseChangepointParamSet(params_vec.GetValue(i));
             state.data->initialized = true;
         }
 
@@ -144,21 +155,34 @@ static void TsChangepointsAggFinalize(Vector &state_vector, AggregateInputData &
             sorted_values.push_back(p.second);
         }
 
-        // Call BOCPD changepoint detection
+        // Call BOCPD changepoint detection (#287, BUG-06, D2-ii): same
+        // shared options struct ts_detect_changepoints_by uses, so both
+        // consumers decide is_changepoint identically for identical
+        // hazard_lambda/threshold.
         BocpdResult cp_result;
         memset(&cp_result, 0, sizeof(cp_result));
         AnofoxError error;
 
-        bool success = anofox_ts_detect_changepoints_bocpd(
+        ChangepointOptionsFFI opts;
+        opts.hazard_lambda = data.params.hazard_lambda;
+        opts.threshold = data.params.threshold;
+        opts.deseasonalize = data.params.deseasonalize;
+        opts.seasonal_period = data.params.seasonal_period;
+        opts.auto_deseasonalize = data.params.auto_deseasonalize;
+
+        bool success = anofox_ts_detect_changepoints_bocpd_opts(
             sorted_values.data(),
             sorted_values.size(),
-            data.hazard_lambda,
-            true,  // always include probabilities for aggregate
+            &opts,
             &cp_result,
             &error
         );
 
         if (!success) {
+            if (error.code == INVALID_INPUT) {
+                throw InvalidInputException("ts_detect_changepoints_agg: %s",
+                    error.message ? error.message : "invalid input");
+            }
             FlatVector::SetNull(result, row, true);
             continue;
         }
@@ -191,7 +215,7 @@ static void TsChangepointsAggFinalize(Vector &state_vector, AggregateInputData &
         for (size_t j = 0; j < n; j++) {
             ts_child_data[current_size + j] = timestamp_t(sorted_timestamps[j]);
             val_child_data[current_size + j] = sorted_values[j];
-            cp_child_data[current_size + j] = cp_result.is_changepoint[j];
+            cp_child_data[current_size + j] = cp_result.is_changepoint ? cp_result.is_changepoint[j] : false;
             prob_child_data[current_size + j] = cp_result.changepoint_probability ?
                 cp_result.changepoint_probability[j] : 0.0;
         }
@@ -239,13 +263,23 @@ static void TsChangepointsAggDestructor(Vector &state_vector, AggregateInputData
     }
 }
 
+// params is declared ANY so a STRUCT, MAP, VARIANT or {} binds as given (#300);
+// ParseChangepointParamSet reads whichever it is as MAP(VARCHAR, VARCHAR).
+static unique_ptr<FunctionData> TsChangepointsAggBind(ClientContext &context, AggregateBindFunction &function,
+                                                      vector<unique_ptr<Expression>> &arguments) {
+    if (arguments.size() > 2) {
+        SetArgumentTypeOf(function, 2, ReturnTypeOf(*arguments[2]));
+    }
+    return nullptr;
+}
+
 void RegisterTsDetectChangepointsAggFunction(ExtensionLoader &loader) {
     // Create aggregate function with 3 parameters:
     // (date_col, value_col, params MAP)
     AggregateFunction agg_func(
         "ts_detect_changepoints_agg",
         {LogicalType(LogicalTypeId::TIMESTAMP), LogicalType(LogicalTypeId::DOUBLE),
-         LogicalType::MAP(LogicalType(LogicalTypeId::VARCHAR), LogicalType(LogicalTypeId::VARCHAR))},
+         LogicalType::ANY},  // params: MAP, STRUCT, VARIANT or {} (#300)
         GetChangepointsAggResultType(),
         AggregateFunction::StateSize<TsChangepointsAggState>,
         AggregateFunction::StateInitialize<TsChangepointsAggState, TsChangepointsAggOperation>,
@@ -253,7 +287,7 @@ void RegisterTsDetectChangepointsAggFunction(ExtensionLoader &loader) {
         TsChangepointsAggCombine,
         ANOFOX_AGG_FINALIZE(TsChangepointsAggFinalize),
         nullptr,  // simple_update
-        nullptr,  // bind
+        ANOFOX_AGG_BIND(TsChangepointsAggBind),
         TsChangepointsAggDestructor
     );
 

@@ -1,6 +1,7 @@
 #include "duckdb_compat.hpp"
 #include "ts_cv_hydrate_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // For DateColumnType, helper functions
+#include "ts_collect_finalize.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
 #include <algorithm>
@@ -84,10 +85,8 @@ struct TsCvHydrateNativeGlobalState : public GlobalTableFunctionState {
     idx_t offset = 0;
     bool processed = false;
 
-    // Finalize coordination
-    std::atomic<bool> finalize_claimed{false};
-    std::atomic<idx_t> threads_collecting{0};
-    std::atomic<idx_t> threads_done_collecting{0};
+    // Single-thread finalize: last-finalizer barrier (ts_collect_finalize.hpp)
+    TsCollectFinalizeBarrier barrier;
 
     idx_t MaxThreads() const override { return 1; }
 };
@@ -98,8 +97,7 @@ struct TsCvHydrateNativeGlobalState : public GlobalTableFunctionState {
 
 struct TsCvHydrateNativeLocalState : public LocalTableFunctionState {
     bool owns_finalize = false;
-    bool registered_collector = false;
-    bool registered_finalizer = false;
+    bool arrived_at_final = false;
 };
 
 // ============================================================================
@@ -353,7 +351,7 @@ static unique_ptr<FunctionData> TsCvHydrateNativeBind(
 
     // Parse params MAP (input.inputs[2])
     if (input.inputs.size() >= 3 && !input.inputs[2].IsNull()) {
-        auto &params = input.inputs[2];
+        auto params = NormalizeParamsValue(input.inputs[2]);
         ValidateHydrateParams(params);
         bind_data->strategy = ParseStringParamForHydrate(params, "strategy", "last_value");
         bind_data->fill_value = ParseStringParamForHydrate(params, "fill_value", "");
@@ -412,6 +410,7 @@ static unique_ptr<LocalTableFunctionState> TsCvHydrateNativeInitLocal(
     ExecutionContext &context,
     TableFunctionInitInput &input,
     GlobalTableFunctionState *global_state) {
+    global_state->Cast<TsCvHydrateNativeGlobalState>().barrier.RegisterLocal();
     return make_uniq<TsCvHydrateNativeLocalState>();
 }
 
@@ -427,12 +426,9 @@ static OperatorResultType TsCvHydrateNativeInOut(
 
     auto &bind_data = data.bind_data->Cast<TsCvHydrateNativeBindData>();
     auto &gstate = data.global_state->Cast<TsCvHydrateNativeGlobalState>();
-    auto &lstate = data.local_state->Cast<TsCvHydrateNativeLocalState>();
 
-    if (!lstate.registered_collector) {
-        gstate.threads_collecting.fetch_add(1);
-        lstate.registered_collector = true;
-    }
+    // Late-row guard: rows after the finalize claim would be silently dropped.
+    gstate.barrier.AssertCollecting("_ts_cv_hydrate_native");
 
     DateColumnType date_col_type = DetectDateColType(bind_data.date_type);
 
@@ -497,19 +493,18 @@ static OperatorFinalizeResultType TsCvHydrateNativeFinalize(
     auto &gstate = data.global_state->Cast<TsCvHydrateNativeGlobalState>();
     auto &lstate = data.local_state->Cast<TsCvHydrateNativeLocalState>();
 
-    // Barrier + claim: ensure all collecting threads are done before processing
-    if (!lstate.registered_finalizer) {
-        if (lstate.registered_collector)
-            gstate.threads_done_collecting.fetch_add(1);
-        lstate.registered_finalizer = true;
-    }
+    // Last-finalizer claim (ts_collect_finalize.hpp): the local state whose
+    // arrival completes the count of registered local states processes; every
+    // other one finishes at once (no spin-wait).
     if (!lstate.owns_finalize) {
-        bool expected = false;
-        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true))
+        if (lstate.arrived_at_final) {
             return OperatorFinalizeResultType::FINISHED;
+        }
+        lstate.arrived_at_final = true;
+        if (!gstate.barrier.ArriveAtFinal()) {
+            return OperatorFinalizeResultType::FINISHED;
+        }
         lstate.owns_finalize = true;
-        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load())
-            std::this_thread::yield();
     }
 
     if (!gstate.processed) {

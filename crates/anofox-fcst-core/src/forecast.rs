@@ -2681,7 +2681,7 @@ pub fn forecast_explain(
     horizon: usize,
     options: &ForecastOptions,
 ) -> Result<String> {
-    use anofox_forecast::models::explain::Explainable;
+    use anofox_forecast::models::explain::{Explainable, ForecastExplanation};
     use anofox_forecast::models::exponential::{ETSSpec, ETS as ETSModel};
     use anofox_forecast::models::mstl_forecaster::MSTLForecaster;
     use anofox_forecast::models::theta::Theta;
@@ -2702,7 +2702,18 @@ pub fn forecast_explain(
 
     let ts = make_timeseries(&prep.values)?;
 
-    let explanation = match options.model {
+    // Each arm returns the explanation and the same fitted model's point
+    // forecast; the point forecast fills `residual` below (#282).
+    fn explain_and_point<M: Explainable + Forecaster>(
+        model: &M,
+        horizon: usize,
+    ) -> std::result::Result<(ForecastExplanation, Vec<f64>), anofox_forecast::ForecastError> {
+        let explanation = model.explain(horizon)?;
+        let point = model.predict(horizon)?.primary().to_vec();
+        Ok((explanation, point))
+    }
+
+    let (mut explanation, point) = match options.model {
         ModelType::ETS => {
             let spec = options.ets_spec.as_deref().unwrap_or("AAA");
             let parsed = ETSSpec::from_notation(spec).map_err(|e| {
@@ -2712,7 +2723,7 @@ pub fn forecast_explain(
             model
                 .fit(&ts)
                 .map_err(|e| ForecastError::ComputationError(format!("ETS fit failed: {e}")))?;
-            model.explain(horizon)
+            explain_and_point(&model, horizon)
         }
         ModelType::MSTL | ModelType::AutoMSTL => {
             // resolve_period guarantees period > 1 here whenever
@@ -2726,7 +2737,7 @@ pub fn forecast_explain(
             model
                 .fit(&ts)
                 .map_err(|e| ForecastError::ComputationError(format!("MSTL fit failed: {e}")))?;
-            model.explain(horizon)
+            explain_and_point(&model, horizon)
         }
         ModelType::Theta => {
             let mut model = if period > 1 {
@@ -2737,7 +2748,7 @@ pub fn forecast_explain(
             model
                 .fit(&ts)
                 .map_err(|e| ForecastError::ComputationError(format!("Theta fit failed: {e}")))?;
-            model.explain(horizon)
+            explain_and_point(&model, horizon)
         }
         other => {
             return Err(ForecastError::InvalidModel(format!(
@@ -2748,6 +2759,14 @@ pub fn forecast_explain(
         }
     }
     .map_err(|e| ForecastError::ComputationError(format!("explain() failed: {e}")))?;
+
+    // #282 (CTR-09): the crate leaves `residual` unset on the forecast
+    // horizon. Fill it with the part of the point forecast the components do
+    // not explain, `point - (level + trend + seasonal + named)`: ~0 for an
+    // additive decomposition, the interaction term for a multiplicative one.
+    if explanation.residual.is_none() && point.len() == explanation.level.len() {
+        explanation.residual = Some(explanation_residual(&point, &explanation));
+    }
 
     // ForecastExplanation isn't Serialize; hand-build the JSON.
     let mut obj = serde_json::Map::new();
@@ -2788,6 +2807,19 @@ pub fn forecast_explain(
     serde_json::to_string(&serde_json::Value::Object(obj)).map_err(|e| {
         ForecastError::ComputationError(format!("Failed to serialise ForecastExplanation: {e}"))
     })
+}
+
+/// Horizon residual of a forecast explanation (#282): the point forecast minus
+/// the sum of its components.
+fn explanation_residual(
+    point: &[f64],
+    explanation: &anofox_forecast::models::explain::ForecastExplanation,
+) -> Vec<f64> {
+    point
+        .iter()
+        .zip(explanation.sum())
+        .map(|(p, s)| p - s)
+        .collect()
 }
 
 /// AutoTheta: Automatic selection of best Theta variant (STM, OTM, DSTM, DOTM).

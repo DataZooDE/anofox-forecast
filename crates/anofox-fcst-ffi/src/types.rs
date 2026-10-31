@@ -729,6 +729,28 @@ impl Default for BocpdResult {
     }
 }
 
+/// Options for `anofox_ts_detect_changepoints_bocpd_opts` (#287, BUG-06,
+/// D2-ii; `deseasonalize`/`seasonal_period` added for BUG-05, D1-b).
+/// `hazard_lambda <= 0.0` means "unset" (defaults to 250.0, same
+/// convention as `anofox_ts_detect_changepoints_bocpd`'s own parameter).
+/// `threshold` is NaN when unset (the default MAP run-length-reset
+/// heuristic applies); otherwise it must be finite and in `[0, 1]` --
+/// range validation happens in `anofox_fcst_core`, not here. `deseasonalize`
+/// defaults to `false` (byte-identical to before BUG-05). `seasonal_period`
+/// is `0` for "auto-detect the period" or a negative value for "invalid"
+/// (both handled at the FFI boundary); a positive value is the explicit
+/// period.
+#[repr(C)]
+pub struct ChangepointOptionsFFI {
+    pub hazard_lambda: c_double,
+    pub threshold: c_double,
+    pub deseasonalize: bool,
+    pub seasonal_period: i64,
+    /// `deseasonalize: 'auto'` (the SQL default, #287): deseasonalize only a
+    /// clearly seasonal series. Ignored when `deseasonalize` is `true`.
+    pub auto_deseasonalize: bool,
+}
+
 /// Feature extraction result.
 #[repr(C)]
 pub struct FeaturesResult {
@@ -2042,6 +2064,8 @@ impl From<anofox_fcst_core::LjungBoxOut> for AnofoxLjungBoxResult {
 pub struct AnofoxDurbinWatsonResult {
     pub statistic: c_double,
     pub interpretation: [c_char; 32],
+    /// Approximate two-sided p-value (#284).
+    pub p_value: c_double,
 }
 
 impl Default for AnofoxDurbinWatsonResult {
@@ -2049,6 +2073,7 @@ impl Default for AnofoxDurbinWatsonResult {
         Self {
             statistic: f64::NAN,
             interpretation: [0; 32],
+            p_value: f64::NAN,
         }
     }
 }
@@ -2101,6 +2126,8 @@ pub struct AnofoxResidualDiagnosticsResult {
     pub jb_skewness: c_double,
     pub jb_excess_kurtosis: c_double,
     pub adequate: bool,
+    /// Approximate two-sided Durbin-Watson p-value (#284).
+    pub dw_p_value: c_double,
 }
 
 impl Default for AnofoxResidualDiagnosticsResult {
@@ -2116,6 +2143,7 @@ impl Default for AnofoxResidualDiagnosticsResult {
             jb_skewness: f64::NAN,
             jb_excess_kurtosis: f64::NAN,
             adequate: false,
+            dw_p_value: f64::NAN,
         }
     }
 }

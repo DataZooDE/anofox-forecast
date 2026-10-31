@@ -288,7 +288,7 @@ SELECT COUNT(*) FROM (
     DESCRIBE SELECT * FROM ts_cv_forecast_by('cv_splits', series_id, date, value, 'Naive', MAP{})
 );
 ----
-9
+10
 
 # Test all folds are represented
 query I

@@ -24,7 +24,7 @@ Data preparation functions help clean and transform time series data before fore
 - [Series Filtering](#series-filtering) — `ts_drop_constant_by`, `ts_drop_short_by`, `ts_drop_gappy_by`, `ts_drop_zeros_by`
 - [Edge Cleaning](#edge-cleaning) — `ts_drop_leading_zeros_by`, `ts_drop_trailing_zeros_by`, `ts_drop_edge_zeros_by`
 - [Missing Value Imputation](#missing-value-imputation) — `ts_fill_nulls_const_by`, `ts_fill_nulls_forward_by`, `ts_fill_nulls_backward_by`, `ts_fill_nulls_mean_by`, [Edge NULLs](#edge-nulls-d-14-g26)
-- [Gap Filling](#gap-filling) — `ts_fill_gaps_by`, `ts_fill_forward_by`
+- [Gap Filling](#gap-filling) — `ts_fill_gaps_by`, `ts_fill_forward_by`, `ts_fill_forward_operator` (deprecated)
 - [Differencing](#differencing) — `ts_diff_by`
 - [Advanced: Native Gap Filling](#advanced-native-gap-filling) — Supported frequency formats
 - [Advanced: Future Value Handling](#advanced-future-value-handling) — `ts_fill_unknown_by`, `ts_mark_unknown_by`
@@ -65,6 +65,8 @@ SELECT * FROM ts_fill_nulls_const_by('gaps_filled', product_id, date, value, 0.0
 CREATE TABLE clean_data AS
 SELECT * FROM ts_drop_short_by('nulls_filled', product_id, 20);
 ```
+
+The `_by` data-preparation functions (`ts_fill_gaps_by`, `ts_fill_forward_by`, and likewise `ts_stats_by`, `ts_detect_changepoints_by` and `ts_mstl_decomposition_by`) read their whole source regardless of plan shape: a view built from a UNION ALL, or a source in reversed or shuffled row order, gives the same result as the same rows in a date-ordered table.
 
 !!! warning "Do not chain table functions in CTEs"
     Chaining multiple `_by` table functions via CTEs (e.g., `ts_fill_gaps_by` → `ts_fill_forward_by`) can return **0 rows** under parallel execution. This is a DuckDB engine limitation where the FinalExecute output of one table-in-out operator is not visible to a downstream table-in-out operator within the same query.
@@ -374,6 +376,34 @@ SELECT * FROM ts_fill_forward_by('sales', product_id, date, quantity, '2024-12-3
 For monthly/quarterly/yearly `frequency`, `ts_fill_forward_by` steps forward from each
 series' LAST observed date using the same month-end-preserving rule as `ts_fill_gaps_by`
 above (D-09) — see that section for the exact behaviour and an example.
+
+---
+
+#### Deprecated: ts_fill_forward_operator
+
+> **Deprecated — removed in the next release.** `ts_fill_forward_operator` (and its
+> `anofox_fcst_ts_fill_forward_operator` alias) is a thin macro over `ts_fill_forward_by`
+> that takes the group/date/value columns as VARCHAR column-name strings instead of
+> column references. It previously ran a nested query that hung natively and trapped
+> DuckDB-Wasm (#289); it is now safe to call, but has no reason to exist once callers
+> migrate.
+
+Signature: `ts_fill_forward_operator(source_table VARCHAR, group_col VARCHAR, date_col VARCHAR, value_col VARCHAR, target_date TIMESTAMP, frequency VARCHAR) → TABLE`
+
+**Migration:** pass column references to `ts_fill_forward_by` instead of quoted
+column-name strings — drop the quotes around `group_col`/`date_col`/`value_col`:
+
+```sql
+CREATE TABLE sales_for_migration AS
+SELECT 'p1' AS product_id, ('2024-01-01'::DATE + i * INTERVAL '1 day') AS date, i::DOUBLE AS quantity
+FROM range(3) t(i);
+
+-- Deprecated form (removed in the next release):
+SELECT * FROM ts_fill_forward_operator('sales_for_migration', 'product_id', 'date', 'quantity', TIMESTAMP '2024-01-05', '1d');
+
+-- Equivalent, non-deprecated form:
+SELECT * FROM ts_fill_forward_by('sales_for_migration', product_id, date, quantity, TIMESTAMP '2024-01-05', '1d');
+```
 
 ---
 

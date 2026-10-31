@@ -31,6 +31,18 @@
 # that ships to users.
 duckdb_extension_load(json)
 
+# wasm_eh links Rust 1.96 objects (native wasm exceptions, #289; see the
+# toolchain pin in CMakeLists.txt). They declare the bulk-memory-opt and
+# call-indirect-overlong target features, which emsdk 3.1.71's binaryen v120
+# rejects ("Unknown option '--enable-bulk-memory-opt'"). Their instructions are
+# covered by bulk-memory and reference-types, so the module's feature list is
+# set explicitly, without those two names. The extra arguments ride on
+# LINKED_LIBS, which DuckDB splits on spaces and appends to the final emcc link.
+set(ANOFOX_WASM_LINK_FLAGS "")
+if("${DUCKDB_EXPLICIT_PLATFORM}" STREQUAL "wasm_eh")
+    set(ANOFOX_WASM_LINK_FLAGS " -Xlinker --no-check-features -Xlinker --features=bulk-memory,exception-handling,multivalue,mutable-globals,nontrapping-fptoint,reference-types,sign-ext,simd128")
+endif()
+
 duckdb_extension_load(anofox_forecast
     SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}
     LOAD_TESTS
@@ -45,7 +57,7 @@ duckdb_extension_load(anofox_forecast
     # `target_link_libraries`) and `anofox_fcst_ffi-static` (the actual STATIC
     # IMPORTED archive). We need the -static suffix here so TARGET_FILE
     # resolves to the .a file path.
-    LINKED_LIBS "$<TARGET_FILE:anofox_fcst_ffi-static>"
+    LINKED_LIBS "$<TARGET_FILE:anofox_fcst_ffi-static>${ANOFOX_WASM_LINK_FLAGS}"
 )
 
 # DuckDB 2.0 links an extension into its own shell and unittest only when an

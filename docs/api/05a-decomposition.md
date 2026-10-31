@@ -92,6 +92,19 @@ SELECT periods FROM ts_mstl_decomposition_by('sales', product_id, date, quantity
 
 ---
 
+### ts_mstl_decomposition_long_by
+
+Long form of `ts_mstl_decomposition_by` (#282): one row per `(group, date, component)`,
+`<group_col>, <date_col>, component, value`, with `component` in `observed`, `trend`,
+`seasonal_<period>` (one per period) and `remainder` — the anofox contract `decomposition`
+shape. Same `params` as `ts_mstl_decomposition_by`; values are the same list elements, mapped
+to their source dates.
+
+```sql
+SELECT * FROM ts_mstl_decomposition_long_by('sales', product_id, date, quantity,
+    params := MAP{'seasonal_periods': '[7]'});
+```
+
 ### ts_detrend_by
 
 Remove trend from grouped time series using polynomial fitting.
@@ -158,6 +171,16 @@ FROM ts_detrend_by('sensor_data', sensor_id, timestamp, reading, 'auto');
 - Use `ts_mstl_decomposition_by` when you need full seasonal decomposition (trend + seasonal + remainder)
 
 ---
+
+### ts_detrend_long_by
+
+Long form of `ts_detrend_by` (#282): `<group_col>, <date_col>, component, value, method`, with
+`component` in `observed`, `trend`, `detrended` (one row each per source row). Rows before the
+first / after the last non-NULL value have NULL `trend` and `detrended`.
+
+```sql
+SELECT * FROM ts_detrend_long_by('sales', product_id, date, quantity, method := 'linear');
+```
 
 ### ts_decompose_seasonal
 
@@ -238,8 +261,8 @@ ts_classify_seasonality_by(source VARCHAR, group_col COLUMN, date_col COLUMN, va
 | `modulation_type` | VARCHAR | `'stable'`, `'emerging'`, `'fading'`, `'oscillating'`, or `'non_seasonal'` (not `'growing'`/`'shrinking'`/`'variable'` — those are not the real label set) |
 | `has_stable_timing` | BOOLEAN | Whether peak timing is consistent |
 | `timing_variability` | DOUBLE | Variability score (lower = more stable) |
-| `seasonal_strength` | DOUBLE | Strength of seasonality (0-1) |
-| `is_seasonal` | BOOLEAN | Whether significant seasonality exists |
+| `seasonal_strength` | DOUBLE | STL strength of seasonality (0-1), `NULL` if no usable period |
+| `is_seasonal` | BOOLEAN | Whether significant seasonality exists (`seasonal_strength >= 0.3` by default) |
 | `cycle_strengths` | DOUBLE[] | Strength per cycle |
 | `weak_seasons` | INTEGER[] | Indices of weak seasonal cycles |
 
@@ -247,6 +270,16 @@ ts_classify_seasonality_by(source VARCHAR, group_col COLUMN, date_col COLUMN, va
 correctly comes back as `timing_classification = 'stable_seasonal'`, `is_seasonal = true`,
 and `seasonal_strength` close to 1.0 — a fdars-core dimension-swap bug that previously made
 every call return `'non_seasonal'` / `NaN` has been fixed (WRAP-01).
+
+**#286 fix:** `seasonal_strength` (and the `is_seasonal`/`timing_classification` that depend
+on it) is now the SAME STL strength `ts_stats_by(..., seasonal_period := period)` reports
+(tsfeatures' `F_S = max(0, 1 - Var(R)/Var(S+R))` on the R-matching STL decomposition at the
+rounded `period`), not fdars's own raw-series variance-explained measure — the two used to
+disagree on the same series (a strong weekly series read `is_seasonal = false` with
+`seasonal_strength = 0.156` here while `ts_stats_by` reported `0.966` for the identical
+series/period). A series with no usable period or a degenerate (near-zero-variance)
+decomposition now returns `seasonal_strength = NULL` (previously `NaN`). `ts_detect_amplitude_modulation`'s
+seasonality gate and `seasonal_strength` use the same STL strength.
 
 **Example:**
 ```sql

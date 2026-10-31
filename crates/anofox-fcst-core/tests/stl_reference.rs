@@ -16,6 +16,7 @@
 
 mod common;
 
+use anofox_fcst_core::classify_seasonality;
 use anofox_fcst_core::stats::{stl_strengths, StlStrengths};
 use anofox_fcst_core::stl::{stl, StlParams};
 use anofox_fcst_core::supsmu::supsmu;
@@ -50,7 +51,13 @@ fn single_period_cases_match_r_stl_components_and_strengths() {
         .and_then(|c| c.as_object())
         .expect("r_stl_strength/cases.json: 'cases' is not an object");
 
-    for name in ["audit_rw150", "air", "ref_rw200", "det_seasonal84"] {
+    for name in [
+        "audit_rw150",
+        "air",
+        "ref_rw200",
+        "det_seasonal84",
+        "issue286_weekly84",
+    ] {
         let case = cases
             .get(name)
             .unwrap_or_else(|| panic!("r_stl_strength/cases.json: missing case {name:?}"));
@@ -104,6 +111,39 @@ fn single_period_cases_match_r_stl_components_and_strengths() {
             &format!("{name}: seasonality_strength"),
         );
     }
+}
+
+/// #286 (BUG-04): `classify_seasonality`'s `seasonal_strength` must match
+/// `stl_strengths` (and, transitively, R `tsfeatures::stl_features`'s
+/// `seasonal_strength` on `ts(values, frequency = 7)`) within the fixture
+/// tolerance, and the series must classify as seasonal.
+#[test]
+fn issue286_weekly84_classify_seasonality_matches_r_tsfeatures() {
+    let fx = load_fixture("r_stl_strength/cases.json");
+    let strength_abs = tolerance(&fx, "strength_abs");
+
+    let case = &fx["cases"]["issue286_weekly84"];
+    let values = f64_vec(&case["values"]);
+    let want_seasonal = num(&case["tsfeatures"]["seasonal_strength"]);
+
+    let stl = stl_strengths(&values, &[7]).unwrap();
+    assert_close(
+        stl.seasonality_strength.unwrap(),
+        want_seasonal,
+        strength_abs,
+        0.0,
+        "issue286_weekly84: stl_strengths seasonality_strength vs R tsfeatures",
+    );
+
+    let classified = classify_seasonality(&values, 7.0, None, None).unwrap();
+    assert!(classified.is_seasonal);
+    assert_close(
+        classified.seasonal_strength,
+        want_seasonal,
+        strength_abs,
+        0.0,
+        "issue286_weekly84: classify_seasonality seasonal_strength vs R tsfeatures",
+    );
 }
 
 #[test]

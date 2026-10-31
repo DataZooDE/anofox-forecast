@@ -2,6 +2,7 @@
 #include "ts_cv_forecast_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // For DateColumnType, helper functions
 #include "anofox_fcst_ffi.h"
+#include "ts_collect_finalize.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
 #include <algorithm>
@@ -111,10 +112,8 @@ struct TsCvForecastNativeGlobalState : public GlobalTableFunctionState {
     bool processed = false;
     idx_t output_offset = 0;
 
-    // Single-thread finalize + barrier
-    std::atomic<bool> finalize_claimed{false};
-    std::atomic<idx_t> threads_collecting{0};
-    std::atomic<idx_t> threads_done_collecting{0};
+    // Single-thread finalize: last-finalizer barrier (ts_collect_finalize.hpp)
+    TsCollectFinalizeBarrier barrier;
 };
 
 // ============================================================================
@@ -123,8 +122,7 @@ struct TsCvForecastNativeGlobalState : public GlobalTableFunctionState {
 
 struct TsCvForecastNativeLocalState : public LocalTableFunctionState {
     bool owns_finalize = false;
-    bool registered_collector = false;
-    bool registered_finalizer = false;
+    bool arrived_at_final = false;
 };
 
 // ============================================================================
@@ -380,7 +378,7 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
 
     // Parse params (index 2)
     if (input.inputs.size() >= 3 && !input.inputs[2].IsNull()) {
-        auto &params = input.inputs[2];
+        auto params = NormalizeParamsValue(input.inputs[2]);
         ValidateParamKeys(params);
         bind_data->model_spec = ParseStringFromParams(params, "model", "");
         bind_data->seasonal_period = ParseInt64FromParams(params, "seasonal_period", 0);
@@ -506,6 +504,11 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
     names.push_back(MakeBindName("model_name"));
     return_types.push_back(LogicalType::VARCHAR);
 
+    // Appended (#280, CTR-06): interval coverage as a fraction (confidence_level);
+    // NULL on rows without an interval.
+    names.push_back(MakeBindName("level"));
+    return_types.push_back(LogicalType::DOUBLE);
+
     return bind_data;
 }
 
@@ -523,6 +526,7 @@ static unique_ptr<LocalTableFunctionState> TsCvForecastNativeInitLocal(
     ExecutionContext &context,
     TableFunctionInitInput &input,
     GlobalTableFunctionState *global_state) {
+    global_state->Cast<TsCvForecastNativeGlobalState>().barrier.RegisterLocal();
     return make_uniq<TsCvForecastNativeLocalState>();
 }
 
@@ -537,14 +541,10 @@ static OperatorResultType TsCvForecastNativeInOut(
     DataChunk &output) {
 
     auto &bind_data = data_p.bind_data->Cast<TsCvForecastNativeBindData>();
-    auto &lstate = data_p.local_state->Cast<TsCvForecastNativeLocalState>();
     auto &gstate = data_p.global_state->Cast<TsCvForecastNativeGlobalState>();
 
-    // Register this thread as a collector
-    if (!lstate.registered_collector) {
-        gstate.threads_collecting.fetch_add(1);
-        lstate.registered_collector = true;
-    }
+    // Late-row guard: rows after the finalize claim would be silently dropped.
+    gstate.barrier.AssertCollecting("_ts_cv_forecast_native");
 
     // Buffer all incoming data - we need complete groups
     // Input columns are at indices stored in bind_data
@@ -639,19 +639,18 @@ static OperatorFinalizeResultType TsCvForecastNativeFinalize(
     auto &gstate = data_p.global_state->Cast<TsCvForecastNativeGlobalState>();
     auto &lstate = data_p.local_state->Cast<TsCvForecastNativeLocalState>();
 
-    // Barrier + claim pattern: ensure all collectors are done before processing
-    if (!lstate.registered_finalizer) {
-        if (lstate.registered_collector)
-            gstate.threads_done_collecting.fetch_add(1);
-        lstate.registered_finalizer = true;
-    }
+    // Last-finalizer claim (ts_collect_finalize.hpp): the local state whose
+    // arrival completes the count of registered local states processes; every
+    // other one finishes at once (no spin-wait).
     if (!lstate.owns_finalize) {
-        bool expected = false;
-        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true))
+        if (lstate.arrived_at_final) {
             return OperatorFinalizeResultType::FINISHED;
+        }
+        lstate.arrived_at_final = true;
+        if (!gstate.barrier.ArriveAtFinal()) {
+            return OperatorFinalizeResultType::FINISHED;
+        }
         lstate.owns_finalize = true;
-        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load())
-            std::this_thread::yield();
     }
 
     // Process all groups on first finalize call
@@ -844,6 +843,11 @@ static OperatorFinalizeResultType TsCvForecastNativeFinalize(
 
         // model_name
         output.data[8].SetValue(i, Value(row.model_name));
+
+        // level (#280)
+        output.data[9].SetValue(i, (std::isnan(row.lower_90) && std::isnan(row.upper_90))
+            ? Value(LogicalType::DOUBLE)
+            : Value::DOUBLE(bind_data.confidence_level));
     }
 
     gstate.output_offset += to_output;

@@ -353,3 +353,343 @@ true
 
 statement ok
 DROP TABLE probe10b;
+
+# =============================================================================
+# #285 (BUG-03, Phase 20-02): every metric macro gives the same result for every
+# input row order and plan shape. Root cause: a UNION ALL source gave the in-out
+# native two pipelines sharing one global state, and the first pipeline's
+# in_out_function_final emitted results on part of the rows (NULL MASE; a
+# 1.0 MAE from only the first branch). The macros now read their source through
+# (SELECT * FROM _ts_passthrough(source) ORDER BY ALL), a single-pipeline
+# breaker, and the natives use the last-finalizer barrier in
+# src/include/ts_collect_finalize.hpp. Its late-row guard (rows arriving after
+# finalize -> InvalidInputException) is defence in depth that the macros never
+# reach, so it is documented here, not pinned.
+#
+# MASE literals are R forecast::accuracy on the date-sorted series, from
+# validation/reference/fixtures/r_mase/accuracy_mase.json (cases
+# issue285_panel_A/B/C), regenerated with
+#   Rscript validation/reference/r/gen_mase_reference.R
+# and printed with
+#   python3 -c "import json; d=json.load(open('validation/reference/fixtures/r_mase/accuracy_mase.json')); print([d['cases']['issue285_panel_'+k]['mase_accuracy'] for k in 'ABC'], d['tolerance'])"
+# =============================================================================
+
+statement ok
+CREATE TABLE s AS SELECT id, (TIMESTAMP '2024-01-01' + INTERVAL (i) DAY) AS ds, base + 0.3 * i + 5 * sin(2 * pi() * i / 7) + CASE WHEN id = 'B' AND i >= 50 THEN 15 ELSE 0 END + 1.6 * cos(i * 0.9) + 0.7 * sin(i * 1.7 + base) AS y FROM (VALUES ('A', 20.0), ('B', 40.0), ('C', 60.0)) t(id, base), range(84) r(i);
+
+statement ok
+CREATE TABLE f AS SELECT id, ds, y, y + 1 AS yhat FROM s WHERE ds >= TIMESTAMP '2024-03-11';
+
+# Helper columns for the other ten macros: a forecast fc whose error varies by
+# row (so a result computed on part of the rows differs from the all-rows one),
+# an interval [fc - 2, fc + 2] (coverage strictly between 0 and 1), and a
+# second model pred2 for ts_rmae_by.
+statement ok
+CREATE TABLE m285 AS
+SELECT id, ds, y, fc, fc - 2 AS lower, fc + 2 AS upper, y + 3 * sin(0.21 * k) AS pred2
+FROM (SELECT id, ds, y, date_diff('day', TIMESTAMP '2024-01-01', ds) AS k,
+             y + 1 + 2 * cos(0.37 * date_diff('day', TIMESTAMP '2024-01-01', ds)) AS fc
+      FROM s);
+
+# ts_mase_by, literal cut-off UNION ALL (the #285 issue shape 1): never NULL, the R values per id.
+query II
+SELECT id, round(mase, 10) FROM ts_mase_by((SELECT id, ds, y, NULL::DOUBLE AS yhat FROM s WHERE ds < TIMESTAMP '2024-03-11' UNION ALL SELECT * FROM f), 'ds', 'y', 'yhat', seasonal_period := 7) ORDER BY id;
+----
+A	0.4764952155
+B	0.2655145005
+C	0.4759518449
+
+# ts_mase_by, scalar-subquery cut-off UNION ALL (the #285 issue shape 2): never NULL, the R values per id.
+query II
+SELECT id, round(mase, 10) FROM ts_mase_by((SELECT id, ds, y, NULL::DOUBLE AS yhat FROM s WHERE ds < (SELECT min(ds) FROM f) UNION ALL SELECT * FROM f), 'ds', 'y', 'yhat', seasonal_period := 7) ORDER BY id;
+----
+A	0.4764952155
+B	0.2655145005
+C	0.4759518449
+
+# ts_mase_by, date-sorted: never NULL, the R values per id.
+query II
+SELECT id, round(mase, 10) FROM ts_mase_by((SELECT * FROM (SELECT id, ds, y, NULL::DOUBLE AS yhat FROM s WHERE ds < (SELECT min(ds) FROM f) UNION ALL SELECT * FROM f) ORDER BY id, ds), 'ds', 'y', 'yhat', seasonal_period := 7) ORDER BY id;
+----
+A	0.4764952155
+B	0.2655145005
+C	0.4759518449
+
+# ts_mase_by, reversed: never NULL, the R values per id.
+query II
+SELECT id, round(mase, 10) FROM ts_mase_by((SELECT * FROM (SELECT id, ds, y, NULL::DOUBLE AS yhat FROM s WHERE ds < (SELECT min(ds) FROM f) UNION ALL SELECT * FROM f) ORDER BY id, ds DESC), 'ds', 'y', 'yhat', seasonal_period := 7) ORDER BY id;
+----
+A	0.4764952155
+B	0.2655145005
+C	0.4759518449
+
+# ts_mase_by, shuffled: never NULL, the R values per id.
+query II
+SELECT id, round(mase, 10) FROM ts_mase_by((SELECT * FROM (SELECT id, ds, y, NULL::DOUBLE AS yhat FROM s WHERE ds < (SELECT min(ds) FROM f) UNION ALL SELECT * FROM f) ORDER BY hash(id, ds)), 'ds', 'y', 'yhat', seasonal_period := 7) ORDER BY id;
+----
+A	0.4764952155
+B	0.2655145005
+C	0.4759518449
+
+# ts_mase_by equals R forecast::accuracy MASE (fixture tolerance mase_abs = 1e-12;
+# 1e-10 here leaves room for DuckDB's DECIMAL 0.3 * i versus R's double).
+query I
+SELECT count(*) FROM ts_mase_by((SELECT id, ds, y, NULL::DOUBLE AS yhat FROM s WHERE ds < (SELECT min(ds) FROM f) UNION ALL SELECT * FROM f), 'ds', 'y', 'yhat', seasonal_period := 7)
+WHERE abs(mase - CASE id WHEN 'A' THEN 0.476495215529845 WHEN 'B' THEN 0.265514500507306 ELSE 0.47595184490648 END) < 1e-10;
+----
+3
+
+# Two-branch probe: a y+1 branch (31 rows per id) UNION ALL a y+3 branch behind a
+# scalar-subquery cut-off (14 rows per id). Before the fix only the first branch
+# reached the computation (MAE exactly 1.0); the all-rows MAE is (31*1 + 14*3)/45.
+query II
+SELECT id, round(mae, 10) FROM ts_mae_by((SELECT id, ds, y, y + 1 AS yhat FROM s WHERE ds < TIMESTAMP '2024-02-01' UNION ALL SELECT id, ds, y, y + 3 FROM s WHERE ds >= (SELECT min(ds) FROM f)), 'ds', 'y', 'yhat') ORDER BY id;
+----
+A	1.6222222222
+B	1.6222222222
+C	1.6222222222
+
+# The other ten metric macros: the result over a reversed, a hash-shuffled and a
+# UNION ALL + scalar-subquery source equals the date-ordered result (EXCEPT ALL
+# empty in both directions; values rounded to 10 digits because ts_rmae_by and
+# ts_quantile_loss_by sum in arrival order, which may move the last float bit).
+# Each date-ordered result is first checked to have one non-NULL row per id.
+
+query II
+SELECT count(*), count(mae) FROM ts_mae_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc');
+----
+3	3
+
+# ts_mae_by: reversed source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(mae, 10) AS v FROM ts_mae_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds DESC), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(mae, 10) AS v FROM ts_mae_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc'))) + (SELECT count(*) FROM (SELECT id, round(mae, 10) AS v FROM ts_mae_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(mae, 10) AS v FROM ts_mae_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds DESC), 'ds', 'y', 'fc')));
+----
+0
+
+# ts_mae_by: shuffled source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(mae, 10) AS v FROM ts_mae_by((SELECT id, ds, y, fc FROM m285 ORDER BY hash(id, ds)), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(mae, 10) AS v FROM ts_mae_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc'))) + (SELECT count(*) FROM (SELECT id, round(mae, 10) AS v FROM ts_mae_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(mae, 10) AS v FROM ts_mae_by((SELECT id, ds, y, fc FROM m285 ORDER BY hash(id, ds)), 'ds', 'y', 'fc')));
+----
+0
+
+# ts_mae_by: UNION ALL + scalar-subquery cut-off source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(mae, 10) AS v FROM ts_mae_by((SELECT id, ds, y, fc FROM m285 WHERE ds < (SELECT min(ds) FROM f) UNION ALL SELECT id, ds, y, fc FROM m285 WHERE ds >= (SELECT min(ds) FROM f)), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(mae, 10) AS v FROM ts_mae_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc'))) + (SELECT count(*) FROM (SELECT id, round(mae, 10) AS v FROM ts_mae_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(mae, 10) AS v FROM ts_mae_by((SELECT id, ds, y, fc FROM m285 WHERE ds < (SELECT min(ds) FROM f) UNION ALL SELECT id, ds, y, fc FROM m285 WHERE ds >= (SELECT min(ds) FROM f)), 'ds', 'y', 'fc')));
+----
+0
+
+query II
+SELECT count(*), count(mse) FROM ts_mse_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc');
+----
+3	3
+
+# ts_mse_by: reversed source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(mse, 10) AS v FROM ts_mse_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds DESC), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(mse, 10) AS v FROM ts_mse_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc'))) + (SELECT count(*) FROM (SELECT id, round(mse, 10) AS v FROM ts_mse_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(mse, 10) AS v FROM ts_mse_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds DESC), 'ds', 'y', 'fc')));
+----
+0
+
+# ts_mse_by: shuffled source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(mse, 10) AS v FROM ts_mse_by((SELECT id, ds, y, fc FROM m285 ORDER BY hash(id, ds)), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(mse, 10) AS v FROM ts_mse_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc'))) + (SELECT count(*) FROM (SELECT id, round(mse, 10) AS v FROM ts_mse_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(mse, 10) AS v FROM ts_mse_by((SELECT id, ds, y, fc FROM m285 ORDER BY hash(id, ds)), 'ds', 'y', 'fc')));
+----
+0
+
+# ts_mse_by: UNION ALL + scalar-subquery cut-off source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(mse, 10) AS v FROM ts_mse_by((SELECT id, ds, y, fc FROM m285 WHERE ds < (SELECT min(ds) FROM f) UNION ALL SELECT id, ds, y, fc FROM m285 WHERE ds >= (SELECT min(ds) FROM f)), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(mse, 10) AS v FROM ts_mse_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc'))) + (SELECT count(*) FROM (SELECT id, round(mse, 10) AS v FROM ts_mse_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(mse, 10) AS v FROM ts_mse_by((SELECT id, ds, y, fc FROM m285 WHERE ds < (SELECT min(ds) FROM f) UNION ALL SELECT id, ds, y, fc FROM m285 WHERE ds >= (SELECT min(ds) FROM f)), 'ds', 'y', 'fc')));
+----
+0
+
+query II
+SELECT count(*), count(rmse) FROM ts_rmse_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc');
+----
+3	3
+
+# ts_rmse_by: reversed source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(rmse, 10) AS v FROM ts_rmse_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds DESC), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(rmse, 10) AS v FROM ts_rmse_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc'))) + (SELECT count(*) FROM (SELECT id, round(rmse, 10) AS v FROM ts_rmse_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(rmse, 10) AS v FROM ts_rmse_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds DESC), 'ds', 'y', 'fc')));
+----
+0
+
+# ts_rmse_by: shuffled source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(rmse, 10) AS v FROM ts_rmse_by((SELECT id, ds, y, fc FROM m285 ORDER BY hash(id, ds)), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(rmse, 10) AS v FROM ts_rmse_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc'))) + (SELECT count(*) FROM (SELECT id, round(rmse, 10) AS v FROM ts_rmse_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(rmse, 10) AS v FROM ts_rmse_by((SELECT id, ds, y, fc FROM m285 ORDER BY hash(id, ds)), 'ds', 'y', 'fc')));
+----
+0
+
+# ts_rmse_by: UNION ALL + scalar-subquery cut-off source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(rmse, 10) AS v FROM ts_rmse_by((SELECT id, ds, y, fc FROM m285 WHERE ds < (SELECT min(ds) FROM f) UNION ALL SELECT id, ds, y, fc FROM m285 WHERE ds >= (SELECT min(ds) FROM f)), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(rmse, 10) AS v FROM ts_rmse_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc'))) + (SELECT count(*) FROM (SELECT id, round(rmse, 10) AS v FROM ts_rmse_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(rmse, 10) AS v FROM ts_rmse_by((SELECT id, ds, y, fc FROM m285 WHERE ds < (SELECT min(ds) FROM f) UNION ALL SELECT id, ds, y, fc FROM m285 WHERE ds >= (SELECT min(ds) FROM f)), 'ds', 'y', 'fc')));
+----
+0
+
+query II
+SELECT count(*), count(mape) FROM ts_mape_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc');
+----
+3	3
+
+# ts_mape_by: reversed source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(mape, 10) AS v FROM ts_mape_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds DESC), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(mape, 10) AS v FROM ts_mape_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc'))) + (SELECT count(*) FROM (SELECT id, round(mape, 10) AS v FROM ts_mape_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(mape, 10) AS v FROM ts_mape_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds DESC), 'ds', 'y', 'fc')));
+----
+0
+
+# ts_mape_by: shuffled source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(mape, 10) AS v FROM ts_mape_by((SELECT id, ds, y, fc FROM m285 ORDER BY hash(id, ds)), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(mape, 10) AS v FROM ts_mape_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc'))) + (SELECT count(*) FROM (SELECT id, round(mape, 10) AS v FROM ts_mape_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(mape, 10) AS v FROM ts_mape_by((SELECT id, ds, y, fc FROM m285 ORDER BY hash(id, ds)), 'ds', 'y', 'fc')));
+----
+0
+
+# ts_mape_by: UNION ALL + scalar-subquery cut-off source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(mape, 10) AS v FROM ts_mape_by((SELECT id, ds, y, fc FROM m285 WHERE ds < (SELECT min(ds) FROM f) UNION ALL SELECT id, ds, y, fc FROM m285 WHERE ds >= (SELECT min(ds) FROM f)), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(mape, 10) AS v FROM ts_mape_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc'))) + (SELECT count(*) FROM (SELECT id, round(mape, 10) AS v FROM ts_mape_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(mape, 10) AS v FROM ts_mape_by((SELECT id, ds, y, fc FROM m285 WHERE ds < (SELECT min(ds) FROM f) UNION ALL SELECT id, ds, y, fc FROM m285 WHERE ds >= (SELECT min(ds) FROM f)), 'ds', 'y', 'fc')));
+----
+0
+
+query II
+SELECT count(*), count(smape) FROM ts_smape_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc');
+----
+3	3
+
+# ts_smape_by: reversed source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(smape, 10) AS v FROM ts_smape_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds DESC), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(smape, 10) AS v FROM ts_smape_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc'))) + (SELECT count(*) FROM (SELECT id, round(smape, 10) AS v FROM ts_smape_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(smape, 10) AS v FROM ts_smape_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds DESC), 'ds', 'y', 'fc')));
+----
+0
+
+# ts_smape_by: shuffled source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(smape, 10) AS v FROM ts_smape_by((SELECT id, ds, y, fc FROM m285 ORDER BY hash(id, ds)), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(smape, 10) AS v FROM ts_smape_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc'))) + (SELECT count(*) FROM (SELECT id, round(smape, 10) AS v FROM ts_smape_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(smape, 10) AS v FROM ts_smape_by((SELECT id, ds, y, fc FROM m285 ORDER BY hash(id, ds)), 'ds', 'y', 'fc')));
+----
+0
+
+# ts_smape_by: UNION ALL + scalar-subquery cut-off source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(smape, 10) AS v FROM ts_smape_by((SELECT id, ds, y, fc FROM m285 WHERE ds < (SELECT min(ds) FROM f) UNION ALL SELECT id, ds, y, fc FROM m285 WHERE ds >= (SELECT min(ds) FROM f)), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(smape, 10) AS v FROM ts_smape_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc'))) + (SELECT count(*) FROM (SELECT id, round(smape, 10) AS v FROM ts_smape_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(smape, 10) AS v FROM ts_smape_by((SELECT id, ds, y, fc FROM m285 WHERE ds < (SELECT min(ds) FROM f) UNION ALL SELECT id, ds, y, fc FROM m285 WHERE ds >= (SELECT min(ds) FROM f)), 'ds', 'y', 'fc')));
+----
+0
+
+query II
+SELECT count(*), count(r2) FROM ts_r2_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc');
+----
+3	3
+
+# ts_r2_by: reversed source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(r2, 10) AS v FROM ts_r2_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds DESC), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(r2, 10) AS v FROM ts_r2_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc'))) + (SELECT count(*) FROM (SELECT id, round(r2, 10) AS v FROM ts_r2_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(r2, 10) AS v FROM ts_r2_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds DESC), 'ds', 'y', 'fc')));
+----
+0
+
+# ts_r2_by: shuffled source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(r2, 10) AS v FROM ts_r2_by((SELECT id, ds, y, fc FROM m285 ORDER BY hash(id, ds)), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(r2, 10) AS v FROM ts_r2_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc'))) + (SELECT count(*) FROM (SELECT id, round(r2, 10) AS v FROM ts_r2_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(r2, 10) AS v FROM ts_r2_by((SELECT id, ds, y, fc FROM m285 ORDER BY hash(id, ds)), 'ds', 'y', 'fc')));
+----
+0
+
+# ts_r2_by: UNION ALL + scalar-subquery cut-off source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(r2, 10) AS v FROM ts_r2_by((SELECT id, ds, y, fc FROM m285 WHERE ds < (SELECT min(ds) FROM f) UNION ALL SELECT id, ds, y, fc FROM m285 WHERE ds >= (SELECT min(ds) FROM f)), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(r2, 10) AS v FROM ts_r2_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc'))) + (SELECT count(*) FROM (SELECT id, round(r2, 10) AS v FROM ts_r2_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(r2, 10) AS v FROM ts_r2_by((SELECT id, ds, y, fc FROM m285 WHERE ds < (SELECT min(ds) FROM f) UNION ALL SELECT id, ds, y, fc FROM m285 WHERE ds >= (SELECT min(ds) FROM f)), 'ds', 'y', 'fc')));
+----
+0
+
+query II
+SELECT count(*), count(bias) FROM ts_bias_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc');
+----
+3	3
+
+# ts_bias_by: reversed source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(bias, 10) AS v FROM ts_bias_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds DESC), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(bias, 10) AS v FROM ts_bias_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc'))) + (SELECT count(*) FROM (SELECT id, round(bias, 10) AS v FROM ts_bias_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(bias, 10) AS v FROM ts_bias_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds DESC), 'ds', 'y', 'fc')));
+----
+0
+
+# ts_bias_by: shuffled source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(bias, 10) AS v FROM ts_bias_by((SELECT id, ds, y, fc FROM m285 ORDER BY hash(id, ds)), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(bias, 10) AS v FROM ts_bias_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc'))) + (SELECT count(*) FROM (SELECT id, round(bias, 10) AS v FROM ts_bias_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(bias, 10) AS v FROM ts_bias_by((SELECT id, ds, y, fc FROM m285 ORDER BY hash(id, ds)), 'ds', 'y', 'fc')));
+----
+0
+
+# ts_bias_by: UNION ALL + scalar-subquery cut-off source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(bias, 10) AS v FROM ts_bias_by((SELECT id, ds, y, fc FROM m285 WHERE ds < (SELECT min(ds) FROM f) UNION ALL SELECT id, ds, y, fc FROM m285 WHERE ds >= (SELECT min(ds) FROM f)), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(bias, 10) AS v FROM ts_bias_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc'))) + (SELECT count(*) FROM (SELECT id, round(bias, 10) AS v FROM ts_bias_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc') EXCEPT ALL SELECT id, round(bias, 10) AS v FROM ts_bias_by((SELECT id, ds, y, fc FROM m285 WHERE ds < (SELECT min(ds) FROM f) UNION ALL SELECT id, ds, y, fc FROM m285 WHERE ds >= (SELECT min(ds) FROM f)), 'ds', 'y', 'fc')));
+----
+0
+
+query II
+SELECT count(*), count(rmae) FROM ts_rmae_by((SELECT id, ds, y, fc, pred2 FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc', 'pred2');
+----
+3	3
+
+# ts_rmae_by: reversed source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(rmae, 10) AS v FROM ts_rmae_by((SELECT id, ds, y, fc, pred2 FROM m285 ORDER BY id, ds DESC), 'ds', 'y', 'fc', 'pred2') EXCEPT ALL SELECT id, round(rmae, 10) AS v FROM ts_rmae_by((SELECT id, ds, y, fc, pred2 FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc', 'pred2'))) + (SELECT count(*) FROM (SELECT id, round(rmae, 10) AS v FROM ts_rmae_by((SELECT id, ds, y, fc, pred2 FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc', 'pred2') EXCEPT ALL SELECT id, round(rmae, 10) AS v FROM ts_rmae_by((SELECT id, ds, y, fc, pred2 FROM m285 ORDER BY id, ds DESC), 'ds', 'y', 'fc', 'pred2')));
+----
+0
+
+# ts_rmae_by: shuffled source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(rmae, 10) AS v FROM ts_rmae_by((SELECT id, ds, y, fc, pred2 FROM m285 ORDER BY hash(id, ds)), 'ds', 'y', 'fc', 'pred2') EXCEPT ALL SELECT id, round(rmae, 10) AS v FROM ts_rmae_by((SELECT id, ds, y, fc, pred2 FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc', 'pred2'))) + (SELECT count(*) FROM (SELECT id, round(rmae, 10) AS v FROM ts_rmae_by((SELECT id, ds, y, fc, pred2 FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc', 'pred2') EXCEPT ALL SELECT id, round(rmae, 10) AS v FROM ts_rmae_by((SELECT id, ds, y, fc, pred2 FROM m285 ORDER BY hash(id, ds)), 'ds', 'y', 'fc', 'pred2')));
+----
+0
+
+# ts_rmae_by: UNION ALL + scalar-subquery cut-off source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(rmae, 10) AS v FROM ts_rmae_by((SELECT id, ds, y, fc, pred2 FROM m285 WHERE ds < (SELECT min(ds) FROM f) UNION ALL SELECT id, ds, y, fc, pred2 FROM m285 WHERE ds >= (SELECT min(ds) FROM f)), 'ds', 'y', 'fc', 'pred2') EXCEPT ALL SELECT id, round(rmae, 10) AS v FROM ts_rmae_by((SELECT id, ds, y, fc, pred2 FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc', 'pred2'))) + (SELECT count(*) FROM (SELECT id, round(rmae, 10) AS v FROM ts_rmae_by((SELECT id, ds, y, fc, pred2 FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc', 'pred2') EXCEPT ALL SELECT id, round(rmae, 10) AS v FROM ts_rmae_by((SELECT id, ds, y, fc, pred2 FROM m285 WHERE ds < (SELECT min(ds) FROM f) UNION ALL SELECT id, ds, y, fc, pred2 FROM m285 WHERE ds >= (SELECT min(ds) FROM f)), 'ds', 'y', 'fc', 'pred2')));
+----
+0
+
+query II
+SELECT count(*), count(coverage) FROM ts_coverage_by((SELECT id, ds, y, lower, upper FROM m285 ORDER BY id, ds), 'ds', 'y', 'lower', 'upper');
+----
+3	3
+
+# ts_coverage_by: reversed source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(coverage, 10) AS v FROM ts_coverage_by((SELECT id, ds, y, lower, upper FROM m285 ORDER BY id, ds DESC), 'ds', 'y', 'lower', 'upper') EXCEPT ALL SELECT id, round(coverage, 10) AS v FROM ts_coverage_by((SELECT id, ds, y, lower, upper FROM m285 ORDER BY id, ds), 'ds', 'y', 'lower', 'upper'))) + (SELECT count(*) FROM (SELECT id, round(coverage, 10) AS v FROM ts_coverage_by((SELECT id, ds, y, lower, upper FROM m285 ORDER BY id, ds), 'ds', 'y', 'lower', 'upper') EXCEPT ALL SELECT id, round(coverage, 10) AS v FROM ts_coverage_by((SELECT id, ds, y, lower, upper FROM m285 ORDER BY id, ds DESC), 'ds', 'y', 'lower', 'upper')));
+----
+0
+
+# ts_coverage_by: shuffled source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(coverage, 10) AS v FROM ts_coverage_by((SELECT id, ds, y, lower, upper FROM m285 ORDER BY hash(id, ds)), 'ds', 'y', 'lower', 'upper') EXCEPT ALL SELECT id, round(coverage, 10) AS v FROM ts_coverage_by((SELECT id, ds, y, lower, upper FROM m285 ORDER BY id, ds), 'ds', 'y', 'lower', 'upper'))) + (SELECT count(*) FROM (SELECT id, round(coverage, 10) AS v FROM ts_coverage_by((SELECT id, ds, y, lower, upper FROM m285 ORDER BY id, ds), 'ds', 'y', 'lower', 'upper') EXCEPT ALL SELECT id, round(coverage, 10) AS v FROM ts_coverage_by((SELECT id, ds, y, lower, upper FROM m285 ORDER BY hash(id, ds)), 'ds', 'y', 'lower', 'upper')));
+----
+0
+
+# ts_coverage_by: UNION ALL + scalar-subquery cut-off source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(coverage, 10) AS v FROM ts_coverage_by((SELECT id, ds, y, lower, upper FROM m285 WHERE ds < (SELECT min(ds) FROM f) UNION ALL SELECT id, ds, y, lower, upper FROM m285 WHERE ds >= (SELECT min(ds) FROM f)), 'ds', 'y', 'lower', 'upper') EXCEPT ALL SELECT id, round(coverage, 10) AS v FROM ts_coverage_by((SELECT id, ds, y, lower, upper FROM m285 ORDER BY id, ds), 'ds', 'y', 'lower', 'upper'))) + (SELECT count(*) FROM (SELECT id, round(coverage, 10) AS v FROM ts_coverage_by((SELECT id, ds, y, lower, upper FROM m285 ORDER BY id, ds), 'ds', 'y', 'lower', 'upper') EXCEPT ALL SELECT id, round(coverage, 10) AS v FROM ts_coverage_by((SELECT id, ds, y, lower, upper FROM m285 WHERE ds < (SELECT min(ds) FROM f) UNION ALL SELECT id, ds, y, lower, upper FROM m285 WHERE ds >= (SELECT min(ds) FROM f)), 'ds', 'y', 'lower', 'upper')));
+----
+0
+
+query II
+SELECT count(*), count(quantile_loss) FROM ts_quantile_loss_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc', 0.3);
+----
+3	3
+
+# ts_quantile_loss_by: reversed source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(quantile_loss, 10) AS v FROM ts_quantile_loss_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds DESC), 'ds', 'y', 'fc', 0.3) EXCEPT ALL SELECT id, round(quantile_loss, 10) AS v FROM ts_quantile_loss_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc', 0.3))) + (SELECT count(*) FROM (SELECT id, round(quantile_loss, 10) AS v FROM ts_quantile_loss_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc', 0.3) EXCEPT ALL SELECT id, round(quantile_loss, 10) AS v FROM ts_quantile_loss_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds DESC), 'ds', 'y', 'fc', 0.3)));
+----
+0
+
+# ts_quantile_loss_by: shuffled source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(quantile_loss, 10) AS v FROM ts_quantile_loss_by((SELECT id, ds, y, fc FROM m285 ORDER BY hash(id, ds)), 'ds', 'y', 'fc', 0.3) EXCEPT ALL SELECT id, round(quantile_loss, 10) AS v FROM ts_quantile_loss_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc', 0.3))) + (SELECT count(*) FROM (SELECT id, round(quantile_loss, 10) AS v FROM ts_quantile_loss_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc', 0.3) EXCEPT ALL SELECT id, round(quantile_loss, 10) AS v FROM ts_quantile_loss_by((SELECT id, ds, y, fc FROM m285 ORDER BY hash(id, ds)), 'ds', 'y', 'fc', 0.3)));
+----
+0
+
+# ts_quantile_loss_by: UNION ALL + scalar-subquery cut-off source == date-ordered source.
+query I
+SELECT (SELECT count(*) FROM (SELECT id, round(quantile_loss, 10) AS v FROM ts_quantile_loss_by((SELECT id, ds, y, fc FROM m285 WHERE ds < (SELECT min(ds) FROM f) UNION ALL SELECT id, ds, y, fc FROM m285 WHERE ds >= (SELECT min(ds) FROM f)), 'ds', 'y', 'fc', 0.3) EXCEPT ALL SELECT id, round(quantile_loss, 10) AS v FROM ts_quantile_loss_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc', 0.3))) + (SELECT count(*) FROM (SELECT id, round(quantile_loss, 10) AS v FROM ts_quantile_loss_by((SELECT id, ds, y, fc FROM m285 ORDER BY id, ds), 'ds', 'y', 'fc', 0.3) EXCEPT ALL SELECT id, round(quantile_loss, 10) AS v FROM ts_quantile_loss_by((SELECT id, ds, y, fc FROM m285 WHERE ds < (SELECT min(ds) FROM f) UNION ALL SELECT id, ds, y, fc FROM m285 WHERE ds >= (SELECT min(ds) FROM f)), 'ds', 'y', 'fc', 0.3)));
+----
+0
+
+statement ok
+DROP TABLE m285;
+
+statement ok
+DROP TABLE f;
+
+statement ok
+DROP TABLE s;

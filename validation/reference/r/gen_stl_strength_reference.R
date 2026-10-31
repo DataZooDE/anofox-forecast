@@ -61,6 +61,14 @@ det_seasonal84_t <- 1:84
 det_seasonal84_values <- 10 + 3 * sin(2 * pi * det_seasonal84_t / 7) + 0.1 * det_seasonal84_t +
   0.5 * cos(2.1 * det_seasonal84_t)
 
+# #286 (BUG-04) repro series: n=84, weekly (period 7) sine + trend + two
+# off-period nuisance terms (i is 0-indexed in the issue's SQL; t = i here).
+issue286_weekly84_t <- 0:83
+issue286_weekly84_values <- 20 + 0.3 * issue286_weekly84_t +
+  5 * sin(2 * pi * issue286_weekly84_t / 7) +
+  1.6 * cos(issue286_weekly84_t * 0.9) +
+  0.7 * sin(issue286_weekly84_t * 1.7 + 20)
+
 msts_t <- 1:280
 msts_values <- sin(2 * pi * msts_t / 7) + 0.5 * sin(2 * pi * msts_t / 28) + 0.3 * cos(1.7 * msts_t)
 
@@ -180,6 +188,7 @@ cases <- list(
   air = single_period_case(air_values, frequency(s$air)),
   ref_rw200 = single_period_case(ref_rw200_values, 12),
   det_seasonal84 = single_period_case(det_seasonal84_values, 7),
+  issue286_weekly84 = single_period_case(issue286_weekly84_values, 7),
   msts_7_28 = multi_period_case(msts_values, c(7, 28)),
   det_trend60 = non_seasonal_case(det_trend60_values, declared_period = 1),
   wn100 = non_seasonal_case(wn100_values, declared_period = NULL),

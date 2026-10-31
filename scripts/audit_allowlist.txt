@@ -51,14 +51,15 @@ src/table_functions/ts_forecast_var_native.cpp | std::sort\(indices\.begin\(\), 
 src/table_functions/ts_metrics_native.cpp | std::sort\(indices\.begin\(\), indices\.end\(\), | row-index ordering by date before metric computation (shared idiom across 5 metric functions in this file: mae/mse/..., mase/rmae, coverage, quantile_loss, and the paired-prediction metric)
 src/table_functions/ts_mstl_decomposition_native.cpp | std::sort\(indices\.begin\(\), indices\.end\(\), | row-index ordering by date before MSTL decomposition FFI call
 src/table_functions/ts_stats.cpp | std::sort\(order\.begin\(\), order\.end\(\), \[&grp\]\(size_t a, size_t b\) \{ | row ordering by (timestamp, validity, value) -- order-dependent stats (autocorr, strength, ...) are defined on the date-ordered series; this orders rows, it does not compute a statistic itself
-src/table_functions/ts_aggregate_hierarchy.cpp | std::sort\(gstate\.results\.begin\(\), gstate\.results\.end\(\), | row ordering by (unique_id, date) key for deterministic output marshalling
+src/table_functions/ts_aggregate_hierarchy.cpp | std::stable_sort\(order\.begin\(\), order\.end\(\), | row ordering by date (stable, input order within a date) before the structural rollup (#305)
+src/table_functions/ts_aggregate_hierarchy.cpp | std::sort\(nodes_sorted\.begin\(\), nodes_sorted\.end\(\), | node ordering by unique_id string for deterministic output marshalling (#305)
 
 # --- src/table_functions/ts_aggregate_hierarchy.cpp: hierarchy rollup is a
 #     plain additive SUM of sibling raw values at the same timestamp across a
 #     GROUP BY hierarchy level -- equivalent to SQL's own SUM()/GROUP BY
 #     aggregate (exact, no model, no bias/variance correction), not a derived
 #     statistic (mean/variance/quantile) of a single series' history.
-src/table_functions/ts_aggregate_hierarchy.cpp | cell\.sum \+= row\.value; | structural rollup: additive SUM across hierarchy siblings at a fixed date, equivalent to SQL SUM()/GROUP BY, not a statistic of series values
+src/table_functions/ts_aggregate_hierarchy.cpp | cell\.sum \+= gstate\.row_values\[row\]; | structural rollup: additive SUM across hierarchy siblings at a fixed date, equivalent to SQL SUM()/GROUP BY, not a statistic of series values
 
 # --- src/table_functions/ts_periods.cpp: list marshalling (reserving output
 #     ListVector capacity from a sum of already Rust-computed per-row sizes).

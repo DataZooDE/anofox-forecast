@@ -79,6 +79,8 @@ static void TsAdfFunction(DataChunk &args, ExpressionState &state, Vector &resul
     auto cv1_data   = FlatDataMut<double>(cv1_vec);
     auto cv5_data   = FlatDataMut<double>(cv5_vec);
     auto cv10_data  = FlatDataMut<double>(cv10_vec);
+    auto &method_vec = StructEntry(struct_entries[7]);
+    auto method_data = FlatDataMut<string_t>(method_vec);
 
     vector<double> series;
 
@@ -131,6 +133,7 @@ static void TsAdfFunction(DataChunk &args, ExpressionState &state, Vector &resul
         cv1_data[row_idx]   = r.cv_1pct;
         cv5_data[row_idx]   = r.cv_5pct;
         cv10_data[row_idx]  = r.cv_10pct;
+        method_data[row_idx] = StringVector::AddString(method_vec, "ADF");
     }
 }
 
@@ -148,6 +151,8 @@ void RegisterTsAdfFunction(ExtensionLoader &loader) {
     struct_children.push_back(make_pair("cv_1pct",       LogicalType(LogicalTypeId::DOUBLE)));
     struct_children.push_back(make_pair("cv_5pct",       LogicalType(LogicalTypeId::DOUBLE)));
     struct_children.push_back(make_pair("cv_10pct",      LogicalType(LogicalTypeId::DOUBLE)));
+    // Appended (#279): self-describing test row for the anofox contract `test` schema.
+    struct_children.push_back(make_pair("method",        LogicalType(LogicalTypeId::VARCHAR)));
     auto result_type = LogicalType::STRUCT(std::move(struct_children));
 
     // 1-arg overload: ts_adf(series)
@@ -189,7 +194,7 @@ void RegisterTsAdfFunction(ExtensionLoader &loader) {
             "Augmented Dickey-Fuller (ADF) unit-root test, matching statsmodels "
             "adfuller(autolag='AIC'). Returns STRUCT(statistic DOUBLE, p_value DOUBLE, "
             "lags BIGINT, is_stationary BOOLEAN, cv_1pct DOUBLE, cv_5pct DOUBLE, "
-            "cv_10pct DOUBLE). AIC lag selection over 0..max_lags; default "
+            "cv_10pct DOUBLE, method VARCHAR = 'ADF'). AIC lag selection over 0..max_lags; default "
             "max_lags = floor((n-1)^(1/3)). regression is 'c' (constant, default) or "
             "'ct' (constant + trend); NULL means 'c'. p-values are MacKinnon (1994) "
             "and critical values are MacKinnon (2010) finite-sample surfaces. "
@@ -220,6 +225,7 @@ void RegisterTsAdfFunction(ExtensionLoader &loader) {
     struct_children2.push_back(make_pair("cv_1pct",       LogicalType(LogicalTypeId::DOUBLE)));
     struct_children2.push_back(make_pair("cv_5pct",       LogicalType(LogicalTypeId::DOUBLE)));
     struct_children2.push_back(make_pair("cv_10pct",      LogicalType(LogicalTypeId::DOUBLE)));
+    struct_children2.push_back(make_pair("method",        LogicalType(LogicalTypeId::VARCHAR)));
     auto result_type2 = LogicalType::STRUCT(std::move(struct_children2));
 
     ScalarFunctionSet anofox_set("anofox_fcst_ts_adf");
@@ -253,7 +259,7 @@ void RegisterTsAdfFunction(ExtensionLoader &loader) {
         FunctionDescription desc;
         desc.description =
             "Augmented Dickey-Fuller (ADF) unit-root test (prefixed alias). "
-            "Returns STRUCT(statistic, p_value, lags, is_stationary, cv_1pct, cv_5pct, cv_10pct).";
+            "Returns STRUCT(statistic, p_value, lags, is_stationary, cv_1pct, cv_5pct, cv_10pct, method).";
         desc.examples = {"anofox_fcst_ts_adf(LIST(y ORDER BY ds))"};
         desc.categories = {"time-series", "diagnostics"};
         info.descriptions.push_back(std::move(desc));
@@ -299,6 +305,8 @@ static void TsKpssFunction(DataChunk &args, ExpressionState &state, Vector &resu
     auto cv1_data   = FlatDataMut<double>(StructEntry(struct_entries[4]));
     auto cv5_data   = FlatDataMut<double>(StructEntry(struct_entries[5]));
     auto cv10_data  = FlatDataMut<double>(StructEntry(struct_entries[6]));
+    auto &method_vec = StructEntry(struct_entries[7]);
+    auto method_data = FlatDataMut<string_t>(method_vec);
 
     vector<double> series;
 
@@ -341,6 +349,7 @@ static void TsKpssFunction(DataChunk &args, ExpressionState &state, Vector &resu
         cv1_data[row_idx]   = r.cv_1pct;
         cv5_data[row_idx]   = r.cv_5pct;
         cv10_data[row_idx]  = r.cv_10pct;
+        method_data[row_idx] = StringVector::AddString(method_vec, "KPSS");
     }
 }
 
@@ -436,6 +445,8 @@ static child_list_t<LogicalType> StationarityStructChildren() {
     c.push_back(make_pair("cv_1pct",       LogicalType(LogicalTypeId::DOUBLE)));
     c.push_back(make_pair("cv_5pct",       LogicalType(LogicalTypeId::DOUBLE)));
     c.push_back(make_pair("cv_10pct",      LogicalType(LogicalTypeId::DOUBLE)));
+    // Appended (#279): self-describing test row for the anofox contract `test` schema.
+    c.push_back(make_pair("method",        LogicalType(LogicalTypeId::VARCHAR)));
     return c;
 }
 
@@ -483,7 +494,7 @@ void RegisterTsKpssFunction(ExtensionLoader &loader) {
             "Kwiatkowski-Phillips-Schmidt-Shin (KPSS) stationarity test, matching "
             "tseries::kpss.test(lshort = TRUE). Returns STRUCT(statistic DOUBLE, "
             "p_value DOUBLE, lags BIGINT, is_stationary BOOLEAN, cv_1pct DOUBLE, "
-            "cv_5pct DOUBLE, cv_10pct DOUBLE); is_stationary=true means the null "
+            "cv_5pct DOUBLE, cv_10pct DOUBLE, method VARCHAR = 'KPSS'); is_stationary=true means the null "
             "is NOT rejected at 5%. regression is 'c' (level, null = \"Level\", "
             "default) or 'ct' (trend, null = \"Trend\"); NULL means 'c'. "
             "p-values are approximate (interpolated, clamped to [0.01, 0.10]). "
@@ -630,6 +641,8 @@ static void TsLjungBoxFunction(DataChunk &args, ExpressionState &state, Vector &
     auto pval_data = FlatDataMut<double>(StructEntry(e[1]));
     auto lags_data = FlatDataMut<int64_t>(StructEntry(e[2]));
     auto df_data   = FlatDataMut<int64_t>(StructEntry(e[3]));
+    auto &lb_method_vec = StructEntry(e[4]);
+    auto lb_method_data = FlatDataMut<string_t>(lb_method_vec);
 
     vector<double> series;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
@@ -661,6 +674,7 @@ static void TsLjungBoxFunction(DataChunk &args, ExpressionState &state, Vector &
         pval_data[row_idx] = r.p_value;
         lags_data[row_idx] = static_cast<int64_t>(r.lags);
         df_data[row_idx]   = static_cast<int64_t>(r.df);
+        lb_method_data[row_idx] = StringVector::AddString(lb_method_vec, "Ljung-Box");
     }
 }
 
@@ -676,6 +690,9 @@ static void TsDurbinWatsonFunction(DataChunk &args, ExpressionState &state, Vect
     auto stat_data = FlatDataMut<double>(StructEntry(e[0]));
     auto &interp_vec = StructEntry(e[1]);
     auto interp_data = FlatDataMut<string_t>(interp_vec);
+    auto pval_data = FlatDataMut<double>(StructEntry(e[2]));
+    auto &method_vec = StructEntry(e[3]);
+    auto method_data = FlatDataMut<string_t>(method_vec);
 
     vector<double> series;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
@@ -691,6 +708,8 @@ static void TsDurbinWatsonFunction(DataChunk &args, ExpressionState &state, Vect
         }
         stat_data[row_idx]   = r.statistic;
         interp_data[row_idx] = StringVector::AddString(interp_vec, r.interpretation);
+        pval_data[row_idx]   = r.p_value;
+        method_data[row_idx] = StringVector::AddString(method_vec, "Durbin-Watson");
     }
 }
 
@@ -708,6 +727,8 @@ static void TsJarqueBeraFunction(DataChunk &args, ExpressionState &state, Vector
     auto pval_data = FlatDataMut<double>(StructEntry(e[1]));
     auto skew_data = FlatDataMut<double>(StructEntry(e[2]));
     auto kurt_data = FlatDataMut<double>(StructEntry(e[3]));
+    auto &jb_method_vec = StructEntry(e[4]);
+    auto jb_method_data = FlatDataMut<string_t>(jb_method_vec);
 
     vector<double> series;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
@@ -725,6 +746,7 @@ static void TsJarqueBeraFunction(DataChunk &args, ExpressionState &state, Vector
         pval_data[row_idx] = r.p_value;
         skew_data[row_idx] = r.skewness;
         kurt_data[row_idx] = r.excess_kurtosis;
+        jb_method_data[row_idx] = StringVector::AddString(jb_method_vec, "Jarque-Bera");
     }
 }
 
@@ -756,6 +778,7 @@ static void TsResidualDiagnosticsFunction(DataChunk &args, ExpressionState &stat
     auto jb_skew = FlatDataMut<double>(StructEntry(e[7]));
     auto jb_kurt = FlatDataMut<double>(StructEntry(e[8]));
     auto adequate_data = FlatDataMut<bool>(StructEntry(e[9]));
+    auto dw_pval = FlatDataMut<double>(StructEntry(e[10]));
 
     vector<double> series;
     for (idx_t row_idx = 0; row_idx < count; row_idx++) {
@@ -784,6 +807,7 @@ static void TsResidualDiagnosticsFunction(DataChunk &args, ExpressionState &stat
         jb_skew[row_idx] = r.jb_skewness;
         jb_kurt[row_idx] = r.jb_excess_kurtosis;
         adequate_data[row_idx] = r.adequate;
+        dw_pval[row_idx] = r.dw_p_value;
     }
 }
 
@@ -797,6 +821,8 @@ static child_list_t<LogicalType> LjungBoxStructChildren() {
     c.push_back(make_pair("p_value",   LogicalType(LogicalTypeId::DOUBLE)));
     c.push_back(make_pair("lags",      LogicalType(LogicalTypeId::BIGINT)));
     c.push_back(make_pair("df",        LogicalType(LogicalTypeId::BIGINT)));
+    // Appended (#279): self-describing test row for the anofox contract `test` schema.
+    c.push_back(make_pair("method",    LogicalType(LogicalTypeId::VARCHAR)));
     return c;
 }
 
@@ -804,6 +830,9 @@ static child_list_t<LogicalType> DurbinWatsonStructChildren() {
     child_list_t<LogicalType> c;
     c.push_back(make_pair("statistic",      LogicalType(LogicalTypeId::DOUBLE)));
     c.push_back(make_pair("interpretation", LogicalType(LogicalTypeId::VARCHAR)));
+    // Appended (#284): existing fields keep their position.
+    c.push_back(make_pair("p_value",        LogicalType(LogicalTypeId::DOUBLE)));
+    c.push_back(make_pair("method",         LogicalType(LogicalTypeId::VARCHAR)));
     return c;
 }
 
@@ -813,6 +842,8 @@ static child_list_t<LogicalType> JarqueBeraStructChildren() {
     c.push_back(make_pair("p_value",         LogicalType(LogicalTypeId::DOUBLE)));
     c.push_back(make_pair("skewness",        LogicalType(LogicalTypeId::DOUBLE)));
     c.push_back(make_pair("excess_kurtosis", LogicalType(LogicalTypeId::DOUBLE)));
+    // Appended (#279): self-describing test row for the anofox contract `test` schema.
+    c.push_back(make_pair("method",          LogicalType(LogicalTypeId::VARCHAR)));
     return c;
 }
 
@@ -828,6 +859,8 @@ static child_list_t<LogicalType> ResidualDiagnosticsStructChildren() {
     c.push_back(make_pair("jb_skewness",       LogicalType(LogicalTypeId::DOUBLE)));
     c.push_back(make_pair("jb_excess_kurtosis", LogicalType(LogicalTypeId::DOUBLE)));
     c.push_back(make_pair("adequate",          LogicalType(LogicalTypeId::BOOLEAN)));
+    // Appended (#284): existing fields keep their position.
+    c.push_back(make_pair("dw_p_value",        LogicalType(LogicalTypeId::DOUBLE)));
     return c;
 }
 
@@ -884,7 +917,7 @@ void RegisterTsLjungBoxFunction(ExtensionLoader &loader) {
         FunctionDescription desc;
         desc.description =
             "Ljung-Box white-noise test on residuals. Returns STRUCT(statistic DOUBLE, "
-            "p_value DOUBLE, lags BIGINT, df BIGINT). Default lags = min(10, n/5); df = lags - "
+            "p_value DOUBLE, lags BIGINT, df BIGINT, method VARCHAR = 'Ljung-Box'). Default lags = min(10, n/5); df = lags - "
             "fitted_params (default fitted_params 0). Pass fitted_params := p + q for ARMA(p, q) "
             "residuals to get R Box.test(fitdf = p + q)-matching p-values; fitted_params >= the "
             "effective lags is a SQL error. A large statistic / small p-value indicates residual "
@@ -934,9 +967,13 @@ void RegisterTsDurbinWatsonFunction(ExtensionLoader &loader) {
         Fallible(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
                        LogicalType::STRUCT(DurbinWatsonStructChildren()), TsDurbinWatsonFunction)),
         "Durbin-Watson first-order autocorrelation statistic on residuals. Returns "
-        "STRUCT(statistic DOUBLE, interpretation VARCHAR); statistic in [0,4], ~2 means no "
-        "autocorrelation. interpretation is one of positive_strong / positive_weak / none / "
-        "negative_weak / negative_strong.",
+        "STRUCT(statistic DOUBLE, interpretation VARCHAR, p_value DOUBLE, method VARCHAR); "
+        "statistic in [0,4], ~2 means no autocorrelation. interpretation is one of "
+        "positive_strong / positive_weak / none / negative_weak / negative_strong. p_value is an "
+        "approximate two-sided p-value for H0: no first-order autocorrelation (normal "
+        "approximation with the exact null mean/variance of the statistic, as in R "
+        "lmtest::dwtest(exact = FALSE), residuals taken as given); NaN for n < 3 or all-zero "
+        "residuals. method = 'Durbin-Watson'.",
         "ts_durbin_watson(LIST(resid ORDER BY ds))");
 }
 
@@ -948,7 +985,7 @@ void RegisterTsJarqueBeraFunction(ExtensionLoader &loader) {
         Fallible(ScalarFunction({LogicalType::LIST(LogicalType(LogicalTypeId::DOUBLE))},
                        LogicalType::STRUCT(JarqueBeraStructChildren()), TsJarqueBeraFunction)),
         "Jarque-Bera normality test on residuals. Returns STRUCT(statistic DOUBLE, "
-        "p_value DOUBLE, skewness DOUBLE, excess_kurtosis DOUBLE). A small p-value rejects "
+        "p_value DOUBLE, skewness DOUBLE, excess_kurtosis DOUBLE, method VARCHAR = 'Jarque-Bera'). A small p-value rejects "
         "normality.",
         "ts_jarque_bera(LIST(resid ORDER BY ds))");
 }
@@ -971,7 +1008,8 @@ void RegisterTsResidualDiagnosticsFunction(ExtensionLoader &loader) {
         desc.description =
             "Combined residual adequacy report: Ljung-Box + Durbin-Watson + Jarque-Bera. "
             "Returns STRUCT(lb_statistic, lb_p_value, lb_lags, dw_statistic, dw_interpretation, "
-            "jb_statistic, jb_p_value, jb_skewness, jb_excess_kurtosis, adequate BOOLEAN). "
+            "jb_statistic, jb_p_value, jb_skewness, jb_excess_kurtosis, adequate BOOLEAN, "
+            "dw_p_value DOUBLE). dw_p_value is the approximate two-sided Durbin-Watson p-value. "
             "adequate = (lb_p_value > alpha); alpha defaults to 0.05. Jarque-Bera and "
             "Durbin-Watson are advisory and do not affect the adequacy verdict.";
         desc.examples = {"ts_residual_diagnostics(LIST(resid ORDER BY ds))",

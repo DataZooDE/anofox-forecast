@@ -1,0 +1,50 @@
+# name: test/sql/ts_params_variant_json.test
+# description: #300 - VARIANT and {} params for the macros that read params through the
+#   json extension (ts_mstl_decomposition_by, ts_forecast_inspect_by, ts_detect_periods_by, ts_detect_peaks_by). Same rules as
+#   ts_params_variant.test; split out because these macros need json.
+# group: [sql]
+
+require anofox_forecast
+
+require json
+
+statement ok
+CREATE MACRO v2_or(sql, fallback) AS TABLE
+    SELECT * FROM query(CASE WHEN version() >= 'v2' THEN sql ELSE fallback END);
+
+statement ok
+CREATE MACRO same_rows(a, b) AS
+    (SELECT string_agg(x::VARCHAR, '|' ORDER BY x::VARCHAR) FROM query(a) x)
+    IS NOT DISTINCT FROM
+    (SELECT string_agg(x::VARCHAR, '|' ORDER BY x::VARCHAR) FROM query(b) x);
+
+statement ok
+CREATE TABLE pv AS
+SELECT 's' || (i % 3) AS id,
+       DATE '2024-01-01' + (i // 3)::INT AS ds,
+       ((i // 3) % 7)::DOUBLE * 3 + (i // 3) * 0.05 + sin(i) + (i % 3) AS y
+FROM range(360) t(i);
+
+query I
+FROM v2_or($$
+    SELECT same_rows(
+        'SELECT * FROM ts_mstl_decomposition_by(''pv'', id, ds, y, {''seasonal_periods'': [14]}::VARIANT)',
+        'SELECT * FROM ts_mstl_decomposition_by(''pv'', id, ds, y, MAP{''seasonal_periods'': ''[14]''})')
+    AND same_rows(
+        'SELECT * FROM ts_mstl_decomposition_by(''pv'', id, ds, y, {})',
+        'SELECT * FROM ts_mstl_decomposition_by(''pv'', id, ds, y, MAP{})')
+    AND same_rows(
+        'SELECT * FROM ts_forecast_inspect_by(''pv'', id, ds, y, ''AutoETS'', {''seasonal_period'': 7}::VARIANT)',
+        'SELECT * FROM ts_forecast_inspect_by(''pv'', id, ds, y, ''AutoETS'', MAP{''seasonal_period'': ''7''})')
+    AND same_rows(
+        'SELECT * FROM ts_forecast_inspect_by(''pv'', id, ds, y, ''AutoETS'', {})',
+        'SELECT * FROM ts_forecast_inspect_by(''pv'', id, ds, y, ''AutoETS'', MAP{})')
+    AND same_rows(
+        'SELECT * FROM ts_detect_periods_by(''pv'', id, ds, y, {})',
+        'SELECT * FROM ts_detect_periods_by(''pv'', id, ds, y, MAP{})')
+    AND same_rows(
+        'SELECT * FROM ts_detect_peaks_by(''pv'', id, ds, y, {})',
+        'SELECT * FROM ts_detect_peaks_by(''pv'', id, ds, y, MAP{})') AS ok
+$$, $$SELECT true$$);
+----
+true

@@ -1,0 +1,134 @@
+probe_utc	url	method	http_status	last_modified	content_encoding	notes
+2026-10-22T23:53:54Z	https://get.erpl.io/?list-type=2&delimiter=/	GET	200			anonymous bucket listing attempt (root) -- body is the ERPL.io landing-page HTML (title 'Download Extensions - ERPL.io'), not an S3 ListBucketResult XML; anonymous ListBucket is NOT actually exposed via this custom domain (status 200 is the domain's own default-document behavior, not a real listing)
+2026-10-22T23:53:54Z	https://get.erpl.io/?list-type=2&prefix=v2.0.0/&delimiter=/	GET	200			anonymous listing attempt, prefix=v2.0.0/ -- body is the ERPL.io landing-page HTML (title 'Download Extensions - ERPL.io'), not an S3 ListBucketResult XML; anonymous ListBucket is NOT actually exposed via this custom domain (status 200 is the domain's own default-document behavior, not a real listing)
+2026-10-22T23:53:55Z	https://get.erpl.io/?list-type=2&prefix=v1.5.6/&delimiter=/	GET	200			anonymous listing attempt, prefix=v1.5.6/ -- body is the ERPL.io landing-page HTML (title 'Download Extensions - ERPL.io'), not an S3 ListBucketResult XML; anonymous ListBucket is NOT actually exposed via this custom domain (status 200 is the domain's own default-document behavior, not a real listing)
+2026-10-22T23:53:55Z	https://get.erpl.io/?list-type=2&prefix=v1.4.5/&delimiter=/	GET	200			anonymous listing attempt, prefix=v1.4.5/ -- body is the ERPL.io landing-page HTML (title 'Download Extensions - ERPL.io'), not an S3 ListBucketResult XML; anonymous ListBucket is NOT actually exposed via this custom domain (status 200 is the domain's own default-document behavior, not a real listing)
+2026-10-22T23:53:55Z	https://get.erpl.io/v1.4.3/linux_amd64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.4.3 arch=linux_amd64
+2026-10-22T23:53:55Z	https://get.erpl.io/v1.4.3/linux_arm64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.4.3 arch=linux_arm64
+2026-10-22T23:53:55Z	https://get.erpl.io/v1.4.3/linux_amd64_musl/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.4.3 arch=linux_amd64_musl
+2026-10-22T23:53:55Z	https://get.erpl.io/v1.4.3/linux_arm64_musl/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.4.3 arch=linux_arm64_musl
+2026-10-22T23:53:55Z	https://get.erpl.io/v1.4.3/osx_amd64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.4.3 arch=osx_amd64
+2026-10-22T23:53:56Z	https://get.erpl.io/v1.4.3/osx_arm64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.4.3 arch=osx_arm64
+2026-10-22T23:53:56Z	https://get.erpl.io/v1.4.3/windows_amd64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.4.3 arch=windows_amd64
+2026-10-22T23:53:56Z	https://get.erpl.io/v1.4.3/windows_arm64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.4.3 arch=windows_arm64
+2026-10-22T23:53:56Z	https://get.erpl.io/v1.4.3/windows_amd64_mingw/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.4.3 arch=windows_amd64_mingw
+2026-10-22T23:53:56Z	https://get.erpl.io/v1.4.3/wasm_mvp/anofox_forecast.duckdb_extension.wasm	HEAD	404			latest-tree, wasm, version=v1.4.3 arch=wasm_mvp
+2026-10-22T23:53:56Z	https://get.erpl.io/v1.4.3/wasm_eh/anofox_forecast.duckdb_extension.wasm	HEAD	404			latest-tree, wasm, version=v1.4.3 arch=wasm_eh
+2026-10-22T23:53:56Z	https://get.erpl.io/v1.4.3/wasm_threads/anofox_forecast.duckdb_extension.wasm	HEAD	404			latest-tree, wasm, version=v1.4.3 arch=wasm_threads
+2026-10-22T23:53:57Z	https://get.erpl.io/v1.4.4/linux_amd64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.4.4 arch=linux_amd64
+2026-10-22T23:53:57Z	https://get.erpl.io/v1.4.4/linux_arm64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.4.4 arch=linux_arm64
+2026-10-22T23:53:57Z	https://get.erpl.io/v1.4.4/linux_amd64_musl/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.4.4 arch=linux_amd64_musl
+2026-10-22T23:53:57Z	https://get.erpl.io/v1.4.4/linux_arm64_musl/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.4.4 arch=linux_arm64_musl
+2026-10-22T23:53:57Z	https://get.erpl.io/v1.4.4/osx_amd64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.4.4 arch=osx_amd64
+2026-10-22T23:53:57Z	https://get.erpl.io/v1.4.4/osx_arm64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.4.4 arch=osx_arm64
+2026-10-22T23:53:57Z	https://get.erpl.io/v1.4.4/windows_amd64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.4.4 arch=windows_amd64
+2026-10-22T23:53:58Z	https://get.erpl.io/v1.4.4/windows_arm64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.4.4 arch=windows_arm64
+2026-10-22T23:53:58Z	https://get.erpl.io/v1.4.4/windows_amd64_mingw/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.4.4 arch=windows_amd64_mingw
+2026-10-22T23:53:58Z	https://get.erpl.io/v1.4.4/wasm_mvp/anofox_forecast.duckdb_extension.wasm	HEAD	404			latest-tree, wasm, version=v1.4.4 arch=wasm_mvp
+2026-10-22T23:53:58Z	https://get.erpl.io/v1.4.4/wasm_eh/anofox_forecast.duckdb_extension.wasm	HEAD	404			latest-tree, wasm, version=v1.4.4 arch=wasm_eh
+2026-10-22T23:53:58Z	https://get.erpl.io/v1.4.4/wasm_threads/anofox_forecast.duckdb_extension.wasm	HEAD	404			latest-tree, wasm, version=v1.4.4 arch=wasm_threads
+2026-10-22T23:53:58Z	https://get.erpl.io/v1.4.5/linux_amd64/anofox_forecast.duckdb_extension.gz	HEAD	200	Thu, 22 Oct 2026 21:51:40 GMT		latest-tree, native, version=v1.4.5 arch=linux_amd64
+2026-10-22T23:53:58Z	https://get.erpl.io/v1.4.5/linux_arm64/anofox_forecast.duckdb_extension.gz	HEAD	200	Thu, 22 Oct 2026 22:02:54 GMT		latest-tree, native, version=v1.4.5 arch=linux_arm64
+2026-10-22T23:53:59Z	https://get.erpl.io/v1.4.5/linux_amd64_musl/anofox_forecast.duckdb_extension.gz	HEAD	200	Thu, 22 Oct 2026 21:50:27 GMT		latest-tree, native, version=v1.4.5 arch=linux_amd64_musl
+2026-10-22T23:53:59Z	https://get.erpl.io/v1.4.5/linux_arm64_musl/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.4.5 arch=linux_arm64_musl
+2026-10-22T23:53:59Z	https://get.erpl.io/v1.4.5/osx_amd64/anofox_forecast.duckdb_extension.gz	HEAD	200	Fri, 16 Oct 2026 11:22:32 GMT		latest-tree, native, version=v1.4.5 arch=osx_amd64
+2026-10-22T23:53:59Z	https://get.erpl.io/v1.4.5/osx_arm64/anofox_forecast.duckdb_extension.gz	HEAD	200	Thu, 08 Oct 2026 20:40:20 GMT		latest-tree, native, version=v1.4.5 arch=osx_arm64
+2026-10-22T23:53:59Z	https://get.erpl.io/v1.4.5/windows_amd64/anofox_forecast.duckdb_extension.gz	HEAD	200	Sun, 09 Aug 2026 01:15:00 GMT		latest-tree, native, version=v1.4.5 arch=windows_amd64
+2026-10-22T23:53:59Z	https://get.erpl.io/v1.4.5/windows_arm64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.4.5 arch=windows_arm64
+2026-10-22T23:53:59Z	https://get.erpl.io/v1.4.5/windows_amd64_mingw/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.4.5 arch=windows_amd64_mingw
+2026-10-22T23:54:00Z	https://get.erpl.io/v1.4.5/wasm_mvp/anofox_forecast.duckdb_extension.wasm	HEAD	200	Thu, 22 Oct 2026 22:02:25 GMT	br	latest-tree, wasm, version=v1.4.5 arch=wasm_mvp
+2026-10-22T23:54:00Z	https://get.erpl.io/v1.4.5/wasm_eh/anofox_forecast.duckdb_extension.wasm	HEAD	200	Thu, 22 Oct 2026 22:00:42 GMT	br	latest-tree, wasm, version=v1.4.5 arch=wasm_eh
+2026-10-22T23:54:00Z	https://get.erpl.io/v1.4.5/wasm_threads/anofox_forecast.duckdb_extension.wasm	HEAD	200	Thu, 22 Oct 2026 22:01:46 GMT	br	latest-tree, wasm, version=v1.4.5 arch=wasm_threads
+2026-10-22T23:54:00Z	https://get.erpl.io/v1.5.0/linux_amd64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.0 arch=linux_amd64
+2026-10-22T23:54:00Z	https://get.erpl.io/v1.5.0/linux_arm64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.0 arch=linux_arm64
+2026-10-22T23:54:00Z	https://get.erpl.io/v1.5.0/linux_amd64_musl/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.0 arch=linux_amd64_musl
+2026-10-22T23:54:00Z	https://get.erpl.io/v1.5.0/linux_arm64_musl/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.0 arch=linux_arm64_musl
+2026-10-22T23:54:01Z	https://get.erpl.io/v1.5.0/osx_amd64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.0 arch=osx_amd64
+2026-10-22T23:54:01Z	https://get.erpl.io/v1.5.0/osx_arm64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.0 arch=osx_arm64
+2026-10-22T23:54:01Z	https://get.erpl.io/v1.5.0/windows_amd64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.0 arch=windows_amd64
+2026-10-22T23:54:01Z	https://get.erpl.io/v1.5.0/windows_arm64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.0 arch=windows_arm64
+2026-10-22T23:54:01Z	https://get.erpl.io/v1.5.0/windows_amd64_mingw/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.0 arch=windows_amd64_mingw
+2026-10-22T23:54:01Z	https://get.erpl.io/v1.5.0/wasm_mvp/anofox_forecast.duckdb_extension.wasm	HEAD	404			latest-tree, wasm, version=v1.5.0 arch=wasm_mvp
+2026-10-22T23:54:01Z	https://get.erpl.io/v1.5.0/wasm_eh/anofox_forecast.duckdb_extension.wasm	HEAD	404			latest-tree, wasm, version=v1.5.0 arch=wasm_eh
+2026-10-22T23:54:02Z	https://get.erpl.io/v1.5.0/wasm_threads/anofox_forecast.duckdb_extension.wasm	HEAD	404			latest-tree, wasm, version=v1.5.0 arch=wasm_threads
+2026-10-22T23:54:02Z	https://get.erpl.io/v1.5.1/linux_amd64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.1 arch=linux_amd64
+2026-10-22T23:54:02Z	https://get.erpl.io/v1.5.1/linux_arm64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.1 arch=linux_arm64
+2026-10-22T23:54:02Z	https://get.erpl.io/v1.5.1/linux_amd64_musl/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.1 arch=linux_amd64_musl
+2026-10-22T23:54:02Z	https://get.erpl.io/v1.5.1/linux_arm64_musl/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.1 arch=linux_arm64_musl
+2026-10-22T23:54:02Z	https://get.erpl.io/v1.5.1/osx_amd64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.1 arch=osx_amd64
+2026-10-22T23:54:02Z	https://get.erpl.io/v1.5.1/osx_arm64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.1 arch=osx_arm64
+2026-10-22T23:54:03Z	https://get.erpl.io/v1.5.1/windows_amd64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.1 arch=windows_amd64
+2026-10-22T23:54:03Z	https://get.erpl.io/v1.5.1/windows_arm64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.1 arch=windows_arm64
+2026-10-22T23:54:03Z	https://get.erpl.io/v1.5.1/windows_amd64_mingw/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.1 arch=windows_amd64_mingw
+2026-10-22T23:54:03Z	https://get.erpl.io/v1.5.1/wasm_mvp/anofox_forecast.duckdb_extension.wasm	HEAD	404			latest-tree, wasm, version=v1.5.1 arch=wasm_mvp
+2026-10-22T23:54:03Z	https://get.erpl.io/v1.5.1/wasm_eh/anofox_forecast.duckdb_extension.wasm	HEAD	404			latest-tree, wasm, version=v1.5.1 arch=wasm_eh
+2026-10-22T23:54:03Z	https://get.erpl.io/v1.5.1/wasm_threads/anofox_forecast.duckdb_extension.wasm	HEAD	404			latest-tree, wasm, version=v1.5.1 arch=wasm_threads
+2026-10-22T23:54:03Z	https://get.erpl.io/v1.5.4/linux_amd64/anofox_forecast.duckdb_extension.gz	HEAD	200	Fri, 17 Jul 2026 20:00:31 GMT		latest-tree, native, version=v1.5.4 arch=linux_amd64
+2026-10-22T23:54:04Z	https://get.erpl.io/v1.5.4/linux_arm64/anofox_forecast.duckdb_extension.gz	HEAD	200	Fri, 17 Jul 2026 20:00:43 GMT		latest-tree, native, version=v1.5.4 arch=linux_arm64
+2026-10-22T23:54:04Z	https://get.erpl.io/v1.5.4/linux_amd64_musl/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.4 arch=linux_amd64_musl
+2026-10-22T23:54:04Z	https://get.erpl.io/v1.5.4/linux_arm64_musl/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.4 arch=linux_arm64_musl
+2026-10-22T23:54:04Z	https://get.erpl.io/v1.5.4/osx_amd64/anofox_forecast.duckdb_extension.gz	HEAD	200	Fri, 17 Jul 2026 20:00:37 GMT		latest-tree, native, version=v1.5.4 arch=osx_amd64
+2026-10-22T23:54:04Z	https://get.erpl.io/v1.5.4/osx_arm64/anofox_forecast.duckdb_extension.gz	HEAD	200	Fri, 17 Jul 2026 20:00:32 GMT		latest-tree, native, version=v1.5.4 arch=osx_arm64
+2026-10-22T23:54:04Z	https://get.erpl.io/v1.5.4/windows_amd64/anofox_forecast.duckdb_extension.gz	HEAD	200	Fri, 17 Jul 2026 20:00:40 GMT		latest-tree, native, version=v1.5.4 arch=windows_amd64
+2026-10-22T23:54:04Z	https://get.erpl.io/v1.5.4/windows_arm64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.4 arch=windows_arm64
+2026-10-22T23:54:04Z	https://get.erpl.io/v1.5.4/windows_amd64_mingw/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.4 arch=windows_amd64_mingw
+2026-10-22T23:54:05Z	https://get.erpl.io/v1.5.4/wasm_mvp/anofox_forecast.duckdb_extension.wasm	HEAD	200	Fri, 17 Jul 2026 20:00:38 GMT	br	latest-tree, wasm, version=v1.5.4 arch=wasm_mvp
+2026-10-22T23:54:05Z	https://get.erpl.io/v1.5.4/wasm_eh/anofox_forecast.duckdb_extension.wasm	HEAD	200	Fri, 17 Jul 2026 20:00:52 GMT	br	latest-tree, wasm, version=v1.5.4 arch=wasm_eh
+2026-10-22T23:54:05Z	https://get.erpl.io/v1.5.4/wasm_threads/anofox_forecast.duckdb_extension.wasm	HEAD	200	Fri, 17 Jul 2026 20:00:45 GMT	br	latest-tree, wasm, version=v1.5.4 arch=wasm_threads
+2026-10-22T23:54:05Z	https://get.erpl.io/v1.5.5/linux_amd64/anofox_forecast.duckdb_extension.gz	HEAD	200	Sat, 26 Sep 2026 10:04:27 GMT		latest-tree, native, version=v1.5.5 arch=linux_amd64
+2026-10-22T23:54:05Z	https://get.erpl.io/v1.5.5/linux_arm64/anofox_forecast.duckdb_extension.gz	HEAD	200	Sat, 26 Sep 2026 10:10:46 GMT		latest-tree, native, version=v1.5.5 arch=linux_arm64
+2026-10-22T23:54:05Z	https://get.erpl.io/v1.5.5/linux_amd64_musl/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.5 arch=linux_amd64_musl
+2026-10-22T23:54:06Z	https://get.erpl.io/v1.5.5/linux_arm64_musl/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.5 arch=linux_arm64_musl
+2026-10-22T23:54:06Z	https://get.erpl.io/v1.5.5/osx_amd64/anofox_forecast.duckdb_extension.gz	HEAD	200	Sat, 26 Sep 2026 10:02:27 GMT		latest-tree, native, version=v1.5.5 arch=osx_amd64
+2026-10-22T23:54:06Z	https://get.erpl.io/v1.5.5/osx_arm64/anofox_forecast.duckdb_extension.gz	HEAD	200	Sat, 26 Sep 2026 10:01:21 GMT		latest-tree, native, version=v1.5.5 arch=osx_arm64
+2026-10-22T23:54:06Z	https://get.erpl.io/v1.5.5/windows_amd64/anofox_forecast.duckdb_extension.gz	HEAD	200	Sat, 26 Sep 2026 10:01:17 GMT		latest-tree, native, version=v1.5.5 arch=windows_amd64
+2026-10-22T23:54:06Z	https://get.erpl.io/v1.5.5/windows_arm64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.5 arch=windows_arm64
+2026-10-22T23:54:06Z	https://get.erpl.io/v1.5.5/windows_amd64_mingw/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.5 arch=windows_amd64_mingw
+2026-10-22T23:54:06Z	https://get.erpl.io/v1.5.5/wasm_mvp/anofox_forecast.duckdb_extension.wasm	HEAD	200	Sat, 26 Sep 2026 10:03:48 GMT	br	latest-tree, wasm, version=v1.5.5 arch=wasm_mvp
+2026-10-22T23:54:06Z	https://get.erpl.io/v1.5.5/wasm_eh/anofox_forecast.duckdb_extension.wasm	HEAD	200	Sat, 26 Sep 2026 10:01:47 GMT	br	latest-tree, wasm, version=v1.5.5 arch=wasm_eh
+2026-10-22T23:54:07Z	https://get.erpl.io/v1.5.5/wasm_threads/anofox_forecast.duckdb_extension.wasm	HEAD	200	Sat, 26 Sep 2026 10:09:53 GMT	br	latest-tree, wasm, version=v1.5.5 arch=wasm_threads
+2026-10-22T23:54:07Z	https://get.erpl.io/v1.5.6/linux_amd64/anofox_forecast.duckdb_extension.gz	HEAD	200	Thu, 22 Oct 2026 22:04:01 GMT		latest-tree, native, version=v1.5.6 arch=linux_amd64
+2026-10-22T23:54:07Z	https://get.erpl.io/v1.5.6/linux_arm64/anofox_forecast.duckdb_extension.gz	HEAD	200	Thu, 22 Oct 2026 22:07:47 GMT		latest-tree, native, version=v1.5.6 arch=linux_arm64
+2026-10-22T23:54:07Z	https://get.erpl.io/v1.5.6/linux_amd64_musl/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.6 arch=linux_amd64_musl
+2026-10-22T23:54:07Z	https://get.erpl.io/v1.5.6/linux_arm64_musl/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.6 arch=linux_arm64_musl
+2026-10-22T23:54:07Z	https://get.erpl.io/v1.5.6/osx_amd64/anofox_forecast.duckdb_extension.gz	HEAD	200	Thu, 22 Oct 2026 22:04:36 GMT		latest-tree, native, version=v1.5.6 arch=osx_amd64
+2026-10-22T23:54:07Z	https://get.erpl.io/v1.5.6/osx_arm64/anofox_forecast.duckdb_extension.gz	HEAD	200	Thu, 22 Oct 2026 22:09:44 GMT		latest-tree, native, version=v1.5.6 arch=osx_arm64
+2026-10-22T23:54:08Z	https://get.erpl.io/v1.5.6/windows_amd64/anofox_forecast.duckdb_extension.gz	HEAD	200	Thu, 22 Oct 2026 22:11:19 GMT		latest-tree, native, version=v1.5.6 arch=windows_amd64
+2026-10-22T23:54:08Z	https://get.erpl.io/v1.5.6/windows_arm64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.6 arch=windows_arm64
+2026-10-22T23:54:08Z	https://get.erpl.io/v1.5.6/windows_amd64_mingw/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v1.5.6 arch=windows_amd64_mingw
+2026-10-22T23:54:08Z	https://get.erpl.io/v1.5.6/wasm_mvp/anofox_forecast.duckdb_extension.wasm	HEAD	200	Thu, 22 Oct 2026 22:08:32 GMT	br	latest-tree, wasm, version=v1.5.6 arch=wasm_mvp
+2026-10-22T23:54:08Z	https://get.erpl.io/v1.5.6/wasm_eh/anofox_forecast.duckdb_extension.wasm	HEAD	200	Thu, 22 Oct 2026 22:07:36 GMT	br	latest-tree, wasm, version=v1.5.6 arch=wasm_eh
+2026-10-22T23:54:08Z	https://get.erpl.io/v1.5.6/wasm_threads/anofox_forecast.duckdb_extension.wasm	HEAD	200	Thu, 22 Oct 2026 22:11:01 GMT	br	latest-tree, wasm, version=v1.5.6 arch=wasm_threads
+2026-10-22T23:54:08Z	https://get.erpl.io/v2.0.0/linux_amd64/anofox_forecast.duckdb_extension.gz	HEAD	200	Thu, 22 Oct 2026 21:40:31 GMT		latest-tree, native, version=v2.0.0 arch=linux_amd64
+2026-10-22T23:54:09Z	https://get.erpl.io/v2.0.0/linux_arm64/anofox_forecast.duckdb_extension.gz	HEAD	200	Thu, 22 Oct 2026 21:29:22 GMT		latest-tree, native, version=v2.0.0 arch=linux_arm64
+2026-10-22T23:54:09Z	https://get.erpl.io/v2.0.0/linux_amd64_musl/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v2.0.0 arch=linux_amd64_musl
+2026-10-22T23:54:09Z	https://get.erpl.io/v2.0.0/linux_arm64_musl/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v2.0.0 arch=linux_arm64_musl
+2026-10-22T23:54:09Z	https://get.erpl.io/v2.0.0/osx_amd64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v2.0.0 arch=osx_amd64
+2026-10-22T23:54:09Z	https://get.erpl.io/v2.0.0/osx_arm64/anofox_forecast.duckdb_extension.gz	HEAD	200	Thu, 22 Oct 2026 21:30:35 GMT		latest-tree, native, version=v2.0.0 arch=osx_arm64
+2026-10-22T23:54:09Z	https://get.erpl.io/v2.0.0/windows_amd64/anofox_forecast.duckdb_extension.gz	HEAD	200	Thu, 22 Oct 2026 21:40:18 GMT		latest-tree, native, version=v2.0.0 arch=windows_amd64
+2026-10-22T23:54:09Z	https://get.erpl.io/v2.0.0/windows_arm64/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v2.0.0 arch=windows_arm64
+2026-10-22T23:54:10Z	https://get.erpl.io/v2.0.0/windows_amd64_mingw/anofox_forecast.duckdb_extension.gz	HEAD	404			latest-tree, native, version=v2.0.0 arch=windows_amd64_mingw
+2026-10-22T23:54:10Z	https://get.erpl.io/v2.0.0/wasm_mvp/anofox_forecast.duckdb_extension.wasm	HEAD	200	Thu, 22 Oct 2026 21:35:15 GMT	br	latest-tree, wasm, version=v2.0.0 arch=wasm_mvp
+2026-10-22T23:54:10Z	https://get.erpl.io/v2.0.0/wasm_eh/anofox_forecast.duckdb_extension.wasm	HEAD	200	Thu, 22 Oct 2026 21:49:37 GMT	br	latest-tree, wasm, version=v2.0.0 arch=wasm_eh
+2026-10-22T23:54:10Z	https://get.erpl.io/v2.0.0/wasm_threads/anofox_forecast.duckdb_extension.wasm	HEAD	200	Thu, 22 Oct 2026 21:44:28 GMT	br	latest-tree, wasm, version=v2.0.0 arch=wasm_threads
+2026-10-22T23:54:10Z	https://get.erpl.io/anofox_forecast/v2026.10.22/v2.0.0/linux_amd64/anofox_forecast.duckdb_extension.gz	HEAD	404			versioned-tree, native, ext_version=v2026.10.22 duckdb_version=v2.0.0 arch=linux_amd64
+2026-10-22T23:54:10Z	https://get.erpl.io/anofox_forecast/v2026.10.22/v2.0.0/wasm_eh/anofox_forecast.duckdb_extension.wasm	HEAD	404			versioned-tree, wasm, ext_version=v2026.10.22 duckdb_version=v2.0.0 arch=wasm_eh
+2026-10-22T23:54:10Z	https://get.erpl.io/anofox_forecast/v2026.10.22/v1.5.6/linux_amd64/anofox_forecast.duckdb_extension.gz	HEAD	200	Thu, 22 Oct 2026 17:04:13 GMT		versioned-tree, native, ext_version=v2026.10.22 duckdb_version=v1.5.6 arch=linux_amd64
+2026-10-22T23:54:11Z	https://get.erpl.io/anofox_forecast/v2026.10.22/v1.5.6/wasm_eh/anofox_forecast.duckdb_extension.wasm	HEAD	200	Thu, 22 Oct 2026 17:28:53 GMT	br	versioned-tree, wasm, ext_version=v2026.10.22 duckdb_version=v1.5.6 arch=wasm_eh
+2026-10-22T23:54:11Z	https://get.erpl.io/anofox_forecast/v2026.10.22/v1.4.5/linux_amd64/anofox_forecast.duckdb_extension.gz	HEAD	200	Thu, 22 Oct 2026 19:11:36 GMT		versioned-tree, native, ext_version=v2026.10.22 duckdb_version=v1.4.5 arch=linux_amd64
+2026-10-22T23:54:11Z	https://get.erpl.io/anofox_forecast/v2026.10.22/v1.4.5/wasm_eh/anofox_forecast.duckdb_extension.wasm	HEAD	200	Thu, 22 Oct 2026 19:16:23 GMT	br	versioned-tree, wasm, ext_version=v2026.10.22 duckdb_version=v1.4.5 arch=wasm_eh
+2026-10-22T23:54:11Z	https://get.erpl.io/v1.5.6/wasm_eh/anofox_forecast.duckdb_extension.wasm	GET+Origin	200			access-control-allow-origin present=no; server: AmazonS3
+;x-cache: Miss from cloudfront
+;via: 1.1 5c79308f72e53cdf81a950b478a7e144.cloudfront.net (CloudFront)
+;
+2026-10-22T23:54:11Z	https://get.erpl.io/v1.5.6/wasm_eh/anofox_forecast.duckdb_extension.wasm	HEAD+Origin	200			access-control-allow-origin present=no
+2026-10-22T23:54:11Z	https://get.erpl.io/v1.5.6/wasm_eh/anofox_forecast.duckdb_extension.wasm	OPTIONS-preflight	403			Access-Control-Request-Method: GET
+2026-10-22T23:54:12Z	https://get.erpl.io/v2.0.0/wasm_mvp/anofox_forecast.duckdb_extension.wasm	GET--compressed	200			duckdb_signature section count=2
+2026-10-22T23:54:12Z	https://get.erpl.io/v2.0.0/wasm_eh/anofox_forecast.duckdb_extension.wasm	GET--compressed	200			duckdb_signature section count=2
+2026-10-22T23:54:13Z	https://get.erpl.io/v2.0.0/wasm_threads/anofox_forecast.duckdb_extension.wasm	GET--compressed	200			duckdb_signature section count=2
+2026-10-22T23:54:13Z	https://get.erpl.io/v1.5.6/wasm_mvp/anofox_forecast.duckdb_extension.wasm	GET--compressed	200			duckdb_signature section count=2
+2026-10-22T23:54:14Z	https://get.erpl.io/v1.5.6/wasm_eh/anofox_forecast.duckdb_extension.wasm	GET--compressed	200			duckdb_signature section count=2
+2026-10-22T23:54:14Z	https://get.erpl.io/v1.5.6/wasm_threads/anofox_forecast.duckdb_extension.wasm	GET--compressed	200			duckdb_signature section count=2
+2026-10-22T23:54:14Z	https://get.erpl.io/v1.4.5/wasm_mvp/anofox_forecast.duckdb_extension.wasm	GET--compressed	200			duckdb_signature section count=2
+2026-10-22T23:54:15Z	https://get.erpl.io/v1.4.5/wasm_eh/anofox_forecast.duckdb_extension.wasm	GET--compressed	200			duckdb_signature section count=2
+2026-10-22T23:54:15Z	https://get.erpl.io/v1.4.5/wasm_threads/anofox_forecast.duckdb_extension.wasm	GET--compressed	200			duckdb_signature section count=2

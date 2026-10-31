@@ -1,14 +1,12 @@
 #include "duckdb_compat.hpp"
 #include "ts_split_keys.hpp"
+#include "ts_collect_finalize.hpp"  // TsCollectFinalizeBarrier (#285, 20-05)
 #include "ts_fill_gaps_native.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
-#include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 #include <vector>
 #include <sstream>
 #include <mutex>
-#include <atomic>
-#include <thread>
 
 namespace duckdb {
 
@@ -81,10 +79,11 @@ struct TsSplitKeysGlobalState : public GlobalTableFunctionState {
     idx_t current_result = 0;
     bool processed = false;
 
-    // Single-thread finalize + barrier
-    std::atomic<bool> finalize_claimed{false};
-    std::atomic<idx_t> threads_collecting{0};
-    std::atomic<idx_t> threads_done_collecting{0};
+    // Single-thread finalize + barrier (#285, 20-05: TsCollectFinalizeBarrier;
+    // a single-pipeline input via (SELECT * FROM _ts_passthrough(source)
+    // ORDER BY ALL), supplied by the public ts_split_keys macro, guarantees
+    // the barrier sees every executor that can hold rows).
+    TsCollectFinalizeBarrier barrier;
 
     idx_t MaxThreads() const override {
         return max_threads;
@@ -97,8 +96,7 @@ struct TsSplitKeysGlobalState : public GlobalTableFunctionState {
 
 struct TsSplitKeysLocalState : public LocalTableFunctionState {
     bool owns_finalize = false;
-    bool registered_collector = false;
-    bool registered_finalizer = false;
+    bool arrived_at_final = false;
 };
 
 // ============================================================================
@@ -163,10 +161,12 @@ static unique_ptr<FunctionData> TsSplitKeysBind(
 
     auto bind_data = make_uniq<TsSplitKeysBindData>();
 
-    // Parse named parameters
+    // Parse named parameters. Skip NULL unconditionally (not just when
+    // kNamedParamsHaveNullDefault): the ts_split_keys macro (ts_macros.cpp,
+    // #285/20-05) always passes `columns := columns` explicitly, which is a
+    // literal NULL when the caller omitted it, on every DuckDB line.
     for (auto &kv : input.named_parameters) {
-        // DuckDB 2.0 passes the typed-NULL default of every parameter the caller left out.
-        if (kNamedParamsHaveNullDefault && kv.second.IsNull()) {
+        if (kv.second.IsNull()) {
             continue;
         }
         if (NameString(kv.first) == "separator") {
@@ -256,6 +256,7 @@ static unique_ptr<LocalTableFunctionState> TsSplitKeysInitLocal(
     TableFunctionInitInput &input,
     GlobalTableFunctionState *global_state) {
 
+    global_state->Cast<TsSplitKeysGlobalState>().barrier.RegisterLocal();
     return make_uniq<TsSplitKeysLocalState>();
 }
 
@@ -271,13 +272,8 @@ static OperatorResultType TsSplitKeysInOut(
 
     auto &bind_data = data.bind_data->Cast<TsSplitKeysBindData>();
     auto &gstate = data.global_state->Cast<TsSplitKeysGlobalState>();
-    auto &lstate = data.local_state->Cast<TsSplitKeysLocalState>();
 
-    // Register this thread as a collector (first call only)
-    if (!lstate.registered_collector) {
-        gstate.threads_collecting.fetch_add(1);
-        lstate.registered_collector = true;
-    }
+    gstate.barrier.AssertCollecting("_ts_split_keys_native");
 
     // Extract batch locally first
     vector<TsSplitKeysBufferedRow> local_rows;
@@ -325,22 +321,18 @@ static OperatorFinalizeResultType TsSplitKeysFinalize(
     auto &gstate = data.global_state->Cast<TsSplitKeysGlobalState>();
     auto &lstate = data.local_state->Cast<TsSplitKeysLocalState>();
 
-    // Barrier + claim
-    if (!lstate.registered_finalizer) {
-        if (lstate.registered_collector) {
-            gstate.threads_done_collecting.fetch_add(1);
-        }
-        lstate.registered_finalizer = true;
-    }
+    // Last-finalizer claim (ts_collect_finalize.hpp): the local state whose
+    // arrival completes the count of registered local states processes; every
+    // other one finishes at once (no spin-wait).
     if (!lstate.owns_finalize) {
-        bool expected = false;
-        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true)) {
+        if (lstate.arrived_at_final) {
+            return OperatorFinalizeResultType::FINISHED;
+        }
+        lstate.arrived_at_final = true;
+        if (!gstate.barrier.ArriveAtFinal()) {
             return OperatorFinalizeResultType::FINISHED;
         }
         lstate.owns_finalize = true;
-        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load()) {
-            std::this_thread::yield();
-        }
     }
 
     if (!gstate.processed) {
@@ -404,8 +396,13 @@ static OperatorFinalizeResultType TsSplitKeysFinalize(
 // ============================================================================
 
 void RegisterTsSplitKeysFunction(ExtensionLoader &loader) {
-    // Function with TABLE parameter and named parameters
-    TableFunction func("ts_split_keys",
+    // Renamed native (#285, 20-05). The public name `ts_split_keys` is now a
+    // ts_table_macros[] entry (ts_macros.cpp) that feeds this function a
+    // single-pipeline input via (SELECT * FROM _ts_passthrough(source) ORDER
+    // BY ALL), so a UNION ALL source is read in full instead of silently
+    // truncated. Signature and output columns are unchanged; the description,
+    // example and category live on the macro entry.
+    TableFunction func("_ts_split_keys_native",
                        {LogicalType::TABLE},
                        nullptr,
                        TsSplitKeysBind,
@@ -420,15 +417,7 @@ void RegisterTsSplitKeysFunction(ExtensionLoader &loader) {
     func.in_out_function = TsSplitKeysInOut;
     func.in_out_function_final = TsSplitKeysFinalize;
 
-    {
-        CreateTableFunctionInfo info(func);
-        FunctionDescription desc;
-        desc.description = "Splits a composite group key column back into its original multiple key columns.";
-        desc.examples = {"SELECT * FROM ts_split_keys(TABLE(SELECT unique_id, date, value FROM t), separator='|', columns=['region', 'store', 'item'])"};
-        desc.categories = {"time-series", "hierarchical"};
-        info.descriptions.push_back(std::move(desc));
-        loader.RegisterFunction(std::move(info));
-    }
+    loader.RegisterFunction(func);
 }
 
 } // namespace duckdb

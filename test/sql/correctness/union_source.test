@@ -1,0 +1,968 @@
+# name: test/sql/correctness/union_source.test
+# description: Plan-shape and row-order independence of the collect-then-finalize
+#   `_by` table macros (BUG-03, #285, Phase 20 plans 20-03..20-05). Each macro must
+#   return the same rows over a UNION ALL view, a reversed-order view and a shuffled
+#   view as over the same rows materialized in a plain table.
+#   Every check runs twice: with preserve_insertion_order = false (DuckDB 2.0 runs
+#   UNION ALL branches in parallel then, duckdb/duckdb#24117, #296) and true (default).
+# group: [sql]
+#
+# #285 root cause (20-02): a UNION ALL source gives the in-out native several input
+# pipelines that share one global state, and the first pipeline to finish ran the
+# finalize on its own branch only, silently dropping the other branch's rows
+# (measured before the fix: ts_detect_changepoints_by kept 14 of 45 rows per id,
+# ts_fill_gaps_by returned 93 of 252 rows). The macros now read their source through
+# an ORDER BY ALL pipeline breaker and the natives use TsCollectFinalizeBarrier
+# (src/include/ts_collect_finalize.hpp).
+#
+# Fixture (20-03 PLAN context): 3 linear series x 84 days; the UNION ALL view keeps
+# days 0..30 (ds < 2024-02-01, 31 rows) and days 70..83 (ds >= the scalar-subquery
+# cut-off 2024-03-11, 14 rows) = 45 rows per id. `ut` is the same 45 rows per id as a
+# plain table; `rv` is reversed, `sv` is shuffled (deterministic hash order).
+
+require anofox_forecast
+
+# ts_mstl_decomposition_by expands to to_json(params)/json_extract_string calls even for
+# an empty params MAP. json is statically linked in native builds (Phase 18, 18-01) and
+# `require json` activates it in the unittest harness, so this never skips natively
+# (same note as detection_decomposition.test).
+require json
+
+foreach pio false true
+
+statement ok
+SET preserve_insertion_order = ${pio};
+
+statement ok
+SET threads = 8;
+
+statement ok
+CREATE OR REPLACE TABLE s2 AS SELECT id, (TIMESTAMP '2024-01-01' + INTERVAL (i) DAY) AS ds, base + 0.3 * i AS y FROM (VALUES ('A', 20.0), ('B', 40.0), ('C', 60.0)) t(id, base), range(84) r(i);
+
+statement ok
+CREATE OR REPLACE TABLE f2 AS SELECT id, ds, y FROM s2 WHERE ds >= TIMESTAMP '2024-03-11';
+
+statement ok
+CREATE OR REPLACE VIEW uv AS SELECT id, ds, y FROM s2 WHERE ds < TIMESTAMP '2024-02-01' UNION ALL SELECT id, ds, y FROM s2 WHERE ds >= (SELECT min(ds) FROM f2);
+
+statement ok
+CREATE OR REPLACE TABLE ut AS SELECT * FROM uv;
+
+statement ok
+CREATE OR REPLACE VIEW rv AS SELECT * FROM ut ORDER BY id, ds DESC;
+
+statement ok
+CREATE OR REPLACE VIEW sv AS SELECT * FROM ut ORDER BY hash(id, ds);
+
+query II
+SELECT id, count(*) FROM ut GROUP BY id ORDER BY id;
+----
+A	45
+B	45
+C	45
+
+# =============================================================================
+# ts_detect_changepoints_by: every input row comes back (was 14 of 45 per id on
+# the UNION ALL view), with a non-NULL probability, and the same rows as on `ut`.
+# =============================================================================
+
+query III
+SELECT id, count(*), count(changepoint_probability) FROM ts_detect_changepoints_by('uv', id, ds, y, MAP{}) GROUP BY id ORDER BY id;
+----
+A	45	45
+B	45	45
+C	45	45
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_detect_changepoints_by('uv', id, ds, y, MAP{}) EXCEPT ALL SELECT * FROM ts_detect_changepoints_by('ut', id, ds, y, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_detect_changepoints_by('ut', id, ds, y, MAP{}) EXCEPT ALL SELECT * FROM ts_detect_changepoints_by('uv', id, ds, y, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_detect_changepoints_by('rv', id, ds, y, MAP{}) EXCEPT ALL SELECT * FROM ts_detect_changepoints_by('ut', id, ds, y, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_detect_changepoints_by('ut', id, ds, y, MAP{}) EXCEPT ALL SELECT * FROM ts_detect_changepoints_by('rv', id, ds, y, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_detect_changepoints_by('sv', id, ds, y, MAP{}) EXCEPT ALL SELECT * FROM ts_detect_changepoints_by('ut', id, ds, y, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_detect_changepoints_by('ut', id, ds, y, MAP{}) EXCEPT ALL SELECT * FROM ts_detect_changepoints_by('sv', id, ds, y, MAP{}));
+----
+0
+
+# =============================================================================
+# ts_stats_by: one row per id, length 45 on every shape, identical statistics.
+# =============================================================================
+
+query II
+SELECT id, length FROM ts_stats_by('uv', id, ds, y, '1d') ORDER BY id;
+----
+A	45
+B	45
+C	45
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_stats_by('uv', id, ds, y, '1d') EXCEPT ALL SELECT * FROM ts_stats_by('ut', id, ds, y, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_stats_by('ut', id, ds, y, '1d') EXCEPT ALL SELECT * FROM ts_stats_by('uv', id, ds, y, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_stats_by('rv', id, ds, y, '1d') EXCEPT ALL SELECT * FROM ts_stats_by('ut', id, ds, y, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_stats_by('ut', id, ds, y, '1d') EXCEPT ALL SELECT * FROM ts_stats_by('rv', id, ds, y, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_stats_by('sv', id, ds, y, '1d') EXCEPT ALL SELECT * FROM ts_stats_by('ut', id, ds, y, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_stats_by('ut', id, ds, y, '1d') EXCEPT ALL SELECT * FROM ts_stats_by('sv', id, ds, y, '1d'));
+----
+0
+
+# =============================================================================
+# ts_fill_gaps_by ('1d'): the full 84-day grid per id = 252 rows with the 135 source
+# values (was 93 rows, 93 values on the UNION ALL view), identical on every shape.
+# =============================================================================
+
+query III
+SELECT id, count(*), count(y) FROM ts_fill_gaps_by('uv', id, ds, y, '1d') GROUP BY id ORDER BY id;
+----
+A	84	45
+B	84	45
+C	84	45
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_gaps_by('uv', id, ds, y, '1d') EXCEPT ALL SELECT * FROM ts_fill_gaps_by('ut', id, ds, y, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_gaps_by('ut', id, ds, y, '1d') EXCEPT ALL SELECT * FROM ts_fill_gaps_by('uv', id, ds, y, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_gaps_by('rv', id, ds, y, '1d') EXCEPT ALL SELECT * FROM ts_fill_gaps_by('ut', id, ds, y, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_gaps_by('ut', id, ds, y, '1d') EXCEPT ALL SELECT * FROM ts_fill_gaps_by('rv', id, ds, y, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_gaps_by('sv', id, ds, y, '1d') EXCEPT ALL SELECT * FROM ts_fill_gaps_by('ut', id, ds, y, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_gaps_by('ut', id, ds, y, '1d') EXCEPT ALL SELECT * FROM ts_fill_gaps_by('sv', id, ds, y, '1d'));
+----
+0
+
+# =============================================================================
+# ts_fill_forward_by ('1d', to 2024-03-31): the 45 source rows plus 7 appended days
+# per id = 52 rows, 45 values (was 273 rows, 93 values on the UNION ALL view, i.e.
+# the first branch alone extended to the target date). Only '1d' is used here: the
+# Phase 19 deferred WASM fill-forward bug affects calendar/hourly frequencies.
+# ts_fill_forward_operator (Phase 19 macro over ts_fill_forward_by) inherits the fix.
+# =============================================================================
+
+query IIII
+SELECT id, count(*), count(y), max(ds) FROM ts_fill_forward_by('uv', id, ds, y, TIMESTAMP '2024-03-31', '1d') GROUP BY id ORDER BY id;
+----
+A	52	45	2024-03-31 00:00:00
+B	52	45	2024-03-31 00:00:00
+C	52	45	2024-03-31 00:00:00
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_forward_by('uv', id, ds, y, TIMESTAMP '2024-03-31', '1d') EXCEPT ALL SELECT * FROM ts_fill_forward_by('ut', id, ds, y, TIMESTAMP '2024-03-31', '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_forward_by('ut', id, ds, y, TIMESTAMP '2024-03-31', '1d') EXCEPT ALL SELECT * FROM ts_fill_forward_by('uv', id, ds, y, TIMESTAMP '2024-03-31', '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_forward_by('rv', id, ds, y, TIMESTAMP '2024-03-31', '1d') EXCEPT ALL SELECT * FROM ts_fill_forward_by('ut', id, ds, y, TIMESTAMP '2024-03-31', '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_forward_by('ut', id, ds, y, TIMESTAMP '2024-03-31', '1d') EXCEPT ALL SELECT * FROM ts_fill_forward_by('rv', id, ds, y, TIMESTAMP '2024-03-31', '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_forward_by('sv', id, ds, y, TIMESTAMP '2024-03-31', '1d') EXCEPT ALL SELECT * FROM ts_fill_forward_by('ut', id, ds, y, TIMESTAMP '2024-03-31', '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_forward_by('ut', id, ds, y, TIMESTAMP '2024-03-31', '1d') EXCEPT ALL SELECT * FROM ts_fill_forward_by('sv', id, ds, y, TIMESTAMP '2024-03-31', '1d'));
+----
+0
+
+query III
+SELECT id, count(*), count(y) FROM ts_fill_forward_operator('uv', 'id', 'ds', 'y', TIMESTAMP '2024-03-31', '1d') GROUP BY id ORDER BY id;
+----
+A	52	45
+B	52	45
+C	52	45
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_forward_operator('uv', 'id', 'ds', 'y', TIMESTAMP '2024-03-31', '1d') EXCEPT ALL SELECT * FROM ts_fill_forward_operator('ut', 'id', 'ds', 'y', TIMESTAMP '2024-03-31', '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_forward_operator('ut', 'id', 'ds', 'y', TIMESTAMP '2024-03-31', '1d') EXCEPT ALL SELECT * FROM ts_fill_forward_operator('uv', 'id', 'ds', 'y', TIMESTAMP '2024-03-31', '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_forward_operator('rv', 'id', 'ds', 'y', TIMESTAMP '2024-03-31', '1d') EXCEPT ALL SELECT * FROM ts_fill_forward_operator('ut', 'id', 'ds', 'y', TIMESTAMP '2024-03-31', '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_forward_operator('ut', 'id', 'ds', 'y', TIMESTAMP '2024-03-31', '1d') EXCEPT ALL SELECT * FROM ts_fill_forward_operator('rv', 'id', 'ds', 'y', TIMESTAMP '2024-03-31', '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_forward_operator('sv', 'id', 'ds', 'y', TIMESTAMP '2024-03-31', '1d') EXCEPT ALL SELECT * FROM ts_fill_forward_operator('ut', 'id', 'ds', 'y', TIMESTAMP '2024-03-31', '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_fill_forward_operator('ut', 'id', 'ds', 'y', TIMESTAMP '2024-03-31', '1d') EXCEPT ALL SELECT * FROM ts_fill_forward_operator('sv', 'id', 'ds', 'y', TIMESTAMP '2024-03-31', '1d'));
+----
+0
+
+# =============================================================================
+# ts_mstl_decomposition_by (seasonal_periods [7]): one row per id whose trend and
+# remainder cover all 45 rows, identical lists on every shape.
+# =============================================================================
+
+query IIIII
+SELECT id, len(trend), len(remainder), list_count(trend), periods FROM ts_mstl_decomposition_by('uv', id, ds, y, MAP{'seasonal_periods': '[7]'}) ORDER BY id;
+----
+A	45	45	45	[7]
+B	45	45	45	[7]
+C	45	45	45	[7]
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_mstl_decomposition_by('uv', id, ds, y, MAP{'seasonal_periods': '[7]'}) EXCEPT ALL SELECT * FROM ts_mstl_decomposition_by('ut', id, ds, y, MAP{'seasonal_periods': '[7]'}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_mstl_decomposition_by('ut', id, ds, y, MAP{'seasonal_periods': '[7]'}) EXCEPT ALL SELECT * FROM ts_mstl_decomposition_by('uv', id, ds, y, MAP{'seasonal_periods': '[7]'}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_mstl_decomposition_by('rv', id, ds, y, MAP{'seasonal_periods': '[7]'}) EXCEPT ALL SELECT * FROM ts_mstl_decomposition_by('ut', id, ds, y, MAP{'seasonal_periods': '[7]'}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_mstl_decomposition_by('ut', id, ds, y, MAP{'seasonal_periods': '[7]'}) EXCEPT ALL SELECT * FROM ts_mstl_decomposition_by('rv', id, ds, y, MAP{'seasonal_periods': '[7]'}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_mstl_decomposition_by('sv', id, ds, y, MAP{'seasonal_periods': '[7]'}) EXCEPT ALL SELECT * FROM ts_mstl_decomposition_by('ut', id, ds, y, MAP{'seasonal_periods': '[7]'}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_mstl_decomposition_by('ut', id, ds, y, MAP{'seasonal_periods': '[7]'}) EXCEPT ALL SELECT * FROM ts_mstl_decomposition_by('sv', id, ds, y, MAP{'seasonal_periods': '[7]'}));
+----
+0
+
+# =============================================================================
+# 20-04: features, cross-validation, panel and VAR macros (same recipe: an ORDER BY
+# ALL breaker on the native's input plus TsCollectFinalizeBarrier).
+# =============================================================================
+
+# =============================================================================
+# ts_features_by: one row per id computed on all 45 rows (was length 31, slope
+# 0.3 from the first branch alone on the UNION ALL view), identical on every shape.
+# =============================================================================
+
+query IIII
+SELECT id, length, mean IS NOT NULL, round(linear_trend_slope, 10) FROM ts_features_by('uv', id, ds, y) ORDER BY id;
+----
+A	45.0	true	0.6345059289
+B	45.0	true	0.6345059289
+C	45.0	true	0.6345059289
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_features_by('uv', id, ds, y) EXCEPT ALL SELECT * FROM ts_features_by('ut', id, ds, y));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_features_by('ut', id, ds, y) EXCEPT ALL SELECT * FROM ts_features_by('uv', id, ds, y));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_features_by('rv', id, ds, y) EXCEPT ALL SELECT * FROM ts_features_by('ut', id, ds, y));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_features_by('ut', id, ds, y) EXCEPT ALL SELECT * FROM ts_features_by('rv', id, ds, y));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_features_by('sv', id, ds, y) EXCEPT ALL SELECT * FROM ts_features_by('ut', id, ds, y));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_features_by('ut', id, ds, y) EXCEPT ALL SELECT * FROM ts_features_by('sv', id, ds, y));
+----
+0
+
+# =============================================================================
+# ts_cv_folds_by (2 folds, horizon 5): train rows count every source row before
+# the cutoff (was 63 and 78 train rows on the UNION ALL view), identical on every shape.
+# =============================================================================
+
+query IIII
+SELECT fold_id, split, count(*), count(y) FROM ts_cv_folds_by('uv', id, ds, y, 2, 5, MAP{}) GROUP BY ALL ORDER BY ALL;
+----
+1	test	15	15
+1	train	105	105
+2	test	15	15
+2	train	120	120
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_folds_by('uv', id, ds, y, 2, 5, MAP{}) EXCEPT ALL SELECT * FROM ts_cv_folds_by('ut', id, ds, y, 2, 5, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_folds_by('ut', id, ds, y, 2, 5, MAP{}) EXCEPT ALL SELECT * FROM ts_cv_folds_by('uv', id, ds, y, 2, 5, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_folds_by('rv', id, ds, y, 2, 5, MAP{}) EXCEPT ALL SELECT * FROM ts_cv_folds_by('ut', id, ds, y, 2, 5, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_folds_by('ut', id, ds, y, 2, 5, MAP{}) EXCEPT ALL SELECT * FROM ts_cv_folds_by('rv', id, ds, y, 2, 5, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_folds_by('sv', id, ds, y, 2, 5, MAP{}) EXCEPT ALL SELECT * FROM ts_cv_folds_by('ut', id, ds, y, 2, 5, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_folds_by('ut', id, ds, y, 2, 5, MAP{}) EXCEPT ALL SELECT * FROM ts_cv_folds_by('sv', id, ds, y, 2, 5, MAP{}));
+----
+0
+
+# =============================================================================
+# ts_cv_split_by (cutoffs 2024-01-20 and 2024-03-12, horizon 3): fold 2 spans both
+# UNION ALL branches; identical on every shape.
+# =============================================================================
+
+query IIII
+SELECT fold_id, split, count(*), count(y) FROM ts_cv_split_by('uv', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}) GROUP BY ALL ORDER BY ALL;
+----
+1	test	9	9
+1	train	60	60
+2	test	9	9
+2	train	99	99
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_split_by('uv', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}) EXCEPT ALL SELECT * FROM ts_cv_split_by('ut', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_split_by('ut', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}) EXCEPT ALL SELECT * FROM ts_cv_split_by('uv', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_split_by('rv', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}) EXCEPT ALL SELECT * FROM ts_cv_split_by('ut', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_split_by('ut', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}) EXCEPT ALL SELECT * FROM ts_cv_split_by('rv', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_split_by('sv', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}) EXCEPT ALL SELECT * FROM ts_cv_split_by('ut', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_split_by('ut', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}) EXCEPT ALL SELECT * FROM ts_cv_split_by('sv', id, ds, y, ['2024-01-20'::TIMESTAMP, '2024-03-12'::TIMESTAMP], 3, MAP{}));
+----
+0
+
+# =============================================================================
+# Cross-validation inputs as UNION ALL / reversed / shuffled views. `cvt` is the
+# materialized fold table built from `ut`; `cvu` re-reads it as a UNION ALL with the
+# same scalar-subquery cut-off; `cvr` / `cvs` are reversed / shuffled. `sxt` adds a
+# row-varying feature column for ts_cv_hydrate_by, with the same four shapes.
+# =============================================================================
+
+statement ok
+CREATE OR REPLACE TABLE cvt AS SELECT * FROM ts_cv_folds_by('ut', id, ds, y, 2, 5, MAP{});
+
+statement ok
+CREATE OR REPLACE VIEW cvu AS SELECT * FROM cvt WHERE ds < TIMESTAMP '2024-02-01' UNION ALL SELECT * FROM cvt WHERE ds >= (SELECT min(ds) FROM f2);
+
+statement ok
+CREATE OR REPLACE VIEW cvr AS SELECT * FROM cvt ORDER BY fold_id DESC, id DESC, ds DESC;
+
+statement ok
+CREATE OR REPLACE VIEW cvs AS SELECT * FROM cvt ORDER BY hash(fold_id, id, ds);
+
+statement ok
+CREATE OR REPLACE TABLE sxt AS SELECT id, ds, y, round(y * 2 + (epoch(ds) / 86400) % 7, 3)::DOUBLE AS temperature FROM ut;
+
+statement ok
+CREATE OR REPLACE VIEW sxu AS SELECT * FROM sxt WHERE ds < TIMESTAMP '2024-02-01' UNION ALL SELECT * FROM sxt WHERE ds >= (SELECT min(ds) FROM f2);
+
+statement ok
+CREATE OR REPLACE VIEW sxr AS SELECT * FROM sxt ORDER BY id, ds DESC;
+
+statement ok
+CREATE OR REPLACE VIEW sxs AS SELECT * FROM sxt ORDER BY hash(id, ds);
+
+query I
+SELECT count(*) FROM cvu;
+----
+255
+
+# =============================================================================
+# ts_cv_forecast_by (Naive): one forecast per test row of every fold, trained on
+# all train rows, identical on every shape of the fold table.
+# =============================================================================
+
+query IIII
+SELECT fold_id, count(*), count(yhat), count(DISTINCT id) FROM ts_cv_forecast_by('cvu', id, ds, y, 'Naive', MAP{}) GROUP BY ALL ORDER BY ALL;
+----
+1	15	15	3
+2	15	15	3
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_forecast_by('cvu', id, ds, y, 'Naive', MAP{}) EXCEPT ALL SELECT * FROM ts_cv_forecast_by('cvt', id, ds, y, 'Naive', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_forecast_by('cvt', id, ds, y, 'Naive', MAP{}) EXCEPT ALL SELECT * FROM ts_cv_forecast_by('cvu', id, ds, y, 'Naive', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_forecast_by('cvr', id, ds, y, 'Naive', MAP{}) EXCEPT ALL SELECT * FROM ts_cv_forecast_by('cvt', id, ds, y, 'Naive', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_forecast_by('cvt', id, ds, y, 'Naive', MAP{}) EXCEPT ALL SELECT * FROM ts_cv_forecast_by('cvr', id, ds, y, 'Naive', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_forecast_by('cvs', id, ds, y, 'Naive', MAP{}) EXCEPT ALL SELECT * FROM ts_cv_forecast_by('cvt', id, ds, y, 'Naive', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_forecast_by('cvt', id, ds, y, 'Naive', MAP{}) EXCEPT ALL SELECT * FROM ts_cv_forecast_by('cvs', id, ds, y, 'Naive', MAP{}));
+----
+0
+
+# =============================================================================
+# ts_cv_hydrate_by (last_value): fold rows with the masked feature, identical when
+# both the fold table and the source are UNION ALL / reversed / shuffled.
+# =============================================================================
+
+query IIII
+SELECT fold_id, split, count(*), count(temperature) FROM ts_cv_hydrate_by('cvu', 'sxu', id, ds, ['temperature'], MAP{}) GROUP BY ALL ORDER BY ALL;
+----
+1	test	15	15
+1	train	105	105
+2	test	15	15
+2	train	120	120
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_hydrate_by('cvu', 'sxu', id, ds, ['temperature'], MAP{}) EXCEPT ALL SELECT * FROM ts_cv_hydrate_by('cvt', 'sxt', id, ds, ['temperature'], MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_hydrate_by('cvt', 'sxt', id, ds, ['temperature'], MAP{}) EXCEPT ALL SELECT * FROM ts_cv_hydrate_by('cvu', 'sxu', id, ds, ['temperature'], MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_hydrate_by('cvr', 'sxr', id, ds, ['temperature'], MAP{}) EXCEPT ALL SELECT * FROM ts_cv_hydrate_by('cvt', 'sxt', id, ds, ['temperature'], MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_hydrate_by('cvt', 'sxt', id, ds, ['temperature'], MAP{}) EXCEPT ALL SELECT * FROM ts_cv_hydrate_by('cvr', 'sxr', id, ds, ['temperature'], MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_hydrate_by('cvs', 'sxs', id, ds, ['temperature'], MAP{}) EXCEPT ALL SELECT * FROM ts_cv_hydrate_by('cvt', 'sxt', id, ds, ['temperature'], MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_cv_hydrate_by('cvt', 'sxt', id, ds, ['temperature'], MAP{}) EXCEPT ALL SELECT * FROM ts_cv_hydrate_by('cvs', 'sxs', id, ds, ['temperature'], MAP{}));
+----
+0
+
+# =============================================================================
+# ts_forecast_panel_by (GlobalETS, horizon 3): one global fit over all 45 rows
+# per id, identical on every shape.
+# =============================================================================
+
+# Observed before the fix on the UNION ALL view: A 29.282066 (the first branch's
+# level alone) instead of 45.321346.
+query IIIIII
+SELECT id, count(*), count(yhat), min(model_name), round(min(yhat), 6), round(max(yhat), 6) FROM ts_forecast_panel_by('uv', id, ds, y, 'GlobalETS', 3, '1d', MAP{}) GROUP BY ALL ORDER BY ALL;
+----
+A	3	3	GlobalETS	45.321346	46.135993
+B	3	3	GlobalETS	65.252406	65.935473
+C	3	3	GlobalETS	85.252406	85.935473
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_panel_by('uv', id, ds, y, 'GlobalETS', 3, '1d', MAP{}) EXCEPT ALL SELECT * FROM ts_forecast_panel_by('ut', id, ds, y, 'GlobalETS', 3, '1d', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_panel_by('ut', id, ds, y, 'GlobalETS', 3, '1d', MAP{}) EXCEPT ALL SELECT * FROM ts_forecast_panel_by('uv', id, ds, y, 'GlobalETS', 3, '1d', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_panel_by('rv', id, ds, y, 'GlobalETS', 3, '1d', MAP{}) EXCEPT ALL SELECT * FROM ts_forecast_panel_by('ut', id, ds, y, 'GlobalETS', 3, '1d', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_panel_by('ut', id, ds, y, 'GlobalETS', 3, '1d', MAP{}) EXCEPT ALL SELECT * FROM ts_forecast_panel_by('rv', id, ds, y, 'GlobalETS', 3, '1d', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_panel_by('sv', id, ds, y, 'GlobalETS', 3, '1d', MAP{}) EXCEPT ALL SELECT * FROM ts_forecast_panel_by('ut', id, ds, y, 'GlobalETS', 3, '1d', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_panel_by('ut', id, ds, y, 'GlobalETS', 3, '1d', MAP{}) EXCEPT ALL SELECT * FROM ts_forecast_panel_by('sv', id, ds, y, 'GlobalETS', 3, '1d', MAP{}));
+----
+0
+
+# =============================================================================
+# ts_forecast_var_by (two variables, p = 1, horizon 3): a contiguous 84-day wide
+# fixture `wt`; `wu` re-reads it as a UNION ALL split at 2024-02-15 (scalar-subquery
+# cut-off on the second branch, both branches non-empty); `wr` / `ws` are reversed /
+# shuffled. One VAR fit on all 84 rows on every shape.
+# =============================================================================
+
+statement ok
+CREATE OR REPLACE TABLE wt AS SELECT (TIMESTAMP '2024-01-01' + INTERVAL (i) DAY) AS ds, round(10 + sin(i) + 0.1 * i, 6) AS y1, round(5 + cos(i * 0.7) + 0.05 * i, 6) AS y2 FROM range(84) r(i);
+
+statement ok
+CREATE OR REPLACE VIEW wu AS SELECT * FROM wt WHERE ds < TIMESTAMP '2024-02-15' UNION ALL SELECT * FROM wt WHERE ds >= (SELECT min(ds) FROM wt WHERE ds >= TIMESTAMP '2024-02-15');
+
+statement ok
+CREATE OR REPLACE VIEW wr AS SELECT * FROM wt ORDER BY ds DESC;
+
+statement ok
+CREATE OR REPLACE VIEW ws AS SELECT * FROM wt ORDER BY hash(ds);
+
+# Observed before the fix on the UNION ALL view: y1 14.442128..14.449617 (the first
+# branch alone) instead of 19.071735..19.168724.
+query IIII
+SELECT variable, count(*), round(min(forecast_value), 6), round(max(forecast_value), 6) FROM ts_forecast_var_by('wu', 'ds', ['y1', 'y2'], 3, '1d') GROUP BY ALL ORDER BY ALL;
+----
+y1	3	19.071735	19.168724
+y2	3	9.325175	9.523599
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_var_by('wu', 'ds', ['y1', 'y2'], 3, '1d') EXCEPT ALL SELECT * FROM ts_forecast_var_by('wt', 'ds', ['y1', 'y2'], 3, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_var_by('wt', 'ds', ['y1', 'y2'], 3, '1d') EXCEPT ALL SELECT * FROM ts_forecast_var_by('wu', 'ds', ['y1', 'y2'], 3, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_var_by('wr', 'ds', ['y1', 'y2'], 3, '1d') EXCEPT ALL SELECT * FROM ts_forecast_var_by('wt', 'ds', ['y1', 'y2'], 3, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_var_by('wt', 'ds', ['y1', 'y2'], 3, '1d') EXCEPT ALL SELECT * FROM ts_forecast_var_by('wr', 'ds', ['y1', 'y2'], 3, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_var_by('ws', 'ds', ['y1', 'y2'], 3, '1d') EXCEPT ALL SELECT * FROM ts_forecast_var_by('wt', 'ds', ['y1', 'y2'], 3, '1d'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_var_by('wt', 'ds', ['y1', 'y2'], 3, '1d') EXCEPT ALL SELECT * FROM ts_forecast_var_by('ws', 'ds', ['y1', 'y2'], 3, '1d'));
+----
+0
+
+# =============================================================================
+# ts_forecast_panel_by series order (Rule 1 fix in 20-04): the shared GlobalETS fit
+# used the series in ARRIVAL order, so on a 2000-series panel the result moved with
+# the intake interleaving (observed on the pre-fix 20-04 build, 400k rows: sum(yhat)
+# 127800.5516 or 127800.5522 between runs at default threads). The native now fits
+# the series in group-key order: the result at default threads equals the result at
+# threads = 1 and on a shuffled copy, both ways.
+# =============================================================================
+
+statement ok
+CREATE OR REPLACE TABLE pbig AS SELECT 's' || (i // 200) AS id, TIMESTAMP '2024-01-01' + INTERVAL (i % 200) DAY AS ds, (i % 200) * 0.1 + ((i * 7919) % 13) * 0.25 AS y FROM range(400000) r(i);
+
+statement ok
+CREATE OR REPLACE TABLE pbig_shuffled AS SELECT * FROM pbig ORDER BY hash(id, ds);
+
+statement ok
+SET threads = 1;
+
+statement ok
+CREATE OR REPLACE TABLE pan_t1 AS SELECT * FROM ts_forecast_panel_by('pbig', id, ds, y, 'GlobalETS', 3, '1d', MAP{});
+
+statement ok
+RESET threads;
+
+query III
+SELECT count(*), count(DISTINCT id), round(sum(yhat), 4) FROM pan_t1;
+----
+6000	2000	127800.5516
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_panel_by('pbig', id, ds, y, 'GlobalETS', 3, '1d', MAP{}) EXCEPT ALL SELECT * FROM pan_t1);
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM pan_t1 EXCEPT ALL SELECT * FROM ts_forecast_panel_by('pbig', id, ds, y, 'GlobalETS', 3, '1d', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_panel_by('pbig_shuffled', id, ds, y, 'GlobalETS', 3, '1d', MAP{}) EXCEPT ALL SELECT * FROM pan_t1);
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM pan_t1 EXCEPT ALL SELECT * FROM ts_forecast_panel_by('pbig_shuffled', id, ds, y, 'GlobalETS', 3, '1d', MAP{}));
+----
+0
+
+# =============================================================================
+# 20-05: _ts_forecast_native (internal, #285 scope expansion, decisions_addendum_2)
+# and ts_forecast_by (already correct; pinned here, body untouched). Fixture: 3
+# series x 84 days with a weekly sine component (planner facts, 20-05-PLAN.md),
+# so SeasonalNaive/Theta have something to fit. uv/rv/sv/ut reuse the s2/f2
+# fixture above for the ts_forecast_by pins (seasonality is irrelevant to those
+# -- they only check shape independence); fs2/fuv/fut/frv/fsv below are a
+# separate seasonal fixture used only for the exact-value _ts_forecast_native pin.
+# =============================================================================
+
+statement ok
+CREATE OR REPLACE TABLE fs2 AS SELECT id, (TIMESTAMP '2024-01-01' + INTERVAL (i) DAY) AS ds, base + 0.3 * i + 5 * sin(2 * pi() * i / 7) AS y FROM (VALUES ('A', 20.0), ('B', 40.0), ('C', 60.0)) t(id, base), range(84) r(i);
+
+statement ok
+CREATE OR REPLACE TABLE ff2 AS SELECT id, ds, y FROM fs2 WHERE ds >= TIMESTAMP '2024-03-11';
+
+statement ok
+CREATE OR REPLACE VIEW fuv AS SELECT id, ds, y FROM fs2 WHERE ds < TIMESTAMP '2024-02-01' UNION ALL SELECT id, ds, y FROM fs2 WHERE ds >= (SELECT min(ds) FROM ff2);
+
+statement ok
+CREATE OR REPLACE TABLE fut AS SELECT * FROM fuv;
+
+statement ok
+CREATE OR REPLACE VIEW frv AS SELECT * FROM fut ORDER BY id, ds DESC;
+
+statement ok
+CREATE OR REPLACE VIEW fsv AS SELECT * FROM fut ORDER BY hash(id, ds);
+
+# _ts_forecast_native: 9 forecast rows (3 ids x 3 horizon), sum(yhat) 548.917583
+# on every shape (was 484.871756 on `fuv` pre-fix: the UNION's first branch
+# alone, extrapolated -- the second branch's rows never reached finalize).
+query II
+SELECT count(*), round(sum(yhat), 6) FROM _ts_forecast_native((SELECT id, ds, y FROM fuv), 3, '1d', 'Naive', MAP{});
+----
+9	548.917583
+
+query II
+SELECT count(*), round(sum(yhat), 6) FROM _ts_forecast_native((SELECT id, ds, y FROM fut), 3, '1d', 'Naive', MAP{});
+----
+9	548.917583
+
+query I
+SELECT count(*) FROM (SELECT * FROM _ts_forecast_native((SELECT id, ds, y FROM fuv), 3, '1d', 'Naive', MAP{}) EXCEPT ALL SELECT * FROM _ts_forecast_native((SELECT id, ds, y FROM fut), 3, '1d', 'Naive', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM _ts_forecast_native((SELECT id, ds, y FROM fut), 3, '1d', 'Naive', MAP{}) EXCEPT ALL SELECT * FROM _ts_forecast_native((SELECT id, ds, y FROM fuv), 3, '1d', 'Naive', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM _ts_forecast_native((SELECT id, ds, y FROM frv), 3, '1d', 'Naive', MAP{}) EXCEPT ALL SELECT * FROM _ts_forecast_native((SELECT id, ds, y FROM fut), 3, '1d', 'Naive', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM _ts_forecast_native((SELECT id, ds, y FROM fut), 3, '1d', 'Naive', MAP{}) EXCEPT ALL SELECT * FROM _ts_forecast_native((SELECT id, ds, y FROM frv), 3, '1d', 'Naive', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM _ts_forecast_native((SELECT id, ds, y FROM fsv), 3, '1d', 'Naive', MAP{}) EXCEPT ALL SELECT * FROM _ts_forecast_native((SELECT id, ds, y FROM fut), 3, '1d', 'Naive', MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM _ts_forecast_native((SELECT id, ds, y FROM fut), 3, '1d', 'Naive', MAP{}) EXCEPT ALL SELECT * FROM _ts_forecast_native((SELECT id, ds, y FROM fsv), 3, '1d', 'Naive', MAP{}));
+----
+0
+
+# ts_forecast_by: already union-safe (GROUP BY + _ts_forecast_scalar); pinned
+# here on the s2/f2/uv/ut/rv/sv fixture (defined above) for SeasonalNaive and
+# Theta, both with seasonal_period := 7. Its macro body is untouched (Task 1
+# acceptance: byte-identical to the phase base).
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_by('uv', id, ds, y, 'SeasonalNaive', 7, '1d', params := MAP{'seasonal_period': '7'}) EXCEPT ALL SELECT * FROM ts_forecast_by('ut', id, ds, y, 'SeasonalNaive', 7, '1d', params := MAP{'seasonal_period': '7'}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_by('ut', id, ds, y, 'SeasonalNaive', 7, '1d', params := MAP{'seasonal_period': '7'}) EXCEPT ALL SELECT * FROM ts_forecast_by('uv', id, ds, y, 'SeasonalNaive', 7, '1d', params := MAP{'seasonal_period': '7'}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_by('rv', id, ds, y, 'SeasonalNaive', 7, '1d', params := MAP{'seasonal_period': '7'}) EXCEPT ALL SELECT * FROM ts_forecast_by('ut', id, ds, y, 'SeasonalNaive', 7, '1d', params := MAP{'seasonal_period': '7'}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_by('sv', id, ds, y, 'SeasonalNaive', 7, '1d', params := MAP{'seasonal_period': '7'}) EXCEPT ALL SELECT * FROM ts_forecast_by('ut', id, ds, y, 'SeasonalNaive', 7, '1d', params := MAP{'seasonal_period': '7'}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_by('uv', id, ds, y, 'Theta', 7, '1d', params := MAP{'seasonal_period': '7'}) EXCEPT ALL SELECT * FROM ts_forecast_by('ut', id, ds, y, 'Theta', 7, '1d', params := MAP{'seasonal_period': '7'}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_by('rv', id, ds, y, 'Theta', 7, '1d', params := MAP{'seasonal_period': '7'}) EXCEPT ALL SELECT * FROM ts_forecast_by('ut', id, ds, y, 'Theta', 7, '1d', params := MAP{'seasonal_period': '7'}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_forecast_by('sv', id, ds, y, 'Theta', 7, '1d', params := MAP{'seasonal_period': '7'}) EXCEPT ALL SELECT * FROM ts_forecast_by('ut', id, ds, y, 'Theta', 7, '1d', params := MAP{'seasonal_period': '7'}));
+----
+0
+
+# =============================================================================
+# 20-05: ts_aggregate_hierarchy, ts_split_keys and ts_validate_separator
+# (#285 scope expansion, decisions_addendum_2). Same recipe as the metric
+# macros: (SELECT * FROM _ts_passthrough(source) ORDER BY ALL) on the renamed
+# native's input, plus TsCollectFinalizeBarrier. Fixture: 3 leaf series
+# (region|store|item, 2 regions, 2 stores) x 20 days; the UNION ALL view keeps
+# days 0..9 and days 10..19 (both branches non-empty, 30 rows each).
+# =============================================================================
+
+statement ok
+CREATE OR REPLACE TABLE hsales AS SELECT (DATE '2024-01-01' + INTERVAL (i) DAY) AS dt, 10.0 + i AS qty, region, store, item FROM (VALUES ('EU', 'S1', 'A'), ('EU', 'S1', 'B'), ('US', 'S2', 'C')) t(region, store, item), range(20) r(i);
+
+statement ok
+CREATE OR REPLACE VIEW huv AS SELECT * FROM hsales WHERE dt < DATE '2024-01-11' UNION ALL SELECT * FROM hsales WHERE dt >= (SELECT min(dt) FROM hsales WHERE dt >= DATE '2024-01-11');
+
+statement ok
+CREATE OR REPLACE TABLE hut AS SELECT * FROM huv;
+
+statement ok
+CREATE OR REPLACE VIEW hrv AS SELECT * FROM hut ORDER BY region DESC, store DESC, item DESC, dt DESC;
+
+statement ok
+CREATE OR REPLACE VIEW hsv AS SELECT * FROM hut ORDER BY hash(region, store, item, dt);
+
+query I
+SELECT count(*) FROM huv;
+----
+60
+
+# ts_aggregate_hierarchy: grand total + 2 regions + 2 region|store + 3 leaves
+# = 8 unique_ids x 20 dates = 160 rows on every shape (was a partial count on
+# `huv` pre-fix, a collect-then-finalize native without the breaker).
+query II
+SELECT count(*), count(DISTINCT unique_id) FROM ts_aggregate_hierarchy((SELECT dt, qty, region, store, item FROM huv), MAP{});
+----
+160	8
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_aggregate_hierarchy((SELECT dt, qty, region, store, item FROM huv), MAP{}) EXCEPT ALL SELECT * FROM ts_aggregate_hierarchy((SELECT dt, qty, region, store, item FROM hut), MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_aggregate_hierarchy((SELECT dt, qty, region, store, item FROM hut), MAP{}) EXCEPT ALL SELECT * FROM ts_aggregate_hierarchy((SELECT dt, qty, region, store, item FROM huv), MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_aggregate_hierarchy((SELECT dt, qty, region, store, item FROM hrv), MAP{}) EXCEPT ALL SELECT * FROM ts_aggregate_hierarchy((SELECT dt, qty, region, store, item FROM hut), MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_aggregate_hierarchy((SELECT dt, qty, region, store, item FROM hut), MAP{}) EXCEPT ALL SELECT * FROM ts_aggregate_hierarchy((SELECT dt, qty, region, store, item FROM hrv), MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_aggregate_hierarchy((SELECT dt, qty, region, store, item FROM hsv), MAP{}) EXCEPT ALL SELECT * FROM ts_aggregate_hierarchy((SELECT dt, qty, region, store, item FROM hut), MAP{}));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_aggregate_hierarchy((SELECT dt, qty, region, store, item FROM hut), MAP{}) EXCEPT ALL SELECT * FROM ts_aggregate_hierarchy((SELECT dt, qty, region, store, item FROM hsv), MAP{}));
+----
+0
+
+# ts_split_keys: unique_id = region|store|item split back into 3 parts; 60
+# rows on every shape (was a partial count pre-fix).
+query II
+SELECT count(*), count(DISTINCT id_part_1) FROM ts_split_keys((SELECT region || '|' || store || '|' || item AS unique_id, dt, qty FROM huv));
+----
+60	2
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_split_keys((SELECT region || '|' || store || '|' || item AS unique_id, dt, qty FROM huv)) EXCEPT ALL SELECT * FROM ts_split_keys((SELECT region || '|' || store || '|' || item AS unique_id, dt, qty FROM hut)));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_split_keys((SELECT region || '|' || store || '|' || item AS unique_id, dt, qty FROM hut)) EXCEPT ALL SELECT * FROM ts_split_keys((SELECT region || '|' || store || '|' || item AS unique_id, dt, qty FROM huv)));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_split_keys((SELECT region || '|' || store || '|' || item AS unique_id, dt, qty FROM hrv)) EXCEPT ALL SELECT * FROM ts_split_keys((SELECT region || '|' || store || '|' || item AS unique_id, dt, qty FROM hut)));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_split_keys((SELECT region || '|' || store || '|' || item AS unique_id, dt, qty FROM hut)) EXCEPT ALL SELECT * FROM ts_split_keys((SELECT region || '|' || store || '|' || item AS unique_id, dt, qty FROM hrv)));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_split_keys((SELECT region || '|' || store || '|' || item AS unique_id, dt, qty FROM hsv)) EXCEPT ALL SELECT * FROM ts_split_keys((SELECT region || '|' || store || '|' || item AS unique_id, dt, qty FROM hut)));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_split_keys((SELECT region || '|' || store || '|' || item AS unique_id, dt, qty FROM hut)) EXCEPT ALL SELECT * FROM ts_split_keys((SELECT region || '|' || store || '|' || item AS unique_id, dt, qty FROM hsv)));
+----
+0
+
+# ts_validate_separator: all 3 columns are ID columns; distinct values counted
+# across the whole source, not just one UNION branch (was a partial distinct
+# set pre-fix). No '|' in region/store/item, so is_valid = true, n_conflicts = 0.
+query II
+SELECT is_valid, n_conflicts FROM ts_validate_separator((SELECT region, store, item FROM huv));
+----
+true	0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_validate_separator((SELECT region, store, item FROM huv)) EXCEPT ALL SELECT * FROM ts_validate_separator((SELECT region, store, item FROM hut)));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_validate_separator((SELECT region, store, item FROM hut)) EXCEPT ALL SELECT * FROM ts_validate_separator((SELECT region, store, item FROM huv)));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_validate_separator((SELECT region, store, item FROM hrv)) EXCEPT ALL SELECT * FROM ts_validate_separator((SELECT region, store, item FROM hut)));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_validate_separator((SELECT region, store, item FROM hut)) EXCEPT ALL SELECT * FROM ts_validate_separator((SELECT region, store, item FROM hrv)));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_validate_separator((SELECT region, store, item FROM hsv)) EXCEPT ALL SELECT * FROM ts_validate_separator((SELECT region, store, item FROM hut)));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM ts_validate_separator((SELECT region, store, item FROM hut)) EXCEPT ALL SELECT * FROM ts_validate_separator((SELECT region, store, item FROM hsv)));
+----
+0
+
+endloop

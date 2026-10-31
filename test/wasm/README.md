@@ -8,7 +8,7 @@ compile+link CI leg cannot verify.
 
 1. The built `.wasm` artifact loads in the DuckDB-Wasm `eh` (exception-handling)
    bundle without signature errors.
-2. A curated set of 8 SQL test files (396 assertions) pass end-to-end.
+2. A curated set of 12 SQL test files (540 assertions) pass end-to-end.
 3. Optionally, the full 66-file suite can be exercised with `--all`.
 
 ## Requirements
@@ -84,15 +84,20 @@ v1.5.6 wasm_eh artifact to the v2.0.0 line together.
    storage-version list embedded in `duckdb-eh.wasm` is the authoritative source.
 3. Update `dependencies` in `package.json`, run `npm --prefix test/wasm install`
    to regenerate `package-lock.json`, add a row to the table above, and commit.
+4. Also bump `WASM_HARNESS_ENGINE` in `scripts/verify-wasm-artifact.sh` (the
+   post-upload check, #272 DIST-02) and re-verify `test/wasm/post_upload_smoke.test`
+   still passes against a freshly built artifact on the new engine version
+   before relying on the post-upload gate again.
 
 ## Running modes
 
 | Command                          | What runs                                              |
 |----------------------------------|--------------------------------------------------------|
-| `node run.mjs`                   | 8-file curated subset (396 assertions, always green)   |
+| `node run.mjs`                   | 12-file curated subset (540 assertions, always green)  |
 | `node run.mjs --all`             | All 66 `.test` files under `test/sql/`                 |
 | `node run.mjs --file <f.test>`   | Single named file (relative to repo root)              |
 | `node run.mjs --ext <path>`      | Override the artifact path (also: `ANOFOX_WASM_EXT`)  |
+| `node run.mjs --bundle mvp`      | Boot the `mvp` DuckDB-Wasm bundle instead of the default `eh` (also: `ANOFOX_WASM_BUNDLE`). An unrecognized value exits 1 before booting anything. See the "wasm_mvp status (DIST-03)" section of `docs/distribution/get-erpl-io.md` for why this exists and what it found. |
 
 Exit code 0 on success, 1 on any assertion failure or harness error.
 
@@ -112,14 +117,26 @@ Measured against a **fresh `wasm_eh` artifact built locally from HEAD**
 
 ### Skip-listed files (structurally WASM-infeasible)
 
-These four files are excluded from all runs (logged, never silent):
+These two files are excluded from all runs (logged, never silent):
 
 | File                              | Reason                                                        |
 |-----------------------------------|---------------------------------------------------------------|
-| `ts_features.test`                | WASM heap overflow in large TSFresh feature extraction        |
-| `ts_features_config.test`         | WASM heap overflow in large TSFresh feature extraction        |
 | `ts_forecast_mfles_stability.test`| UNNEST not supported in DuckDB v1.5.5 WASM engine            |
 | `ts_fill_forward_native.test`     | Emscripten abort trap (`___trap`) in WASM runtime            |
+
+`ts_features.test` and `ts_features_config.test` were previously skip-listed
+under a reason blaming a large-TSFresh-extraction WASM memory limit --
+empirically wrong (Plan 19-03, #289 BUG-02). The real trap was (1) a
+malloc/free allocator mismatch between the WASM-only size-prefixed Rust
+allocator and C++'s raw `free()`, compounded by (2) a WASM toolchain
+code-folding defect that misoptimizes `DATAZOO_GUARD`-wrapped function pairs
+sharing an identical signature across the two zero-argument catalog
+functions. Neither cause has anything to do with available memory or
+TSFresh's feature count -- see the comment on `RegisterTsFeaturesListFunction`
+in `src/table_functions/ts_features.cpp`. Both files are now un-skipped;
+`ts_features.test` is in `CURATED` (above), `ts_features_config.test` passes
+but is not curated (it exercises `ts_features_config_from_json`/`_csv`, not
+the fixed catalog functions, so it adds no incremental coverage for #289).
 
 ### Known failures in the 23 failing files — pre-existing test-suite debt
 

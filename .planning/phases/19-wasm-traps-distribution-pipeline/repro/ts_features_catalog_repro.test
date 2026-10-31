@@ -1,0 +1,29 @@
+# name: .planning/phases/19-wasm-traps-distribution-pipeline/repro/ts_features_catalog_repro.test
+# description: BUG-02 (#289) repro -- ts_features_list()/ts_features_config_template() trap
+#   DuckDB-Wasm with "memory access out of bounds" on the pre-fix artifact; this evidence
+#   file is kept with the phase artifacts, not in test/sql/ (not part of the CI-gated suite).
+# group: [anofox_forecast]
+
+require anofox_forecast
+
+# Pre-fix: traps with "memory access out of bounds" in DuckDB-Wasm (wasm_eh).
+# Post-fix: returns 117.
+query I
+SELECT count(*) FROM ts_features_list();
+----
+117
+
+# Pre-fix: traps with "memory access out of bounds" in DuckDB-Wasm (wasm_eh).
+# Post-fix: returns 117.
+query I
+SELECT count(*) FROM ts_features_config_template();
+----
+117
+
+# Proves the DuckDB-Wasm instance is still usable for a later statement on the
+# same connection after the catalog calls above (pre-fix: heap corruption from
+# the allocator-mismatch free() would leave this undefined/flaky).
+query I
+SELECT 42;
+----
+42

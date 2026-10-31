@@ -1,0 +1,126 @@
+# name: test/sql/ts_grouping_sets.test
+# description: #299 - the ts_*_agg aggregates under GROUP BY ROLLUP / GROUPING SETS /
+#   CUBE give the same per-level results as separate GROUP BY queries. DuckDB 2.0 folds
+#   grouping sets into CTEs and aggregates the coarser levels from the finer ones
+#   (cascading aggregation, duckdb/duckdb#23287), which relies on Combine; v1.5 rescans
+#   each level. Both lines must agree. Also: a GROUP BY ROLLUP builds the same
+#   hierarchy series as ts_aggregate_hierarchy.
+# group: [sql]
+#
+# Fixture: 4 stores in 2 regions; each store reports on its own days (d % 4 = store),
+# so every level's series (store, region, total) has unique timestamps.
+
+require anofox_forecast
+
+statement ok
+SET threads = 8;
+
+statement ok
+CREATE TABLE gs AS
+SELECT 'R' || (st // 2) AS region, 'S' || st AS store,
+       (TIMESTAMP '2024-01-01' + INTERVAL (d) DAY) AS ds,
+       (10 + st + 0.1 * d + 3 * sin(2 * pi() * d / 7) + (hash(st, d) % 100) / 50.0)::DOUBLE AS y
+FROM range(4) a(st), range(480) b(d)
+WHERE d % 4 = st;
+
+# rollup_diff(agg): rows of GROUP BY ROLLUP(region, store) that the three separate
+# GROUP BY queries do not produce, and the reverse (0 = identical)
+statement ok
+CREATE MACRO rollup_diff(agg) AS TABLE
+WITH r AS (
+    FROM query(format('SELECT region, store, ({})::VARCHAR AS v FROM gs GROUP BY ROLLUP(region, store)', agg))
+), s AS (
+    FROM query(format('SELECT region, store, ({0})::VARCHAR AS v FROM gs GROUP BY region, store
+                       UNION ALL SELECT region, NULL, ({0})::VARCHAR FROM gs GROUP BY region
+                       UNION ALL SELECT NULL, NULL, ({0})::VARCHAR FROM gs', agg))
+)
+SELECT (SELECT count(*) FROM r) AS n,
+       (SELECT count(*) FROM (FROM r EXCEPT ALL FROM s)) + (SELECT count(*) FROM (FROM s EXCEPT ALL FROM r)) AS diff;
+
+query II
+FROM rollup_diff('ts_stats_agg(ds, y)');
+----
+7	0
+
+query II
+FROM rollup_diff('ts_features_agg(ds, y)');
+----
+7	0
+
+query II
+FROM rollup_diff('ts_data_quality_agg(ds, y)');
+----
+7	0
+
+query II
+FROM rollup_diff('ts_forecast_agg(ds, y, ''ETS'', 7, {''seasonal_period'': 7})');
+----
+7	0
+
+query II
+FROM rollup_diff('ts_detect_changepoints_agg(ds, y, MAP{})');
+----
+7	0
+
+query II
+FROM rollup_diff('ts_detect_periods_agg(ds, y)');
+----
+7	0
+
+query II
+FROM rollup_diff('ts_classify_seasonality_agg(ds, y, 7)');
+----
+7	0
+
+# GROUPING SETS and CUBE spellings
+query I
+SELECT count(*) FROM (
+    SELECT region, store, ts_stats_agg(ds, y)::VARCHAR FROM gs GROUP BY GROUPING SETS ((region, store), (region), ())
+    EXCEPT ALL
+    SELECT region, store, v FROM (
+        SELECT region, store, ts_stats_agg(ds, y)::VARCHAR AS v FROM gs GROUP BY region, store
+        UNION ALL SELECT region, NULL, ts_stats_agg(ds, y)::VARCHAR FROM gs GROUP BY region
+        UNION ALL SELECT NULL, NULL, ts_stats_agg(ds, y)::VARCHAR FROM gs));
+----
+0
+
+# CUBE adds the per-store level without region (same rows as per (region, store), keyed by store only)
+query II
+SELECT count(*), count(*) FILTER (WHERE region IS NULL AND store IS NOT NULL)
+FROM (SELECT region, store, ts_forecast_agg(ds, y, 'Naive', 3, MAP{}) AS f FROM gs GROUP BY CUBE(region, store));
+----
+11	4
+
+query I
+SELECT count(*) FROM (
+    SELECT store, f::VARCHAR FROM (SELECT region, store, ts_forecast_agg(ds, y, 'Naive', 3, MAP{}) AS f FROM gs GROUP BY CUBE(region, store))
+    WHERE region IS NULL AND store IS NOT NULL
+    EXCEPT ALL
+    SELECT store, ts_forecast_agg(ds, y, 'Naive', 3, MAP{})::VARCHAR FROM gs GROUP BY store);
+----
+0
+
+# --- hierarchy series: GROUP BY ds, ROLLUP(...) == ts_aggregate_hierarchy ---
+statement ok
+CREATE TABLE h_native AS SELECT unique_id, ds, round(y, 9) AS y FROM ts_aggregate_hierarchy((SELECT ds, y, region, store FROM gs), MAP{});
+
+statement ok
+CREATE TABLE h_rollup AS
+SELECT CASE WHEN GROUPING(region) = 1 THEN 'AGGREGATED' ELSE region END || '|' ||
+       CASE WHEN GROUPING(store) = 1 THEN 'AGGREGATED' ELSE store END AS unique_id,
+       ds, round(SUM(y), 9) AS y
+FROM gs GROUP BY ds, ROLLUP(region, store);
+
+query III
+SELECT (SELECT count(*) FROM h_native),
+       (SELECT count(*) FROM (FROM h_native EXCEPT ALL FROM h_rollup)),
+       (SELECT count(*) FROM (FROM h_rollup EXCEPT ALL FROM h_native));
+----
+1440	0	0
+
+# and forecasting every level from it in one statement
+query II
+SELECT count(DISTINCT unique_id), count(*)
+FROM ts_forecast_by('h_rollup', unique_id, ds, y, 'Naive', 7, '1d');
+----
+7	49

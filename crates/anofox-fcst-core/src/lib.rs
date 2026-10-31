@@ -26,6 +26,8 @@ pub mod stl;
 pub mod supsmu;
 pub mod validation;
 
+mod template_match;
+
 // Shared fixture loader (std + serde_json only) from
 // crates/anofox-fcst-core/tests/common/mod.rs, compiled into the library's
 // own cfg(test) build so inline #[cfg(test)] blocks (e.g. forecast.rs's
@@ -42,8 +44,9 @@ pub use bootstrap::{
 };
 pub use calendar::{detect_step, future_dates, CalendarStep, ONE_DAY_MICROS};
 pub use changepoint::{
-    bocpd_trace, detect_changepoints, detect_changepoints_bocpd, robust_noise_scale, BocpdResult,
-    BocpdTrace, ChangepointResult, CostFunction,
+    bocpd_trace, deseasonalize_for_changepoints, detect_changepoints, detect_changepoints_bocpd,
+    detect_changepoints_bocpd_with_options, robust_noise_scale, BocpdResult, BocpdTrace,
+    ChangepointOptions, ChangepointResult, CostFunction,
 };
 pub use conformal::{
     // New Learn/Apply API (v2)

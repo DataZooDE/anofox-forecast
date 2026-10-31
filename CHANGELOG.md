@@ -10,9 +10,171 @@ use the semver numbering this project started with.
 
 ## [Unreleased]
 
-No SQL signature or numeric output changes.
+## [2026.10.31] - 2026-10-31 — DuckDB 2.0 features, contract outputs, faster stats
+
+### Changed — build and distribution
+
+- **DuckDB v1.4.5 LTS is no longer built or published.** CI now builds the v2.0.0 and v1.5.6
+  lines only, aligned with anofox-statistics: pull requests run a linux_amd64 fast lane (the
+  full platform matrix runs on `main`, tags, manual dispatch and PRs labelled `full-ci`),
+  deploys require a passing smoke test, and a non-blocking ASAN/UBSAN job and Rust coverage
+  report were added. Existing v1.4.5 binaries on get.erpl.io stay as the last builds for that
+  line. Windows builds keep shipping for both remaining lines.
+
+No signature changes. `ts_fill_forward_operator` changes implementation and now
+returns the source table's column names and types (previously always
+`group_col`/`date_col`/`value_col`, `TIMESTAMP`/`DOUBLE`).
+
+### Added
+
+- **anofox integration contract (#279).** `anofox_contract_version()` returns `'1'`
+  (registered only if no other anofox extension already did, so anofox_statistics and
+  anofox_forecast load together). Every function carries the `duckdb_functions()` tag
+  `anofox.family = 'forecast'`; 19 result producers also carry `anofox.contract = '1'` and
+  `anofox.output` (`prediction`, `test`, `summary`, `events`, `decomposition`, `obs`, `cv`) --
+  see `docs/api/00-api-design.md`. `ts_adf`, `ts_kpss`, `ts_ljung_box` and `ts_jarque_bera`
+  (and their `_by` macros) append `method` to their result STRUCT, so every test row is
+  self-describing.
+
+- **Long-form companions for list outputs (#282).** Each wraps the existing producer and maps
+  its lists back to the caller's group and date columns: `ts_mstl_decomposition_long_by`
+  (`component`, `value`: observed / trend / seasonal_<p> / remainder), `ts_detrend_long_by`,
+  `ts_detect_peaks_long_by` (one row per peak, events-compatible), `ts_detect_periods_long_by`
+  (one row per period candidate), `ts_forecast_fitted_by` (in-sample `y, fitted, residual`
+  per row, the long form of `ts_forecast_agg`'s lists) and `ts_forecast_explain_long_by`
+  (one row per step and component, with `ts_forecast_by`'s `ds`).
+- **`ts_forecast_explain_by` fills `residual` (#282).** Previously always NULL; now
+  `yhat - (level + trend + seasonal + named components)` from the same fitted model, so the
+  components plus the residual reconstruct the point forecast.
+
+- **Contract prediction columns on forecast and conformal outputs (#280).** Appended after
+  the existing columns, which keep their names, types and positions:
+  - `level` (interval coverage as a fraction, `NULL` without an interval) on
+    `ts_forecast_by`, `ts_forecast_ensemble_by`, `ts_cv_forecast_by`, `ts_forecast_exog_by`,
+    `ts_conformal_by` and `ts_conformal_apply_by`. Forecasts at two levels now stack into
+    nested fans with `UNION ALL`.
+  - `yhat`, `yhat_lower`, `yhat_upper` on `ts_conformal_by` and `ts_conformal_apply_by`
+    (the same values as `point`, `lower`, `upper`).
+  - `ds` on `ts_forecast_exog_by` (the same value as `date`).
+  - `id`, `yhat`, `yhat_lower`, `yhat_upper`, `model_name` and `level` on
+    `ts_forecast_var_by` (`id` = `variable`, `yhat` = `forecast_value`; VAR has no
+    interval, so the bounds and `level` are `NULL`).
+  - The internal `_ts_forecast` / `_ts_forecast_exog` result STRUCT gains a trailing
+    `level` field.
+  - An `INSERT INTO t SELECT * FROM <one of these>` into a table created with the old
+    column list now has more values than columns; select the stored columns explicitly
+    (or `ALTER TABLE t ADD COLUMN ...` for the new ones).
+
+- **`ts_metrics_by` (#281).** Long-form forecast accuracy metrics: one row per group and
+  metric, `<group columns>, metric, value` (the anofox contract `summary` schema). `metrics`
+  (default `['mae','mse','rmse','mape','smape','r2','bias']`) may also include `'mase'`
+  (with `seasonal_period`, as `ts_mase_by`). Values equal the wide one-metric macros, which
+  stay unchanged.
+
+- **`ts_detect_changepoints_events_by` (#283).** Changepoints as events: one row per
+  detected changepoint, `<group_col>, <date_col>, kind = 'changepoint', severity, value`
+  (the anofox contract `events` schema). Same detection and `params` MAP as
+  `ts_detect_changepoints_by`; `value` is the changepoint probability and `severity` is
+  `'alarm'` when it is at least 0.5, else `'warning'`.
+
+- **`ts_durbin_watson` / `ts_durbin_watson_by` return `p_value` and `method` (#284).**
+  Two fields appended to the result STRUCT: `p_value`, an approximate two-sided p-value
+  for H0 "no first-order autocorrelation" (normal approximation with the exact null
+  moments of the statistic, as R `lmtest::dwtest(exact = FALSE)`; `NaN` for `n < 3`), and
+  `method = 'Durbin-Watson'`. `ts_residual_diagnostics` / `_by` append the same p-value as
+  `dw_p_value`. Existing fields keep their names, types and positions.
+
+- **`ts_detect_changepoints_by` and `ts_detect_changepoints_agg` gain `threshold`,
+  `deseasonalize` and `seasonal_period` params MAP keys (#287).** `threshold`
+  (optional, `[0, 1]`): when set, `is_changepoint = (changepoint_probability >=
+  threshold)` for every row after the first of each series (the first row is never
+  flagged); when unset, the existing MAP run-length-reset heuristic applies.
+  `deseasonalize` (strict bool, default `false`, opt-in only): removes the STL
+  seasonal component at `seasonal_period` (or the auto-detected period) AND a
+  linear trend before BOCPD, so a regular seasonal cycle stops producing
+  changepoints while a genuine level shift still survives as a step. When
+  `deseasonalize` is `true` and `threshold` is left unset, the *effective*
+  threshold defaults to `0.5` (decided in Rust, so both SQL surfaces inherit it)
+  instead of falling back to the MAP run-length-reset heuristic, which floods the
+  series with spurious changepoints once the dominant seasonal variance is
+  removed; an explicit `threshold` always wins over this default (code review
+  CR-02).
+  `seasonal_period` (strict non-negative integer, default `0` = auto-detect via
+  `ts_detect_periods_by`'s FFT primary period; only consulted when `deseasonalize`
+  is `true`). Both functions parse this params MAP through one shared C++ header
+  and decide `is_changepoint`/`changepoint_probability` through one Rust function,
+  so they return identical rows for identical inputs and params. Defaults with
+  `deseasonalize` unset/`false` are unchanged (pinned by md5 in
+  `test/sql/correctness/detection_decomposition.test`).
+
+- **Rolling-origin forecasts as window functions (#297).** `ts_forecast_agg(...) OVER (...)`
+  over sliding or expanding frames fits one forecast per frame, and each frame equals a GROUP BY
+  over its rows. A frame too short to fit reports in `error_message` instead of failing the
+  query. Works on DuckDB 1.5 and 2.0.
+- **Exportable aggregate states (#298, DuckDB 2.0).** `ts_forecast_agg` and `ts_stats_agg` support
+  `EXPORT_STATE`, `combine_aggr` and `finalize`, so partial states can be stored and merged later.
+  DuckDB 1.5 refuses `EXPORT_STATE` for these aggregates.
+- **ROLLUP / GROUPING SETS / CUBE (#299).** Every aggregate gives correct per-level results, and
+  `docs/api/02-hierarchical.md` has a ROLLUP hierarchy recipe that equals `ts_aggregate_hierarchy`.
+- **`params` in any form (#300).** STRUCT (the documented form), MAP, VARIANT, MAP(VARCHAR, VARIANT)
+  and the empty `{}` work everywhere. `ts_forecast_agg` and `ts_detect_changepoints_agg` accept
+  STRUCT too (their `params` widened from MAP to ANY).
+- **Monitoring with triggers (#302) and SQL variables (#303).** New guide
+  `docs/guides/04-monitoring-with-triggers.md` (interval-breach alerts, stale-series refresh on
+  DuckDB 2.0). Variables work in every argument, including `$name` on 2.0.
+- **DuckDB 2.0 benchmark (#296).** `benchmark/duckdb2/` compares v1.5.6 with v2.0.0 interleaved and
+  checksummed: 2.0 is 8–32% faster where the engine does the work, and within ±5% where the model
+  fit dominates.
+
+### Deprecated
+
+- **`ts_fill_forward_operator` and its `anofox_fcst_ts_fill_forward_operator`
+  alias are deprecated and will be removed in the next release.** Use
+  `ts_fill_forward_by` with column references instead (same signature:
+  source table name, group, date, value, target date, frequency).
 
 ### Changed
+
+- **anofox-forecast crate 0.16.2 → 0.19.0 (#259, #227, #258).** 0.19.0 adds incremental model
+  updates and compact model state at the crate level (no extension changes yet). 0.18.1 stops the Laplace model
+  leaking a label string on every call (found by the ASAN job). 0.18.0 adds a conditioning-aware
+  ridge backend at the crate level (#258), built on anofox-regression 0.7. 0.17.0: AutoETS no longer
+  extrapolates one-off spikes as a trend. On a series with a spiky tail or more than
+  20% zeros it considers only trend-free models, and caps tail spikes at 3× their
+  seasonal-position median. On the intermittent snapshot series, AutoETS / ETS now
+  select `(A,N,N)` instead of `(A,A,N)`. Series that are neither spiky nor
+  intermittent forecast exactly as before.
+- **Changepoint detection deseasonalizes clearly seasonal series by default (#287).**
+  The `deseasonalize` param of `ts_detect_changepoints_by`, `ts_detect_changepoints_agg`,
+  `ts_detect_changepoints` and `ts_detect_changepoints_events_by` now defaults to `auto`.
+  A series counts as clearly seasonal when it has a usable period (given, or FFT-detected
+  with confidence ≥ 10), spans at least 3 cycles, and has STL seasonal strength ≥ 0.5.
+  Such a series is deseasonalized and detrended before BOCPD, with an effective threshold
+  of 0.5, so a weekly or monthly cycle is no longer reported as a run of changepoints.
+  On the #287 panel, only B's real level shift (2024-02-20) is flagged instead of every
+  weekly trough. Non-seasonal series run on the raw values exactly as before (on simulated
+  noise, trend and step series the gate never fires). `'deseasonalize': 'false'`
+  restores the previous output byte for byte; `true` keeps forcing it on.
+- **`ts_stats` is sub-quadratic in series length (#304): 160,000 rows take ~0.9 s
+  instead of ~44 s, and a 1,000,000-row series finishes in ~6.5 s.**
+  - Approximate / sample entropy (`ts_stats` `entropy`, `ts_features`
+    `sample_entropy` / `approximate_entropy`) counts template matches with exact
+    rank-space range counting: values are unchanged (bit-identical counts).
+  - Default period detection (`detect_seasonality`, also used for automatic
+    seasonal periods in forecasting) computes the autocorrelation by FFT when
+    `n * max_lag >= 4096 * 2048`; ACF values agree with direct sums to ~1e-12.
+  - `stability` slides its rolling-window sum (compensated) from 4,096 rows on.
+  Shorter series keep the previous code paths, so their results are unchanged.
+- **`ts_aggregate_hierarchy` is ~10x faster (#305).** It reads the input vectors
+  directly, interns each key tuple once, and aggregates (unique_id, date) cells in
+  flat arrays instead of nested `std::map`s: 10,000 series x 365 days x 3 key levels
+  takes ~1.1 s instead of ~12 s. Output rows, order and sums are unchanged.
+- **`ts_detect_amplitude_modulation`'s seasonality gate and `seasonal_strength` now
+  use the same STL strength as `ts_stats_by` / `ts_classify_seasonality_by` (#286),
+  not fdars's own raw-series spectral strength.** Below the (default 0.3) threshold,
+  or with no usable period, it now returns `NonSeasonal` directly without running the
+  wavelet analysis; `seasonal_strength` is `NaN` when no usable period exists (the
+  output struct is unchanged; only values differ).
 
 - **DuckDB v2.0.0 is now the stable build line.** The `duckdb` submodule is pinned to
   v2.0.0 and `extension-ci-tools` to v2.0-cyanoptera, so a local `make release` builds
@@ -24,13 +186,158 @@ No SQL signature or numeric output changes.
 - **WASM runtime test stays on the v1.5.6 artifact.** No `@duckdb/duckdb-wasm` npm
   build bundles a DuckDB v2.0.0 engine yet (the newest, 1.33.1-dev65.0, bundles
   v1.5.6). The Node harness moves to the stable line when one ships.
+- **`wasm_mvp` keeps shipping (#272).** `wasm_mvp` was measured against the v1.5.6
+  engine: it LOADs and the full 94-file suite shows zero `wasm_mvp`-only failures
+  versus `wasm_eh`. A `ReferenceError: _setThrew is not defined` console error is
+  a non-fatal, upstream `@duckdb/duckdb-wasm` defect (its own JS glue never binds
+  `_setThrew` to the main module's `setThrew` export, on either bundle); it never
+  failed a query result in any measurement. The post-upload deploy check now
+  LOADs `wasm_mvp` too (not just `wasm_eh`), so a real future regression still
+  blocks the deploy. See `docs/distribution/get-erpl-io.md` for the full
+  measurement, root-cause, and decision record, and for the bucket owner's
+  handover (CORS rule, stale paths, redeploy steps).
 
 ### Fixed
+
+- **`ts_*_agg` aggregates crashed as window functions (#294).** All seven read the state vector
+  as flat, but window evaluation passes a constant or dictionary vector. They now read it through
+  `UnifiedVectorFormat`. This affected DuckDB 1.5 as well.
+- **A top-level VARIANT `params` was silently ignored (#300).** Every key, unknown ones included,
+  had no effect. It is now unwrapped on 2.0 and raises a clear error on 1.5.
+- **`ts_features_agg` gave last-bit-different results between runs (#299).**
+  `permutation_entropy` and the reoccurring-value sums added floats in HashMap order; they now use
+  a deterministic order.
+
+- **DuckDB-Wasm (`wasm_eh`): Rust code computed wrong results (#289).**
+  `ts_fill_forward_by` returned unfilled series, filled from 1970, or aborted on
+  hourly frequencies, but only in DuckDB-Wasm. WASM builds pinned Rust 1.86, whose
+  emscripten target uses JS-based exception handling (`invoke_*` trampolines). That
+  breaks inside a native-exception `wasm_eh` module. `wasm_eh` now builds its Rust
+  code with Rust 1.96 (native wasm exceptions), and the link declares its target
+  features explicitly so emsdk 3.1.71's binaryen accepts the module. The WASM
+  allocator also no longer returns 4-byte-aligned i64/f64 arrays.
+  `ts_fill_forward_native.test` is back in the WASM harness, which now runs 12
+  files and 540 assertions.
+
+- **`ts_detect_changepoints_agg` silently ignored its entire `params` MAP
+  (#287).** Its "Parse params MAP if valid" block was empty, so `hazard_lambda`
+  (and every other key) stayed hardcoded at the default `250.0` regardless of
+  what was passed, while `ts_detect_changepoints_by` parsed the same key through
+  its own parser -- the two consumers could silently disagree on identical
+  inputs. Both now share one C++ params parser (`ts_changepoints_params.hpp`)
+  and one Rust decision function, so they return identical rows for identical
+  inputs and params; on a repro panel, `ts_detect_changepoints_agg(..,
+  MAP{'hazard_lambda': '50'})` now flags 8/6/6 changepoints across the panel's
+  three series (previously 6/2/6, i.e. unaffected by `hazard_lambda`).
+  `ts_detect_changepoints_agg`'s `is_changepoint` decision rule is also now
+  identical to `ts_detect_changepoints_by`'s -- previously it could leave a row
+  unflagged even at `changepoint_probability = 0.996`. `ts_detect_periods_by`
+  returning `primary_period = 7.0` on the #287 panel (already correct on main)
+  is now pinned by a regression test, closing out #287 end to end.
+
+- **The 11 metric macros returned NULL, or a value computed on part of the rows,
+  when the source was a UNION ALL (#285).** `ts_mae_by`, `ts_mse_by`, `ts_rmse_by`,
+  `ts_mape_by`, `ts_smape_by`, `ts_r2_by`, `ts_bias_by`, `ts_mase_by`, `ts_rmae_by`,
+  `ts_coverage_by` and `ts_quantile_loss_by` collect their input and compute at the
+  end. A UNION ALL (or another multi-pipeline subquery) feeds that step through
+  several pipelines, and the first pipeline to finish computed the results before the
+  other branch's rows arrived: `ts_mase_by` on the #285 panel returned NULL, and
+  `ts_mae_by` over a `y + 1` branch UNION ALL a `y + 3` branch returned exactly 1.0
+  (only the first branch). They now give the same result for every row order and plan
+  shape; `ts_mase_by` on the #285 panel matches R `forecast::accuracy`. Signatures and
+  output columns are unchanged. Cost: each call now sorts its source once
+  (`ORDER BY ALL`) to give the computation a single input pipeline, about 0.04 s per
+  1M rows in our measurement.
+  The same silent partial input hit the detection, statistics and data-preparation
+  macros `ts_detect_changepoints_by`, `ts_stats_by`, `ts_fill_gaps_by`,
+  `ts_fill_forward_by` (and the deprecated `ts_fill_forward_operator` over it) and
+  `ts_mstl_decomposition_by` when the source table name was a UNION ALL view: on a
+  3-series view of 45 rows per series, `ts_detect_changepoints_by` returned 31 rows
+  per series and `ts_fill_gaps_by` 93 of 252. They now read their whole source
+  (`ORDER BY ALL` single-pipeline input) and give identical results for UNION ALL,
+  reversed and shuffled sources. Signatures, output columns and default changepoint
+  outputs are unchanged.
+  The feature, cross-validation, panel and VAR macros had the same defect:
+  `ts_features_by`, `ts_cv_folds_by`, `ts_cv_split_by`, `ts_cv_hydrate_by`,
+  `ts_cv_forecast_by`, `ts_forecast_panel_by` and `ts_forecast_var_by`. On a UNION ALL
+  source (or fold table) they computed on part of the rows: `ts_features_by` reported a
+  length of 31 of 45, `ts_cv_folds_by` returned 171 of 255 fold rows,
+  `ts_cv_forecast_by` returned 0 of 30 forecasts, and `ts_forecast_panel_by` and
+  `ts_forecast_var_by` fitted on the first branch only. Backtests built on such
+  sources were therefore silently wrong. These macros now read their whole input
+  through the same `ORDER BY ALL` single-pipeline step. They give identical results
+  for UNION ALL, reversed and shuffled sources, and their signatures and output
+  columns are unchanged. `ts_forecast_panel_by` also fitted its shared model with the
+  series in arrival order, so on large panels its forecasts changed slightly from run
+  to run (on a 2000-series panel, the sum of the 6000 forecasts moved by about
+  0.0006). It now orders the series by group key, so it returns the same result on
+  every run.
+  `ts_aggregate_hierarchy`, `ts_split_keys`, `ts_validate_separator` and the internal
+  `_ts_forecast_native` had the same defect, and had no macro wrapper to insert the
+  fix through (decisions_addendum_2's BUG-03 scope expansion): they are now table
+  macros with the same signatures and output columns, wrapping a renamed
+  `_ts_*_native` through the same `ORDER BY ALL` single-pipeline breaker.
+  `ts_forecast_by` itself (`GROUP BY` + `_ts_forecast_scalar`) was already correct
+  on UNION ALL sources -- it does not call `_ts_forecast_native` -- and is now
+  pinned against UNION ALL, reversed and shuffled sources; its speed is unchanged.
+  Measured on a 1M-row, 5000-series panel (median of 5 alternating runs against the
+  pre-fix build): the added sort costs at most about 0.02 s per call (`ts_mae_by`
+  0.242 -> 0.261 s, `ts_fill_gaps_by` 0.132 -> 0.148 s, `_ts_forecast_native`
+  Naive 0.401 -> 0.412 s).
+
+- **`ts_classify_seasonality_by` / `ts_classify_seasonality_agg` / `ts_classify_seasonality`
+  reported a strong weekly series as non-seasonal with the wrong strength (#286).** The
+  Rust `classify_seasonality` passed the raw, undetrended series straight to fdars's own
+  `classify_seasonality`, which measures variance explained on the raw series -- a
+  different formula from `ts_stats_by`'s STL-based `seasonality_strength`, and the two
+  disagreed on the same series (0.156 vs 0.966 on the #286 repro). `seasonal_strength`
+  (and the `is_seasonal`/`timing_classification` that depend on it) now come from the
+  same `stl_strengths` function `ts_stats_by` uses, at the rounded period; `cycle_strengths`,
+  `weak_seasons`, `has_stable_timing` and `timing_variability` are unaffected. A degenerate
+  series (no usable period, or zero seasonal variance) now reports `seasonal_strength` as
+  SQL `NULL` (previously `NaN`), matching `ts_stats_by`'s own NULL semantics.
 
 - **Post-build smoke test on DuckDB v2.0.0.** v2.0.0 renamed its CLI release assets
   from `duckdb_cli-<os>-<arch>.zip` to `duckdb-cli-<os>-<arch>.tar.gz`.
   `scripts/smoke_test.py` now tries the new tarball first and falls back to the legacy
   zip, so one script serves all three lines.
+- **WASM artifacts on get.erpl.io carried two `duckdb_signature` sections and failed
+  to LOAD (#272).** `extension-upload.sh` used to unconditionally append a second
+  `duckdb_signature` custom section to every WASM artifact instead of overwriting
+  the placeholder inside the existing one, like the native path already did.
+  `extension-upload.sh` now replaces the signature in place for WASM too, guarded
+  by pre- and post-upload section-count checks (`scripts/wasm_signature_sections.py`)
+  that abort rather than ever produce a double-signed artifact. The deploy job
+  (`_extension_deploy.yml`) now also verifies every artifact it just uploaded:
+  section count for every WASM arch, and a real DuckDB-Wasm LOAD via the Node
+  harness for `v1.5.6` `wasm_eh` and `wasm_mvp` (`scripts/verify-wasm-artifact.sh`,
+  `scripts/extension-verify-upload.sh`). Any failure fails the deploy job.
+- **`ts_fill_forward_operator` hung natively and trapped DuckDB-Wasm (#289).** The
+  old native C++ table function ran a nested query from its `InitGlobal`, which hung
+  natively and trapped the DuckDB-Wasm instance; it also interpolated identifiers
+  unquoted via `StringUtil::Format` (breaking on reserved words or names with
+  spaces) and ignored the `frequency` argument (always forward-filled at one day).
+  It is now a table macro delegating to `ts_fill_forward_by`, which fixes all three:
+  the macro binder resolves column names via `COLUMNS([param])` (no SQL text is
+  built from user input), and `frequency` is honoured.
+- **`ts_features_list()` / `ts_features_config_template()` trapped DuckDB-Wasm
+  with "memory access out of bounds" (#289).** Two independent defects, both
+  specific to these two zero-argument catalog functions: (1) the FFI
+  feature-name array is allocated with this crate's own allocator shim (a
+  size-prefixed `std::alloc` shim on WASM, required because WASM has no
+  libc `free()` that carries its own size metadata), but C++ released it with
+  raw libc `free()`, corrupting the Emscripten heap on wasm32; (2) wrapping
+  both catalog functions' bind/execute pairs in the `DATAZOO_GUARD` error-hint
+  macro at the same time made the wasm_eh build miscompile, apparently a WASM
+  toolchain code-folding defect merging `GuardedFunction<...>::Call`
+  instantiations that share a signature but differ only in the baked-in
+  function pointer. Fixed by releasing the array through a new, paired
+  `anofox_free_ts_features_list` FFI function, and by no longer wrapping
+  these two functions in `DATAZOO_GUARD` (neither throws). Also: re-executing
+  a prepared statement over either function returned 117 rows then 0 on the
+  second `EXECUTE` (the output cursor lived in bind data, which is immutable
+  per-execution); state now lives in `init_global`, fixing this on every
+  target including native.
 
 ## [2026.10.22] - 2026-10-22 — macOS build on DuckDB v2.0.0
 

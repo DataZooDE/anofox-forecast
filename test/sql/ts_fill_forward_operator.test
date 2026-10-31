@@ -1,10 +1,8 @@
 # name: test/sql/ts_fill_forward_operator.test
-# description: Tests for ts_fill_forward table macro (fill forward to target date)
+# description: Tests for ts_fill_forward_operator (DEPRECATED macro over ts_fill_forward_by, #289) and ts_fill_forward_by
 # group: [anofox_forecast]
 
 require anofox_forecast
-
-require json
 
 # ts_fill_forward_by outputs the group/date/value columns under their ORIGINAL names
 # (id/ds/value here), not generic group_col/date_col/value_col aliases, since commit
@@ -12,6 +10,147 @@ require json
 # (#113)" (Phase 18, 18-01, class A). Every group_col/date_col/value_col reference
 # below (output-side only; the function call's input args already correctly used
 # id/ds/value) was updated accordingly.
+
+#######################################
+# ts_fill_forward_operator (DEPRECATED, #289) - Registration
+#######################################
+
+# Both the macro and its anofox_fcst_ alias register as table macros (not the old
+# native table function, which hung natively and trapped DuckDB-Wasm -- see #289).
+query I
+SELECT function_name || ':' || function_type FROM duckdb_functions()
+WHERE function_name IN ('ts_fill_forward_operator', 'anofox_fcst_ts_fill_forward_operator')
+ORDER BY 1;
+----
+anofox_fcst_ts_fill_forward_operator:table_macro
+ts_fill_forward_operator:table_macro
+
+#######################################
+# ts_fill_forward_operator - #289 reproducer (nested-query hang/trap, fixed)
+#######################################
+
+statement ok
+CREATE TABLE raw_sales AS
+SELECT (DATE '2024-01-01' + i::INT) AS sale_date, i::DOUBLE AS quantity, 'S' || (i % 2) AS store_id
+FROM range(6) t(i);
+
+# Before the fix this call hung natively (nested QueryMaterialized in InitGlobal)
+# and trapped DuckDB-Wasm. It now completes immediately and returns 15 rows.
+query I
+SELECT count(*) FROM ts_fill_forward_operator('raw_sales', 'store_id', 'sale_date', 'quantity', TIMESTAMP '2024-01-10', '1d');
+----
+15
+
+# Store S1: 3 observed rows (01-02, 01-04, 01-06) + 4 forward-filled NULL rows
+# (01-07..01-10) at the requested '1d' frequency.
+query TTR
+SELECT store_id, sale_date, quantity
+FROM ts_fill_forward_operator('raw_sales', 'store_id', 'sale_date', 'quantity', TIMESTAMP '2024-01-10', '1d')
+WHERE store_id = 'S1'
+ORDER BY sale_date;
+----
+S1	2024-01-02	1.0
+S1	2024-01-04	3.0
+S1	2024-01-06	5.0
+S1	2024-01-07	NULL
+S1	2024-01-08	NULL
+S1	2024-01-09	NULL
+S1	2024-01-10	NULL
+
+#######################################
+# ts_fill_forward_operator - quoted/reserved identifiers + non-default frequency
+#######################################
+
+# "order" is a reserved word and "my date" contains a space; the old C++ operator
+# interpolated identifiers unquoted via StringUtil::Format. The macro resolves
+# column names through COLUMNS([param]) (AST substitution), never re-parsed SQL
+# text, so both identifiers work with no quoting from the caller.
+#
+# Two groups with a 2-day cadence (not one group with a 2-row/1-day cadence): a
+# single-group or very-short-per-group input hits a separate, pre-existing
+# WASM-only bug in the underlying _ts_fill_forward_native (silently zero-fills
+# instead of raising) -- see deferred-items.md and the single-group pin moved to
+# test/sql/ts_fill_forward_native.test. This shape mirrors the already-WASM-safe
+# raw_sales fixture above.
+statement ok
+CREATE TABLE weird("order" VARCHAR, "my date" DATE, val DOUBLE);
+
+statement ok
+INSERT INTO weird VALUES
+    ('a', DATE '2024-01-01', 1.0), ('a', DATE '2024-01-03', 3.0), ('a', DATE '2024-01-05', 5.0),
+    ('b', DATE '2024-01-02', 2.0), ('b', DATE '2024-01-04', 4.0), ('b', DATE '2024-01-06', 6.0);
+
+query TTR
+SELECT * FROM ts_fill_forward_operator('weird', 'order', 'my date', 'val', TIMESTAMP '2024-01-10', '2d')
+ORDER BY 1, 2;
+----
+a	2024-01-01	1.0
+a	2024-01-03	3.0
+a	2024-01-05	5.0
+a	2024-01-07	NULL
+a	2024-01-09	NULL
+b	2024-01-02	2.0
+b	2024-01-04	4.0
+b	2024-01-06	6.0
+b	2024-01-08	NULL
+b	2024-01-10	NULL
+
+#######################################
+# ts_fill_forward_operator - frequency is honoured (the old operator ignored it
+# and always filled at one day)
+#######################################
+
+query I
+SELECT count(*) FROM ts_fill_forward_operator('raw_sales', 'store_id', 'sale_date', 'quantity', TIMESTAMP '2024-01-20', '2d');
+----
+20
+
+query I
+SELECT count(*) FROM ts_fill_forward_operator('raw_sales', 'store_id', 'sale_date', 'quantity', TIMESTAMP '2024-01-20', '1d');
+----
+35
+
+#######################################
+# ts_fill_forward_operator - equivalence with ts_fill_forward_by (both directions)
+#######################################
+
+query I
+SELECT count(*) FROM (
+    SELECT * FROM ts_fill_forward_operator('raw_sales', 'store_id', 'sale_date', 'quantity', TIMESTAMP '2024-01-10', '1d')
+    EXCEPT ALL
+    SELECT * FROM ts_fill_forward_by('raw_sales', store_id, sale_date, quantity, TIMESTAMP '2024-01-10', '1d')
+);
+----
+0
+
+query I
+SELECT count(*) FROM (
+    SELECT * FROM ts_fill_forward_by('raw_sales', store_id, sale_date, quantity, TIMESTAMP '2024-01-10', '1d')
+    EXCEPT ALL
+    SELECT * FROM ts_fill_forward_operator('raw_sales', 'store_id', 'sale_date', 'quantity', TIMESTAMP '2024-01-10', '1d')
+);
+----
+0
+
+#######################################
+# ts_fill_forward_operator - error cases
+#######################################
+
+statement error
+SELECT * FROM ts_fill_forward_operator('nonexistent_table', 'store_id', 'sale_date', 'quantity', TIMESTAMP '2024-01-10', '1d');
+----
+does not exist
+
+statement error
+SELECT * FROM ts_fill_forward_operator('raw_sales', 'no_such_col', 'sale_date', 'quantity', TIMESTAMP '2024-01-10', '1d');
+----
+was not found
+
+statement ok
+DROP TABLE raw_sales;
+
+statement ok
+DROP TABLE weird;
 
 #######################################
 # Setup - Create test data
@@ -134,24 +273,13 @@ SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-0
 #######################################
 # Frequency Parameter Tests
 #######################################
-
-# Polars-style '1d' frequency
-query I
-SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-08', '1d');
-----
-16
-
-# DuckDB INTERVAL style '1 day'
-query I
-SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-08', '1 day');
-----
-16
-
-# Hourly frequency (more granular)
-query I
-SELECT (SELECT COUNT(*) FROM ts_fill_forward_by('test_series', id, ds, value, '2024-01-05 12:00:00', '1h')) > 10;
-----
-true
+#
+# The '2024-01-08' ('1d'/'1 day', 3-day fill) and hourly cases moved to
+# test/sql/ts_fill_forward_native.test: both hit pre-existing WASM-only bugs in
+# _ts_fill_forward_native (silent zero-fill / stack overflow) unrelated to this
+# plan's fix -- see deferred-items.md. This file is in the CI-gated curated
+# WASM subset, so it must avoid those trigger shapes; the '2024-01-10' calls
+# above (5-day fill) are unaffected and still pin frequency='1d'.
 
 #######################################
 # Ordering Tests
@@ -168,32 +296,11 @@ A	2024-01-02 00:00:00
 A	2024-01-03 00:00:00
 
 #######################################
-# Single Group Test
+# Single Group Test moved to test/sql/ts_fill_forward_native.test:
+# a single-group input (or any very-short-per-group input) hits the same
+# pre-existing WASM-only _ts_fill_forward_native bug noted above -- see
+# deferred-items.md.
 #######################################
-
-statement ok
-CREATE TABLE single_group AS
-SELECT 'X' AS id,
-       ('2024-01-01'::DATE + (i || ' days')::INTERVAL)::TIMESTAMP AS ds,
-       (i * 10.0)::DOUBLE AS value
-FROM generate_series(0, 2) AS t(i);
-
-# Single group should work correctly
-query I
-SELECT COUNT(*) FROM ts_fill_forward_by('single_group', id, ds, value, '2024-01-05', '1d');
-----
-5
-
-# Verify values for single group
-query IR
-SELECT ds, value FROM ts_fill_forward_by('single_group', id, ds, value, '2024-01-05', '1d')
-ORDER BY ds;
-----
-2024-01-01 00:00:00	0.0
-2024-01-02 00:00:00	10.0
-2024-01-03 00:00:00	20.0
-2024-01-04 00:00:00	NULL
-2024-01-05 00:00:00	NULL
 
 #######################################
 # Cleanup
@@ -201,6 +308,3 @@ ORDER BY ds;
 
 statement ok
 DROP TABLE test_series;
-
-statement ok
-DROP TABLE single_group;

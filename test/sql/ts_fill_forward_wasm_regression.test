@@ -1,0 +1,66 @@
+# name: test/sql/ts_fill_forward_wasm_regression.test
+# description: #289 -- forward fills that were wrong only on DuckDB-Wasm (JS-exception Rust in a wasm_eh build).
+#              Expected values are the native results; CURATED in test/wasm/run.mjs.
+# group: [sql]
+
+require anofox_forecast
+
+statement ok
+CREATE TABLE t2 AS SELECT 'A' AS g, TIMESTAMP '2024-01-01' + INTERVAL (i) DAY AS d, i::DOUBLE AS v FROM range(2) r(i);
+
+# (a) 1 group x 2 rows, step == frequency
+query I
+SELECT count(*) FROM ts_fill_forward_by('t2', g, d, v, TIMESTAMP '2024-01-05', '1d');
+----
+5
+
+statement ok
+CREATE TABLE t6 AS SELECT 'A' AS g, TIMESTAMP '2024-01-01' + INTERVAL (i) DAY AS d, i::DOUBLE AS v FROM range(6) r(i);
+
+query I
+SELECT count(*) FROM ts_fill_forward_by('t6', g, d, v, TIMESTAMP '2024-01-09', '1d');
+----
+9
+
+# (b) 2 groups x 1 row each, frequency 2d
+statement ok
+CREATE TABLE small4 AS SELECT * FROM (VALUES ('S0', DATE '2024-01-01', 1.0), ('S1', DATE '2024-01-02', 2.0)) t(store_id, sale_date, quantity);
+
+query I
+SELECT count(*) FROM ts_fill_forward_by('small4', store_id, sale_date, quantity, TIMESTAMP '2024-01-08', '2d');
+----
+8
+
+# calendar frequencies on a monthly DATE series (native: 4 each)
+statement ok
+CREATE TABLE monthly AS SELECT 'A' AS g, (DATE '2024-01-31' + INTERVAL (i) MONTH)::DATE AS d, i::DOUBLE AS v FROM range(1) r(i);
+
+query I
+SELECT count(*) FROM ts_fill_forward_by('monthly', g, d, v, DATE '2024-04-30', '1mo');
+----
+4
+
+query I
+SELECT count(*) FROM ts_fill_forward_by('monthly', g, d, v, DATE '2024-10-31', '1q');
+----
+4
+
+query I
+SELECT count(*) FROM ts_fill_forward_by('monthly', g, d, v, DATE '2027-01-31', '1y');
+----
+4
+
+# TIMESTAMP + hourly
+statement ok
+CREATE TABLE hourly AS SELECT 'A' AS g, TIMESTAMP '2024-01-01' + INTERVAL (i) HOUR AS d, i::DOUBLE AS v FROM range(3) r(i);
+
+query I
+SELECT count(*) FROM ts_fill_forward_by('hourly', g, d, v, TIMESTAMP '2024-01-01 05:00:00', '1h');
+----
+6
+
+# the instance still works afterwards
+query I
+SELECT count(*) FROM ts_fill_forward_by('t2', g, d, v, TIMESTAMP '2024-01-05', '1d');
+----
+5

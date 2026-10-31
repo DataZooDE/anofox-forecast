@@ -114,6 +114,7 @@ Field order is fixed:
 | `cv_1pct` | `DOUBLE` | MacKinnon finite-sample critical value at 1%, depends on `nobs` and `regression` |
 | `cv_5pct` | `DOUBLE` | Critical value at 5% |
 | `cv_10pct` | `DOUBLE` | Critical value at 10% |
+| `method` | `VARCHAR` | Always `'ADF'` (appended in #279, so test STRUCTs are self-describing) |
 
 A degenerate/too-short series (e.g. `n < 4`) returns `statistic`/`p_value`/critical values
 all `NaN`, never a crash: `SELECT isnan((ts_adf([1.0, 2.0, 3.0]::DOUBLE[])).statistic)` → `true`.
@@ -220,7 +221,8 @@ FROM ts_kpss_by('sales', product_id, ds, y, regression := 'ct');
 - `ts_kpss_by(source, group_col, date_col, value_col [, lags := -1] [, regression := 'c']) → TABLE(group_col, kpss STRUCT(...))`
 
 **Returned STRUCT** — same layout as `ts_adf`: `statistic DOUBLE`, `p_value DOUBLE`,
-`lags BIGINT`, `is_stationary BOOLEAN`, `cv_1pct DOUBLE`, `cv_5pct DOUBLE`, `cv_10pct DOUBLE`.
+`lags BIGINT`, `is_stationary BOOLEAN`, `cv_1pct DOUBLE`, `cv_5pct DOUBLE`, `cv_10pct DOUBLE`,
+`method VARCHAR` (`'KPSS'`, appended in #279).
 For KPSS, `is_stationary = true` means the statistic is **below** the 5% critical
 value (fails to reject the stationarity null).
 
@@ -298,7 +300,7 @@ Ljung-Box white-noise test — the primary check for leftover autocorrelation in
 residuals. A small p-value means the residuals are **not** white noise (the model
 missed structure).
 
-- `ts_ljung_box(residuals LIST(DOUBLE) [, lags INTEGER [, fitted_params INTEGER]]) → STRUCT(statistic DOUBLE, p_value DOUBLE, lags BIGINT, df BIGINT)`
+- `ts_ljung_box(residuals LIST(DOUBLE) [, lags INTEGER [, fitted_params INTEGER]]) → STRUCT(statistic DOUBLE, p_value DOUBLE, lags BIGINT, df BIGINT, method VARCHAR)` (`method = 'Ljung-Box'`, appended in #279)
 - `ts_ljung_box_by(source, group_col, date_col, value_col [, lags := -1] [, fitted_params := 0])`
 
 Default `lags = min(10, n/5).max(1)`, then clamped to `n - 1`. `df = lags - fitted_params`:
@@ -341,7 +343,17 @@ Durbin-Watson first-order autocorrelation statistic: the closed form
 the closed-form fixture value (which matches this formula exactly on both the R and Rust
 sides) in `portmanteau_reference.rs#durbin_watson_matches_closed_form_for_every_portmanteau_case`.
 
-- `ts_durbin_watson(residuals LIST(DOUBLE)) → STRUCT(statistic DOUBLE, interpretation VARCHAR)`
+- `ts_durbin_watson(residuals LIST(DOUBLE)) → STRUCT(statistic DOUBLE, interpretation VARCHAR, p_value DOUBLE, method VARCHAR)`
+
+`p_value` (#284) is an **approximate** two-sided p-value for H0: no first-order
+autocorrelation. It is a normal approximation that uses the exact null mean and variance of
+the statistic for residuals taken as given (no regressors, no demeaning), the moment formula
+of R `lmtest::dwtest(exact = FALSE)`: `E[d] = 2(n-1)/n`,
+`Var[d] = 2((6n-8) - 2(n-1)E[d]) / (n(n+2))`, `p = 2·min(Φ(z), 1-Φ(z))`. It is `NaN` for
+`n < 3` or all-zero residuals. Verified against the R reference in
+`portmanteau_reference.rs#durbin_watson_p_value_matches_r_normal_approximation_for_every_portmanteau_case`
+and `test/sql/correctness/diagnostics.test`. `method` is always `'Durbin-Watson'`. Both
+fields are appended after the existing ones.
 
 `interpretation` is a heuristic label from fixed thresholds on `statistic`: `< 0.5` →
 `positive_strong`, `< 1.5` → `positive_weak`, `<= 2.5` → `none`, `< 3.5` → `negative_weak`,
@@ -354,7 +366,7 @@ p-value rejects normality. Matches R `tseries::jarque.bera.test` to ~1e-13 on fi
 reference series, verified in
 `portmanteau_reference.rs#jarque_bera_matches_tseries_for_every_r_diagnostics_series`.
 
-- `ts_jarque_bera(residuals LIST(DOUBLE)) → STRUCT(statistic DOUBLE, p_value DOUBLE, skewness DOUBLE, excess_kurtosis DOUBLE)`
+- `ts_jarque_bera(residuals LIST(DOUBLE)) → STRUCT(statistic DOUBLE, p_value DOUBLE, skewness DOUBLE, excess_kurtosis DOUBLE, method VARCHAR)` (`method = 'Jarque-Bera'`, appended in #279)
 
 ### `ts_residual_diagnostics` / `ts_residual_diagnostics_by` (RESID-04)
 
@@ -365,7 +377,8 @@ One-shot residual adequacy report combining all three tests.
 
 **Returned STRUCT**: `lb_statistic`, `lb_p_value`, `lb_lags`, `dw_statistic`,
 `dw_interpretation`, `jb_statistic`, `jb_p_value`, `jb_skewness`,
-`jb_excess_kurtosis`, `adequate BOOLEAN`.
+`jb_excess_kurtosis`, `adequate BOOLEAN`, `dw_p_value DOUBLE` (the approximate
+Durbin-Watson p-value above; appended in #284).
 
 **Adequacy rule**: `adequate = (lb_p_value > alpha)`, using the Ljung-Box gate with
 `fitted_params = 0` — the gate assumes raw residuals, not a model-corrected `df`. Durbin-Watson

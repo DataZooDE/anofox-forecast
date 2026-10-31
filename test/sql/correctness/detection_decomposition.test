@@ -143,6 +143,400 @@ SELECT (_ts_detect_changepoints_bocpd([100.0, 100.0, 100.0, 100.0, 100.0, 100.0,
 true
 
 # =============================================================================
+# #287 raw-path byte-identity pins (Phase 20, 20-03, T-20-08).
+# Captured on the pre-Phase-20-changepoint build (commit 21dfe7e, DuckDB v2.0.0).
+# Until #287 these were the DEFAULT outputs. The default is now
+# deseasonalize 'auto' (seasonal series are deseasonalized first; see the
+# block below), so the pins run with deseasonalize 'false', which must still
+# reproduce the pre-Phase-20 outputs byte for byte. The md5 covers id, date,
+# is_changepoint and the probability of every row rounded to 9 decimals: the
+# full-precision text differed in its last digits on the CI runners (sin/cos in the
+# fixture and libm/FMA differences across CPUs), so the full-precision pin only held
+# on the capturing machine. The rounded md5s were computed on a build whose
+# full-precision md5s still matched the captured pre-Phase-20 values
+# (40b71f3f.../30e6fc73...), so they pin the same outputs.
+# #287 panel: 3 series x 84 days, weekly seasonality, B +15 from day 50 (2024-02-20).
+# =============================================================================
+
+statement ok
+CREATE TABLE cp287 AS SELECT id, (TIMESTAMP '2024-01-01' + INTERVAL (i) DAY) AS ds, base + 0.3 * i + 5 * sin(2 * pi() * i / 7) + CASE WHEN id = 'B' AND i >= 50 THEN 15 ELSE 0 END + 1.6 * cos(i * 0.9) + 0.7 * sin(i * 1.7 + base) AS y FROM (VALUES ('A', 20.0), ('B', 40.0), ('C', 60.0)) t(id, base), range(84) r(i);
+
+query I
+SELECT md5(string_agg(id || '|' || ds || '|' || is_changepoint || '|' || round(changepoint_probability, 9)::VARCHAR, ',' ORDER BY id, ds)) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'false'});
+----
+083042b082bc53142e3232b612736daf
+
+query I
+SELECT md5(string_agg(id || '|' || ds || '|' || is_changepoint || '|' || round(changepoint_probability, 9)::VARCHAR, ',' ORDER BY id, ds)) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'hazard_lambda': '50', 'deseasonalize': 'false'});
+----
+d8674561e9f706fa44a924abacd94e87
+
+query I
+SELECT md5(string_agg(id || '|' || r.timestamp || '|' || r.is_changepoint || '|' || round(r.changepoint_probability, 9)::VARCHAR, ',' ORDER BY id, r.timestamp)) FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'deseasonalize': 'false'})) AS r FROM cp287 GROUP BY id);
+----
+083042b082bc53142e3232b612736daf
+
+# Readable form of the same raw-path outputs: flagged dates per series.
+
+query II
+SELECT id, string_agg(ds::DATE::VARCHAR, ',' ORDER BY ds) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'false'}) WHERE is_changepoint GROUP BY id ORDER BY id;
+----
+A	2024-01-22,2024-01-29,2024-02-05,2024-02-12,2024-02-19,2024-02-26
+B	2024-01-29,2024-02-20
+C	2024-01-22,2024-01-29,2024-02-05,2024-02-12,2024-02-19,2024-02-26
+
+query II
+SELECT id, string_agg(r.timestamp::DATE::VARCHAR, ',' ORDER BY r.timestamp) FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'deseasonalize': 'false'})) AS r FROM cp287 GROUP BY id) WHERE r.is_changepoint GROUP BY id ORDER BY id;
+----
+A	2024-01-22,2024-01-29,2024-02-05,2024-02-12,2024-02-19,2024-02-26
+B	2024-01-29,2024-02-20
+C	2024-01-22,2024-01-29,2024-02-05,2024-02-12,2024-02-19,2024-02-26
+
+query I
+SELECT round(max(changepoint_probability), 3) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'false'});
+----
+0.996
+
+# #287 default: deseasonalize 'auto'. All three series are clearly weekly
+# (STL strength >= 0.5 at period 7), so they are deseasonalized first and only
+# B's real level shift on 2024-02-20 is flagged, on both surfaces. 'auto' given
+# explicitly is the same as the default.
+
+query II
+SELECT id, string_agg(ds::DATE::VARCHAR, ',' ORDER BY ds) FILTER (is_changepoint) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{}) GROUP BY id ORDER BY id;
+----
+A	NULL
+B	2024-02-20
+C	NULL
+
+query II
+SELECT id, string_agg(r.timestamp::DATE::VARCHAR, ',' ORDER BY r.timestamp) FILTER (r.is_changepoint) FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{})) AS r FROM cp287 GROUP BY id) GROUP BY id ORDER BY id;
+----
+A	NULL
+B	2024-02-20
+C	NULL
+
+query I
+SELECT count(*) FROM (
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{})
+    EXCEPT ALL
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'auto'})
+);
+----
+0
+
+statement error
+SELECT count(*) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'maybe'});
+----
+must be true/false/1/0/auto
+
+# #287 agg/table parity (BUG-06): ts_detect_changepoints_agg previously
+# ignored its params MAP entirely (hazard_lambda stayed 250 regardless of
+# what was passed -- 20-RESEARCH.md probe: agg with MAP{'hazard_lambda':
+# '50'} and MAP{} both gave A 6 / B 2 / C 6 flagged). It now shares
+# ParseChangepointParamSet with ts_detect_changepoints_by (Phase 20 20-06),
+# so identical params give byte-identical rows on both surfaces for both
+# the default (MAP{}) and a non-default hazard_lambda.
+
+query I
+SELECT count(*) FROM (
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{})
+    EXCEPT ALL
+    SELECT id, r.timestamp, r.is_changepoint, r.changepoint_probability FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{})) AS r FROM cp287 GROUP BY id)
+);
+----
+0
+
+query I
+SELECT count(*) FROM (
+    SELECT id, r.timestamp, r.is_changepoint, r.changepoint_probability FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{})) AS r FROM cp287 GROUP BY id)
+    EXCEPT ALL
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{})
+);
+----
+0
+
+query I
+SELECT count(*) FROM (
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'hazard_lambda': '50'})
+    EXCEPT ALL
+    SELECT id, r.timestamp, r.is_changepoint, r.changepoint_probability FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'hazard_lambda': '50'})) AS r FROM cp287 GROUP BY id)
+);
+----
+0
+
+query I
+SELECT count(*) FROM (
+    SELECT id, r.timestamp, r.is_changepoint, r.changepoint_probability FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'hazard_lambda': '50'})) AS r FROM cp287 GROUP BY id)
+    EXCEPT ALL
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'hazard_lambda': '50'})
+);
+----
+0
+
+# Aggregate honours hazard_lambda: flagged count per id with hazard_lambda 50
+# on the raw series is 8/6/6 (previously ignored -> 6/2/6, per the
+# 20-RESEARCH.md probe above). deseasonalize 'false' keeps the raw path that
+# was pinned here before the #287 'auto' default.
+query I
+SELECT string_agg(id || ':' || cnt, ',' ORDER BY id) FROM (
+    SELECT id, count(*) FILTER (WHERE r.is_changepoint) AS cnt
+    FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'hazard_lambda': '50', 'deseasonalize': 'false'})) AS r FROM cp287 GROUP BY id)
+    GROUP BY id
+);
+----
+A:8,B:6,C:6
+
+# The aggregate's hazard_lambda=50 output differs from its MAP{} default,
+# proving the param is no longer ignored (previously identical).
+query I
+SELECT (
+    SELECT string_agg(id || '|' || r.timestamp || '|' || r.is_changepoint || '|' || r.changepoint_probability::VARCHAR, ',' ORDER BY id, r.timestamp)
+    FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'hazard_lambda': '50', 'deseasonalize': 'false'})) AS r FROM cp287 GROUP BY id)
+) <> (
+    SELECT string_agg(id || '|' || r.timestamp || '|' || r.is_changepoint || '|' || r.changepoint_probability::VARCHAR, ',' ORDER BY id, r.timestamp)
+    FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'deseasonalize': 'false'})) AS r FROM cp287 GROUP BY id)
+);
+----
+true
+
+# =============================================================================
+# #287 threshold (BUG-06, D2-ii) and BUG-07 period regression pins (Phase 20
+# plan 20-06 Task 3). D2-ii: with a threshold set, is_changepoint =
+# (changepoint_probability >= threshold) for every row AFTER THE FIRST of
+# each series; the first row is never flagged. These numbers are also pinned
+# against an independent numpy BOCPD reference in
+# crates/anofox-fcst-core/tests/changepoint_reference.rs
+# (bocpd_with_options_threshold_matches_numpy_expected_threshold_0_5, cases
+# issue287_A/B/C in validation/reference/fixtures/changepoints/bocpd_cases.json).
+# =============================================================================
+
+# Consistency: every row after the first obeys is_changepoint ==
+# (changepoint_probability >= threshold), and no first row is ever flagged --
+# on both surfaces.
+
+query I
+SELECT count(*) FROM (
+    SELECT id, ds, is_changepoint, changepoint_probability,
+           row_number() OVER (PARTITION BY id ORDER BY ds) AS rn
+    FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'threshold': '0.5'})
+) WHERE rn > 1 AND is_changepoint <> (changepoint_probability >= 0.5);
+----
+0
+
+query I
+SELECT count(*) FROM (
+    SELECT id, ds, is_changepoint,
+           row_number() OVER (PARTITION BY id ORDER BY ds) AS rn
+    FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'threshold': '0.5'})
+) WHERE rn = 1 AND is_changepoint;
+----
+0
+
+query I
+SELECT count(*) FROM (
+    SELECT id, r.timestamp, r.is_changepoint, r.changepoint_probability,
+           row_number() OVER (PARTITION BY id ORDER BY r.timestamp) AS rn
+    FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'threshold': '0.5'})) AS r FROM cp287 GROUP BY id)
+) WHERE rn > 1 AND is_changepoint <> (changepoint_probability >= 0.5);
+----
+0
+
+query I
+SELECT count(*) FROM (
+    SELECT id, r.timestamp, r.is_changepoint,
+           row_number() OVER (PARTITION BY id ORDER BY r.timestamp) AS rn
+    FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'threshold': '0.5'})) AS r FROM cp287 GROUP BY id)
+) WHERE rn = 1 AND is_changepoint;
+----
+0
+
+# Readable form: threshold 0.5 flags exactly B's 2024-02-20 and nothing else
+# (A and C have no flagged rows at all, so they produce no group here).
+
+query II
+SELECT id, string_agg(ds::DATE::VARCHAR, ',' ORDER BY ds) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'threshold': '0.5'}) WHERE is_changepoint GROUP BY id ORDER BY id;
+----
+B	2024-02-20
+
+# Parity (threshold combined with a non-default hazard_lambda): table
+# function and aggregate still agree exactly.
+
+query I
+SELECT count(*) FROM (
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'threshold': '0.5', 'hazard_lambda': '50'})
+    EXCEPT ALL
+    SELECT id, r.timestamp, r.is_changepoint, r.changepoint_probability FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'threshold': '0.5', 'hazard_lambda': '50'})) AS r FROM cp287 GROUP BY id)
+);
+----
+0
+
+query I
+SELECT count(*) FROM (
+    SELECT id, r.timestamp, r.is_changepoint, r.changepoint_probability FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'threshold': '0.5', 'hazard_lambda': '50'})) AS r FROM cp287 GROUP BY id)
+    EXCEPT ALL
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'threshold': '0.5', 'hazard_lambda': '50'})
+);
+----
+0
+
+# A threshold outside [0, 1] errors naming the key, on both surfaces.
+
+statement error
+SELECT count(*) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'threshold': '1.5'});
+----
+threshold
+
+statement error
+SELECT count(*) FROM (SELECT unnest(ts_detect_changepoints_agg(ds, y, MAP{'threshold': '1.5'})) FROM cp287 GROUP BY id);
+----
+threshold
+
+# BUG-07 (#287 release-only symptom, already fixed on main): ts_detect_
+# periods_by returns primary_period 7.0 (the weekly seasonality every #287
+# series shares) for A, B and C -- regression pin.
+
+query III
+SELECT id, primary_period, periods[1].period FROM ts_detect_periods_by('cp287', id, ds, y, MAP{}) ORDER BY id;
+----
+A	7.0	7.0
+B	7.0	7.0
+C	7.0	7.0
+
+# =============================================================================
+# #287 deseasonalize (BUG-05, D1-b, Phase 20 plan 20-07 Task 2). deseasonalize
+# removes the STL seasonal component AND a straight-line trend before BOCPD
+# (mstl_fit + detrend_linear in deseasonalize_for_changepoints), so a level
+# shift still survives as a step while regular weekly cycles stop producing
+# changepoints. Opt-in only -- CONTEXT Deferred Ideas: making this the
+# default is out of scope and must not happen. The transform itself is
+# pinned against R forecast::mstl's own seasonal component in
+# crates/anofox-fcst-core/tests/changepoint_reference.rs
+# (deseasonalize_for_changepoints_matches_r_mstl_seasonal_for_issue287, cases
+# issue287_A/B/C in validation/reference/fixtures/r_decomposition/cases.json).
+# =============================================================================
+
+# The #287 acceptance: deseasonalize combined with threshold 0.5 flags
+# nothing on A/C and exactly B's 2024-02-20 shift, on both surfaces.
+
+query II
+SELECT id, coalesce(string_agg(ds::DATE::VARCHAR, ',' ORDER BY ds) FILTER (WHERE is_changepoint), 'none')
+FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'true', 'threshold': '0.5'})
+GROUP BY id ORDER BY id;
+----
+A	none
+B	2024-02-20
+C	none
+
+query II
+SELECT id, coalesce(string_agg(r.timestamp::DATE::VARCHAR, ',' ORDER BY r.timestamp) FILTER (WHERE r.is_changepoint), 'none')
+FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'deseasonalize': 'true', 'threshold': '0.5'})) AS r FROM cp287 GROUP BY id)
+GROUP BY id ORDER BY id;
+----
+A	none
+B	2024-02-20
+C	none
+
+# Parity: table function and aggregate agree exactly row for row with
+# deseasonalize+threshold combined, both directions.
+
+query I
+SELECT count(*) FROM (
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'true', 'threshold': '0.5'})
+    EXCEPT ALL
+    SELECT id, r.timestamp, r.is_changepoint, r.changepoint_probability FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'deseasonalize': 'true', 'threshold': '0.5'})) AS r FROM cp287 GROUP BY id)
+);
+----
+0
+
+query I
+SELECT count(*) FROM (
+    SELECT id, r.timestamp, r.is_changepoint, r.changepoint_probability FROM (SELECT id, unnest(ts_detect_changepoints_agg(ds, y, MAP{'deseasonalize': 'true', 'threshold': '0.5'})) AS r FROM cp287 GROUP BY id)
+    EXCEPT ALL
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'true', 'threshold': '0.5'})
+);
+----
+0
+
+# deseasonalize alone (threshold unset) now defaults the EFFECTIVE
+# threshold to 0.5 (code review CR-02, user decision 2026-10-24) instead of
+# falling back to the MAP run-length-reset heuristic -- the heuristic
+# flagged B's weekly troughs in addition to the real 2024-02-20 shift once
+# the dominant seasonal variance was removed (robust_noise_scale collapse).
+# deseasonalize alone must therefore match deseasonalize+threshold=0.5
+# exactly: nothing on A/C, only B's 2024-02-20 shift.
+
+query II
+SELECT id, coalesce(string_agg(ds::DATE::VARCHAR, ',' ORDER BY ds) FILTER (WHERE is_changepoint), 'none')
+FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'true'})
+GROUP BY id ORDER BY id;
+----
+A	none
+B	2024-02-20
+C	none
+
+query I
+SELECT count(*) FROM (
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'true'})
+    EXCEPT ALL
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'true', 'threshold': '0.5'})
+);
+----
+0
+
+# seasonal_period '7' given explicitly gives the same result as the
+# auto-detected period (7, pinned by the BUG-07 block below) on the #287
+# panel.
+
+query I
+SELECT count(*) FROM (
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'true', 'threshold': '0.5', 'seasonal_period': '7'})
+    EXCEPT ALL
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'true', 'threshold': '0.5'})
+);
+----
+0
+
+# Default (no deseasonalize key) is 'auto' since #287: on this clearly
+# seasonal panel it equals deseasonalize 'true' row for row. The raw path
+# ('false') keeps its pre-BUG-05 outputs (md5 pins near the top of this file).
+
+query I
+SELECT count(*) FROM (
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{})
+    EXCEPT ALL
+    SELECT id, ds, is_changepoint, changepoint_probability FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'true'})
+);
+----
+0
+
+# deseasonalize/seasonal_period are strict and error naming the key, on
+# both surfaces.
+
+statement error
+SELECT count(*) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'deseasonalize': 'yes'});
+----
+deseasonalize
+
+statement error
+SELECT count(*) FROM (SELECT unnest(ts_detect_changepoints_agg(ds, y, MAP{'deseasonalize': 'yes'})) FROM cp287 GROUP BY id);
+----
+deseasonalize
+
+statement error
+SELECT count(*) FROM ts_detect_changepoints_by('cp287', id, ds, y, MAP{'seasonal_period': '-1', 'deseasonalize': 'true'});
+----
+seasonal_period
+
+statement error
+SELECT count(*) FROM (SELECT unnest(ts_detect_changepoints_agg(ds, y, MAP{'seasonal_period': '-1', 'deseasonalize': 'true'})) FROM cp287 GROUP BY id);
+----
+seasonal_period
+
+statement ok
+DROP TABLE cp287;
+
+# =============================================================================
 # ts_decompose_seasonal / _ts_mstl_decomposition / ts_mstl_decomposition_by
 # (DET-04): additive identity trend+seasonal+remainder == input; constant
 # series decomposes to trend==input, seasonal==0 (cited from 15-01/15-04).
@@ -211,6 +605,64 @@ false
 
 statement ok
 DROP TABLE sine120;
+
+# =============================================================================
+# #286 (BUG-04): classify_seasonality's seasonal_strength must come from the
+# SAME STL strength ts_stats_by uses, not fdars's own raw-series strength --
+# the two used to disagree (0.156 vs 0.966) on this exact series/period.
+# Values below are the literals the built extension prints; a strong weekly
+# series must classify stable_seasonal/is_seasonal with cycle_strengths
+# consistent with the overall strength (no 0.16-vs-1.0 contradiction), and
+# the scalar/aggregate/table-macro surfaces must all agree exactly.
+# =============================================================================
+
+statement ok
+CREATE TABLE w AS
+SELECT 'A' AS id, (TIMESTAMP '2024-01-01' + INTERVAL (i) DAY) AS ds,
+       20 + 0.3 * i + 5 * sin(2 * pi() * i / 7) + 1.6 * cos(i * 0.9) + 0.7 * sin(i * 1.7 + 20) AS y
+FROM range(84) r(i);
+
+query IIIII
+SELECT timing_classification, modulation_type <> 'non_seasonal', is_seasonal,
+       round(seasonal_strength, 10), list_min(cycle_strengths) >= 0.3
+FROM ts_classify_seasonality_by('w', id, ds, y, 7.0);
+----
+stable_seasonal	true	true	0.986881091	true
+
+query I
+SELECT abs(
+    (SELECT seasonal_strength FROM ts_classify_seasonality_by('w', id, ds, y, 7.0)) -
+    (SELECT seasonality_strength FROM ts_stats_by('w', id, ds, y, '1d', seasonal_period := 7))
+) < 1e-12;
+----
+true
+
+query I
+SELECT round((ts_classify_seasonality(list(y ORDER BY ds), 7.0)).seasonal_strength, 10) FROM w;
+----
+0.986881091
+
+query I
+SELECT round((ts_classify_seasonality_agg(ds, y, 7.0)).seasonal_strength, 10) FROM w;
+----
+0.986881091
+
+statement ok
+DROP TABLE w;
+
+statement ok
+CREATE TABLE issue286_constant AS
+SELECT 'A' AS id, (TIMESTAMP '2024-01-01' + INTERVAL (i) DAY) AS ds, 5.0 AS y
+FROM range(84) r(i);
+
+query II
+SELECT is_seasonal, seasonal_strength IS NULL
+FROM ts_classify_seasonality_by('issue286_constant', id, ds, y, 7.0);
+----
+false	true
+
+statement ok
+DROP TABLE issue286_constant;
 
 # =============================================================================
 # ts_detect_seasonality / ts_analyze_seasonality: a clean period-4 square wave

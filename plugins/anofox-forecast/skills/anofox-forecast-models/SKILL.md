@@ -24,9 +24,13 @@ user-invocable: false
 
 # Anofox Forecast — Models & `ts_forecast_by` Cheat Sheet
 
-**Extension:** `anofox_forecast` (Rust crate `anofox-forecast` v0.16.2) | **DuckDB:** v2.0.0 / v1.5.6 / v1.4.5 LTS | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
+**Extension:** `anofox_forecast` (Rust crate `anofox-forecast` v0.16.2) | **DuckDB:** v2.0.0 / v1.5.6 | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
 
 36 forecasting models exposed by SQL via three call surfaces (table macro, aggregate, scalar) + `ts_forecast_var_by` for multivariate VAR.
+
+**`level` column (#280):** every forecast output with an interval ends with `level` (the
+interval coverage, `confidence_level`, default `0.9`; `NULL` without an interval), so two
+confidence levels stack into nested fans via `UNION ALL`.
 
 **Prediction intervals** (`yhat_lower`/`yhat_upper`) are each model's own crate-native
 interval (corrected formulas since anofox-forecast 0.16.0: Hyndman class-1/2/3 ETS
@@ -69,6 +73,13 @@ section for the full per-model table.
    ts_forecast_by(..., 'HoltWinters', 12, '1d', MAP{'seasonal_period': '7'})
    ```
 
+   Never mix numbers and strings in one MAP literal: `MAP{'seasonal_period': 7, 'model': 'AAA'}`
+   fails with `Could not convert string 'AAA' to INT32` (DuckDB types MAP values uniformly). Use
+   the STRUCT. The aggregates (`ts_forecast_agg`, `ts_detect_changepoints_agg`) accept the same
+   forms. On DuckDB 2.0, `{}` means "no params" and a `VARIANT` holding the options also works.
+   Shared settings can live in SQL variables (`SET VARIABLE horizon = 14;` then
+   `getvariable('horizon')`, or `$horizon` on 2.0) in any argument, params included.
+
 5. **The `_by` output renames the target column to `y`** and adds `forecast_step`, `yhat`, `yhat_lower`, `yhat_upper`, `model_name`.
 
 6. **`ts_forecast_agg` takes `(date, value, model, horizon, params)` directly** — no `LIST(...)` wrapping.
@@ -85,7 +96,7 @@ ts_forecast_by(
     horizon INTEGER,          -- number of periods ahead
     frequency VARCHAR,        -- '1d', '1mo', '1h', ...
     params MAP or STRUCT      -- model-specific config
-) → TABLE(group_col, forecast_step INT, ds, yhat DOUBLE, yhat_lower, yhat_upper, model_name)
+) → TABLE(group_col, forecast_step INT, ds, yhat DOUBLE, yhat_lower, yhat_upper, model_name, level)
 ```
 
 ## `ts_forecast_panel_by` (panel / global models)
@@ -167,7 +178,10 @@ ts_forecast_var_by(
     frequency  VARCHAR,     -- time step between observations
     p          INTEGER,     -- lag order (named param, default: 1)
     params     MAP          -- reserved for future use (default: MAP{})
-) → TABLE(variable VARCHAR, forecast_step BIGINT, <date_col>, forecast_value DOUBLE)
+) → TABLE(variable VARCHAR, forecast_step BIGINT, <date_col>, forecast_value DOUBLE,
+         id, yhat, yhat_lower, yhat_upper, model_name, level)
+-- trailing columns (#280): id = variable, yhat = forecast_value, model_name = 'VAR';
+-- VAR has no interval, so yhat_lower / yhat_upper / level are NULL
 ```
 
 **Output:** `k_vars × horizon` rows in long format. One row per (variable, forecast_step).
@@ -234,7 +248,7 @@ ts_forecast_exog_by(
     method            VARCHAR,     -- 'AutoARIMA', 'OptimizedTheta', 'MFLES'
     horizon           INTEGER,
     params            MAP or STRUCT
-) → TABLE(group_col, forecast_step INT, date TIMESTAMP, yhat DOUBLE, yhat_lower, yhat_upper, model_name)
+) → TABLE(group_col, forecast_step INT, date TIMESTAMP, yhat DOUBLE, yhat_lower, yhat_upper, model_name, ds, level)
 ```
 
 ```sql
@@ -308,7 +322,7 @@ ts_forecast_by(
     source VARCHAR, group_col COLUMN, date_col COLUMN, target_col COLUMN,
     'AutoEnsemble', horizon INTEGER, frequency VARCHAR,
     params MAP or STRUCT   -- top_k, combination_method, seasonal_period
-) → TABLE(group_col, forecast_step INT, ds, yhat DOUBLE, yhat_lower, yhat_upper, model_name)
+) → TABLE(group_col, forecast_step INT, ds, yhat DOUBLE, yhat_lower, yhat_upper, model_name, level)
 ```
 
 Params:
@@ -360,7 +374,7 @@ ts_forecast_ensemble_by(
     frequency VARCHAR,
     combination_method := 'mean',   -- named param
     seasonal_period := 0            -- named param
-) → TABLE(group_col, forecast_step INT, ds, yhat DOUBLE, yhat_lower DOUBLE, yhat_upper DOUBLE, model_name)
+) → TABLE(group_col, forecast_step INT, ds, yhat DOUBLE, yhat_lower DOUBLE, yhat_upper DOUBLE, model_name, level)
 ```
 
 ```sql
@@ -502,7 +516,7 @@ SELECT * FROM ts_cv_folds_by('ens_series', id, ds, y, 3, 5, MAP{});
 For custom `GROUP BY` shapes.
 
 ```sql
-ts_forecast_agg(date_col TIMESTAMP, value_col DOUBLE, method VARCHAR, horizon INTEGER, params MAP)
+ts_forecast_agg(date_col TIMESTAMP, value_col DOUBLE, method VARCHAR, horizon INTEGER, params STRUCT or MAP)
     → STRUCT(point_forecast DOUBLE[], lower_<pct> DOUBLE[], upper_<pct> DOUBLE[], model_name VARCHAR, insample_fitted DOUBLE[], ...)
 ```
 
@@ -780,6 +794,16 @@ FROM ts_forecast_inspect_by('sales', product_id, ds, y, 'AutoETS',
 Per-horizon decomposition. Returns `TABLE(group_col, decomposition STRUCT(horizon, level DOUBLE[], trend DOUBLE[], seasonal DOUBLE[], residual DOUBLE[], named_components_json, raw_json))`. Each array has `horizon` elements; components not produced by a family are `NULL`.
 
 Supported models: `ETS` (fixed spec), `MSTL`, `AutoMSTL`, `Theta`. Others raise `does not implement Explainable`.
+
+`residual` (#282) = `yhat - (level + trend + seasonal + named)` from the same fit (≈0 for
+additive models), so the four components always sum to the point forecast.
+
+Long forms (#282): `ts_forecast_explain_long_by(source, group_col, date_col, target_col, method,
+horizon, frequency, params := MAP{})` → `<group_col>, forecast_step, ds, component, value`
+(joins to `ts_forecast_by` on `id, forecast_step, ds`), and `ts_forecast_fitted_by(source,
+group_col, date_col, target_col, method, params := MAP{})` → in-sample `<group_col>,
+<date_col>, y, fitted, residual, model_name` per source row (long form of `ts_forecast_agg`'s
+`insample_fitted` / `residuals` lists).
 
 ```sql
 -- Reconstruct: yhat = level + trend + seasonal + residual

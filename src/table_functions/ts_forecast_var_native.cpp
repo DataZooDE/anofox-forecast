@@ -3,6 +3,7 @@
 #include "ts_fill_gaps_native.hpp"  // ParseFrequencyWithType, date helpers, DateColumnType
 #include "ts_future_dates.hpp"     // StepFromFrequency, ComputeFutureDates (D-12)
 #include "anofox_fcst_ffi.h"
+#include "ts_collect_finalize.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
 #include <algorithm>
@@ -67,8 +68,7 @@ struct VarOutputRow {
 
 struct TsForecastVarNativeLocalState : public LocalTableFunctionState {
     bool owns_finalize = false;
-    bool registered_collector = false;
-    bool registered_finalizer = false;
+    bool arrived_at_final = false;
 };
 
 // ============================================================================
@@ -86,9 +86,8 @@ struct TsForecastVarNativeGlobalState : public GlobalTableFunctionState {
     bool processed = false;
     idx_t output_offset = 0;
 
-    std::atomic<bool> finalize_claimed{false};
-    std::atomic<idx_t> threads_collecting{0};
-    std::atomic<idx_t> threads_done_collecting{0};
+    // Single-thread finalize: last-finalizer barrier (ts_collect_finalize.hpp)
+    TsCollectFinalizeBarrier barrier;
 };
 
 // ============================================================================
@@ -289,6 +288,7 @@ static unique_ptr<LocalTableFunctionState> TsForecastVarNativeInitLocal(
     ExecutionContext &context,
     TableFunctionInitInput &input,
     GlobalTableFunctionState *global_state) {
+    global_state->Cast<TsForecastVarNativeGlobalState>().barrier.RegisterLocal();
     return make_uniq<TsForecastVarNativeLocalState>();
 }
 
@@ -304,13 +304,9 @@ static OperatorResultType TsForecastVarNativeInOut(
 
     auto &bind_data = data_p.bind_data->Cast<TsForecastVarNativeBindData>();
     auto &gstate = data_p.global_state->Cast<TsForecastVarNativeGlobalState>();
-    auto &lstate = data_p.local_state->Cast<TsForecastVarNativeLocalState>();
 
-    // Register this thread as a collector (first call only)
-    if (!lstate.registered_collector) {
-        gstate.threads_collecting.fetch_add(1);
-        lstate.registered_collector = true;
-    }
+    // Late-row guard: rows after the finalize claim would be silently dropped.
+    gstate.barrier.AssertCollecting("_ts_forecast_var_native");
 
     size_t k_vars = bind_data.value_col_names.size();
 
@@ -388,22 +384,18 @@ static OperatorFinalizeResultType TsForecastVarNativeFinalize(
     auto &gstate = data_p.global_state->Cast<TsForecastVarNativeGlobalState>();
     auto &lstate = data_p.local_state->Cast<TsForecastVarNativeLocalState>();
 
-    // Barrier + CAS claim (mirrors ts_forecast_panel_native.cpp)
-    if (!lstate.registered_finalizer) {
-        if (lstate.registered_collector) {
-            gstate.threads_done_collecting.fetch_add(1);
-        }
-        lstate.registered_finalizer = true;
-    }
+    // Last-finalizer claim (ts_collect_finalize.hpp): the local state whose
+    // arrival completes the count of registered local states processes; every
+    // other one finishes at once (no spin-wait).
     if (!lstate.owns_finalize) {
-        bool expected = false;
-        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true)) {
+        if (lstate.arrived_at_final) {
+            return OperatorFinalizeResultType::FINISHED;
+        }
+        lstate.arrived_at_final = true;
+        if (!gstate.barrier.ArriveAtFinal()) {
             return OperatorFinalizeResultType::FINISHED;
         }
         lstate.owns_finalize = true;
-        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load()) {
-            std::this_thread::yield();
-        }
     }
 
     // Single-thread processing

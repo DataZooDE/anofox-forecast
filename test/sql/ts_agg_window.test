@@ -1,0 +1,106 @@
+# name: test/sql/ts_agg_window.test
+# description: #294 - every ts_*_agg aggregate works as a window function. Window
+#   evaluation passes a constant or dictionary state vector to Update (GROUP BY
+#   passes a flat one); reading it as flat crashed the process. OVER (PARTITION BY)
+#   must equal the GROUP BY result, and sliding ROWS frames must evaluate.
+# group: [sql]
+
+require anofox_forecast
+
+statement ok
+CREATE TABLE agg_win AS
+SELECT i % 3 AS id,
+       (TIMESTAMP '2024-01-01' + to_days((i // 3)::INT)) AS ds,
+       ((i // 3) % 7)::DOUBLE + i * 0.01 AS y
+FROM range(150) t(i);
+
+statement ok
+SET threads = 8;
+
+# --- OVER () over the whole table (the original crash shape) ---
+query I
+SELECT count(f) FROM (SELECT ts_stats_agg(ds, y) OVER () AS f FROM agg_win);
+----
+150
+
+query I
+SELECT count(f) FROM (SELECT ts_forecast_agg(ds, y, 'Naive', 1, MAP{}) OVER () AS f FROM agg_win);
+----
+150
+
+# --- OVER (PARTITION BY id) equals GROUP BY id, per aggregate ---
+query II
+SELECT bool_and(w IS NOT DISTINCT FROM g), count(*)
+FROM (SELECT id, ts_forecast_agg(ds, y, 'Naive', 2, MAP{}) OVER (PARTITION BY id) AS w FROM agg_win) a
+JOIN (SELECT id, ts_forecast_agg(ds, y, 'Naive', 2, MAP{}) AS g FROM agg_win GROUP BY id) b USING (id);
+----
+true	150
+
+query II
+SELECT bool_and(w IS NOT DISTINCT FROM g), count(*)
+FROM (SELECT id, ts_stats_agg(ds, y) OVER (PARTITION BY id) AS w FROM agg_win) a
+JOIN (SELECT id, ts_stats_agg(ds, y) AS g FROM agg_win GROUP BY id) b USING (id);
+----
+true	150
+
+query II
+SELECT bool_and(w IS NOT DISTINCT FROM g), count(*)
+FROM (SELECT id, ts_features_agg(ds, y) OVER (PARTITION BY id) AS w FROM agg_win) a
+JOIN (SELECT id, ts_features_agg(ds, y) AS g FROM agg_win GROUP BY id) b USING (id);
+----
+true	150
+
+query II
+SELECT bool_and(w IS NOT DISTINCT FROM g), count(*)
+FROM (SELECT id, ts_data_quality_agg(ds, y) OVER (PARTITION BY id) AS w FROM agg_win) a
+JOIN (SELECT id, ts_data_quality_agg(ds, y) AS g FROM agg_win GROUP BY id) b USING (id);
+----
+true	150
+
+query II
+SELECT bool_and(w IS NOT DISTINCT FROM g), count(*)
+FROM (SELECT id, ts_detect_changepoints_agg(ds, y, MAP{}) OVER (PARTITION BY id) AS w FROM agg_win) a
+JOIN (SELECT id, ts_detect_changepoints_agg(ds, y, MAP{}) AS g FROM agg_win GROUP BY id) b USING (id);
+----
+true	150
+
+query II
+SELECT bool_and(w IS NOT DISTINCT FROM g), count(*)
+FROM (SELECT id, ts_detect_periods_agg(ds, y) OVER (PARTITION BY id) AS w FROM agg_win) a
+JOIN (SELECT id, ts_detect_periods_agg(ds, y) AS g FROM agg_win GROUP BY id) b USING (id);
+----
+true	150
+
+query II
+SELECT bool_and(w IS NOT DISTINCT FROM g), count(*)
+FROM (SELECT id, ts_classify_seasonality_agg(ds, y, 7) OVER (PARTITION BY id) AS w FROM agg_win) a
+JOIN (SELECT id, ts_classify_seasonality_agg(ds, y, 7) AS g FROM agg_win GROUP BY id) b USING (id);
+----
+true	150
+
+# --- sliding ROWS frames evaluate (segment-tree path) ---
+query I
+SELECT count(f) FROM (
+    SELECT ts_stats_agg(ds, y) OVER (PARTITION BY id ORDER BY ds ROWS BETWEEN 9 PRECEDING AND CURRENT ROW) AS f
+    FROM agg_win);
+----
+150
+
+query I
+SELECT count(f) FROM (
+    SELECT ts_forecast_agg(ds, y, 'Naive', 1, MAP{}) OVER (PARTITION BY id ORDER BY ds ROWS BETWEEN 9 PRECEDING AND CURRENT ROW) AS f
+    FROM agg_win);
+----
+150
+
+# a sliding frame equals the GROUP BY over the same rows (last frame of id 0)
+query I
+WITH w AS (
+    SELECT id, ds, ts_stats_agg(ds, y) OVER (PARTITION BY id ORDER BY ds ROWS BETWEEN 9 PRECEDING AND CURRENT ROW) AS f
+    FROM agg_win),
+last_rows AS (
+    SELECT ds, y FROM agg_win WHERE id = 0 ORDER BY ds DESC LIMIT 10)
+SELECT (SELECT f FROM w WHERE id = 0 ORDER BY ds DESC LIMIT 1)
+       IS NOT DISTINCT FROM (SELECT ts_stats_agg(ds, y) FROM last_rows);
+----
+true

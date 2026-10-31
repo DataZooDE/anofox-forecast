@@ -12,7 +12,7 @@ user-invocable: false
 
 # Anofox Forecast — Detection & Decomposition Cheat Sheet
 
-**Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.16.2) | **DuckDB:** v2.0.0 / v1.5.6 / v1.4.5 LTS | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
+**Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.16.2) | **DuckDB:** v2.0.0 / v1.5.6 | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
 
 Detect signal structure. When both `seasonal_period` and `seasonal_periods` are omitted,
 `ts_forecast_by` / `ts_cv_forecast_by` / the scalar paths / `ts_forecast_agg` all auto-detect
@@ -79,6 +79,12 @@ FROM range(0,48) t(g);
 
 SELECT * FROM ts_detect_periods_by('sea', id, ts, y, MAP{});
 ```
+
+### `ts_detect_periods_long_by` — one row per period candidate (#282)
+
+`ts_detect_periods_long_by(source, group_col, date_col, value_col, params := MAP{})` →
+`<group_col>, rank, period, confidence, strength, amplitude, phase, iteration,
+matches_expected, matched_expected_period, match_deviation, is_primary, method`.
 
 ### `ts_detect_periods_agg` — aggregate period detection
 
@@ -189,10 +195,16 @@ SELECT * FROM ts_forecast_by('sales', product_id, ds, y,
 ts_detect_changepoints_by(source, group_col, date_col, value_col, params) → TABLE
 ```
 
-Params:
+Params (Phase 20 20-06/20-07, #287 — `ts_detect_changepoints_by` and `ts_detect_changepoints_agg`
+parse this same params MAP through one shared C++ header and decide `is_changepoint`/
+`changepoint_probability` through one Rust function, so **both return identical rows for
+identical inputs and params**; `deseasonalize` defaults to `auto` since #287):
 | Key | Default | Description |
 |---|---|---|
 | `hazard_lambda` | 250.0 | Expected run length between changepoints. Lower → more changepoints (and more false alarms) |
+| `threshold` | unset | When set (`[0, 1]`), `is_changepoint = (changepoint_probability >= threshold)` for every row **after the first** of each series — the first row is never flagged. When unset, the existing MAP run-length-reset heuristic applies. Out-of-range/non-numeric throws, naming `threshold` |
+| `deseasonalize` | `auto` | `auto`/`true`/`false` (also `1`/`0`). Deseasonalizing removes the STL seasonal component at `seasonal_period` (or auto-detected) AND a linear trend before BOCPD (D1-b): level shifts survive as steps, and regular seasonal cycles stop producing changepoints. `auto` (default since #287) deseasonalizes only clearly seasonal series: a usable period, ≥ 3 cycles, STL strength ≥ 0.5. Other series run on the raw values. `false` = the pre-#287 raw behaviour. When deseasonalized and `threshold` is unset, the effective threshold is `0.5` (CR-02); an explicit `threshold` always wins. An invalid value throws, naming `deseasonalize` |
+| `seasonal_period` | `0` (auto) | Strict non-negative integer; consulted when deseasonalizing (`true`, or `auto` on a seasonal series). Negative/non-numeric throws, naming `seasonal_period` |
 
 Returns one row per input point with `<group_col>`, `<date_col>`, `is_changepoint BOOLEAN`,
 and `changepoint_probability DOUBLE` only — the value column is **not** included in the
@@ -204,13 +216,35 @@ SELECT product_id, ds, is_changepoint, changepoint_probability
 FROM ts_detect_changepoints_by('sales', product_id, ds, y,
     MAP{'hazard_lambda': '100'})
 WHERE is_changepoint;
+
+-- Ignore a weekly cycle, flag only a genuine sustained level shift (#287, D1-b).
+-- The default 'auto' already does this for clearly seasonal series; 'true' forces it.
+-- threshold unset here defaults to an effective 0.5 (CR-02) -- pass 'threshold': '0.5'
+-- explicitly for the identical result, or a different value to override it.
+-- MAP{'deseasonalize': 'false'} restores the pre-#287 raw behaviour.
+SELECT product_id, ds, is_changepoint
+FROM ts_detect_changepoints_by('sales', product_id, ds, y,
+    MAP{'deseasonalize': 'true'})
+WHERE is_changepoint;
+```
+
+**Events form (#283):** `ts_detect_changepoints_events_by(source, group_col, date_col,
+value_col, params := MAP{})` returns one row per detected changepoint — `<group_col>,
+<date_col>, kind = 'changepoint', severity ('alarm' if value >= 0.5 else 'warning'),
+value = changepoint_probability` — the anofox contract `events` schema. Same detection and
+params as above; prefer it over `WHERE is_changepoint` when plotting or alerting.
+
+```sql
+SELECT * FROM ts_detect_changepoints_events_by('sales', product_id, ds, y,
+    params := MAP{'deseasonalize': 'true'});
 ```
 
 Note: the single-series `ts_detect_changepoints` (no `group_col`) has a **different** output
 shape that DOES include the value column: `(date_col, value_col, is_changepoint,
 changepoint_probability)`. It is not a simple alias of the `_by` form.
 
-Also: `ts_detect_changepoints` (scalar) and `ts_detect_changepoints_agg` (aggregate).
+Also: `ts_detect_changepoints` (scalar) and `ts_detect_changepoints_agg` (aggregate, same params
+MAP as above — see `docs/api/06-changepoint-detection.md` for its signature/example).
 
 **Algorithm (Phase 15 plan 15-03, DET-02):** the series is standardised first
 (`z = (x - median(x)) / sigma_hat`, `sigma_hat` a MAD-of-first-differences robust
@@ -247,8 +281,8 @@ Output columns (group column preserved):
 | `modulation_type` | VARCHAR | `'stable'` / `'emerging'` / `'fading'` / `'oscillating'` / `'non_seasonal'` (NOT `Additive`/`Multiplicative`/`None` — that is not the real label set) |
 | `has_stable_timing` | BOOLEAN | Peak timing regularity |
 | `timing_variability` | DOUBLE | Numeric variability score |
-| `seasonal_strength` | DOUBLE | ∈ [0, 1] |
-| `is_seasonal` | BOOLEAN | Overall verdict |
+| `seasonal_strength` | DOUBLE | STL strength ∈ [0, 1], `NULL` if no usable period |
+| `is_seasonal` | BOOLEAN | `seasonal_strength >= 0.3` by default |
 | `cycle_strengths` | DOUBLE[] | Per-cycle strengths |
 | `weak_seasons` | BIGINT[] | Indices of weak seasonal peaks |
 
@@ -256,6 +290,11 @@ Output columns (group column preserved):
 correctly comes back as `timing_classification = 'stable_seasonal'`, `is_seasonal = true`,
 with `seasonal_strength` close to 1.0 (previously a fdars-core dimension-swap bug made every
 call return `'non_seasonal'` / `NaN`).
+
+**#286 fix:** `seasonal_strength` is now the SAME STL strength `ts_stats_by` reports (not
+fdars's own raw-series strength, which used to disagree — e.g. 0.156 here vs 0.966 from
+`ts_stats_by` on the identical series/period). `ts_detect_amplitude_modulation`'s
+seasonality gate and `seasonal_strength` use the same shared STL strength.
 
 ```sql
 SELECT product_id, timing_classification, modulation_type, is_seasonal, seasonal_strength
@@ -297,6 +336,12 @@ input data** (not `0..1`); a plateau reports its midpoint index; `min_distance` 
 (the macro default) applies no distance filter. See `docs/api/05b-peak-detection.md` for the
 full parameter mapping.
 
+### `ts_detect_peaks_long_by` — one row per peak (#282)
+
+`ts_detect_peaks_long_by(source, group_col, date_col, value_col, params := MAP{})` →
+`<group_col>, <date_col>, kind = 'peak', value, prominence` (events-compatible; each peak on
+the source row it was found at).
+
 ### `ts_analyze_peak_timing_by`
 
 ```sql
@@ -334,6 +379,12 @@ SELECT periods FROM ts_mstl_decomposition_by('sales', product_id, ds, y, MAP{});
 -- []
 ```
 
+### `ts_mstl_decomposition_long_by` — long form (#282)
+
+`ts_mstl_decomposition_long_by(source, group_col, date_col, value_col, params := MAP{})` →
+`<group_col>, <date_col>, component, value` with component in `observed`, `trend`,
+`seasonal_<period>`, `remainder` (anofox contract `decomposition`; plot without unnesting).
+
 ### `ts_decompose_seasonal` (scalar) — fdars LOESS+Fourier, or R classical (centred moving-average)
 
 Signature `ts_decompose_seasonal(DOUBLE[] values, DOUBLE period [, VARCHAR method]) → STRUCT(trend DOUBLE[], seasonal DOUBLE[], remainder DOUBLE[], period DOUBLE, method VARCHAR)`.
@@ -363,6 +414,11 @@ ts_detrend_by(source, group_col, date_col, value_col, method) → TABLE
 name is a SQL error naming every valid choice — there is no silent fallback. `'loess'` and
 `'auto'` are `O(n^2)` in series length; prefer `'linear'`/`'quadratic'`/`'cubic'` on long
 series.
+
+### `ts_detrend_long_by` — long form (#282)
+
+`ts_detrend_long_by(source, group_col, date_col, value_col, method := 'auto')` →
+`<group_col>, <date_col>, component (observed / trend / detrended), value, method`.
 
 ### `ts_detrend` (scalar) — array-level trend removal
 

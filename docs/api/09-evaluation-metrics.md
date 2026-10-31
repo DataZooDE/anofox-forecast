@@ -300,11 +300,52 @@ GROUP BY unique_id, fold_id, model_name;
 
 ---
 
+## Long Form: ts_metrics_by
+
+`ts_metrics_by` (#281) returns several metrics at once, **one row per group and metric**,
+instead of one wide table per metric. Its shape (`<group columns>, metric, value`) is the
+anofox integration contract's `summary` schema, so anofox-visualization plots it directly.
+
+```sql
+ts_metrics_by(source, date_col, actual_col, forecast_col,
+              metrics := ['mae', 'mse', 'rmse', 'mape', 'smape', 'r2', 'bias'],
+              seasonal_period := 1)
+```
+
+- As with the wide macros below, `source` is a subquery and every source column other than
+  `date_col` / `actual_col` / `forecast_col` is a group key. A model column (for example
+  `model_name` from `ts_cv_forecast_by`) therefore stays in the output.
+- `metrics` takes any of `mae`, `mse`, `rmse`, `mape`, `smape`, `r2`, `bias`, `mase`
+  (case-insensitive; duplicates are dropped). An unknown name is an error.
+- `mase` is computed exactly as `ts_mase_by` with `seasonal_period`: rows whose forecast is
+  NULL and that are dated before a group's first forecast supply the in-sample scale. The
+  other metrics only use rows where both actual and forecast are present.
+- Each value equals the corresponding wide macro (pinned in
+  `test/sql/correctness/metrics_long.test`).
+
+| Column | Type | Description |
+|---|---|---|
+| `<group columns>` | (input types) | Every other source column, unchanged |
+| `metric` | VARCHAR | Metric name, lower case |
+| `value` | DOUBLE | Metric value (`NULL` where the wide macro returns `NULL`) |
+
+```sql
+SELECT * FROM ts_metrics_by(
+    (SELECT 'A' AS unique_id, m AS model_name, DATE '2024-01-01' + i::INT AS ds, i::DOUBLE AS y,
+            CASE WHEN i >= 14 THEN i + (CASE WHEN m = 'Naive' THEN 2.0 ELSE 0.5 END) END AS yhat
+     FROM range(21) t(i), (VALUES ('Naive'), ('AutoETS')) v(m)),
+    'ds', 'y', 'yhat', metrics := ['mae', 'rmse', 'mase'], seasonal_period := 7);
+```
+
+---
+
 ## Deprecated: Table Macros
 
 > **Warning**: The `_by` table macros (`ts_mae_by`, `ts_rmse_by`, etc.) are deprecated.
-> They are ~2400x slower than scalar functions and have threading issues requiring
-> `SET threads=1` for correct results. Use scalar functions with `GROUP BY` instead.
+> They are ~2400x slower than scalar functions. Use scalar functions with `GROUP BY` instead.
+
+Their results do not depend on the row order of `source` or on `source` being a
+UNION ALL (#285); no pre-sorting and no `SET threads = 1` are needed.
 
 The following macros are deprecated and will be removed in a future version:
 - `ts_mae_by`, `ts_mse_by`, `ts_rmse_by`, `ts_mape_by`, `ts_smape_by`, `ts_r2_by`, `ts_bias_by`
@@ -313,7 +354,7 @@ The following macros are deprecated and will be removed in a future version:
 **Migration example:**
 
 ```sql
--- DEPRECATED (slow, threading issues)
+-- DEPRECATED (slow)
 SELECT * FROM ts_mae_by(
     (SELECT unique_id, ds, y, forecast FROM results),
     'ds', 'y', 'forecast'

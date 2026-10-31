@@ -39,12 +39,12 @@ FROM diag_series WHERE grp = 'B';
 ----
 true
 
-# STRUCT has correct type (STRUCT with 7 fields)
+# STRUCT has correct type (7 fields + method appended in #279)
 query I
 SELECT typeof(ts_adf(LIST(val ORDER BY ds)))
 FROM diag_series WHERE grp = 'B';
 ----
-STRUCT(statistic DOUBLE, p_value DOUBLE, lags BIGINT, is_stationary BOOLEAN, cv_1pct DOUBLE, cv_5pct DOUBLE, cv_10pct DOUBLE)
+STRUCT(statistic DOUBLE, p_value DOUBLE, lags BIGINT, is_stationary BOOLEAN, cv_1pct DOUBLE, cv_5pct DOUBLE, cv_10pct DOUBLE, "method" VARCHAR)
 
 # statistic is finite (non-NaN) for n=40 series
 query I

@@ -19,6 +19,7 @@
 #include "anofox_fcst_ffi.h"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
+#include "duckdb_compat.hpp"
 
 #include <cstring>
 #include <unordered_set>
@@ -160,8 +161,9 @@ inline void ValidateForecastParamKeys(const Value &params_value) {
 // check). Non-NULL params -> validate the closed key set, parse every key,
 // then apply the WR-03 "too long" guards before the caller ever copies
 // arima_order/seasonal_order into the fixed 32-byte ForecastOptions buffers.
-inline ForecastParamSet ParseForecastParamSet(const Value &params_value) {
+inline ForecastParamSet ParseForecastParamSet(const Value &params_in) {
     ForecastParamSet p;
+    const Value params_value = NormalizeParamsValue(params_in);
     if (params_value.IsNull()) {
         return p;
     }

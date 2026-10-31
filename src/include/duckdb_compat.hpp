@@ -28,6 +28,11 @@
 #include "duckdb/common/vector/string_vector.hpp"
 #include "duckdb/common/vector/struct_vector.hpp"
 #endif
+// Up to 1.5 VariantValue (a different struct, without GetValue) lives in its own
+// header; from 2.0 on it is declared in value.hpp.
+#if __has_include("duckdb/common/types/variant_value.hpp")
+#include "duckdb/common/types/variant_value.hpp"
+#endif
 #endif
 
 #include <string>
@@ -548,6 +553,183 @@ inline vector<unique_ptr<ParsedExpression>> ParseExpressionList(const std::strin
 	return compat_detail::ParseExpressionList(static_cast<Parser *>(nullptr), list, 0);
 }
 
+
+//===--------------------------------------------------------------------===//
+// VARIANT options
+//===--------------------------------------------------------------------===//
+
+namespace compat_detail {
+template <class VV>
+auto UnwrapVariant(const Value &v, int) -> decltype(VV::GetValue(v)) {
+	return VV::GetValue(v);
+}
+template <class VV>
+Value UnwrapVariant(const Value &, long) {
+	throw InvalidInputException("params of type VARIANT need DuckDB 2.0 or later; pass a STRUCT "
+	                            "({'seasonal_period': 7, 'model': 'AAA'}) or a MAP instead");
+}
+template <class VV, class = void>
+struct HasVariantGetValue : std::false_type {};
+template <class VV>
+struct HasVariantGetValue<VV, decltype(void(VV::GetValue(std::declval<const Value &>())))> : std::true_type {};
+} // namespace compat_detail
+
+//! Whether VARIANT values can be unwrapped (VariantValue::GetValue, DuckDB 2.0+).
+constexpr bool kHasVariantUnwrap = compat_detail::HasVariantGetValue<VariantValue>::value;
+
+//! A params/options argument as the STRUCT or MAP the parsers understand. A VARIANT
+//! (e.g. `{'seasonal_period': 7}::VARIANT`, or a value read from a VARIANT column) is
+//! unwrapped to the value it holds, and a MAP(VARCHAR, VARIANT) gets its values
+//! unwrapped. Without this the parsers, which branch on MAP / STRUCT, silently
+//! ignored every key of a VARIANT. On DuckDB < 2.0 a VARIANT raises instead.
+inline Value NormalizeParamsValue(const Value &params) {
+	if (params.IsNull()) {
+		return params;
+	}
+	if (params.type().id() == LogicalTypeId::VARIANT) {
+		return NormalizeParamsValue(compat_detail::UnwrapVariant<VariantValue>(params, 0));
+	}
+	if (params.type().id() == LogicalTypeId::MAP &&
+	    MapType::ValueType(params.type()).id() == LogicalTypeId::VARIANT) {
+		auto &entries = MapValue::GetChildren(params);
+		vector<Value> keys;
+		vector<Value> values;
+		for (auto &entry : entries) {
+			auto &kv = StructValue::GetChildren(entry);
+			keys.push_back(kv[0]);
+			if (kv[1].IsNull()) {
+				values.push_back(Value(LogicalType::VARCHAR));
+			} else {
+				// Before 2.0 a VARIANT entry can't be unwrapped, but its text form is
+				// what the parsers always read from MAP values.
+				values.push_back(Value(kHasVariantUnwrap ? NormalizeParamsValue(kv[1]).ToString() : kv[1].ToString()));
+			}
+		}
+		return Value::MAP(MapType::KeyType(params.type()), LogicalType::VARCHAR, std::move(keys), std::move(values));
+	}
+	return params;
+}
+
+//! A params/options argument as MAP(VARCHAR, VARCHAR), the form the SQL macros and the
+//! MAP-typed natives read: STRUCT children, MAP values and VARIANT contents become their
+//! text form (lists as '[7, 30]'), NULL becomes an empty map.
+inline Value ParamsAsVarcharMap(const Value &params_in) {
+	const Value params = NormalizeParamsValue(params_in);
+	vector<Value> keys;
+	vector<Value> values;
+	auto add = [&](const string &key, const Value &val) {
+		keys.push_back(Value(key));
+		values.push_back(val.IsNull() ? Value(LogicalType::VARCHAR) : Value(val.ToString()));
+	};
+	if (params.IsNull()) {
+		// no params
+	} else if (params.type().id() == LogicalTypeId::MAP) {
+		for (auto &entry : MapValue::GetChildren(params)) {
+			auto &kv = StructValue::GetChildren(entry);
+			add(kv[0].ToString(), kv[1]);
+		}
+	} else if (params.type().id() == LogicalTypeId::STRUCT) {
+		auto &children = StructValue::GetChildren(params);
+		auto &child_types = StructType::GetChildTypes(params.type());
+		for (idx_t i = 0; i < child_types.size(); i++) {
+			add(NameString(child_types[i].first), children[i]);
+		}
+	} else {
+		throw InvalidInputException("params must be a STRUCT or MAP (e.g. {'alpha': 0.1}), got %s",
+		                            params.type().ToString());
+	}
+	return Value::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR, std::move(keys), std::move(values));
+}
+
+//===--------------------------------------------------------------------===//
+// Aggregate state export (DuckDB 2.0: agg(...) EXPORT_STATE, combine_aggr, finalize)
+//===--------------------------------------------------------------------===//
+//
+// An exporter EXP describes a pointer-backed state in plain Values, so it compiles on
+// every line:
+//   static LogicalType ExportType();
+//   static idx_t StateSize();                              // sizeof(STATE)
+//   static Value Export(data_ptr_t state);                 // a NULL Value for an empty state
+//   static void Import(const Value &entry, data_ptr_t state); // entry may be NULL
+//   static void Destroy(data_ptr_t state);                 // free what Import allocated
+// InstallStateExportOf<EXP>(function) wires it through SetStateExportCallbacks on 2.0 and
+// is a no-op before. The 2.0-only callback types are taken from that setter's own
+// signature, so nothing here names them and 1.5 never instantiates the template.
+
+namespace compat_detail {
+template <class T>
+struct MemberFnArgs;
+template <class C, class R, class... A>
+struct MemberFnArgs<R (C::*)(A...)> {
+	template <size_t I>
+	using Arg = typename std::tuple_element<I, std::tuple<A...>>::type;
+};
+
+template <class F, class EXP>
+struct StateExportCallbacks {
+	using Setter = MemberFnArgs<decltype(&F::SetStateExportCallbacks)>;
+	using GetTypeFn = typename Setter::template Arg<0>;
+	using ExportFn = typename Setter::template Arg<1>;
+	using ImportFn = typename Setter::template Arg<2>;
+	using LayoutInput = typename std::remove_reference<typename FunctionTraits<GetTypeFn>::template Arg<0>>::type;
+	using Layout = decltype(std::declval<GetTypeFn>()(std::declval<LayoutInput &>()));
+	using FinalizeInput = typename std::remove_reference<typename FunctionTraits<ExportFn>::template Arg<1>>::type;
+	using ImportInput = typename std::remove_reference<typename FunctionTraits<ImportFn>::template Arg<0>>::type;
+
+	static Layout GetType(LayoutInput &) {
+		Layout layout;
+		layout.type = EXP::ExportType();
+		layout.total_state_size = AlignValue<idx_t>(EXP::StateSize());
+		return layout;
+	}
+	static void Export(Vector &states, FinalizeInput &, Vector &result, idx_t count, idx_t offset) {
+		auto ptrs = FlatDataMut<data_ptr_t>(states);
+		for (idx_t i = 0; i < count; i++) {
+			result.SetValue(offset + i, EXP::Export(ptrs[i]));
+		}
+	}
+	static void Import(ImportInput &input) {
+		const idx_t count = input.input_vec.size();
+		const idx_t stride = input.layout.total_state_size;
+		idx_t i = 0;
+		try {
+			for (; i < count; i++) {
+				EXP::Import(input.input_vec.GetValue(i), input.dest_buffer + i * stride);
+			}
+		} catch (...) {
+			// DuckDB does not destroy a batch whose import failed: free the entries
+			// imported so far (entry i cleans up after itself).
+			for (idx_t j = 0; j < i; j++) {
+				EXP::Destroy(input.dest_buffer + j * stride);
+			}
+			throw;
+		}
+	}
+};
+
+template <class F, class EXP>
+auto InstallStateExport(F &fn, int) -> decltype(&F::SetStateExportCallbacks, void()) {
+	using CB = StateExportCallbacks<F, EXP>;
+	fn.SetStateExportCallbacks(&CB::GetType, &CB::Export, &CB::Import);
+}
+template <class F, class EXP>
+void InstallStateExport(F &, long) {
+}
+
+template <class F, class = void>
+struct HasStateExport : std::false_type {};
+template <class F>
+struct HasStateExport<F, decltype(void(&F::SetStateExportCallbacks))> : std::true_type {};
+} // namespace compat_detail
+
+//! Whether aggregates can export / import their state (DuckDB 2.0+).
+constexpr bool kHasStateExport = compat_detail::HasStateExport<AggregateFunction>::value;
+
+//! Install EXP's state export / import on `function` (no-op without kHasStateExport).
+template <class EXP>
+void InstallStateExportOf(AggregateFunction &function) {
+	compat_detail::InstallStateExport<AggregateFunction, EXP>(function, 0);
+}
 
 } // namespace duckdb
 

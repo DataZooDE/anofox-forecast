@@ -2,6 +2,7 @@
 #include "ts_features_native.hpp"
 #include "anofox_fcst_ffi.h"
 #include "ts_list_marshal.hpp"
+#include "ts_collect_finalize.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
 #include <algorithm>
@@ -116,10 +117,8 @@ struct TsFeaturesNativeGlobalState : public GlobalTableFunctionState {
     idx_t current_result = 0;
     bool processed = false;
 
-    // Single-thread finalize + barrier
-    std::atomic<bool> finalize_claimed{false};
-    std::atomic<idx_t> threads_collecting{0};
-    std::atomic<idx_t> threads_done_collecting{0};
+    // Single-thread finalize: last-finalizer barrier (ts_collect_finalize.hpp)
+    TsCollectFinalizeBarrier barrier;
 
     idx_t MaxThreads() const override {
         return max_threads;
@@ -132,8 +131,7 @@ struct TsFeaturesNativeGlobalState : public GlobalTableFunctionState {
 
 struct TsFeaturesNativeLocalState : public LocalTableFunctionState {
     bool owns_finalize = false;
-    bool registered_collector = false;
-    bool registered_finalizer = false;
+    bool arrived_at_final = false;
 };
 
 // ============================================================================
@@ -201,6 +199,7 @@ static unique_ptr<LocalTableFunctionState> TsFeaturesNativeInitLocal(
     TableFunctionInitInput &input,
     GlobalTableFunctionState *global_state) {
 
+    global_state->Cast<TsFeaturesNativeGlobalState>().barrier.RegisterLocal();
     return make_uniq<TsFeaturesNativeLocalState>();
 }
 
@@ -215,13 +214,9 @@ static OperatorResultType TsFeaturesNativeInOut(
     DataChunk &output) {
 
     auto &gstate = data.global_state->Cast<TsFeaturesNativeGlobalState>();
-    auto &lstate = data.local_state->Cast<TsFeaturesNativeLocalState>();
 
-    // Register this thread as a collector (first call only)
-    if (!lstate.registered_collector) {
-        gstate.threads_collecting.fetch_add(1);
-        lstate.registered_collector = true;
-    }
+    // Late-row guard: rows after the finalize claim would be silently dropped.
+    gstate.barrier.AssertCollecting("_ts_features_native");
 
     // Extract batch locally first
     struct LocalRow {
@@ -299,22 +294,18 @@ static OperatorFinalizeResultType TsFeaturesNativeFinalize(
     auto &lstate = data.local_state->Cast<TsFeaturesNativeLocalState>();
     const auto& feature_names = GetFeatureNames();
 
-    // Barrier + claim
-    if (!lstate.registered_finalizer) {
-        if (lstate.registered_collector) {
-            gstate.threads_done_collecting.fetch_add(1);
-        }
-        lstate.registered_finalizer = true;
-    }
+    // Last-finalizer claim (ts_collect_finalize.hpp): the local state whose
+    // arrival completes the count of registered local states processes; every
+    // other one finishes at once (no spin-wait).
     if (!lstate.owns_finalize) {
-        bool expected = false;
-        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true)) {
+        if (lstate.arrived_at_final) {
+            return OperatorFinalizeResultType::FINISHED;
+        }
+        lstate.arrived_at_final = true;
+        if (!gstate.barrier.ArriveAtFinal()) {
             return OperatorFinalizeResultType::FINISHED;
         }
         lstate.owns_finalize = true;
-        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load()) {
-            std::this_thread::yield();
-        }
     }
 
     // Process all groups if not yet done

@@ -13,8 +13,14 @@
 //   - serve the built .wasm over localhost and FORCE INSTALL ... FROM it
 //
 // Usage:
-//   node run.mjs [--ext <path-to-.duckdb_extension.wasm>] [--all] [--file <t.test> ...]
-//   ANOFOX_WASM_EXT=<path> node run.mjs
+//   node run.mjs [--ext <path-to-.duckdb_extension.wasm>] [--bundle eh|mvp] [--all] [--file <t.test> ...]
+//   ANOFOX_WASM_EXT=<path> ANOFOX_WASM_BUNDLE=<eh|mvp> node run.mjs
+//
+// --bundle / ANOFOX_WASM_BUNDLE selects which @duckdb/duckdb-wasm bundle boots
+// the engine (eh: exception-handling, the default; mvp: minimal viable
+// product -- see test/wasm/README.md's "wasm_mvp status (DIST-03)" section
+// in docs/distribution/get-erpl-io.md for why this exists and what it found).
+// An unrecognized value exits 1 before booting anything.
 //
 // Exit code 0 on success; non-zero on any load or assertion failure.
 
@@ -44,25 +50,23 @@ const EXT_FILE = `${EXT_NAME}.duckdb_extension.wasm`;
 // Files that fail due to artifact-API drift or pre-existing test bugs are NOT
 // skipped; they appear in the --all failure list and are tracked in the SUMMARY.
 const SKIP_FILES = new Map([
-  // DuckDB-Wasm heap overflow: TSFresh feature extraction (117 features × many series)
-  // exceeds the default 32 MB WASM heap. Manifests as "memory access out of bounds".
-  ['test/sql/ts_features.test', 'WASM heap overflow in large TSFresh feature extraction'],
-  ['test/sql/ts_features_config.test', 'WASM heap overflow in large TSFresh feature extraction'],
-
   // DuckDB v1.5.5 WASM engine does not support UNNEST in this position (regression
   // vs 1.6+). The test exercises an UNNEST in a FROM clause that WASM 1.5.5 rejects.
   ['test/sql/ts_forecast_mfles_stability.test', 'UNNEST not supported in DuckDB v1.5.5 WASM engine'],
 
-  // Emscripten abort trap: ts_fill_forward_native exercises an internal table function
-  // (_ts_fill_forward_native) that triggers an Emscripten WebAssembly.RuntimeError
-  // (___trap is not defined) in the WASM runtime. A separate ___trap import is
-  // missing from the eh bundle used here.
-  ['test/sql/ts_fill_forward_native.test', 'Emscripten abort trap (___trap) in WASM runtime'],
 ]);
 
-// Curated subset: 8 files verified green against the current WASM artifact.
+// Curated subset: 12 files verified green against the current WASM artifact.
 // Selected for breadth: core forecasting, CV, metrics, conformal, decomposition,
-// diagnostics, aggregation, period detection.
+// diagnostics, aggregation, period detection, (Plan 19-01, #289) the
+// ts_fill_forward_operator deprecated macro + ts_fill_forward_by pins, and
+// (Plan 19-03, #289 BUG-02) the ts_features_list/ts_features_config_template
+// catalog functions (the previous skip-list reason -- a WASM memory-limit
+// theory -- was wrong; see the RegisterTsFeaturesListFunction comment in
+// src/table_functions/ts_features.cpp), and (#289) ts_fill_forward_native.test
+// plus ts_fill_forward_wasm_regression.test: forward fills that came back
+// unfilled, 1970-dated or aborted on WASM until wasm_eh moved to a Rust
+// toolchain with native wasm exceptions (CMakeLists.txt, ANOFOX_WASM_RUST_TOOLCHAIN).
 const CURATED = [
   'test/sql/ts_forecast_by.test',
   'test/sql/ts_metrics.test',
@@ -72,13 +76,23 @@ const CURATED = [
   'test/sql/ts_cv_folds.test',
   'test/sql/ts_aggregate_hierarchy.test',
   'test/sql/ts_periods.test',
+  'test/sql/ts_fill_forward_operator.test',
+  'test/sql/ts_features.test',
+  'test/sql/ts_fill_forward_native.test',
+  'test/sql/ts_fill_forward_wasm_regression.test',
 ];
 
 function parseArgs(argv) {
-  const args = { ext: process.env.ANOFOX_WASM_EXT || null, all: false, files: [] };
+  const args = {
+    ext: process.env.ANOFOX_WASM_EXT || null,
+    bundle: process.env.ANOFOX_WASM_BUNDLE || 'eh',
+    all: false,
+    files: [],
+  };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--ext') args.ext = argv[++i];
+    else if (a === '--bundle') args.bundle = argv[++i];
     else if (a === '--all') args.all = true;
     else if (a === '--file') args.files.push(argv[++i]);
     else if (a.endsWith('.test')) args.files.push(a);
@@ -148,18 +162,23 @@ function startServer(extPath) {
   });
 }
 
-async function bootEngine() {
+const VALID_BUNDLES = new Set(['eh', 'mvp']);
+
+async function bootEngine(bundle) {
+  if (!VALID_BUNDLES.has(bundle)) {
+    throw new Error(`unknown --bundle/ANOFOX_WASM_BUNDLE value: ${bundle} (expected eh or mvp)`);
+  }
   const duckdb = require('@duckdb/duckdb-wasm/dist/duckdb-node.cjs');
   const Worker = require('web-worker');
   const DIST = path.dirname(require.resolve('@duckdb/duckdb-wasm/dist/duckdb-node.cjs'));
 
-  const mainModule = path.join(DIST, 'duckdb-eh.wasm');
-  const mainWorker = path.join(DIST, 'duckdb-node-eh.worker.cjs');
+  const mainModule = path.join(DIST, `duckdb-${bundle}.wasm`);
+  const mainWorker = path.join(DIST, `duckdb-node-${bundle}.worker.cjs`);
 
   const worker = new Worker(mainWorker);
   const logger = { log() {} }; // silence per-query engine logs; we report ourselves
   const db = new duckdb.AsyncDuckDB(logger, worker);
-  await db.instantiate(mainModule, null); // pthreadWorker MUST be null for eh
+  await db.instantiate(mainModule, null); // pthreadWorker MUST be null for eh/mvp
   await db.open({ allowUnsignedExtensions: true });
   return { db, worker };
 }
@@ -182,10 +201,18 @@ async function main() {
   const args = parseArgs(process.argv);
   const log = (s) => process.stdout.write(s + '\n');
 
+  if (!VALID_BUNDLES.has(args.bundle)) {
+    process.stderr.write(
+      `✗ HARNESS ERROR: unknown --bundle/ANOFOX_WASM_BUNDLE value: ${args.bundle} (expected eh or mvp)\n`,
+    );
+    process.exit(1);
+  }
+
   log('━━━ anofox_forecast — DuckDB-Wasm harness ━━━');
 
   const extPath = findExtension(args.ext);
   log(`Extension artifact: ${path.relative(REPO_ROOT, extPath)}`);
+  log(`DuckDB-Wasm bundle: ${args.bundle}`);
 
   const { server, port } = await startServer(extPath);
   const base = `http://127.0.0.1:${port}`;
@@ -193,7 +220,7 @@ async function main() {
   let engine;
   let failedHard = false;
   try {
-    engine = await bootEngine();
+    engine = await bootEngine(args.bundle);
     const conn = await engine.db.connect();
 
     let version = 'unknown';

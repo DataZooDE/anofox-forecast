@@ -191,9 +191,11 @@ SELECT * FROM ts_conformal_calibrate(
     'historical_backtest', product_id, actual, forecast, params := {'alpha': 0.1}
 );
 
--- Run daily: apply to new forecasts
+-- Run daily: apply to new forecasts. Name the columns you store: later releases
+-- may append output columns (yhat/yhat_lower/yhat_upper/level came in #280).
 INSERT INTO forecast_with_intervals
-SELECT * FROM ts_conformal_apply_by(
+SELECT group_col, date_col, point, lower, upper, method, conformity_score
+FROM ts_conformal_apply_by(
     'todays_forecasts',
     product_id,
     date,
@@ -374,8 +376,10 @@ STRUCT literal casts implicitly — malformed values error instead of silently d
 | `method` | VARCHAR | `'symmetric'` | `'symmetric'` (alias `'split'`), `'asymmetric'`, or `'adaptive'` (requires `difficulty_col`) |
 
 **Returns:** `group_col`, `date_col`, `point`, `lower`, `upper`, `coverage` (empirical),
-`nominal_level`, `conformity_score`, `n_calibration`, `calibration_insufficient`, `method` —
-**one row per `(group_col, date_col)`**.
+`nominal_level`, `conformity_score`, `n_calibration`, `calibration_insufficient`, `method`,
+then (appended in #280) `yhat`, `yhat_lower`, `yhat_upper` (the same values as `point`,
+`lower`, `upper`, under the forecast names) and `level` (= `nominal_level`, `1 - alpha`) —
+**one row per `(group_col, date_col)`**. The existing columns are unchanged.
 
 **Examples:**
 ```sql
@@ -505,7 +509,10 @@ SELECT * FROM ts_conformal_apply_by(
 ```
 
 **Returns:** `group_col`, `date_col`, `point`, `lower`, `upper`, `method`,
-`conformity_score` — **one row per `(group_col, date_col)`**.
+`conformity_score`, then (appended in #280) `yhat`, `yhat_lower`, `yhat_upper` (= `point`,
+`lower`, `upper`) and `level` (the matched calibration row's `nominal_level`; `NULL` when the
+calibration table has no `nominal_level` column, e.g. a hand-built one) — **one row per
+`(group_col, date_col)`**.
 
 **Example:**
 ```sql

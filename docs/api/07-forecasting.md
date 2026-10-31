@@ -481,6 +481,86 @@ offending model/parameter:
   `ts_forecast_by` uses (see "Calendar stepping" above), with the frequency auto-detected
   from the observed dates instead of a declared `frequency` argument.
 
+### Rolling-origin forecasts with window frames
+
+`ts_forecast_agg` is also a window function. A sliding or expanding frame refits the
+model on each row's frame, the SQL-native form of a rolling-origin evaluation (next to
+[`ts_cv_folds_by`](08-cross-validation.md), which splits a fixed number of folds):
+
+```sql
+CREATE OR REPLACE TABLE rolling_demo AS
+SELECT i % 2 AS id, (TIMESTAMP '2024-01-01' + INTERVAL (i // 2) DAY) AS ds,
+       (10 + (i // 2) % 7 + 0.05 * (i // 2))::DOUBLE AS y
+FROM range(120) t(i);
+
+-- one-step-ahead forecast of every day from all the days before it, next to the actual
+SELECT id, ds, y,
+       (fc).point_forecast[1] AS yhat,
+       (fc).error_message
+FROM (
+    SELECT id, ds, y,
+           ts_forecast_agg(ds, y, 'SES', 1, MAP{}) OVER (
+               PARTITION BY id ORDER BY ds ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS fc
+    FROM rolling_demo)
+ORDER BY id, ds;
+```
+
+- Each frame gives exactly the `GROUP BY` result over the frame's rows (`FILTER` included).
+- A frame the model cannot fit, typically the first rows of the window, is **not** an
+  error for the query: its `error_message` says why (e.g. `Insufficient data: need at
+  least 3 observations, got 1`) and its forecast lists are empty. An empty frame (the
+  first row with `... AND 1 PRECEDING`) is `NULL`. An unknown model or params key still
+  raises.
+- A frame over the whole partition (`OVER (PARTITION BY id)`) fits once per partition,
+  as fast as `GROUP BY id`. Sliding and expanding frames fit once per row, so cost grows
+  with rows × frame length; keep frames bounded (`ROWS BETWEEN 199 PRECEDING AND ...`)
+  for the slower models.
+- The other `ts_*_agg` aggregates (`ts_stats_agg`, `ts_features_agg`, ...) work over
+  frames too (rolling statistics), with the same results as `GROUP BY` over the frame.
+
+### Stored states and incremental refits (DuckDB 2.0+)
+
+On DuckDB 2.0 the aggregate state of `ts_forecast_agg` and `ts_stats_agg` can be exported
+with `EXPORT_STATE`, stored in a table, merged with `combine_aggr` and turned into the
+result later with `finalize`. A refit then combines yesterday's stored state with
+today's new rows instead of rescanning the history:
+
+```sql
+-- DuckDB 2.0+
+CREATE OR REPLACE TABLE history AS
+SELECT i % 2 AS id, (TIMESTAMP '2024-01-01' + INTERVAL (i // 2) DAY) AS ds,
+       (10 + (i // 2) % 7)::DOUBLE AS y
+FROM range(120) t(i);
+
+-- once: one state per series
+CREATE OR REPLACE TABLE fc_state AS
+SELECT id, ts_forecast_agg(ds, y, 'SES', 7, MAP{}) EXPORT_STATE AS st FROM history GROUP BY id;
+
+-- each day: merge the new rows' state into the stored one ...
+CREATE OR REPLACE TABLE new_rows AS
+SELECT id, TIMESTAMP '2024-03-01' AS ds, 12.0 AS y FROM (VALUES (0), (1)) t(id);
+
+CREATE OR REPLACE TABLE fc_state AS
+SELECT id, combine_aggr(st) AS st FROM (
+    SELECT id, st FROM fc_state
+    UNION ALL
+    SELECT id, ts_forecast_agg(ds, y, 'SES', 7, MAP{}) EXPORT_STATE FROM new_rows GROUP BY id)
+GROUP BY id;
+
+-- ... and forecast from it
+SELECT id, (finalize(st)).point_forecast FROM fc_state ORDER BY id;
+```
+
+- `finalize(st)` gives exactly the aggregate over all the rows that went into the
+  state(s); the exported state is the buffered series plus method, horizon and params
+  (`STRUCT(method, horizon, params, ds, y)` for `ts_forecast_agg`, `STRUCT(ds, y)` for
+  `ts_stats_agg`). The state grows with the history: this saves the rescan, not memory.
+- `finalize` cannot see the original constant arguments, so the result's interval fields
+  are those of the default `confidence_level` (`lower_90` / `upper_90`); finalizing a
+  state built with another `confidence_level` is an error.
+- DuckDB 1.5.6 refuses `EXPORT_STATE` for these aggregates ("Cannot use EXPORT_STATE on aggregate functions with custom ..."); there,
+  aggregate the rows directly.
+
 ---
 
 ## Table Macros
@@ -538,6 +618,11 @@ so every public forecast surface agrees on dates (not just values) for the same 
 | `yhat` | DOUBLE | Point forecast |
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
+| `model_name` | VARCHAR | Model used |
+| `level` | DOUBLE | Interval coverage as a fraction (`confidence_level`, e.g. `0.9`); `NULL` when the model returns no interval. Appended in #280 |
+
+`level` lets forecasts at several confidence levels be stacked with `UNION ALL` into nested
+fans (one row per series, step and level), the anofox contract `prediction` shape.
 
 `yhat_lower` / `yhat_upper` come from each model's own crate-native prediction interval at
 `confidence_level` — see
@@ -575,6 +660,11 @@ Multi-series forecasting with exogenous variables. This is the **primary exogeno
 ```sql
 ts_forecast_exog_by(table_name, group_col, date_col, target_col, x_cols, future_table, future_date_col, future_x_cols, frequency, model, horizon, params?) → TABLE
 ```
+
+**Returns:** `id, forecast_step, date, yhat, yhat_lower, yhat_upper, model_name, ds, level`.
+`ds` (#280) holds the same value as `date`, under the name every other forecast uses; `level`
+is the interval coverage (`confidence_level`, default `0.9`), `NULL` without an interval. Both
+are appended after the existing columns, which are unchanged.
 
 **Exog-capable models** — every model below routes through the crate's own
 exogenous-regressor support (`CalendarAnnotations` + `predict_with_exog_intervals`); there
@@ -982,7 +1072,8 @@ ts_forecast_ensemble_by(
     seasonal_period := 0,      -- shared period for all members; 0 = non-seasonal
     confidence_level := 0.90   -- confidence level for the combined forecast's interval
 ) → TABLE(group_col, forecast_step INT, date_col TIMESTAMP, yhat DOUBLE,
-          yhat_lower DOUBLE, yhat_upper DOUBLE, model_name VARCHAR)
+          yhat_lower DOUBLE, yhat_upper DOUBLE, model_name VARCHAR,
+          level DOUBLE)  -- level = confidence_level, NULL without an interval (#280)
 ```
 
 ### Parameters
@@ -1253,8 +1344,14 @@ ts_forecast_var_by(
     p          INTEGER,     -- lag order (named param, default: 1)
     params     MAP          -- reserved for future use (default: MAP{})
 )
-→ TABLE(variable VARCHAR, forecast_step BIGINT, <date_col>, forecast_value DOUBLE)
+→ TABLE(variable VARCHAR, forecast_step BIGINT, <date_col>, forecast_value DOUBLE,
+         id VARCHAR, yhat DOUBLE, yhat_lower DOUBLE, yhat_upper DOUBLE,
+         model_name VARCHAR, level DOUBLE)
 ```
+
+The trailing columns (#280) carry `ts_forecast_by`'s names: `id` = `variable`, `yhat` =
+`forecast_value`, `model_name = 'VAR'`. The crate's VAR returns point forecasts only, so
+`yhat_lower`, `yhat_upper` and `level` are `NULL`.
 
 ### Examples (verified end-to-end)
 
@@ -1353,6 +1450,11 @@ Returns per-group `decomposition` STRUCT with `level` / `trend` /
 components are `NULL`) plus `named_components_json` for family-specific
 extras. `raw_json` carries the untransformed payload.
 
+`residual` (#282) is the part of the point forecast the components do not explain:
+`yhat - (level + trend + seasonal + named components)`, computed in Rust from the same fitted
+model. It is ~0 for an additive decomposition and carries the interaction term for a
+multiplicative one, so `level + trend + seasonal + residual` always equals `yhat`.
+
 **Supported models (decomposition):** `ETS` (fixed spec), `MSTL`,
 `AutoMSTL`, `Theta`. Other models error with `does not implement Explainable`.
 
@@ -1365,6 +1467,32 @@ SELECT product_id,
 FROM ts_forecast_explain_by('sales', product_id, ds, y, 'ETS', 12,
     {seasonal_period: 12});
 ```
+
+### Long forms: `ts_forecast_explain_long_by` and `ts_forecast_fitted_by` (#282)
+
+```sql
+ts_forecast_explain_long_by(source, group_col, date_col, target_col, method, horizon, frequency,
+                            params := MAP{})
+ts_forecast_fitted_by(source, group_col, date_col, target_col, method, params := MAP{})
+```
+
+- `ts_forecast_explain_long_by` returns one row per `(group, forecast_step, component)`:
+  `<group_col>, forecast_step, ds, component, value`, with `component` in `level`, `trend`,
+  `seasonal`, `residual` (absent components omitted). `ds` follows `ts_forecast_by`'s calendar
+  rule for `frequency`, so it joins to `ts_forecast_by` output on `(id, forecast_step, ds)`.
+- `ts_forecast_fitted_by` is the in-sample long form of `ts_forecast_agg`: one row per source
+  row, `<group_col>, <date_col>, y, fitted, residual, model_name` (the anofox contract `obs`
+  shape). `fitted`/`residual` are `NULL` where the model has none (NULL input, warm-up).
+
+```sql
+SELECT * FROM ts_forecast_explain_long_by('sales', product_id, ds, y, 'ETS', 12, '1mo',
+    params := MAP{'seasonal_period': '12'});
+
+SELECT * FROM ts_forecast_fitted_by('sales', product_id, ds, y, 'AutoETS');
+```
+
+`ts_forecast` and `ts_forecast_agg` return lists; their long form is `ts_forecast_by` (one row
+per `id, forecast_step, ds`) for the horizon and `ts_forecast_fitted_by` for the in-sample part.
 
 ---
 

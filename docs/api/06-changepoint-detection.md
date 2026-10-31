@@ -147,8 +147,44 @@ ts_detect_changepoints_by(source, group_col, date_col, value_col, params)
 | `value_col` | COLUMN | Value column |
 | `params` | MAP | Configuration options |
 
-**Parameters in MAP:**
-- `hazard_lambda`: Hazard rate parameter (default: 250.0). Lower values detect more changepoints.
+**Parameters in MAP** (Phase 20 plans 20-06/20-07, #287: `ts_detect_changepoints_by` and
+`ts_detect_changepoints_agg` share one Rust decision for every key below, through a single
+shared C++ params parser (`ts_changepoints_params.hpp`) and one Rust FFI export
+(`anofox_ts_detect_changepoints_bocpd_opts`) — **both functions return identical rows for
+identical inputs and params**, and every default below is unchanged from before Phase 20):
+- `hazard_lambda`: Hazard rate parameter (default: `250.0`). Lower values detect more
+  changepoints.
+- `threshold`: Optional probability cutoff in `[0, 1]` (default: unset). When **unset**, the
+  existing MAP run-length-reset heuristic decides `is_changepoint` (see Algorithm above). When
+  **set**, `is_changepoint = (changepoint_probability >= threshold)` for every row **after the
+  first** of each series — the first row of a series is **never** flagged, even at
+  `threshold = 0`, because its probability is always `1 - 1/hazard_lambda` (the hazard prior
+  alone, before any data is seen), not evidence of a changepoint. An out-of-range or
+  non-numeric value throws, naming `threshold`.
+- `deseasonalize`: `auto` (default), `true` or `false` (also `1`/`0`; case-insensitive).
+  When deseasonalizing, the series is transformed in Rust (`deseasonalize_for_changepoints`)
+  **before** BOCPD runs: the STL seasonal component at `seasonal_period` (or the
+  auto-detected period) is subtracted, and a straight-line (linear) trend is **always**
+  removed afterwards. A regular seasonal cycle then stops producing changepoints, while a
+  genuine level shift still survives as a step (a global line cannot absorb a local step).
+  - `auto` (default since #287) deseasonalizes only a **clearly seasonal** series. That
+    means a usable period (`seasonal_period`, or an FFT-detected period with confidence
+    ≥ 10), at least 3 whole cycles, and STL seasonal strength ≥ 0.5 at that period.
+    Any other series runs on the raw values, exactly as with `false`.
+  - `true` always deseasonalizes.
+  - `false` never does, and reproduces the pre-#287 defaults byte for byte (pinned by md5 in
+    `test/sql/correctness/detection_decomposition.test`).
+
+  When the series is deseasonalized and `threshold` is left unset, the **effective threshold
+  defaults to `0.5`** instead of the MAP run-length-reset heuristic. This is decided in Rust,
+  so `ts_detect_changepoints_by` and `ts_detect_changepoints_agg` both inherit it. Removing
+  the dominant seasonal variance collapses the BOCPD noise scale enough that the heuristic
+  otherwise floods the series with spurious changepoints. An explicit `threshold` always wins
+  over this default. An invalid value throws, naming `deseasonalize`.
+- `seasonal_period`: Strict non-negative integer (default: `0` = auto-detect via
+  `ts_detect_periods_by`'s FFT primary period). Consulted when deseasonalizing (`true`, or
+  `auto` deciding the series is seasonal); ignored with `false`. A negative or non-numeric value throws, naming
+  `seasonal_period`.
 
 **Returns:**
 | Column | Type | Description |
@@ -217,6 +253,117 @@ GROUP BY product_id;
 > params)`, no `group_col` — and its output shape differs: `(date_col, value_col,
 > is_changepoint, changepoint_probability)`. Notably it INCLUDES the value column (unlike
 > `ts_detect_changepoints_by`, which omits it) and has no series identifier column at all.
+
+### ts_detect_changepoints_events_by
+
+Changepoints as **events**: one row per detected changepoint instead of one row per input
+row (#283). The shape is the anofox integration contract's `events` schema, so
+anofox-visualization's `anofox_plot_events` (or the `events :=` overlay of
+`anofox_plot_prediction`) reads it directly.
+
+**Signature:**
+```sql
+ts_detect_changepoints_events_by(source, group_col, date_col, value_col, params := MAP{})
+```
+
+Detection and every `params` key (`hazard_lambda`, `threshold`, `deseasonalize`,
+`seasonal_period`) are exactly those of `ts_detect_changepoints_by`: the events are its rows
+`WHERE is_changepoint`.
+
+**Returns:**
+
+| Column | Type | Description |
+|---|---|---|
+| `<group_col>` | (input type) | Series identifier, caller's column name |
+| `<date_col>` | (input type) | Date of the changepoint, caller's column name |
+| `kind` | VARCHAR | Always `'changepoint'` |
+| `severity` | VARCHAR | `'alarm'` when `value >= 0.5`, else `'warning'` |
+| `value` | DOUBLE | `changepoint_probability` of that row |
+
+A series without a detected changepoint contributes no rows.
+
+**Example:**
+```sql
+SELECT * FROM ts_detect_changepoints_events_by('sales', product_id, date, quantity,
+    params := MAP{'threshold': '0.5'});
+```
+
+---
+
+## Aggregate Function
+
+### ts_detect_changepoints_agg
+
+Grouped aggregate form: one row per group, with a `LIST<STRUCT(...)>` of per-point results.
+Returns **identical** `is_changepoint`/`changepoint_probability` values to
+`ts_detect_changepoints_by` for identical inputs and params (Phase 20, #287) — pick whichever
+shape fits the surrounding query.
+
+**Signature:**
+```sql
+ts_detect_changepoints_agg(date_col, value_col, params) -- used with GROUP BY
+```
+
+**Parameters:** same `params` MAP keys as `ts_detect_changepoints_by` above
+(`hazard_lambda`, `threshold`, `deseasonalize`, `seasonal_period`).
+
+**Returns:** `LIST<STRUCT(timestamp TIMESTAMP, value DOUBLE, is_changepoint BOOLEAN, changepoint_probability DOUBLE)>` per group.
+
+**Example:**
+```sql
+SELECT product_id, ts_detect_changepoints_agg(date, quantity, MAP{'hazard_lambda': '100'})
+FROM sales
+GROUP BY product_id;
+
+-- Unnest to row-level output (equivalent shape to ts_detect_changepoints_by)
+SELECT product_id, r.timestamp, r.is_changepoint, r.changepoint_probability
+FROM (SELECT product_id, unnest(ts_detect_changepoints_agg(date, quantity, MAP{})) AS r FROM sales GROUP BY product_id);
+```
+
+---
+
+## Ignoring Seasonal Cycles (deseasonalize, #287, D1-b)
+
+A regular seasonal cycle (e.g. weekly traffic) can itself look like a sequence of
+changepoints to BOCPD, drowning out a genuine level shift. Deseasonalizing removes the
+seasonal component (and, always, a linear trend) before detection runs. Since #287 this
+happens **by default** for clearly seasonal series (`deseasonalize` `auto`). When
+`threshold` is left unset, the effective threshold is then `0.5` (code review CR-02), so only
+strong, sustained shifts are flagged. The calls below are equivalent on this series:
+
+```sql
+CREATE TABLE weekly_with_shift AS
+    SELECT 'series' AS id, (DATE '2024-01-01' + INTERVAL (i) DAY) AS ds,
+           40.0 + 0.3 * i + 5 * sin(2 * pi() * i / 7)
+               + CASE WHEN i >= 50 THEN 15 ELSE 0 END
+               + 1.6 * cos(i * 0.9) + 0.7 * sin(i * 1.7 + 40.0) AS y
+    FROM range(84) t(i);
+
+SELECT ds, is_changepoint
+FROM ts_detect_changepoints_by('weekly_with_shift', id, ds, y, MAP{})
+WHERE is_changepoint;
+-- 2024-02-20   true    (the level shift -- weekly troughs are NOT flagged)
+
+-- Equivalent -- the default 'auto' finds the weekly cycle and deseasonalizes:
+SELECT ds, is_changepoint
+FROM ts_detect_changepoints_by('weekly_with_shift', id, ds, y,
+    MAP{'deseasonalize': 'true'})
+WHERE is_changepoint;
+-- 2024-02-20   true    (identical result)
+
+-- Equivalent -- an explicit threshold always wins, and 0.5 is the default
+-- effective threshold whenever deseasonalize is true and threshold is unset:
+SELECT ds, is_changepoint
+FROM ts_detect_changepoints_by('weekly_with_shift', id, ds, y,
+    MAP{'deseasonalize': 'true', 'threshold': '0.5'})
+WHERE is_changepoint;
+-- 2024-02-20   true    (identical result)
+
+-- The pre-#287 raw behaviour: the weekly troughs are flagged too.
+SELECT count(*) FILTER (is_changepoint) AS flagged
+FROM ts_detect_changepoints_by('weekly_with_shift', id, ds, y,
+    MAP{'deseasonalize': 'false'});
+```
 
 ---
 

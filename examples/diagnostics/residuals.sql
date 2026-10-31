@@ -26,7 +26,7 @@ FROM ts_ljung_box_by('resids', series_id, ds, e) AS t(series_id, lb)
 ORDER BY series_id;
 
 .print '--- Durbin-Watson (RESID-02) per series ---'
-SELECT series_id, (dw).statistic, (dw).interpretation
+SELECT series_id, (dw).statistic, (dw).interpretation, (dw).p_value, (dw).method
 FROM ts_durbin_watson_by('resids', series_id, ds, e) AS t(series_id, dw)
 ORDER BY series_id;
 

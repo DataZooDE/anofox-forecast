@@ -424,10 +424,13 @@ ORDER BY group_col, date_col
     // Performance (1M rows, 10K groups):
     //   SQL macro:  181 MB peak memory
     //   Native:      11 MB peak memory (16x reduction)
+    // The native's input is (... FROM query_table(source) ORDER BY ALL): the ORDER BY is a
+    // single-pipeline breaker, so a UNION ALL view cannot hand the collect-then-finalize
+    // native several pipelines that finalize on partial input (#285, Phase 20 20-03).
     {"ts_fill_gaps_by", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_fill_gaps_native(
-    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
+    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR) ORDER BY ALL),
     frequency::VARCHAR
 )
 )",
@@ -445,16 +448,38 @@ SELECT * FROM _ts_fill_gaps_native(
     // Performance (1M rows, 10K groups):
     //   SQL macro:  127 MB peak memory
     //   Native:      11 MB peak memory (11x reduction)
+    // The native's input is (... FROM query_table(source) ORDER BY ALL): the ORDER BY is a
+    // single-pipeline breaker, so a UNION ALL view cannot hand the collect-then-finalize
+    // native several pipelines that finalize on partial input (#285, Phase 20 20-03).
     {"ts_fill_forward_by", {"source", "group_col", "date_col", "value_col", "target_date", "frequency", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_fill_forward_native(
-    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
+    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR) ORDER BY ALL),
     target_date,
     frequency::VARCHAR
 )
 )",
     "Forward-fills missing timestamps in each group's time series using the last known value.",
     "SELECT * FROM ts_fill_forward_by('sales', product_id, date, qty, '1d')",
+    "data-preparation"},
+
+    // ts_fill_forward_operator: DEPRECATED VARCHAR-column-name form of ts_fill_forward_by (GH#289)
+    // C++ API: ts_fill_forward_operator(source_table, group_col, date_col, value_col, target_date, frequency)
+    //
+    // Previously a native C++ table function that ran a nested QueryMaterialized query from
+    // InitGlobal, hung natively and trapped DuckDB-Wasm, interpolated identifiers unquoted via
+    // StringUtil::Format, and ignored the frequency argument (always one day). It is now a thin
+    // macro over ts_fill_forward_by: COLUMNS([param]) resolves each VARCHAR column-name argument
+    // to a column reference at bind time via AST substitution, so reserved words and names with
+    // spaces need no quoting and no SQL text is ever formatted from user input. Deprecated and
+    // scheduled for removal in the next release — use ts_fill_forward_by with column references.
+    {"ts_fill_forward_operator", {"source_table", "group_col", "date_col", "value_col", "target_date", "frequency", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT * FROM ts_fill_forward_by(source_table, COLUMNS([group_col]), COLUMNS([date_col]), COLUMNS([value_col]), target_date, frequency)
+)",
+    "DEPRECATED (removed in the next release): use ts_fill_forward_by with column references. "
+    "Takes the group/date/value columns as VARCHAR names and forward-fills each group to target_date at the given frequency.",
+    "SELECT * FROM ts_fill_forward_operator('sales', 'store_id', 'sale_date', 'qty', TIMESTAMP '2024-01-10', '1d')",
     "data-preparation"},
 
     // ts_drop_gappy_by: Filter out series with too many gaps
@@ -495,10 +520,13 @@ WHERE group_col IN (
     // C++ API: ts_mstl_decomposition_by(table_name, group_col, date_col, value_col, params MAP)
     // Returns: TABLE with expanded decomposition columns
     // Uses native streaming implementation to avoid LIST() memory issues
+    // The native's input is (... FROM query_table(source) ORDER BY ALL): the ORDER BY is a
+    // single-pipeline breaker, so a UNION ALL view cannot hand the collect-then-finalize
+    // native several pipelines that finalize on partial input (#285, Phase 20 20-03).
     {"ts_mstl_decomposition_by", {"source", "group_col", "date_col", "value_col", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_mstl_decomposition_native(
-    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
+    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR) ORDER BY ALL),
     COALESCE(json_extract_string(to_json(params), '$.insufficient_data'), 'fail'),
     CAST(COALESCE(json_extract_string(to_json(params), '$.seasonal_periods'), json_extract_string(to_json(params), '$.periods'), '[]') AS INTEGER[])
 )
@@ -535,6 +563,244 @@ FROM detrend_data
     "Removes the trend component from each group's time series.",
     "SELECT * FROM ts_detrend_by('sales', product_id, date, qty, 'cubic')",
     "decomposition"},
+
+    // =========================================================================
+    // Long-form companions (#282, CTR-08): one row per time point (or peak /
+    // period) carrying the caller's group and date columns, so nothing has to be
+    // unnested and joined back by list position. Each wraps the existing _by
+    // macro and maps list positions back to source rows; the values are
+    // unchanged.
+    // =========================================================================
+
+    // ts_mstl_decomposition_long_by: contract `decomposition` shape.
+    {"ts_mstl_decomposition_long_by", {"source", "group_col", "date_col", "value_col", nullptr},
+     {{"params", "MAP{}"}, {nullptr, nullptr}},
+R"(
+WITH _rows AS (
+    -- Every source row with its 1-based position in its series (by date) and
+    -- the series length. A list producer returns either one entry per row
+    -- (length _n) or one per row of the series with its leading/trailing NULLs
+    -- dropped (offset _lead, the number of leading NULL/NaN rows).
+    -- _g copies the group key for joins: a macro parameter name is only
+    -- substituted when unqualified, so qualified joins use _g.
+    SELECT group_col, date_col, group_col AS _g, value_col::DOUBLE AS _y,
+           row_number() OVER (PARTITION BY group_col ORDER BY date_col) AS _pos,
+           count(*) OVER (PARTITION BY group_col) AS _n
+    FROM query_table(source::VARCHAR)
+),
+_lead AS (
+    SELECT _g, coalesce(min(_pos) FILTER (WHERE _y IS NOT NULL AND NOT isnan(_y)), max(_pos) + 1) - 1 AS _lead
+    FROM _rows GROUP BY _g
+),
+_dec AS (
+    SELECT group_col AS _g, trend AS _trend, seasonal AS _seasonal, remainder AS _remainder, periods AS _periods
+    FROM ts_mstl_decomposition_by(source, group_col, date_col, value_col, params)
+),
+_idx AS (
+    SELECT r.*, d._trend, d._seasonal, d._remainder, d._periods,
+           -- NULL before the first non-NULL row (a negative index would count from the end).
+           CASE WHEN len(d._trend) = r._n THEN r._pos
+                WHEN r._pos > l._lead THEN r._pos - l._lead END AS _i
+    FROM _rows r
+    JOIN _lead l ON l._g IS NOT DISTINCT FROM r._g
+    JOIN _dec d ON d._g IS NOT DISTINCT FROM r._g
+)
+SELECT group_col, date_col, component, value
+FROM (
+    SELECT group_col, date_col,
+           unnest(
+               [{component: 'observed', value: _y}, {component: 'trend', value: _trend[_i]}]
+               || [{component: 'seasonal_' || _periods[k]::VARCHAR, value: _seasonal[k][_i]}
+                   FOR k IN generate_series(1, len(_periods))]
+               || [{component: 'remainder', value: _remainder[_i]}],
+               recursive := true)
+    FROM _idx
+)
+ORDER BY ALL
+)",
+    "Long form of ts_mstl_decomposition_by: one row per (group, date, component) with component in "
+    "observed, trend, seasonal_<period> (one per period), remainder -- the anofox contract "
+    "'decomposition' shape. Same params as ts_mstl_decomposition_by.",
+    "SELECT * FROM ts_mstl_decomposition_long_by('sales', product_id, date, qty, params := MAP{'seasonal_periods': '[7]'})",
+    "decomposition"},
+
+    // ts_detrend_long_by: one row per (group, date, component).
+    {"ts_detrend_long_by", {"source", "group_col", "date_col", "value_col", nullptr},
+     {{"method", "'auto'"}, {nullptr, nullptr}},
+R"(
+WITH _rows AS (
+    -- Every source row with its 1-based position in its series (by date) and
+    -- the series length. A list producer returns either one entry per row
+    -- (length _n) or one per row of the series with its leading/trailing NULLs
+    -- dropped (offset _lead, the number of leading NULL/NaN rows).
+    -- _g copies the group key for joins: a macro parameter name is only
+    -- substituted when unqualified, so qualified joins use _g.
+    SELECT group_col, date_col, group_col AS _g, value_col::DOUBLE AS _y,
+           row_number() OVER (PARTITION BY group_col ORDER BY date_col) AS _pos,
+           count(*) OVER (PARTITION BY group_col) AS _n
+    FROM query_table(source::VARCHAR)
+),
+_lead AS (
+    SELECT _g, coalesce(min(_pos) FILTER (WHERE _y IS NOT NULL AND NOT isnan(_y)), max(_pos) + 1) - 1 AS _lead
+    FROM _rows GROUP BY _g
+),
+_dt AS (
+    SELECT group_col AS _g, trend AS _trend, detrended AS _detrended, method AS _method
+    FROM ts_detrend_by(source, group_col, date_col, value_col, method)
+),
+_idx AS (
+    SELECT r.*, d._trend, d._detrended, d._method,
+           -- NULL before the first non-NULL row (a negative index would count from the end).
+           CASE WHEN len(d._trend) = r._n THEN r._pos
+                WHEN r._pos > l._lead THEN r._pos - l._lead END AS _i
+    FROM _rows r
+    JOIN _lead l ON l._g IS NOT DISTINCT FROM r._g
+    JOIN _dt d ON d._g IS NOT DISTINCT FROM r._g
+)
+-- SELECT * (not a column list): an unqualified `method` would be replaced by
+-- this macro's own method parameter.
+SELECT *
+FROM (
+    SELECT group_col, date_col,
+           unnest([{component: 'observed', value: _y},
+                   {component: 'trend', value: _trend[_i]},
+                   {component: 'detrended', value: _detrended[_i]}], recursive := true),
+           _method AS method
+    FROM _idx
+)
+ORDER BY ALL
+)",
+    "Long form of ts_detrend_by: one row per (group, date, component) with component in observed, "
+    "trend, detrended, plus the method used. method as ts_detrend_by (default 'auto').",
+    "SELECT * FROM ts_detrend_long_by('sales', product_id, date, qty, method := 'linear')",
+    "decomposition"},
+
+    // ts_detect_peaks_long_by: one row per detected peak (events-compatible).
+    {"ts_detect_peaks_long_by", {"source", "group_col", "date_col", "value_col", nullptr},
+     {{"params", "MAP{}"}, {nullptr, nullptr}},
+R"(
+WITH _rows AS (
+    -- Every source row with its 1-based position in its series (by date) and
+    -- the series length. A list producer returns either one entry per row
+    -- (length _n) or one per row of the series with its leading/trailing NULLs
+    -- dropped (offset _lead, the number of leading NULL/NaN rows).
+    -- _g copies the group key for joins: a macro parameter name is only
+    -- substituted when unqualified, so qualified joins use _g.
+    SELECT group_col, date_col, group_col AS _g, value_col::DOUBLE AS _y,
+           row_number() OVER (PARTITION BY group_col ORDER BY date_col) AS _pos,
+           count(*) OVER (PARTITION BY group_col) AS _n
+    FROM query_table(source::VARCHAR)
+),
+_lead AS (
+    SELECT _g, coalesce(min(_pos) FILTER (WHERE _y IS NOT NULL AND NOT isnan(_y)), max(_pos) + 1) - 1 AS _lead
+    FROM _rows GROUP BY _g
+),
+_pk AS (
+    SELECT group_col AS _g, unnest(peaks) AS _p
+    FROM ts_detect_peaks_by(source, group_col, date_col, value_col, params)
+)
+SELECT group_col, date_col, 'peak' AS kind, (pk._p).value AS value, (pk._p).prominence AS prominence
+FROM _pk pk
+JOIN _lead l ON l._g IS NOT DISTINCT FROM pk._g
+JOIN _rows r ON r._g IS NOT DISTINCT FROM pk._g AND r._pos = (pk._p).index + 1 + l._lead
+ORDER BY ALL
+)",
+    "Long form of ts_detect_peaks_by: one row per detected peak (group_col, date_col, kind = 'peak', "
+    "value, prominence), usable as anofox contract 'events'. Same params as ts_detect_peaks_by.",
+    "SELECT * FROM ts_detect_peaks_long_by('sales', product_id, date, qty, params := MAP{'min_prominence': '1.0'})",
+    "peak-detection"},
+
+    // ts_detect_periods_long_by: one row per detected period candidate.
+    {"ts_detect_periods_long_by", {"source", "group_col", "date_col", "value_col", nullptr},
+     {{"params", "MAP{}"}, {nullptr, nullptr}},
+R"(
+SELECT group_col, rank, (_c).period AS period, (_c).confidence AS confidence, (_c).strength AS strength,
+       (_c).amplitude AS amplitude, (_c).phase AS phase, (_c).iteration AS iteration,
+       (_c).matches_expected AS matches_expected, (_c).matched_expected_period AS matched_expected_period,
+       (_c).match_deviation AS match_deviation, (_c).period = primary_period AS is_primary, method
+FROM (
+    SELECT group_col, primary_period, method,
+           unnest(periods) AS _c, unnest(generate_series(1, len(periods))) AS rank
+    FROM ts_detect_periods_by(source, group_col, date_col, value_col, params)
+)
+ORDER BY ALL
+)",
+    "Long form of ts_detect_periods_by: one row per detected period candidate (group_col, rank, "
+    "period, confidence, strength, amplitude, phase, iteration, matches_expected, "
+    "matched_expected_period, match_deviation, is_primary, method). Same params as ts_detect_periods_by.",
+    "SELECT * FROM ts_detect_periods_long_by('sales', product_id, date, qty)",
+    "period-detection"},
+
+    // ts_forecast_fitted_by: in-sample long form of ts_forecast_agg (contract `obs`).
+    {"ts_forecast_fitted_by", {"source", "group_col", "date_col", "target_col", "method", nullptr},
+     {{"params", "MAP{}"}, {nullptr, nullptr}},
+R"(
+WITH _rows AS (
+    SELECT group_col, date_col, group_col AS _g, target_col::DOUBLE AS _y,
+           row_number() OVER (PARTITION BY group_col ORDER BY date_col) AS _pos
+    FROM query_table(source::VARCHAR)
+),
+_fit AS (
+    SELECT group_col AS _g, ts_forecast_agg(date_col, target_col::DOUBLE, method, 1, params) AS _f
+    FROM query_table(source::VARCHAR)
+    GROUP BY group_col
+)
+SELECT group_col, date_col, _y AS y, (f._f).insample_fitted[r._pos] AS fitted,
+       (f._f).residuals[r._pos] AS residual, (f._f).model_name AS model_name
+FROM _rows r JOIN _fit f ON r._g IS NOT DISTINCT FROM f._g
+ORDER BY ALL
+)",
+    "In-sample long form of ts_forecast_agg: one row per source row (group_col, date_col, y, fitted, "
+    "residual, model_name), the anofox contract 'obs' shape. fitted/residual are NULL where the model "
+    "has none (e.g. leading NULLs, warm-up). method and params as ts_forecast_by.",
+    "SELECT * FROM ts_forecast_fitted_by('sales', product_id, date, qty, 'AutoETS')",
+    "forecasting"},
+
+    // ts_forecast_explain_long_by: per-horizon decomposition, one row per
+    // (group, step, component). ds uses ts_forecast_by's calendar rule (a Naive
+    // _ts_forecast_scalar call supplies the future dates, typed as ts_forecast_by's).
+    {"ts_forecast_explain_long_by", {"source", "group_col", "date_col", "target_col", "method", "horizon", "frequency", nullptr},
+     {{"params", "MAP{}"}, {nullptr, nullptr}},
+R"(
+WITH _ex AS (
+    SELECT group_col AS _g, decomposition
+    FROM ts_forecast_explain_by(source, group_col, date_col, target_col, method, horizon, params := params)
+),
+_ds AS (
+    SELECT group_col, group_col AS _g,
+           [f.ds FOR f IN _ts_forecast_scalar(LIST(date_col ORDER BY date_col), LIST(target_col::DOUBLE ORDER BY date_col),
+                                               horizon, frequency::VARCHAR, 'Naive', MAP{})] AS _dates
+    FROM query_table(source::VARCHAR)
+    GROUP BY group_col
+),
+_comp AS (
+    SELECT d.*,
+           [{component: 'level', values: (e.decomposition).level},
+            {component: 'trend', values: (e.decomposition).trend},
+            {component: 'seasonal', values: (e.decomposition).seasonal},
+            {component: 'residual', values: (e.decomposition).residual}] AS _cs
+    FROM _ex e JOIN _ds d ON e._g IS NOT DISTINCT FROM d._g
+),
+_c AS (
+    SELECT group_col, _dates, unnest(_cs, recursive := true) FROM _comp
+)
+SELECT group_col, forecast_step, ds, component, value
+FROM (
+    SELECT group_col, component,
+           unnest(generate_series(1, len(values)))::INTEGER AS forecast_step,
+           unnest(_dates[1:len(values)]) AS ds,
+           unnest(values) AS value
+    FROM _c
+    WHERE values IS NOT NULL
+)
+ORDER BY group_col, forecast_step, component
+)",
+    "Long form of ts_forecast_explain_by: one row per (group, forecast_step, component) with ds (future "
+    "date, ts_forecast_by's calendar rule), component in level, trend, seasonal, residual (absent "
+    "components are omitted) and value. residual = point forecast - (level + trend + seasonal). "
+    "frequency as in ts_forecast_by.",
+    "SELECT * FROM ts_forecast_explain_long_by('sales', product_id, ds, y, 'ETS', 12, '1d', params := MAP{'seasonal_period': '7'})",
+    "forecasting"},
 
     // ts_classify_seasonality_by: Classify seasonality type per group
     // C++ API: ts_classify_seasonality_by(table_name, group_col, date_col, value_col, period)
@@ -615,6 +881,10 @@ ORDER BY od._dt
     // C++ API: ts_detect_changepoints_by(table_name, group_col, date_col, value_col, params MAP)
     // Returns: TABLE with group_col (preserved name!), date_col, value_col, is_changepoint, changepoint_probability
     //
+    // The native's input is (... FROM query_table(source) ORDER BY ALL): the ORDER BY is a
+    // single-pipeline breaker, so a UNION ALL view cannot hand the collect-then-finalize
+    // native several pipelines that finalize on partial input (#285, Phase 20 20-03).
+    //
     // This macro wraps the native streaming implementation (_ts_detect_changepoints_by_native)
     // which fixes issue #149:
     // - Preserves the input group column name (was hardcoded as 'id')
@@ -622,12 +892,41 @@ ORDER BY od._dt
     {"ts_detect_changepoints_by", {"source", "group_col", "date_col", "value_col", "params", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_detect_changepoints_by_native(
-    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
-    COALESCE(TRY_CAST(params['hazard_lambda'] AS VARCHAR), '250.0')
+    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR) ORDER BY ALL),
+    -- not a cast: a STRUCT, MAP, VARIANT (2.0) or MAP(VARCHAR, VARIANT) all become the
+    -- MAP(VARCHAR, VARCHAR) the native takes (no VARIANT -> MAP cast exists)
+    _ts_params_map(params)
 )
 )",
     "Detects structural changepoints for each group using Bayesian Online Changepoint Detection.",
     "SELECT * FROM ts_detect_changepoints_by('sales', product_id, date, qty)",
+    "changepoint-detection"},
+
+    // ts_detect_changepoints_events_by: one row per detected changepoint in the
+    // anofox contract `events` shape (#283, CTR-11). Same detection, params and
+    // union-safety as ts_detect_changepoints_by (it is a filter over that macro);
+    // group/date columns keep the caller's names.
+    // severity: 'alarm' when changepoint_probability >= 0.5, else 'warning' (the
+    // MAP run-length heuristic can flag a row whose probability is below 0.5).
+    {"ts_detect_changepoints_events_by", {"source", "group_col", "date_col", "value_col", nullptr},
+     {{"params", "MAP{}"}, {nullptr, nullptr}},
+R"(
+SELECT
+    group_col,
+    date_col,
+    'changepoint' AS kind,
+    CASE WHEN changepoint_probability >= 0.5 THEN 'alarm' ELSE 'warning' END AS severity,
+    changepoint_probability AS value
+FROM ts_detect_changepoints_by(source, group_col, date_col, value_col, params)
+WHERE is_changepoint
+ORDER BY ALL
+)",
+    "Changepoints as events: one row per detected changepoint (group_col, date_col, kind = "
+    "'changepoint', severity, value = changepoint_probability), the anofox contract 'events' schema. "
+    "Same detection and params MAP as ts_detect_changepoints_by (hazard_lambda, threshold, "
+    "deseasonalize, seasonal_period). severity is 'alarm' when changepoint_probability >= 0.5, "
+    "else 'warning'.",
+    "SELECT * FROM ts_detect_changepoints_events_by('sales', product_id, date, qty, params := MAP{'threshold': '0.5'})",
     "changepoint-detection"},
 
     // ts_forecast: Generate forecasts for a single series (table-based)
@@ -670,7 +969,7 @@ FROM forecast_result
     // Supports both Polars-style ('1d', '1h', '30m', '1w', '1mo', '1q', '1y') and DuckDB INTERVAL ('1 day', '1 hour')
     {"ts_forecast_by", {"source", "group_col", "date_col", "target_col", "method", "horizon", "frequency", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
 R"(
-SELECT group_col, forecast_step, ds, yhat, yhat_lower, yhat_upper, model_name
+SELECT group_col, forecast_step, ds, yhat, yhat_lower, yhat_upper, model_name, level
 FROM (
     SELECT group_col,
            unnest(_ts_forecast_scalar(
@@ -689,6 +988,21 @@ FROM (
     "SELECT * FROM ts_forecast_by('sales', product_id, date, qty, 'AutoETS', 12, '1d')",
     "forecasting"},
 
+    // _ts_forecast_native: INTERNAL ONLY (#285, 20-05). This underscore-prefixed
+    // macro wraps the renamed `_ts_forecast_native_impl` native (ts_forecast_native.cpp)
+    // with a single-pipeline input, (SELECT * FROM _ts_passthrough(source) ORDER BY ALL),
+    // so a UNION ALL source is read in full instead of silently truncated. It exists
+    // only because test/sql/ts_forecast_param_grid.test, ts_native_model_names.test and
+    // ts_native_param_validation.test call it directly, positional. ts_forecast_by does
+    // NOT use this macro or the native behind it (GROUP BY + _ts_forecast_scalar; already
+    // correct on UNION ALL sources, untouched here). RegisterTsTableMacros skips the
+    // anofox_fcst_ alias for any name starting with '_'.
+    {"_ts_forecast_native", {"source", "horizon", "frequency", "method", "params", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT * FROM _ts_forecast_native_impl((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), horizon, frequency, method, params)
+)",
+    nullptr, nullptr, nullptr},
+
     // ts_forecast_ensemble_by: Explicit-member ensemble forecasting (Phase 5: ENS-02)
     //
     // Fits each named member model independently per series and combines forecasts
@@ -705,7 +1019,8 @@ FROM (
      {"source", "group_col", "date_col", "target_col", "members", "horizon", "frequency", nullptr},
      {{"combination_method", "''"}, {"seasonal_period", "0"}, {"confidence_level", "0.90"}, {nullptr, nullptr}},
 R"(
-SELECT group_col, forecast_step, ds, yhat, yhat_lower, yhat_upper, model_name
+SELECT group_col, forecast_step, ds, yhat, yhat_lower, yhat_upper, model_name,
+       CASE WHEN yhat_lower IS NULL AND yhat_upper IS NULL THEN NULL ELSE confidence_level::DOUBLE END AS level
 FROM (
     SELECT group_col,
            unnest(_ts_forecast_ensemble_native(
@@ -817,7 +1132,7 @@ FROM (
 R"(
 SELECT group_col, forecast_step, date_col, yhat, model_name
 FROM _ts_forecast_panel_native(
-    (SELECT group_col, date_col, target_col::DOUBLE FROM query_table(source::VARCHAR)),
+    (SELECT group_col, date_col, target_col::DOUBLE FROM query_table(source::VARCHAR) ORDER BY ALL),
     horizon,
     frequency,
     method,
@@ -852,9 +1167,18 @@ FROM _ts_forecast_panel_native(
      {"source", "date_col", "value_cols", "horizon", "frequency", nullptr},
      {{"p", "1"}, {"params", "MAP{}"}, {nullptr, nullptr}},
 R"(
-SELECT *
+-- Appended columns (#280, CTR-05): the ts_forecast_by names. id = variable,
+-- yhat = forecast_value; the crate's VAR returns point forecasts only, so
+-- yhat_lower / yhat_upper / level are NULL.
+SELECT *,
+    variable AS id,
+    forecast_value AS yhat,
+    NULL::DOUBLE AS yhat_lower,
+    NULL::DOUBLE AS yhat_upper,
+    'VAR' AS model_name,
+    NULL::DOUBLE AS level
 FROM _ts_forecast_var_native(
-    (SELECT * FROM query_table(source::VARCHAR)),
+    (SELECT * FROM query_table(source::VARCHAR) ORDER BY ALL),
     horizon,
     frequency,
     p,
@@ -869,6 +1193,8 @@ FROM _ts_forecast_var_native(
     "date_col is the name of the date column (VARCHAR string, e.g. 'ds'). "
     "p is the VAR lag order (default 1). "
     "forecast_value is a point forecast (no prediction intervals in v1). "
+    "Trailing columns id (= variable), yhat (= forecast_value), yhat_lower, yhat_upper (NULL), "
+    "model_name ('VAR') and level (NULL) match ts_forecast_by's names (#280). "
     "v1 is single-panel only (no group_col — one VAR fit for the entire input table).",
     "SELECT * FROM ts_forecast_var_by('returns', 'ds', ['equity','bond','fx'], 12, '1d', p:=2)",
     "forecasting"},
@@ -1016,7 +1342,7 @@ SELECT * FROM _ts_cv_forecast_native(
         date_col AS "__cv_dt__",
         target_col::DOUBLE AS "__cv_tgt__",
         *
-     FROM query_table(ml_folds::VARCHAR)),
+     FROM query_table(ml_folds::VARCHAR) ORDER BY ALL),
     method,
     params
 )
@@ -1211,7 +1537,11 @@ SELECT
     UNNEST((fcst).point) AS yhat,
     UNNEST((fcst).lower) AS yhat_lower,
     UNNEST((fcst).upper) AS yhat_upper,
-    (fcst).model AS model_name
+    (fcst).model AS model_name,
+    -- Appended (#280): ds (the same value as date, the name every other forecast
+    -- uses) and level (interval coverage; NULL without an interval).
+    UNNEST(_ts_future_dates(_dates, len((fcst).point)::INTEGER, (SELECT _interval FROM _freq))) AS ds,
+    (fcst).level AS level
 FROM forecast_data
 ORDER BY __exog_grp__, forecast_step
 )",
@@ -1485,7 +1815,7 @@ ORDER BY fold_id
     {"ts_cv_split_by", {"source", "group_col", "date_col", "target_col", "training_end_times", "horizon", nullptr}, {{"params", "MAP{}"}, {nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_cv_split_native(
-    (SELECT group_col, date_col, target_col FROM query_table(source::VARCHAR)),
+    (SELECT group_col, date_col, target_col FROM query_table(source::VARCHAR) ORDER BY ALL),
     horizon,
     training_end_times,
     params
@@ -1653,7 +1983,7 @@ SELECT * FROM _ts_cv_folds_native(
         group_col,      -- Original name (position 3)
         date_col,       -- Original name (position 4)
         target_col      -- Original name (position 5)
-     FROM query_table(source::VARCHAR)),
+     FROM query_table(source::VARCHAR) ORDER BY ALL),
     n_folds,
     horizon,
     params
@@ -1716,7 +2046,7 @@ joined AS (
     JOIN src ON cv.__cv_grp = src.__src_grp AND cv.__cv_dt = src.__src_dt
 )
 SELECT * FROM _ts_cv_hydrate_native(
-    (SELECT * FROM joined),
+    (SELECT * FROM joined ORDER BY ALL),
     unknown_features,
     params
 )
@@ -1743,8 +2073,8 @@ SELECT * FROM _ts_cv_hydrate_native(
 R"(
 WITH _params AS (
     SELECT
-        CAST(COALESCE((params::MAP(VARCHAR, VARCHAR))['alpha'], '0.1') AS DOUBLE) AS _alpha,
-        COALESCE((params::MAP(VARCHAR, VARCHAR))['method'], 'symmetric') AS _method
+        CAST(COALESCE(_ts_params_map(params)['alpha'], '0.1') AS DOUBLE) AS _alpha,
+        COALESCE(_ts_params_map(params)['method'], 'symmetric') AS _method
 ),
 per_group AS (
     SELECT
@@ -1782,7 +2112,12 @@ SELECT
     (conf_result).conformity_score AS conformity_score,
     (conf_result).n_calibration AS n_calibration,
     (conf_result).calibration_insufficient AS calibration_insufficient,
-    (conf_result).method AS method
+    (conf_result).method AS method,
+    -- Appended (#280): contract prediction names and the interval level.
+    UNNEST((conf_result).point) AS yhat,
+    UNNEST((conf_result).lower) AS yhat_lower,
+    UNNEST((conf_result).upper) AS yhat_upper,
+    (conf_result).nominal_level AS level
 FROM conformal_calc
 )",
     "One-step conformal prediction: calibrates on backtest residuals and applies to new forecasts, one row per (group, date).",
@@ -1814,9 +2149,9 @@ FROM conformal_calc
 R"(
 WITH _params AS (
     SELECT
-        CAST(COALESCE((params::MAP(VARCHAR, VARCHAR))['alpha'], '0.1') AS DOUBLE) AS _alpha,
-        COALESCE((params::MAP(VARCHAR, VARCHAR))['method'], 'symmetric') AS _method,
-        CAST(COALESCE((params::MAP(VARCHAR, VARCHAR))['pooled'], 'false') AS BOOLEAN) AS _pooled
+        CAST(COALESCE(_ts_params_map(params)['alpha'], '0.1') AS DOUBLE) AS _alpha,
+        COALESCE(_ts_params_map(params)['method'], 'symmetric') AS _method,
+        CAST(COALESCE(_ts_params_map(params)['pooled'], 'false') AS BOOLEAN) AS _pooled
 ),
 per_key AS (
     SELECT
@@ -1875,7 +2210,11 @@ FROM calibrated
     {"ts_conformal_apply_by", {"forecast_results", "group_col", "date_col", "forecast_col", "calibration", nullptr}, {{"difficulty_col", "NULL"}, {nullptr, nullptr}},
 R"(
 WITH cal AS (
+    -- UNION ALL BY NAME with an empty typed row (#280): a calibration table
+    -- without a nominal_level column (hand-built) still binds, with NULL level.
     SELECT * FROM query_table(calibration::VARCHAR)
+    UNION ALL BY NAME
+    SELECT NULL::DOUBLE AS nominal_level WHERE false
 ),
 cal_dupe_check AS (
     -- NOTE: `cal.group_col` must stay qualified (never a bare `group_col`)
@@ -1903,7 +2242,9 @@ matched AS (
         pg._grp AS _grp,
         pg._points AS _points,
         COALESCE(direct.conformity_score, pooled.conformity_score, dupe_check._err) AS _score,
-        COALESCE(direct.method, pooled.method) AS _method
+        COALESCE(direct.method, pooled.method) AS _method,
+        -- level (#280): the matched calibration row's nominal_level.
+        TRY_CAST(COALESCE(direct.nominal_level, pooled.nominal_level) AS DOUBLE) AS _level
     FROM per_group pg
     CROSS JOIN cal_pooled_eligible eligible
     CROSS JOIN cal_dupe_check dupe_check
@@ -1916,6 +2257,7 @@ applied AS (
         _points,
         _method,
         _score,
+        _level,
         ts_conformal_intervals([pt.p FOR pt IN _points], _score, _method, [pt.d FOR pt IN _points]) AS _bounds
     FROM matched
 )
@@ -1926,7 +2268,12 @@ SELECT
     UNNEST((_bounds).lower) AS lower,
     UNNEST((_bounds).upper) AS upper,
     _method AS method,
-    _score AS conformity_score
+    _score AS conformity_score,
+    -- Appended (#280): contract prediction names and the interval level.
+    UNNEST(_points).p AS yhat,
+    UNNEST((_bounds).lower) AS yhat_lower,
+    UNNEST((_bounds).upper) AS yhat_upper,
+    _level AS level
 FROM applied
 )",
     "Applies a calibration table (from ts_conformal_calibrate) to new point forecasts, matching each group to its own row or a pooled row.",
@@ -1965,13 +2312,56 @@ FROM per_group
     // ================================================================================
     // Multi-key unique_id functions (Issue #78)
     // ================================================================================
-    // NOTE: ts_validate_separator, ts_combine_keys, ts_aggregate_hierarchy, and ts_split_keys
-    // are now native table functions supporting arbitrary hierarchy levels.
-    // See: ts_validate_separator.cpp, ts_aggregate_hierarchy.cpp, ts_combine_keys.cpp, ts_split_keys.cpp
+    // NOTE: ts_combine_keys is still a native table function (streaming, no
+    // in_out_function_final, so it is not affected by #285).
+    // ts_validate_separator, ts_aggregate_hierarchy and ts_split_keys are
+    // collect-then-finalize natives and were silently truncating a UNION ALL
+    // source (#285, decisions_addendum_2, 20-05). Each is now a table macro
+    // over a renamed `_ts_*_native` (ts_validate_separator.cpp,
+    // ts_aggregate_hierarchy.cpp, ts_split_keys.cpp) that reads its source
+    // through (SELECT * FROM _ts_passthrough(source) ORDER BY ALL), the same
+    // single-pipeline breaker the metric/detection/CV macros use. Call
+    // signatures and output columns are unchanged.
+
+    // ts_aggregate_hierarchy: aggregate a leaf-level time series up through a
+    // hierarchy of group keys. `params` stays a required positional MAP (no
+    // default, matching the pre-20-05 native's signature).
+    {"ts_aggregate_hierarchy", {"source", "params", nullptr}, {{nullptr, nullptr}},
+R"(
+SELECT * FROM _ts_aggregate_hierarchy_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), params)
+)",
+    "Aggregates time series data up through a hierarchy of group keys, rolling up lower-level series to higher levels.",
+    "SELECT * FROM ts_aggregate_hierarchy(TABLE(SELECT date, value, region, store, item FROM t), MAP {'separator': '|'})",
+    "hierarchical"},
+
+    // ts_split_keys: split a composite unique_id column back into its
+    // component key columns. `columns` defaults to NULL (auto-generated
+    // id_part_N names), matching the pre-20-05 native's optional parameter.
+    {"ts_split_keys", {"source", nullptr}, {{"separator", "'|'"}, {"columns", "NULL"}, {nullptr, nullptr}},
+R"(
+SELECT * FROM _ts_split_keys_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), separator := separator, columns := columns)
+)",
+    "Splits a composite group key column back into its original multiple key columns.",
+    "SELECT * FROM ts_split_keys(TABLE(SELECT unique_id, date, value FROM t), separator='|', columns=['region', 'store', 'item'])",
+    "hierarchical"},
+
+    // ts_validate_separator: check whether a separator is safe to use (does
+    // not appear in any ID column value) across the whole source.
+    {"ts_validate_separator", {"source", nullptr}, {{"separator", "'|'"}, {nullptr, nullptr}},
+R"(
+SELECT * FROM _ts_validate_separator_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), separator := separator)
+)",
+    "Validates that group key separators in composite keys are consistent and non-ambiguous.",
+    "SELECT * FROM ts_validate_separator(TABLE(SELECT region, store FROM t), separator='|')",
+    "utilities"},
 
     // ts_stats_by: Compute time series statistics grouped by a unique ID column
     // C++ API: ts_stats_by(table_name, group_col, date_col, value_col, frequency, seasonal_period := 0)
     // Returns: TABLE with group column (preserving original name!) and 36 statistics columns
+    //
+    // The native's input is (... FROM query_table(source) ORDER BY ALL): the ORDER BY is a
+    // single-pipeline breaker, so a UNION ALL view cannot hand the collect-then-finalize
+    // native several pipelines that finalize on partial input (#285, Phase 20 20-03).
     //
     // This macro is a thin wrapper around the native streaming implementation (_ts_stats_by_native)
     // which fixes the following bugs from issue #147:
@@ -1983,7 +2373,7 @@ FROM per_group
     {"ts_stats_by", {"source", "group_col", "date_col", "value_col", "frequency", nullptr}, {{"seasonal_period", "0"}, {nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_stats_by_native(
-    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR)),
+    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR) ORDER BY ALL),
     frequency,
     seasonal_period::INTEGER
 )
@@ -2169,7 +2559,7 @@ FROM features_data
     {"ts_features_by", {"source", "group_col", "date_col", "value_col", nullptr}, {{nullptr, nullptr}},
 R"(
 SELECT * FROM _ts_features_native(
-    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR))
+    (SELECT group_col, date_col, value_col FROM query_table(source::VARCHAR) ORDER BY ALL)
 )
 )",
     "Extracts time series features for each group and returns results as a structured table.",
@@ -2409,7 +2799,7 @@ FROM timing_data
     // C++ API: ts_mae_by(source, date_col, actual_col, forecast_col)
     {"ts_mae_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'mae')
+SELECT * FROM _ts_metrics_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, forecast_col, 'mae')
 )",
     "Computes Mean Absolute Error between actual and forecast columns per group. "
     "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
@@ -2422,7 +2812,7 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'ma
     // C++ API: ts_mse_by(source, date_col, actual_col, forecast_col)
     {"ts_mse_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'mse')
+SELECT * FROM _ts_metrics_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, forecast_col, 'mse')
 )",
     "Computes Mean Squared Error between actual and forecast columns per group. "
     "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
@@ -2435,7 +2825,7 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'ms
     // C++ API: ts_rmse_by(source, date_col, actual_col, forecast_col)
     {"ts_rmse_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'rmse')
+SELECT * FROM _ts_metrics_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, forecast_col, 'rmse')
 )",
     "Computes Root Mean Squared Error between actual and forecast columns per group. "
     "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
@@ -2448,7 +2838,7 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'rm
     // C++ API: ts_mape_by(source, date_col, actual_col, forecast_col)
     {"ts_mape_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'mape')
+SELECT * FROM _ts_metrics_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, forecast_col, 'mape')
 )",
     "Computes Mean Absolute Percentage Error between actual and forecast columns per group. "
     "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
@@ -2461,7 +2851,7 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'ma
     // C++ API: ts_smape_by(source, date_col, actual_col, forecast_col)
     {"ts_smape_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'smape')
+SELECT * FROM _ts_metrics_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, forecast_col, 'smape')
 )",
     "Computes Symmetric Mean Absolute Percentage Error between actual and forecast columns per group. "
     "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
@@ -2474,7 +2864,7 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'sm
     // C++ API: ts_r2_by(source, date_col, actual_col, forecast_col)
     {"ts_r2_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'r2')
+SELECT * FROM _ts_metrics_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, forecast_col, 'r2')
 )",
     "Computes R-squared (coefficient of determination) between actual and forecast columns per group. "
     "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
@@ -2487,7 +2877,7 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'r2
     // C++ API: ts_bias_by(source, date_col, actual_col, forecast_col)
     {"ts_bias_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'bias')
+SELECT * FROM _ts_metrics_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, forecast_col, 'bias')
 )",
     "Computes mean forecast bias between actual and forecast columns per group. "
     "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
@@ -2503,7 +2893,7 @@ SELECT * FROM _ts_metrics_native(source, date_col, actual_col, forecast_col, 'bi
     // 5th-argument baseline-column form was removed in v2026.10.16 (see ts_rmae_by).
     {"ts_mase_by", {"source", "date_col", "actual_col", "forecast_col", nullptr}, {{"seasonal_period", "1"}, {nullptr, nullptr}},
 R"(
-SELECT * FROM _ts_mase_native(source, date_col, actual_col, forecast_col, seasonal_period)
+SELECT * FROM _ts_mase_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, forecast_col, seasonal_period)
 )",
     "Computes Hyndman-Koehler Mean Absolute Scaled Error (MASE) per group: the out-of-sample forecast MAE scaled by the in-sample seasonal-naive MAE at lag seasonal_period (default 1). Source rows dated before each group's first forecast (forecast NULL) supply the in-sample scale. The old baseline-column form was removed in v2026.10.16 -- use ts_rmae_by for a relative-MAE comparison. "
     "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
@@ -2512,11 +2902,38 @@ SELECT * FROM _ts_mase_native(source, date_col, actual_col, forecast_col, season
     "SELECT * FROM ts_mase_by((SELECT product_id, date, actual, forecast FROM results), 'date', 'actual', 'forecast', seasonal_period := 4)",
     "metrics"},
 
+    // ts_metrics_by: long-form point-forecast metrics (#281, CTR-07). One row per
+    // group and metric: every source column except date/actual/forecast is a key
+    // (as in ts_mae_by), then metric VARCHAR, value DOUBLE -- the anofox contract
+    // `summary` shape (a model column, e.g. ts_cv_forecast_by's model_name, stays a key).
+    // mae/mse/rmse/mape/smape/r2/bias come from one _ts_metrics_long_native pass with
+    // the same values as the wide macros; 'mase' (in-sample rows = forecast NULL, as
+    // ts_mase_by) is appended from _ts_mase_native when requested.
+    {"ts_metrics_by", {"source", "date_col", "actual_col", "forecast_col", nullptr},
+     {{"metrics", "['mae', 'mse', 'rmse', 'mape', 'smape', 'r2', 'bias']"}, {"seasonal_period", "1"}, {nullptr, nullptr}},
+R"(
+SELECT * FROM _ts_metrics_long_native(
+    (SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, forecast_col,
+    list_filter(metrics::VARCHAR[], lambda m: lower(m) != 'mase'))
+UNION ALL
+SELECT * EXCLUDE (mase), 'mase' AS metric, mase AS value
+FROM _ts_mase_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, forecast_col, seasonal_period)
+WHERE list_contains([lower(m) FOR m IN metrics::VARCHAR[]], 'mase')
+)",
+    "Long-form forecast accuracy metrics per group: one row per (group, metric) with columns "
+    "<group columns>, metric VARCHAR, value DOUBLE (the anofox contract 'summary' shape). As in "
+    "ts_mae_by, every source column other than date_col/actual_col/forecast_col is a group key, so a "
+    "model column stays in the output. metrics (default ['mae','mse','rmse','mape','smape','r2','bias']) "
+    "may also contain 'mase', computed as ts_mase_by with seasonal_period (default 1). Values equal the "
+    "wide one-metric macros. source must be a subquery; the column names are quoted string literals.",
+    "SELECT * FROM ts_metrics_by((SELECT id, model_name, ds, y, yhat FROM cv), 'ds', 'y', 'yhat', metrics := ['mae', 'rmse', 'mase'], seasonal_period := 7)",
+    "metrics"},
+
     // ts_rmae_by: Compute Relative Mean Absolute Error with GROUP BY ALL
     // C++ API: ts_rmae_by(source, date_col, actual_col, pred1_col, pred2_col)
     {"ts_rmae_by", {"source", "date_col", "actual_col", "pred1_col", "pred2_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT * FROM _ts_rmae_native(source, date_col, actual_col, pred1_col, pred2_col)
+SELECT * FROM _ts_rmae_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, pred1_col, pred2_col)
 )",
     "Computes Relative MAE (MAE ratio between two models) per group. "
     "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
@@ -2529,7 +2946,7 @@ SELECT * FROM _ts_rmae_native(source, date_col, actual_col, pred1_col, pred2_col
     // C++ API: ts_coverage_by(source, date_col, actual_col, lower_col, upper_col)
     {"ts_coverage_by", {"source", "date_col", "actual_col", "lower_col", "upper_col", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT * FROM _ts_coverage_native(source, date_col, actual_col, lower_col, upper_col)
+SELECT * FROM _ts_coverage_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, lower_col, upper_col)
 )",
     "Computes prediction interval coverage rate per group. "
     "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
@@ -2542,7 +2959,7 @@ SELECT * FROM _ts_coverage_native(source, date_col, actual_col, lower_col, upper
     // C++ API: ts_quantile_loss_by(source, date_col, actual_col, forecast_col, quantile)
     {"ts_quantile_loss_by", {"source", "date_col", "actual_col", "forecast_col", "quantile", nullptr}, {{nullptr, nullptr}},
 R"(
-SELECT * FROM _ts_quantile_loss_native(source, date_col, actual_col, forecast_col, quantile)
+SELECT * FROM _ts_quantile_loss_native((SELECT * FROM _ts_passthrough(source) ORDER BY ALL), date_col, actual_col, forecast_col, quantile)
 )",
     "Computes quantile (pinball) loss at a specified quantile level per group. "
     "source must be a subquery, e.g. (SELECT ...) -- a bare table name fails to bind "
@@ -2629,7 +3046,9 @@ FROM query_table(source::VARCHAR)
 GROUP BY group_col
 )",
     "Durbin-Watson first-order autocorrelation statistic on residuals per group. "
-    "Returns STRUCT(statistic, interpretation); statistic in [0,4], ~2 means no autocorrelation.",
+    "Returns STRUCT(statistic, interpretation, p_value, method); statistic in [0,4], ~2 means no "
+    "autocorrelation. p_value is an approximate two-sided p-value (normal approximation, as R "
+    "lmtest::dwtest(exact = FALSE)); method = 'Durbin-Watson'.",
     "SELECT group_col, (durbin_watson).statistic FROM ts_durbin_watson_by('resids', product_id, ds, e)",
     "diagnostics"},
 
@@ -2656,7 +3075,8 @@ GROUP BY group_col
 )",
     "Combined residual adequacy report per group: Ljung-Box + Durbin-Watson + Jarque-Bera. "
     "Returns STRUCT(lb_statistic, lb_p_value, lb_lags, dw_statistic, dw_interpretation, jb_statistic, "
-    "jb_p_value, jb_skewness, jb_excess_kurtosis, adequate). adequate = (lb_p_value > alpha), alpha default 0.05.",
+    "jb_p_value, jb_skewness, jb_excess_kurtosis, adequate, dw_p_value). adequate = (lb_p_value > alpha), "
+    "alpha default 0.05; dw_p_value is the approximate two-sided Durbin-Watson p-value.",
     "SELECT group_col, (residual_diagnostics).adequate FROM ts_residual_diagnostics_by('resids', product_id, ds, e)",
     "diagnostics"},
 
@@ -2724,6 +3144,12 @@ void RegisterTsTableMacros(ExtensionLoader &loader) {
         // Register the short name (e.g. ts_forecast_by)
         auto info = CreateTableMacro(ts_table_macros[i]);
         loader.RegisterFunction(*info);
+
+        // Internal macros (name starts with '_', e.g. _ts_forecast_native, #285/20-05)
+        // are not public API and must not gain an anofox_fcst_ alias.
+        if (ts_table_macros[i].name[0] == '_') {
+            continue;
+        }
 
         // Register the prefixed alias (e.g. anofox_fcst_ts_forecast_by)
         auto alias_info = CreateTableMacro(ts_table_macros[i]);

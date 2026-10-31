@@ -18,8 +18,10 @@
 mod common;
 
 use anofox_fcst_core::changepoint::{
-    bocpd_trace, detect_changepoints, robust_noise_scale, CostFunction,
+    bocpd_trace, deseasonalize_for_changepoints, detect_changepoints,
+    detect_changepoints_bocpd_with_options, robust_noise_scale, ChangepointOptions, CostFunction,
 };
+use anofox_fcst_core::detrend_linear;
 use common::{assert_close, assert_vec_close, f64_vec, load_fixture, num, tolerance};
 
 #[test]
@@ -127,6 +129,113 @@ fn bocpd_behaviour_anchors() {
     assert_eq!(
         scaled_trace.changepoints, step3_trace.changepoints,
         "scaled == base (scale/shift invariance)"
+    );
+}
+
+/// Phase 20 plan 20-06 Task 3 (#287, BUG-06, D2-ii): `issue287_A/B/C`
+/// (the #287 panel's exact SQL formula, hazard_lambda 250) pin
+/// `detect_changepoints_bocpd_with_options`'s D2-ii threshold rule against
+/// the independent numpy reference's `expected_threshold_0_5` -- the
+/// indices `t >= 1` where the reference `prob[t] >= 0.5`.
+#[test]
+fn bocpd_with_options_threshold_matches_numpy_expected_threshold_0_5() {
+    let fx = load_fixture("changepoints/bocpd_cases.json");
+    let cases = fx["cases"].as_array().unwrap();
+    let case = |name: &str| {
+        cases
+            .iter()
+            .find(|c| c["name"] == name)
+            .unwrap_or_else(|| panic!("bocpd_cases.json: no case named {name:?}"))
+    };
+
+    let mut checked_at_least_one = false;
+    for name in ["issue287_A", "issue287_B", "issue287_C"] {
+        let c = case(name);
+        let expected = &c["expected"];
+        let want_threshold_flags: Vec<usize> = expected["expected_threshold_0_5"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{name}: fixture case has no 'expected_threshold_0_5' field"))
+            .iter()
+            .map(|v| v.as_u64().unwrap() as usize)
+            .collect();
+
+        let x = f64_vec(&c["x"]);
+        let hazard_lambda = num(&c["hazard_lambda"]);
+        let opts = ChangepointOptions {
+            hazard_lambda,
+            threshold: Some(0.5),
+            ..Default::default()
+        };
+        let result = detect_changepoints_bocpd_with_options(&x, &opts).unwrap();
+        assert_eq!(
+            result.changepoints, want_threshold_flags,
+            "{name}: threshold=0.5 flags"
+        );
+        assert!(
+            !result.is_changepoint[0],
+            "{name}: index 0 must never be flagged"
+        );
+        checked_at_least_one = true;
+    }
+    assert!(
+        checked_at_least_one,
+        "no issue287_* case carried expected_threshold_0_5 -- regenerate bocpd_cases.json"
+    );
+}
+
+/// Phase 20 plan 20-07 Task 2 (#287, BUG-05, D1-b): pins
+/// `deseasonalize_for_changepoints`'s seasonal removal against R
+/// `forecast::mstl`'s own seasonal component at period 7 -- an independent
+/// reference for the OTHER half of the transform (`bocpd_with_options_
+/// threshold_matches_numpy_expected_threshold_0_5` above pins the BOCPD
+/// decision rule; this pins the deseasonalization step that feeds it).
+#[test]
+fn deseasonalize_for_changepoints_matches_r_mstl_seasonal_for_issue287() {
+    let fx = load_fixture("r_decomposition/cases.json");
+    let component_abs = tolerance(&fx, "component_abs");
+
+    let mut checked_at_least_one = false;
+    for name in ["issue287_A", "issue287_B", "issue287_C"] {
+        let case = fx["mstl_cases"]
+            .get(name)
+            .unwrap_or_else(|| panic!("r_decomposition/cases.json: no mstl_cases.{name}"));
+        let values = f64_vec(&case["values"]);
+        let r_seasonal = f64_vec(
+            case["mstl"]["seasonal"]
+                .get("p7")
+                .unwrap_or_else(|| panic!("{name}: mstl.seasonal.p7 missing")),
+        );
+
+        // What deseasonalize_for_changepoints is supposed to compute:
+        // values minus R's own seasonal component, then linearly detrended
+        // (D1-b) -- the independent reference for the seasonal-removal
+        // half of the transform.
+        let x_minus_r_seasonal: Vec<f64> = values
+            .iter()
+            .zip(r_seasonal.iter())
+            .map(|(&v, &s)| v - s)
+            .collect();
+        let want = detrend_linear(&x_minus_r_seasonal)
+            .unwrap_or_else(|e| panic!("{name}: detrend_linear(values - R seasonal) failed: {e:?}"))
+            .detrended;
+
+        let got = deseasonalize_for_changepoints(&values, Some(7))
+            .unwrap_or_else(|e| panic!("{name}: deseasonalize_for_changepoints failed: {e:?}"));
+
+        assert_vec_close(
+            &got,
+            &want,
+            component_abs,
+            0.0,
+            &format!(
+                "{name}: deseasonalize_for_changepoints vs R mstl seasonal (p7) + detrend_linear"
+            ),
+        );
+        checked_at_least_one = true;
+    }
+    assert!(
+        checked_at_least_one,
+        "no issue287_* case found in r_decomposition/cases.json -- regenerate the fixture"
     );
 }
 

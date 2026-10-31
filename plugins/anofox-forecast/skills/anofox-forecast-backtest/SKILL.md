@@ -13,14 +13,14 @@ user-invocable: false
 
 # Anofox Forecast — Backtesting, CV, Metrics & Conformal Cheat Sheet
 
-**Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.16.2) | **DuckDB:** v2.0.0 / v1.5.6 / v1.4.5 LTS | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
+**Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.16.2) | **DuckDB:** v2.0.0 / v1.5.6 | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
 
 Time-series-aware cross-validation, error metrics, and distribution-free intervals.
 
 ## Critical gotchas
 
 - **`ts_backtest_auto_by` was REMOVED**, along with the orphaned internal `_ts_backtest_native` table function that backed it (Phase 12 D-07). Use the two-step CV workflow (`ts_cv_folds_by` → `ts_cv_forecast_by`) instead.
-- **Metric `_by` table macros are deprecated.** They're ~2400× slower than the scalar + `GROUP BY` pattern and don't parallelise. Use scalars. The full deprecated family: `ts_mae_by`, `ts_rmse_by`, `ts_mse_by`, `ts_mape_by`, `ts_smape_by`, `ts_bias_by`, `ts_mase_by`, `ts_rmae_by`, `ts_r2_by`, `ts_coverage_by`, `ts_quantile_loss_by`, `ts_interval_width_by`. Each maps to a scalar (`ts_mae`, `ts_rmse`, … below) called under `GROUP BY`. Two helpers are exceptions: `ts_interval_width_by` is a table macro `(results, group_col, lower_col, upper_col)` and `ts_mean_interval_width(DOUBLE[] lower, DOUBLE[] upper) → DOUBLE` is a **scalar** — still prefer the scalar + `GROUP BY` pattern over the `_by` table macro.
+- **Metric `_by` table macros are deprecated.** They're ~2400× slower than the scalar + `GROUP BY` pattern and don't parallelise. Use scalars. If you do use them, their results don't depend on `source` row order or on `source` being a UNION ALL (#285 fixed), so no pre-sorting (and no `SET threads = 1`) is needed, for `ts_mase_by` too. The full deprecated family: `ts_mae_by`, `ts_rmse_by`, `ts_mse_by`, `ts_mape_by`, `ts_smape_by`, `ts_bias_by`, `ts_mase_by`, `ts_rmae_by`, `ts_r2_by`, `ts_coverage_by`, `ts_quantile_loss_by`, `ts_interval_width_by`. Each maps to a scalar (`ts_mae`, `ts_rmse`, … below) called under `GROUP BY`. Two helpers are exceptions: `ts_interval_width_by` is a table macro `(results, group_col, lower_col, upper_col)` and `ts_mean_interval_width(DOUBLE[] lower, DOUBLE[] upper) → DOUBLE` is a **scalar** — still prefer the scalar + `GROUP BY` pattern over the `_by` table macro.
 - **Always `ORDER BY` inside `LIST()`** for temporal correctness: `LIST(y ORDER BY ds)`, not `LIST(y)`.
 - **`ts_cv_forecast_by` output renames the target column to `y`** (canonical). Don't try to access the original name.
 - **Folds must be pre-computed before forecasting.** Passing raw data to `ts_cv_forecast_by` throws a clear error.
@@ -102,6 +102,23 @@ Output columns: `fold_id`, `<group_col>`, `<date_col>`, `y` (renamed from target
 
 Params: same shape as `ts_forecast_by`. All model strings work (`'AutoETS'`, `'Laplace'`, `'HoltWinters'`, etc.). See `anofox-forecast-models` for the full catalogue.
 
+## Rolling-origin forecasts as a window function
+
+For a one-step-ahead (or h-step) forecast at every origin, `ts_forecast_agg` works over a
+window frame; each frame refits on its own rows (same result as `GROUP BY` over them):
+
+```sql
+SELECT product_id, ds, y, (fc).point_forecast[1] AS yhat, (fc).error_message
+FROM (SELECT product_id, ds, y,
+             ts_forecast_agg(ds::TIMESTAMP, y, 'SES', 1, MAP{}) OVER (
+                 PARTITION BY product_id ORDER BY ds ROWS BETWEEN 199 PRECEDING AND 1 PRECEDING) AS fc
+      FROM sales);
+```
+
+Frames too short for the model come back with `error_message` set and empty lists (the
+query does not fail); the empty first frame is `NULL`. Cost is one fit per row, so bound
+the frame for slow models and prefer `ts_cv_folds_by` when a few folds are enough.
+
 ## `ts_cv_hydrate_by` — attach features to fold rows
 
 If your model needs exogenous columns (features, calendar flags, promotions), the folds table lost them. Join them back:
@@ -153,6 +170,22 @@ Pattern: `SELECT group, ts_<metric>(LIST(actual ORDER BY ds), LIST(pred ORDER BY
 | `ts_quantile_loss` | `(actual, forecast, q) → DOUBLE` | Quantile loss at level q |
 | `ts_mqloss` | `(actual, quantiles[], levels[]) → DOUBLE` | Multi-quantile CRPS-adjacent |
 
+### Long form: several metrics at once (`ts_metrics_by`, #281)
+
+`ts_metrics_by(source, date_col, actual_col, forecast_col, metrics := ['mae','mse','rmse','mape','smape','r2','bias'], seasonal_period := 1)`
+returns one row per group and metric (`<group columns>, metric, value`), the anofox contract
+`summary` shape. `source` is a subquery; every column other than the three named ones is a
+key, so a model column stays. `metrics` may include `'mase'` (uses forecast-NULL history rows,
+as `ts_mase_by`).
+
+```sql
+-- cv_results: e.g. ts_cv_forecast_by output (unique_id, model_name, ds, y, yhat)
+SELECT * FROM ts_metrics_by(
+    (SELECT 'A' AS unique_id, 'Naive' AS model_name, DATE '2024-01-01' + i::INT AS ds,
+            i::DOUBLE AS y, i + 1.0 AS yhat FROM range(10) t(i)),
+    'ds', 'y', 'yhat', metrics := ['mae', 'rmse']);
+```
+
 ### Model comparison across CV folds
 
 ```sql
@@ -197,7 +230,10 @@ ts_conformal_by(backtest_results VARCHAR, group_col COLUMN, date_col COLUMN,
 ```
 
 Returns one row per `(group_col, date_col)`. `date_col` is required and orders/pairs every
-row — forecasts are never value-sorted. Params:
+row — forecasts are never value-sorted. Output columns are named literally `group_col` /
+`date_col` / `point` / `lower` / `upper` (kept for compatibility); `yhat`, `yhat_lower`,
+`yhat_upper` (same values) and `level` (= `1 - alpha`) are appended at the end (#280), as on
+`ts_conformal_apply_by`. Params:
 
 | Key | Default | Description |
 |---|---|---|

@@ -130,6 +130,18 @@ SELECT * FROM ts_detect_peaks_by(
 
 ---
 
+### ts_detect_peaks_long_by
+
+Long form of `ts_detect_peaks_by` (#282): one row per detected peak,
+`<group_col>, <date_col>, kind = 'peak', value, prominence` — usable directly as anofox
+contract `events`. Same `params` as `ts_detect_peaks_by`; each peak is placed on the source
+row it was found at (leading NULLs are accounted for).
+
+```sql
+SELECT * FROM ts_detect_peaks_long_by('sales', product_id, date, quantity,
+    params := MAP{'min_prominence': '1.0'});
+```
+
 ### ts_analyze_peak_timing_by
 
 Analyze peak timing regularity for multiple series. Determines if peaks occur at consistent times within each period.

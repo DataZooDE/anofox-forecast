@@ -209,6 +209,7 @@ Returns the test rows with forecast columns added:
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
 | `model_name` | VARCHAR | Model used |
+| `level` | DOUBLE | Interval coverage (`confidence_level`, default `0.9`); `NULL` on rows without an interval. Appended in #280 |
 
 `yhat_lower` / `yhat_upper` are each model's own crate-native prediction interval at
 `confidence_level`; see

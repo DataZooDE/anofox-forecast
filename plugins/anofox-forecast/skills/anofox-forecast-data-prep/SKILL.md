@@ -12,7 +12,7 @@ user-invocable: false
 
 # Anofox Forecast — Data Preparation Cheat Sheet
 
-**Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.16.2) | **DuckDB:** v2.0.0 / v1.5.6 / v1.4.5 LTS | **Dual naming:** `ts_*` and `anofox_fcst_ts_*` (identical)
+**Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.16.2) | **DuckDB:** v2.0.0 / v1.5.6 | **Dual naming:** `ts_*` and `anofox_fcst_ts_*` (identical)
 
 Prep raw time series so downstream forecasting / CV has clean input: no gaps, no unwanted NULLs, no degenerate series, correct hierarchy.
 
@@ -77,7 +77,7 @@ Table macros. Signatures:
 | `ts_fill_nulls_backward_by(source, group_col, date_col, value_col)` | Next observation carried backward (NOCB) — mirrors forward: a trailing NULL run stays NULL |
 | `ts_fill_nulls_mean_by(source, group_col, date_col, value_col)` | Per-group mean, computed in Rust (NaN counts as missing too; all-missing group stays NULL) |
 | `ts_fill_nulls_const_by(source, group_col, date_col, value_col, fill_value)` | Constant (e.g. 0.0 for retail counts) |
-| `ts_fill_forward_by(...)` | Streaming per-group forward fill; also `ts_fill_forward_operator` for windowed variants |
+| `ts_fill_forward_by(...)` | Streaming per-group forward fill. `ts_fill_forward_operator` is the deprecated VARCHAR-column-name form of this macro, removed in the next release |
 | `ts_mark_unknown_by` | Marks values matching a sentinel as unknown |
 | `ts_fill_unknown_by` | Fills previously-marked unknowns |
 
@@ -142,6 +142,8 @@ Retail and IoT panels usually have composite keys (region × store × item). The
 | `ts_split_keys` | Reverse — split back into components |
 | `ts_aggregate_hierarchy` | Sum-aggregate up a hierarchy level (region+store+item → region+store) |
 | `ts_validate_separator` | Verify separator string isn't present in the source columns |
+
+`ts_aggregate_hierarchy`, `ts_split_keys` and `ts_validate_separator` read their whole input regardless of plan shape (a UNION ALL source included); signatures are unchanged (#285).
 
 ```sql
 -- Setup: raw_hierarchy(ds, y, region_id, store_id, item_id) -- ts_combine_keys /

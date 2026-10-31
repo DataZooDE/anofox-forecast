@@ -1,0 +1,95 @@
+# name: test/sql/correctness/changepoint_events.test
+# description: ts_detect_changepoints_events_by -- changepoints as one row per event
+#   in the anofox contract `events` schema (#283, CTR-11). Not json-gated.
+# group: [sql]
+
+require anofox_forecast
+
+# Two step series: A shifts 10 -> 20 at i = 30, B shifts 5 -> -5 at i = 40.
+statement ok
+CREATE TABLE cpe AS
+SELECT 'A' AS id, DATE '2024-01-01' + i::INT AS ds, CASE WHEN i < 30 THEN 10 ELSE 20 END + sin(i) AS v FROM range(60) t(i)
+UNION ALL
+SELECT 'B', DATE '2024-01-01' + i::INT, CASE WHEN i < 40 THEN 5 ELSE -5 END + cos(i) FROM range(60) t(i);
+
+# Schema: caller's group/date names, then kind, severity, value.
+query II
+SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM ts_detect_changepoints_events_by('cpe', id, ds, v));
+----
+id	VARCHAR
+ds	DATE
+kind	VARCHAR
+severity	VARCHAR
+value	DOUBLE
+
+# One event per level shift, on the shift date.
+query IIII
+SELECT id, ds, kind, severity FROM ts_detect_changepoints_events_by('cpe', id, ds, v);
+----
+A	2024-01-31	changepoint	alarm
+B	2024-02-10	changepoint	alarm
+
+# The events are exactly the flagged rows of ts_detect_changepoints_by, with
+# value = changepoint_probability (default params and with a threshold).
+query I
+SELECT count(*) FROM (
+    SELECT id, ds, value FROM ts_detect_changepoints_events_by('cpe', id, ds, v)
+    EXCEPT ALL
+    SELECT id, ds, changepoint_probability FROM ts_detect_changepoints_by('cpe', id, ds, v, MAP{}) WHERE is_changepoint);
+----
+0
+
+query I
+SELECT count(*) = (SELECT count(*) FROM ts_detect_changepoints_by('cpe', id, ds, v, MAP{'threshold': '0.3'}) WHERE is_changepoint)
+FROM ts_detect_changepoints_events_by('cpe', id, ds, v, params := MAP{'threshold': '0.3'});
+----
+true
+
+# severity rule: 'alarm' iff value >= 0.5.
+query I
+SELECT bool_and((severity = 'alarm') = (value >= 0.5))
+FROM ts_detect_changepoints_events_by('cpe', id, ds, v, params := MAP{'threshold': '0.0001'});
+----
+true
+
+# A series without a shift produces no event row.
+statement ok
+CREATE TABLE cpe_flat AS SELECT 'F' AS id, DATE '2024-01-01' + i::INT AS ds, 3.0 + 0.01 * sin(i) AS v FROM range(60) t(i);
+
+query I
+SELECT count(*) FROM ts_detect_changepoints_events_by('cpe_flat', id, ds, v, params := MAP{'threshold': '0.5'});
+----
+0
+
+# Quoted identifiers keep the caller's names.
+statement ok
+CREATE TABLE cpe_q AS SELECT id AS "series id", ds AS "the date", v AS "y value" FROM cpe;
+
+query II
+SELECT "series id", "the date" FROM ts_detect_changepoints_events_by('cpe_q', "series id", "the date", "y value");
+----
+A	2024-01-31
+B	2024-02-10
+
+# UNION ALL view source (#285 class): same events as the base table.
+statement ok
+CREATE VIEW cpe_v AS SELECT * FROM cpe WHERE id = 'A' UNION ALL SELECT * FROM cpe WHERE id = 'B';
+
+query I
+SELECT count(*) FROM (
+    SELECT * FROM ts_detect_changepoints_events_by('cpe_v', id, ds, v)
+    EXCEPT ALL SELECT * FROM ts_detect_changepoints_events_by('cpe', id, ds, v));
+----
+0
+
+statement ok
+DROP VIEW cpe_v;
+
+statement ok
+DROP TABLE cpe_q;
+
+statement ok
+DROP TABLE cpe_flat;
+
+statement ok
+DROP TABLE cpe;

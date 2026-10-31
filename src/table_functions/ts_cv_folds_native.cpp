@@ -1,6 +1,7 @@
 #include "duckdb_compat.hpp"
 #include "ts_cv_folds_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // For DateColumnType, helper functions
+#include "ts_collect_finalize.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
 #include <algorithm>
@@ -93,10 +94,8 @@ struct TsCvFoldsGlobalState : public GlobalTableFunctionState {
     bool preprocessing_done = false;
     idx_t output_offset = 0;
 
-    // Finalize coordination
-    std::atomic<bool> finalize_claimed{false};
-    std::atomic<idx_t> threads_collecting{0};
-    std::atomic<idx_t> threads_done_collecting{0};
+    // Single-thread finalize: last-finalizer barrier (ts_collect_finalize.hpp)
+    TsCollectFinalizeBarrier barrier;
 
     idx_t MaxThreads() const override { return 1; }
 };
@@ -107,8 +106,7 @@ struct TsCvFoldsGlobalState : public GlobalTableFunctionState {
 
 struct TsCvFoldsLocalState : public LocalTableFunctionState {
     bool owns_finalize = false;
-    bool registered_collector = false;
-    bool registered_finalizer = false;
+    bool arrived_at_final = false;
 };
 
 // ============================================================================
@@ -346,7 +344,7 @@ static unique_ptr<FunctionData> TsCvFoldsBind(
 
     // Parse optional params MAP (index 3)
     if (input.inputs.size() >= 4 && !input.inputs[3].IsNull()) {
-        auto &params = input.inputs[3];
+        auto params = NormalizeParamsValue(input.inputs[3]);
 
         // Validate parameter names first
         ValidateParams(params);
@@ -399,6 +397,7 @@ static unique_ptr<LocalTableFunctionState> TsCvFoldsInitLocal(
     ExecutionContext &context,
     TableFunctionInitInput &input,
     GlobalTableFunctionState *global_state) {
+    global_state->Cast<TsCvFoldsGlobalState>().barrier.RegisterLocal();
     return make_uniq<TsCvFoldsLocalState>();
 }
 
@@ -414,12 +413,9 @@ static OperatorResultType TsCvFoldsInOut(
 
     auto &bind_data = data.bind_data->Cast<TsCvFoldsBindData>();
     auto &gstate = data.global_state->Cast<TsCvFoldsGlobalState>();
-    auto &lstate = data.local_state->Cast<TsCvFoldsLocalState>();
 
-    if (!lstate.registered_collector) {
-        gstate.threads_collecting.fetch_add(1);
-        lstate.registered_collector = true;
-    }
+    // Late-row guard: rows after the finalize claim would be silently dropped.
+    gstate.barrier.AssertCollecting("_ts_cv_folds_native");
 
     // Extract batch locally first
     vector<TsCvFoldsInputRow> local_batch;
@@ -492,19 +488,18 @@ static OperatorFinalizeResultType TsCvFoldsFinalize(
     auto &gstate = data.global_state->Cast<TsCvFoldsGlobalState>();
     auto &lstate = data.local_state->Cast<TsCvFoldsLocalState>();
 
-    // Barrier + claim: ensure all collecting threads are done before processing
-    if (!lstate.registered_finalizer) {
-        if (lstate.registered_collector)
-            gstate.threads_done_collecting.fetch_add(1);
-        lstate.registered_finalizer = true;
-    }
+    // Last-finalizer claim (ts_collect_finalize.hpp): the local state whose
+    // arrival completes the count of registered local states processes; every
+    // other one finishes at once (no spin-wait).
     if (!lstate.owns_finalize) {
-        bool expected = false;
-        if (!gstate.finalize_claimed.compare_exchange_strong(expected, true))
+        if (lstate.arrived_at_final) {
             return OperatorFinalizeResultType::FINISHED;
+        }
+        lstate.arrived_at_final = true;
+        if (!gstate.barrier.ArriveAtFinal()) {
+            return OperatorFinalizeResultType::FINISHED;
+        }
         lstate.owns_finalize = true;
-        while (gstate.threads_done_collecting.load() < gstate.threads_collecting.load())
-            std::this_thread::yield();
     }
 
     if (!gstate.preprocessing_done) {

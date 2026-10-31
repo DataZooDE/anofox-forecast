@@ -8,35 +8,93 @@ require json
 
 #######################################
 # ts_features_list - List Available Features
+# (#289 BUG-02: exact counts, not just "> 0" -- the trap this pins was a WASM
+#  allocator-pairing + DATAZOO_GUARD defect, not a row-count ambiguity, but
+#  exact pins are the strongest regression guard available here.)
 #######################################
 
-# Test ts_features_list returns non-empty table
+# Test ts_features_list returns exactly 117 rows, all distinct, min/max as expected
 query I
-SELECT count(*) > 0 FROM ts_features_list();
+SELECT count(*) FROM ts_features_list();
 ----
-true
+117
 
-# Test ts_features_list returns rows
+query I
+SELECT count(DISTINCT feature_name) FROM ts_features_list();
+----
+117
+
+query II
+SELECT min(feature_name), max(feature_name) FROM ts_features_list();
+----
+abs_energy	zero_crossing_rate
+
+# Test ts_features_list returns rows with non-null feature_name
 query I
 SELECT feature_name IS NOT NULL FROM ts_features_list() LIMIT 1;
 ----
 true
 
+# #289: re-executing a prepared statement over ts_features_list must return
+# 117 every time, not 117 then 0 (the bind-data-cursor bug fixed by moving
+# per-execution state into init_global).
+statement ok
+PREPARE ts_features_list_p AS SELECT count(*) FROM ts_features_list();
+
+query I
+EXECUTE ts_features_list_p;
+----
+117
+
+query I
+EXECUTE ts_features_list_p;
+----
+117
+
+# The connection must still be usable for a later, unrelated statement after
+# the catalog calls above (#289: a pre-fix heap-corrupting free() would leave
+# this undefined/flaky in DuckDB-Wasm).
+query I
+SELECT 42;
+----
+42
+
 #######################################
 # ts_features_config_template - Config Template
 #######################################
 
-# Test ts_features_config_template returns non-empty table
+# Test ts_features_config_template returns exactly 117 rows, all with an
+# empty-object params_json default.
 query I
-SELECT count(*) > 0 FROM ts_features_config_template();
+SELECT count(*) FROM ts_features_config_template();
 ----
-true
+117
+
+query I
+SELECT count(*) FILTER (WHERE params_json = '{}') FROM ts_features_config_template();
+----
+117
 
 # Test ts_features_config_template has feature and params_json columns
 query II
 SELECT feature IS NOT NULL, params_json IS NOT NULL FROM ts_features_config_template() LIMIT 1;
 ----
 true	true
+
+# #289: re-executing a prepared statement over ts_features_config_template
+# must return 117 every time.
+statement ok
+PREPARE ts_features_config_template_p AS SELECT count(*) FROM ts_features_config_template();
+
+query I
+EXECUTE ts_features_config_template_p;
+----
+117
+
+query I
+EXECUTE ts_features_config_template_p;
+----
+117
 
 #######################################
 # ts_features - Aggregate Function Tests (C++ API Compatible)

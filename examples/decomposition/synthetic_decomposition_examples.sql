@@ -309,6 +309,35 @@ FROM decomposed
 ORDER BY noise_level;
 
 -- ============================================================================
+-- LONG FORMS (#282): one row per date and component, no unnesting needed
+-- ============================================================================
+
+.print ''
+.print '>>> LONG FORMS (#282)'
+.print '-----------------------------------------------------------------------------'
+
+.print 'MSTL as (series_id, date, component, value) -- first 2 dates of Series_A:'
+SELECT * FROM ts_mstl_decomposition_long_by('multi_series', series_id, date, value,
+    params := MAP{'seasonal_periods': '[7]'})
+WHERE series_id = 'Series_A' AND date < '2024-01-03'::TIMESTAMP;
+
+.print ''
+.print 'Detrended values per date (Series_B, first 3 dates):'
+SELECT * FROM ts_detrend_long_by('multi_series', series_id, date, value, method := 'linear')
+WHERE series_id = 'Series_B' AND date < '2024-01-04'::TIMESTAMP;
+
+.print ''
+.print 'Peaks as events (Series_A, first 3):'
+SELECT * FROM ts_detect_peaks_long_by('multi_series', series_id, date, value,
+    params := MAP{'min_prominence': '20'})
+WHERE series_id = 'Series_A' LIMIT 3;
+
+.print ''
+.print 'Period candidates, one row each:'
+SELECT series_id, rank, period, round(confidence, 2) AS confidence, is_primary
+FROM ts_detect_periods_long_by('multi_series', series_id, date, value) ORDER BY series_id, rank;
+
+-- ============================================================================
 -- CLEANUP
 -- ============================================================================
 

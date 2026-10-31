@@ -17,7 +17,19 @@ SQL users can produce, validate, combine, and interval-bound time-series forecas
 - **Shipped v0.8.0 — Ensemble Forecasting (2026-08-31):** AutoEnsemble (`ts_forecast_by('AutoEnsemble')`), explicit-member ensembles (`ts_forecast_ensemble_by`), six combination methods, ensemble conformal intervals (existing path), and member/weight introspection (`ts_ensemble_inspect_by` / `ts_auto_ensemble_inspect_by`). See `.planning/milestones/v0.8.0-*`.
 - **Shipped v0.7.0 — Diagnostics + Model Coverage (2026-08-22):** stationarity + residual diagnostics, global/panel models, GARCH/Kalman/VAR.
 
-## Next Milestone Goals
+## Current Milestone: v0.11.0 Issue Sweep: Contract, Bugs, Crate Fixes
+
+**Goal:** Close all 15 open GitHub issues of DataZooDE/anofox-forecast: make the outputs conform to the anofox-visualization contract, fix the reported detection, metric and WASM bugs, and ship the three upstream crate fixes.
+
+**Target features:**
+- Extension bugs: #289 (fill-forward operator: internal, quoted, frequency honoured; `ts_features_list` / `ts_features_config_template` WASM traps), #285 (`ts_mase_by` independent of row order), #286 (seasonality classification detrends first), #287 (changepoints don't flag a regular seasonal cycle; the agg's `is_changepoint` follows probability), #272 (upload script WASM signature, post-upload check, `wasm_mvp` `_setThrew`)
+- Output contract (#279-#284): discovery tags + `anofox_contract_version()`, consistent prediction columns + `level` (additive; old names kept permanently), long-form `ts_metrics_by`, long forms for list outputs + AutoARIMA inspect, changepoint events, Durbin-Watson `p_value`/`method`
+- Upstream crate fixes, released and consumed: #259 (AutoETS spike runaway), #258 (conditioning-aware ridge λ), #227 (standalone streaming feature builders)
+- Release closure: #288 closes once duckdb/community-extensions#3112 (v2026.10.22) is merged and verified
+
+**Locked decisions (2026-10-22, alias policy revised 2026-10-23):** API compatibility is permanent: no public name, parameter or output column is ever removed or renamed (user: "I do not want that users have to change their code each time I publish a new version"); the #280 contract shape is added additively, and old names stay as permanent aliases. Enforced by Phase 20.1's API snapshot gate; all three crate issues are in scope; #272 is code-only (the owner applies the get.erpl.io CORS rule and stale-path cleanup). Branch: `milestone/v0.11.0-issue-sweep`. Issue bodies: GitHub issues #227, #258, #259, #272, #279-#289.
+
+## Next Milestone Goals (carried candidates)
 
 To be defined with `/gsd-new-milestone`. Candidates carried forward:
 - v0.10.0 tech debt: integer-`frequency` casts in `ts_forecast_panel_by` / `ts_forecast_var_by` / `ts_stats_by`; `window` / `seasonal_periods` misuse checks in the shared params header; strict parsing of numeric MAP params; the examples/ metric `_by` bare-table form; the `ts_features_config_*` "features" filter; dead `ConformalIntervalFFI`.
@@ -83,10 +95,13 @@ v0.9.0 (WASM Runtime Verification) shipped 2026-09-10 and was closed on main 202
 - ✓ Core statistics, features, detection and conformal outputs match R/scipy/tsfresh references — Phases 13-16, pinned in Phase 18 — v0.10.0
 - ✓ Upstream anofox-forecast diagnostics/model-selection fixes merged and consumed — anofox-forecast 0.16.1, Phase 17 — v0.10.0
 - ✓ Dependencies bumped — anofox-regression 0.5.15 (Phase 9), fdars-core 0.47 (Phase 15), anofox-forecast 0.16.2 (Phase 18) — v0.10.0
+- ✓ Metric/detection functions order- and UNION-ALL-independent (#285: collect-then-finalize natives fed via `ORDER BY ALL` single-pipeline breaker + shared `TsCollectFinalizeBarrier`), seasonality strength = STL strength shared with `ts_stats_by` (#286), changepoint params parity + `threshold` + opt-in `deseasonalize` (#287) — v0.11.0 Phase 20 (BUG-03..07)
 
 ### Active
 
-<!-- v0.10.0 shipped 2026-10-16; REQ-IDs archived in milestones/v0.10.0-REQUIREMENTS.md. Next milestone's requirements come from /gsd-new-milestone. -->
+<!-- v0.11.0 requirements: see .planning/REQUIREMENTS.md (REQ-IDs mapped to phases in ROADMAP.md). -->
+
+- [ ] v0.11.0: close issues #227 #258 #259 #272 #279-#289 (see REQUIREMENTS.md)
 
 
 
@@ -126,7 +141,7 @@ Deferred from v0.7.0 (candidates for a future milestone):
 
 ## Constraints
 
-- **Tech stack**: DuckDB v1.4.3+ extension; Rust 1.89+ core via FFI; C++17. No new languages.
+- **Tech stack**: DuckDB extension built for v2.0.0 (stable), v1.5.6 and v1.4.5 LTS; Rust 1.89+ core via FFI; C++17. No new languages.
 - **Architecture**: Parallelism stays at the DuckDB GROUP BY / scalar-function layer — no custom threading or table-in/table-out (established project rule).
 - **Dependencies**: anofox-forecast 0.16.2, anofox-regression =0.5.15, fdars-core 0.47 (as of v0.10.0). Upstream fixes ship as crate releases consumed from crates.io; no local `[patch]` for anofox-forecast.
 - **Correctness**: Statistics are computed in Rust only; every statistical output is checked against a reference implementation (R / scipy / statsmodels / tsfresh) via checked-in fixtures — length-only tests do not count.
@@ -156,6 +171,8 @@ Deferred from v0.7.0 (candidates for a future milestone):
 | SQL `'Holt'` = ETS(A,A,N), R `holt()`'s definition (v0.10.0 P17, D-13) | `HoltLinearTrend::auto()` diverged from R by 3–13x on parity fixtures | ✓ Good — R-parity point deviation cut 6.86x (AirPassengers), 13.41x (rw), 3.01x (trend) |
 | Upstream fixes ship as crate releases, never local [patch] (v0.10.0 P18, user 2026-10-16) | Extension must consume what crates.io serves; a local patch hides release drift | ✓ Good — v0.16.2 merged + published upstream, then consumed from crates.io |
 | Every R-parity known gap must cite an evidenced root cause, never a loosened tolerance (v0.10.0 P17, D-12) | Prevents tolerance-widening from masking real bugs | ✓ Good — RC-01..RC-05 table; extension-side cause fixed, 3 crate-side causes drafted as upstream issues with repros |
+| Feed collect-then-finalize natives through `(SELECT * FROM _ts_passthrough(src) ORDER BY ALL)`, not `WITH ... AS MATERIALIZED` (v0.11.0 P20) | MATERIALIZED CTE hits a DuckDB v2.0.0 broadcast-exchange INTERNAL error intermittently; ORDER BY ALL is a single-pipeline breaker that is also ~9x cheaper | ✓ Good — #285 fixed across 18 natives; ≤0.02 s/1M-row overhead; cross-line (v1.4.5/v1.5.6) barrier check deferred to PR CI |
+| `deseasonalize` without `threshold` uses effective threshold 0.5 (v0.11.0 P20 review, user 2026-10-24) | Deseasonalized residual collapses BOCPD noise scale ~10-70x, so the MAP run-length rule flagged 8-21 false changepoints | ✓ Good — deseasonalize alone now flags only the real shift; defaults byte-identical |
 
 ## Evolution
 
@@ -175,4 +192,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-16 after v0.10.0 milestone*
+*Last updated: 2026-10-24 after Phase 20*

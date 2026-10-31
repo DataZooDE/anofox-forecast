@@ -59,15 +59,20 @@ use libc::{free, malloc};
 //   [ usize header (size of data region) | data ... ]
 //                                         ^-- returned pointer
 //
-// Total allocation: size_of::<usize>() + size bytes, aligned to 8.
+// Total allocation: WASM_ALLOC_HEADER + size bytes, aligned to 8.
 // This is compatible across all alloc/free pairings in both lib.rs and allocation.rs
 // as long as both files use the identical header format (they do — see allocation.rs).
+/// Size-header bytes in front of each WASM allocation. 8, not
+/// `size_of::<usize>()` (4 on wasm32): the data region must stay 8-aligned for
+/// the i64/f64 arrays handed to C++, or every such array is misaligned (#289).
+#[cfg(target_family = "wasm")]
+const WASM_ALLOC_HEADER: usize = 8;
+
 #[cfg(target_family = "wasm")]
 unsafe fn malloc(size: usize) -> *mut core::ffi::c_void {
     use std::alloc::{alloc, Layout};
-    use std::mem::size_of;
     // Allocate header + data. Alignment 8 covers both usize (≤8 bytes) and f64 (8 bytes).
-    let total = size_of::<usize>()
+    let total = WASM_ALLOC_HEADER
         .checked_add(size)
         .expect("allocation size overflow");
     let layout = Layout::from_size_align(total, 8).expect("8-byte alignment is always valid");
@@ -78,20 +83,19 @@ unsafe fn malloc(size: usize) -> *mut core::ffi::c_void {
     // Store the data size (not the total) in the header for dealloc.
     *(base as *mut usize) = size;
     // Return pointer to the data region (after the header).
-    base.add(size_of::<usize>()) as *mut core::ffi::c_void
+    base.add(WASM_ALLOC_HEADER) as *mut core::ffi::c_void
 }
 
 #[cfg(target_family = "wasm")]
 unsafe fn free(ptr: *mut core::ffi::c_void) {
     use std::alloc::{dealloc, Layout};
-    use std::mem::size_of;
     if ptr.is_null() {
         return;
     }
     // Recover base pointer and stored size from the header.
-    let base = (ptr as *mut u8).sub(size_of::<usize>());
+    let base = (ptr as *mut u8).sub(WASM_ALLOC_HEADER);
     let size = *(base as *const usize);
-    let total = size_of::<usize>()
+    let total = WASM_ALLOC_HEADER
         .checked_add(size)
         .expect("allocation size overflow");
     let layout = Layout::from_size_align(total, 8).expect("8-byte alignment is always valid");
@@ -3414,6 +3418,174 @@ pub unsafe extern "C" fn anofox_ts_detect_changepoints_bocpd(
     }
 }
 
+/// BOCPD changepoint detection with an explicit `is_changepoint` decision
+/// rule (#287, BUG-06, user decision D2-ii; `deseasonalize`/
+/// `seasonal_period` added for BUG-05, D1-b): shared by both
+/// `ts_detect_changepoints_by` and `ts_detect_changepoints_agg` so they
+/// agree on hazard_lambda, threshold, deseasonalize and seasonal_period for
+/// identical inputs.
+///
+/// `opts->threshold` NaN means "unset" (the default heuristic applies,
+/// reproducing [`anofox_ts_detect_changepoints_bocpd`] bit for bit).
+/// `opts->hazard_lambda <= 0.0` means "unset" (defaults to 250.0, same
+/// convention as the sibling export above). A set, out-of-range
+/// `opts->threshold` (not finite, or outside `[0, 1]`) returns an
+/// `INVALID_INPUT`-coded error naming `threshold` in the message.
+/// `opts->deseasonalize == false` (default) leaves `values` unchanged.
+/// `opts->seasonal_period == 0` means "auto-detect the period"; a negative
+/// value returns an `INVALID_INPUT`-coded error naming `seasonal_period`;
+/// a positive value is the explicit period.
+///
+/// # Safety
+/// All pointer arguments must be valid and non-null. Arrays must have the
+/// specified lengths.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_ts_detect_changepoints_bocpd_opts(
+    values: *const c_double,
+    length: size_t,
+    opts: *const types::ChangepointOptionsFFI,
+    out_result: *mut types::BocpdResult,
+    out_error: *mut AnofoxError,
+) -> bool {
+    if !out_error.is_null() {
+        *out_error = AnofoxError::success();
+    }
+
+    if values.is_null() || opts.is_null() || out_result.is_null() {
+        if !out_error.is_null() {
+            (*out_error).set_error(ErrorCode::NullPointer, "Null pointer argument");
+        }
+        return false;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let values_vec = std::slice::from_raw_parts(values, length).to_vec();
+        let hazard_lambda = if (*opts).hazard_lambda > 0.0 {
+            (*opts).hazard_lambda
+        } else {
+            250.0
+        };
+        let threshold = if (*opts).threshold.is_nan() {
+            None
+        } else {
+            Some((*opts).threshold)
+        };
+        let seasonal_period_raw = (*opts).seasonal_period;
+        if seasonal_period_raw < 0 {
+            return Err(anofox_fcst_core::ForecastError::InvalidParameter {
+                param: "seasonal_period".to_string(),
+                value: seasonal_period_raw.to_string(),
+                reason: "must be a non-negative integer".to_string(),
+            });
+        }
+        let seasonal_period = if seasonal_period_raw == 0 {
+            None
+        } else {
+            Some(seasonal_period_raw as usize)
+        };
+        anofox_fcst_core::detect_changepoints_bocpd_with_options(
+            &values_vec,
+            &anofox_fcst_core::ChangepointOptions {
+                hazard_lambda,
+                threshold,
+                deseasonalize: (*opts).deseasonalize,
+                seasonal_period,
+                auto_deseasonalize: (*opts).auto_deseasonalize,
+            },
+        )
+    }));
+
+    match result {
+        Ok(Ok(bocpd)) => {
+            let n = bocpd.is_changepoint.len();
+            (*out_result).n_points = n;
+
+            let is_cp_ptr = malloc(n * std::mem::size_of::<bool>()) as *mut bool;
+            if is_cp_ptr.is_null() {
+                if !out_error.is_null() {
+                    (*out_error).set_error(
+                        ErrorCode::AllocationError,
+                        "Failed to allocate is_changepoint",
+                    );
+                }
+                return false;
+            }
+            for (i, &cp) in bocpd.is_changepoint.iter().enumerate() {
+                *is_cp_ptr.add(i) = cp;
+            }
+            (*out_result).is_changepoint = is_cp_ptr;
+
+            let prob_ptr = malloc(n * std::mem::size_of::<c_double>()) as *mut c_double;
+            if prob_ptr.is_null() {
+                if !out_error.is_null() {
+                    (*out_error).set_error(
+                        ErrorCode::AllocationError,
+                        "Failed to allocate changepoint_probability",
+                    );
+                }
+                free_ptr((*out_result).is_changepoint as *mut core::ffi::c_void);
+                (*out_result).is_changepoint = ptr::null_mut();
+                return false;
+            }
+            for (i, &p) in bocpd.changepoint_probability.iter().enumerate() {
+                *prob_ptr.add(i) = p;
+            }
+            (*out_result).changepoint_probability = prob_ptr;
+
+            let n_cp = bocpd.changepoints.len();
+            (*out_result).n_changepoints = n_cp;
+            if n_cp > 0 {
+                let idx_ptr = malloc(n_cp * std::mem::size_of::<size_t>()) as *mut size_t;
+                if idx_ptr.is_null() {
+                    if !out_error.is_null() {
+                        (*out_error).set_error(
+                            ErrorCode::AllocationError,
+                            "Failed to allocate changepoint_indices",
+                        );
+                    }
+                    free_ptr((*out_result).is_changepoint as *mut core::ffi::c_void);
+                    free_ptr((*out_result).changepoint_probability as *mut core::ffi::c_void);
+                    (*out_result).is_changepoint = ptr::null_mut();
+                    (*out_result).changepoint_probability = ptr::null_mut();
+                    return false;
+                }
+                for (i, &c) in bocpd.changepoints.iter().enumerate() {
+                    *idx_ptr.add(i) = c;
+                }
+                (*out_result).changepoint_indices = idx_ptr;
+            } else {
+                (*out_result).changepoint_indices = ptr::null_mut();
+            }
+
+            true
+        }
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                let error_code = match e.to_code() {
+                    1 => ErrorCode::NullPointer,
+                    2 => ErrorCode::InvalidInput,
+                    3 => ErrorCode::ComputationError,
+                    4 => ErrorCode::AllocationError,
+                    5 => ErrorCode::InvalidModel,
+                    6 => ErrorCode::InsufficientData,
+                    7 => ErrorCode::InvalidDateFormat,
+                    8 => ErrorCode::InvalidFrequency,
+                    9 => ErrorCode::InvalidInput, // InvalidParameter -> InvalidInput at FFI boundary
+                    _ => ErrorCode::InternalError,
+                };
+                (*out_error).set_error(error_code, &e.to_string());
+            }
+            false
+        }
+        Err(_) => {
+            if !out_error.is_null() {
+                (*out_error).set_error(ErrorCode::PanicCaught, "Panic in Rust code");
+            }
+            false
+        }
+    }
+}
+
 // ============================================================================
 // Feature Functions
 // ============================================================================
@@ -3596,9 +3768,38 @@ pub unsafe extern "C" fn anofox_ts_features_list(
         }
 
         *out_names = names_ptr as *mut c_char;
+    } else {
+        *out_names = ptr::null_mut();
     }
 
     true
+}
+
+/// Free the feature-name array returned by `anofox_ts_features_list`.
+///
+/// # Safety
+/// `names` and `n_names` must be exactly the pointer and count that
+/// `anofox_ts_features_list` wrote into `*out_names`/`*out_count` for a
+/// single call — this releases every name and the array itself through the
+/// same allocator shim that allocated them (the size-prefixed WASM shim, or
+/// libc `malloc`/`free` on native). Manually `free()`-ing WASM-shim-allocated
+/// memory instead of calling this function reads/writes 8 bytes before the
+/// real allocation and corrupts the Emscripten heap (#289). `names` may be
+/// null (no-op). Call at most once per array returned by
+/// `anofox_ts_features_list`.
+#[no_mangle]
+pub unsafe extern "C" fn anofox_free_ts_features_list(names: *mut *mut c_char, n_names: size_t) {
+    if names.is_null() {
+        return;
+    }
+
+    for i in 0..n_names {
+        let name_ptr = *names.add(i);
+        if !name_ptr.is_null() {
+            free(name_ptr as *mut core::ffi::c_void);
+        }
+    }
+    free(names as *mut core::ffi::c_void);
 }
 
 // ============================================================================
@@ -8001,6 +8202,7 @@ pub unsafe extern "C" fn anofox_ts_durbin_watson(
         Ok(r) => {
             (*out_result).statistic = r.statistic;
             copy_string_to_buffer(r.interpretation, &mut (*out_result).interpretation);
+            (*out_result).p_value = r.p_value;
             true
         }
         Err(_) => {
@@ -8105,6 +8307,7 @@ pub unsafe extern "C" fn anofox_ts_residual_diagnostics(
             (*out_result).jb_skewness = r.jb_skewness;
             (*out_result).jb_excess_kurtosis = r.jb_excess_kurtosis;
             (*out_result).adequate = r.adequate;
+            (*out_result).dw_p_value = r.dw_p_value;
             true
         }
         Err(_) => {

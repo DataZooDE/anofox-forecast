@@ -497,8 +497,14 @@ static void TsClassifySeasonalityFunction(DataChunk &args, ExpressionState &stat
         // timing_variability (index 3)
         FlatDataMut<double>(StructEntry(children[3]))[row_idx] = class_result.timing_variability;
 
-        // seasonal_strength (index 4)
-        FlatDataMut<double>(StructEntry(children[4]))[row_idx] = class_result.seasonal_strength;
+        // seasonal_strength (index 4): NaN (degenerate/no-usable-period STL
+        // decomposition) marshals to SQL NULL, matching ts_stats_by's
+        // seasonality_strength NULL semantics (#286, BUG-04).
+        if (std::isnan(class_result.seasonal_strength)) {
+            FlatVector::SetNull(StructEntry(children[4]), row_idx, true);
+        } else {
+            FlatDataMut<double>(StructEntry(children[4]))[row_idx] = class_result.seasonal_strength;
+        }
 
         // is_seasonal (index 5)
         FlatDataMut<bool>(StructEntry(children[5]))[row_idx] = class_result.is_seasonal;

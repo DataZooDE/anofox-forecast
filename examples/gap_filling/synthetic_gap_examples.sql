@@ -9,7 +9,6 @@
 
 -- Load extension
 LOAD anofox_forecast;
-INSTALL json;
 LOAD json;
 
 .print '============================================================================='
@@ -75,6 +74,19 @@ FROM short_series GROUP BY series_id ORDER BY series_id;
 SELECT series_id, date, value
 FROM ts_fill_forward_by('short_series', series_id, date, value, '2024-01-07'::DATE, '1 day')
 ORDER BY series_id, date;
+
+-- -----------------------------------------------------------------------------
+-- DEPRECATED: ts_fill_forward_operator (removed in the next release, #289)
+-- -----------------------------------------------------------------------------
+-- Same result as ts_fill_forward_by above, but takes the group/date/value columns
+-- as VARCHAR column-name strings. Shown here only to demonstrate the migration
+-- path; prefer ts_fill_forward_by with column references for new code.
+
+.print ''
+.print 'ts_fill_forward_operator (deprecated) vs ts_fill_forward_by row counts (should be equal):'
+SELECT
+    (SELECT COUNT(*) FROM ts_fill_forward_operator('short_series', 'series_id', 'date', 'value', TIMESTAMP '2024-01-07', '1d')) AS operator_rows,
+    (SELECT COUNT(*) FROM ts_fill_forward_by('short_series', series_id, date, value, '2024-01-07'::DATE, '1 day')) AS fill_forward_by_rows;
 
 -- =============================================================================
 -- SECTION 3: Drop Gappy Series (ts_drop_gappy_by)

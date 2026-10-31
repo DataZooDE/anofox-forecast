@@ -152,6 +152,24 @@ def bocpd(x: np.ndarray, hazard_lambda: float) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def issue287_series(base: float, step_at_50: bool) -> np.ndarray:
+    """The #287 panel's exact SQL formula (test/sql/correctness/
+    detection_decomposition.test): `base + 0.3*i + 5*sin(2*pi*i/7) +
+    (step_at_50 and i>=50 ? 15 : 0) + 1.6*cos(i*0.9) + 0.7*sin(i*1.7+base)`
+    for `i` in `0..83` (84 days). `base=20.0`/no step -> series A,
+    `base=40.0`/step -> series B, `base=60.0`/no step -> series C."""
+    i = np.arange(84, dtype=float)
+    step = np.where(i >= 50, 15.0, 0.0) if step_at_50 else np.zeros_like(i)
+    return (
+        base
+        + 0.3 * i
+        + 5.0 * np.sin(2.0 * np.pi * i / 7.0)
+        + step
+        + 1.6 * np.cos(i * 0.9)
+        + 0.7 * np.sin(i * 1.7 + base)
+    )
+
+
 def make_bocpd_cases() -> list[dict]:
     rng_step3 = np.random.default_rng(15101)
     step3 = rng_step3.normal(0, 1, 200)
@@ -175,6 +193,12 @@ def make_bocpd_cases() -> list[dict]:
     short = np.array([1.0, 2.0, 3.0])
     step3_scaled = step3 * 100.0 + 7.0
 
+    # Phase 20 plan 20-06 Task 3 (#287, BUG-06, D2-ii): the #287 panel's
+    # exact three series, hazard_lambda 250 (the SQL default).
+    issue287_a = issue287_series(20.0, False)
+    issue287_b = issue287_series(40.0, True)
+    issue287_c = issue287_series(60.0, False)
+
     raw_cases = [
         ("step3_n200_h250", step3, 250.0),
         ("step3_n200_h50", step3, 50.0),
@@ -186,6 +210,9 @@ def make_bocpd_cases() -> list[dict]:
         ("constant_n30", constant, 250.0),
         ("short_n3", short, 250.0),
         ("step3_scaled", step3_scaled, 250.0),
+        ("issue287_A", issue287_a, 250.0),
+        ("issue287_B", issue287_b, 250.0),
+        ("issue287_C", issue287_c, 250.0),
     ]
 
     cases = []
@@ -200,19 +227,27 @@ def make_bocpd_cases() -> list[dict]:
                 f"step3_scaled flags {result['changepoints']} differ from "
                 f"step3_n200_h250's {base_changepoints} -- scale invariance broken"
             )
+        expected = {
+            "sigma_hat": result["sigma_hat"],
+            "loc": result["loc"],
+            "map_run_length": result["map_run_length"].tolist(),
+            "prob": result["prob"].tolist(),
+            "is_changepoint": result["is_changepoint"].tolist(),
+            "changepoints": result["changepoints"],
+        }
+        if name.startswith("issue287_"):
+            # D2-ii (user decision, 20-CONTEXT.md decisions_addendum_2):
+            # is_changepoint = (prob >= threshold) for every index AFTER the
+            # first; index 0 is never included even if prob[0] >= threshold.
+            expected["expected_threshold_0_5"] = [
+                i for i in range(1, len(x)) if result["prob"][i] >= 0.5
+            ]
         cases.append(
             {
                 "name": name,
                 "x": x,
                 "hazard_lambda": hazard,
-                "expected": {
-                    "sigma_hat": result["sigma_hat"],
-                    "loc": result["loc"],
-                    "map_run_length": result["map_run_length"].tolist(),
-                    "prob": result["prob"].tolist(),
-                    "is_changepoint": result["is_changepoint"].tolist(),
-                    "changepoints": result["changepoints"],
-                },
+                "expected": expected,
             }
         )
 
@@ -225,6 +260,13 @@ def make_bocpd_cases() -> list[dict]:
     assert anchors["two_step_n300"]["expected"]["changepoints"] == [100, 199]
     assert anchors["long_n1500"]["expected"]["changepoints"] == [700, 1418]
     assert anchors["constant_n30"]["expected"]["changepoints"] == []
+
+    # #287 anchors (BUG-06, D2-ii): series B's single +15 level shift at
+    # index 50 (2024-02-20 in the SQL fixture) is the only index across all
+    # three series whose probability crosses 0.5.
+    assert anchors["issue287_A"]["expected"]["expected_threshold_0_5"] == []
+    assert anchors["issue287_B"]["expected"]["expected_threshold_0_5"] == [50]
+    assert anchors["issue287_C"]["expected"]["expected_threshold_0_5"] == []
 
     return cases
 
