@@ -2,6 +2,7 @@
 quick_id: 261106-srk
 status: complete
 issue: null
+commits: [9f9a86f6]
 ---
 
 # 261106-srk: strict DuckDB-Wasm sqllogic runner
