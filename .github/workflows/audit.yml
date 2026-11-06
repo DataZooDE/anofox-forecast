@@ -43,3 +43,9 @@ jobs:
 
       - name: WASM signature parser self-test (#272)
         run: python3 scripts/wasm_signature_sections.py --self-test
+
+      # The DuckDB-Wasm harness's sqllogic runner (test/wasm/sqllogic.mjs):
+      # pure node, no npm install and no build, so it runs on every PR (the
+      # wasm runtime job itself only runs on full-ci).
+      - name: WASM sqllogic runner self-test
+        run: node test/wasm/sqllogic.mjs --self-test

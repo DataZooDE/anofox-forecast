@@ -29,7 +29,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { parseTest, runRecords } from './sqllogic.mjs';
+import { parseTest, runRecords, RECORD_TIMEOUT_MS } from './sqllogic.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..', '..');
@@ -37,6 +37,12 @@ const require = createRequire(path.join(HERE, 'package.json'));
 
 const EXT_NAME = 'anofox_forecast';
 const EXT_FILE = `${EXT_NAME}.duckdb_extension.wasm`;
+
+// Per-record timeout. A record that hangs fails the run naming its file and
+// line instead of running into the CI job's timeout. The hung query keeps the
+// worker busy, so a timeout aborts the run. ANOFOX_WASM_RECORD_TIMEOUT_MS
+// overrides the default (60 s).
+const RECORD_TIMEOUT = Number(process.env.ANOFOX_WASM_RECORD_TIMEOUT_MS) || RECORD_TIMEOUT_MS;
 
 // Curated WASM-appropriate subset: breadth across function families, kept small
 // so the first CI gate is robust. Expand with --all once green. NOTE: this is an
@@ -183,16 +189,16 @@ async function bootEngine(bundle) {
   return { db, worker };
 }
 
-// Adapter: run a SQL string, return rows as arrays of JS cell values.
+// Adapter: run a SQL string, return rows as arrays of JS cell values, read by
+// column index. (Row objects are keyed by name, so `SELECT a, a` would collapse
+// to one column and fail the column-count check for the wrong reason.)
 function makeRunQuery(conn) {
   return async (sql) => {
     const table = await conn.query(sql);
+    const cols = [];
+    for (let c = 0; c < table.numCols; c++) cols.push(table.getChildAt(c));
     const rows = [];
-    for (const row of table.toArray()) {
-      // Arrow row → array of column values in schema order.
-      const obj = row.toJSON();
-      rows.push(Object.values(obj));
-    }
+    for (let r = 0; r < table.numRows; r++) rows.push(cols.map((col) => col.get(r)));
     return rows;
   };
 }
@@ -257,12 +263,14 @@ async function main() {
       log(`Running curated WASM subset (${files.length} files). Use --all for the full suite.`);
     }
 
-    let totalPass = 0, totalFail = 0, totalSkip = 0;
+    let totalPass = 0, totalFail = 0, totalSkip = 0, totalRaw = 0;
     const failedFiles = [];
     for (const rel of files) {
       if (SKIP_FILES.has(rel)) { log(`  ⊘ ${rel} — skipped (${SKIP_FILES.get(rel)})`); continue; }
       const abs = path.join(REPO_ROOT, rel);
-      if (!fs.existsSync(abs)) { log(`  ⚠ missing: ${rel} (skipped)`); continue; }
+      // A named file that does not exist is a failure, not a skip: a typo in
+      // --file (or in the post-upload check) must not turn the gate green.
+      if (!fs.existsSync(abs)) { log(`  ✗ missing: ${rel}`); totalFail++; failedFiles.push(rel); continue; }
       const text = fs.readFileSync(abs, 'utf8');
       const records = parseTest(text);
 
@@ -272,10 +280,11 @@ async function main() {
       await engine.db.open({ allowUnsignedExtensions: true });
       const c = await engine.db.connect();
       await c.query(`LOAD ${EXT_NAME};`);
-      const r = await runRecords(records, makeRunQuery(c), { file: rel, log });
+      const r = await runRecords(records, makeRunQuery(c), { file: rel, log, timeoutMs: RECORD_TIMEOUT });
       await c.close();
 
       totalPass += r.passed; totalFail += r.failed; totalSkip += r.skipped;
+      totalRaw += r.raw;
       const mark = r.failed === 0 ? '✓' : '✗';
       log(`  ${mark} ${rel} — ${r.passed} passed, ${r.failed} failed, ${r.skipped} skipped`);
       if (r.failed > 0) failedFiles.push(rel);
@@ -283,6 +292,9 @@ async function main() {
 
     log('──────────────────────────────────────────────');
     log(`Totals: ${totalPass} passed, ${totalFail} failed, ${totalSkip} skipped across ${files.length} files`);
+    // Queries the ::VARCHAR / typeof wrap could not parse or bind: run as written
+    // and compared by type letter only.
+    log(`Comparison: ${totalRaw} queries run unwrapped, without column types`);
     if (totalFail > 0) {
       log(`✗ Failing files: ${failedFiles.join(', ')}`);
       failedHard = true;
