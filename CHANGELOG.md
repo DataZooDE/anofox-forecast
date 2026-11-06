@@ -10,6 +10,22 @@ use the semver numbering this project started with.
 
 ## [Unreleased]
 
+### Fixed — tests
+
+- **The DuckDB-Wasm harness's sqllogic runner is strict (ported from anofox-optimize PR #21).**
+  `statement error` records folded the `----` line and the expected message into the SQL, so
+  each of the suite's 200 expected-error records failed on a syntax error and passed without
+  its statement running. Values compared within 1e-6 absolute / 1e-4 relative whenever both
+  looked numeric (100000 equalled 100001, text `001` equalled `1`), BIGINT went through a JS
+  Number, row and column counts were not checked, and `foreach` / `statement maybe` were
+  skipped silently. `test/wasm/sqllogic.mjs` now runs every statement, compares by the
+  column's SQL type (integers exactly, text exactly, doubles within 1e-9 relative), checks the
+  result shape, supports rowsort/valuesort, hashes, `foreach`/`loop` and `statement maybe`,
+  fails on unknown records with file:line, and has a 60 s per-record timeout and a
+  `--self-test` that CI runs before the suite. No test expectation changed. The curated CI
+  subset still passes (540 assertions); under `--all` the full suite runs 4389 passing
+  records, up from 4197, and 7 failing, down from 8, all listed in `test/wasm/README.md`.
+
 ## [2026.10.31] - 2026-10-31 — DuckDB 2.0 features, contract outputs, faster stats
 
 ### Changed — build and distribution

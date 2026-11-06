@@ -148,6 +148,11 @@ jobs:
       - name: Install harness dependencies
         run: npm --prefix test/wasm install
 
+      # The comparator and parser check themselves before the suite runs: a
+      # runner that accepts wrong answers turns every result below green.
+      - name: sqllogic runner self-test
+        run: node test/wasm/sqllogic.mjs --self-test
+
       - name: Run DuckDB-Wasm load + runtime harness
         run: |
           EXT=$(find wasm-artifact -name 'anofox_forecast.duckdb_extension.wasm' | head -1)
