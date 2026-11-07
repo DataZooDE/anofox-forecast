@@ -28,17 +28,18 @@
 #include "duckdb/common/vector/string_vector.hpp"
 #include "duckdb/common/vector/struct_vector.hpp"
 #endif
-// Up to 1.5 VariantValue (a different struct, without GetValue) lives in its own
-// header; from 2.0 on it is declared in value.hpp.
-#if __has_include("duckdb/common/types/variant_value.hpp")
-#include "duckdb/common/types/variant_value.hpp"
-#endif
 #endif
 
 #include <string>
 #include <tuple>
 #include <type_traits>
 #include <utility>
+
+//! Stand-in for DuckDB builds whose headers declare no duckdb::VariantValue at this
+//! point (1.5 and earlier); see compat_detail::VariantValueOrStandIn.
+namespace duckdb_compat_variant_fallback {
+struct VariantValue {};
+} // namespace duckdb_compat_variant_fallback
 
 namespace duckdb {
 
@@ -559,6 +560,21 @@ inline vector<unique_ptr<ParsedExpression>> ParseExpressionList(const std::strin
 //===--------------------------------------------------------------------===//
 
 namespace compat_detail {
+//! duckdb::VariantValue where DuckDB's headers declare it, otherwise a stand-in.
+//! 2.0 declares the struct (with GetValue) in value.hpp, which duckdb.hpp pulls in.
+//! 1.5 declares a different struct, without GetValue, in variant_value.hpp, a header
+//! this file deliberately does not include: 2.0 has no such header, so a probe for it
+//! finds a stray 1.5 copy (e.g. a system DuckDB in /usr/include) and redefines the
+//! struct. Unqualified lookup from variant_lookup searches compat_detail, then duckdb,
+//! then the global namespace, where the using-directive places the stand-in: a
+//! VariantValue declared in duckdb hides it. Neither the stand-in nor the 1.5 struct
+//! has GetValue, so the detection below needs no version check.
+namespace variant_lookup {
+using namespace ::duckdb_compat_variant_fallback;
+using type = VariantValue;
+} // namespace variant_lookup
+using VariantValueOrStandIn = variant_lookup::type;
+
 template <class VV>
 auto UnwrapVariant(const Value &v, int) -> decltype(VV::GetValue(v)) {
 	return VV::GetValue(v);
@@ -575,7 +591,11 @@ struct HasVariantGetValue<VV, decltype(void(VV::GetValue(std::declval<const Valu
 } // namespace compat_detail
 
 //! Whether VARIANT values can be unwrapped (VariantValue::GetValue, DuckDB 2.0+).
-constexpr bool kHasVariantUnwrap = compat_detail::HasVariantGetValue<VariantValue>::value;
+constexpr bool kHasVariantUnwrap = compat_detail::HasVariantGetValue<compat_detail::VariantValueOrStandIn>::value;
+// On DuckDB 2.0 the stand-in must never be chosen: VARIANT params would then fail at
+// runtime with the build still green.
+static_assert(!compat_detail::BindAdapter<bind_scalar_function_t>::kNewApi || kHasVariantUnwrap,
+              "DuckDB 2.0 API without VariantValue::GetValue(): update VariantValueOrStandIn");
 
 //! A params/options argument as the STRUCT or MAP the parsers understand. A VARIANT
 //! (e.g. `{'seasonal_period': 7}::VARIANT`, or a value read from a VARIANT column) is
@@ -587,7 +607,7 @@ inline Value NormalizeParamsValue(const Value &params) {
 		return params;
 	}
 	if (params.type().id() == LogicalTypeId::VARIANT) {
-		return NormalizeParamsValue(compat_detail::UnwrapVariant<VariantValue>(params, 0));
+		return NormalizeParamsValue(compat_detail::UnwrapVariant<compat_detail::VariantValueOrStandIn>(params, 0));
 	}
 	if (params.type().id() == LogicalTypeId::MAP &&
 	    MapType::ValueType(params.type()).id() == LogicalTypeId::VARIANT) {
