@@ -592,6 +592,10 @@ struct HasVariantGetValue<VV, decltype(void(VV::GetValue(std::declval<const Valu
 
 //! Whether VARIANT values can be unwrapped (VariantValue::GetValue, DuckDB 2.0+).
 constexpr bool kHasVariantUnwrap = compat_detail::HasVariantGetValue<compat_detail::VariantValueOrStandIn>::value;
+// On DuckDB 2.0 the stand-in must never be chosen: VARIANT params would then fail at
+// runtime with the build still green.
+static_assert(!compat_detail::BindAdapter<bind_scalar_function_t>::kNewApi || kHasVariantUnwrap,
+              "DuckDB 2.0 API without VariantValue::GetValue(): update VariantValueOrStandIn");
 
 //! A params/options argument as the STRUCT or MAP the parsers understand. A VARIANT
 //! (e.g. `{'seasonal_period': 7}::VARIANT`, or a value read from a VARIANT column) is

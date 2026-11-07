@@ -9,7 +9,7 @@
 # no secrets.
 # The compat-stray-headers job compiles src/include/duckdb_compat.hpp (syntax
 # only, no build) against the bundled DuckDB headers with stray headers from
-# another DuckDB version on a later include path, as a system DuckDB package
+# another DuckDB version on a later include path (-isystem), as a system DuckDB package
 # puts them (scripts/check_compat_stray_headers.sh). CI runners have no system
 # DuckDB, so without it a __has_include probe that finds the wrong tree only
 # breaks on developer machines.

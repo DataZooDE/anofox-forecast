@@ -8,8 +8,9 @@
 # DuckDB version in the system include directories. This script plants a stub
 # that fails with #error for every header that either (a) another supported DuckDB
 # line has and the bundled one lacks, or (b) the sources probe with __has_include
-# and the bundled one lacks. The stubs go on -idirafter, which, like the system
-# directories, is searched after the bundled tree. A header that is found there
+# and the bundled one lacks. The stubs go on -isystem, which is searched after the
+# bundled tree (-I) and before the real system directories, so a stub also wins over
+# a system DuckDB on a developer machine. A header that is found there
 # fails the compile.
 #
 # Usage: scripts/check_compat_stray_headers.sh   (CXX and DUCKDB_INCLUDE override)
@@ -31,7 +32,8 @@ trap 'rm -rf "$stray"' EXIT
 #     once probed for.
 known="duckdb/common/types/variant_value.hpp"
 # (b) Every header the sources probe for.
-probed=$(grep -rhoE '__has_include\("duckdb[^"]*"\)' "$root/src" | sed -E 's/^__has_include\("([^"]*)"\)$/\1/' || true)
+probed=$(grep -rhoE '__has_include[[:space:]]*\([[:space:]]*["<]duckdb[^">]*[">]' "$root/src" |
+	sed -E 's/.*["<](duckdb[^">]*)[">]$/\1/' || true)
 
 planted=0
 for header in $(printf '%s\n' $known $probed | sort -u); do
@@ -44,6 +46,13 @@ for header in $(printf '%s\n' $known $probed | sort -u); do
 	fi
 done
 
-printf '#include "duckdb_compat.hpp"\n' >"$stray/tu.cpp"
-"$cxx" -std=c++17 -fsyntax-only -I"$duckdb_include" -I"$root/src/include" -idirafter "$stray" "$stray/tu.cpp"
+if [ "$planted" -eq 0 ]; then
+	echo "warning: no stray headers planted; the check below tests nothing" >&2
+fi
+
+# The TU lives outside $stray: a quoted include searches the includer's directory first.
+tu=$(mktemp -d)
+trap 'rm -rf "$stray" "$tu"' EXIT
+printf '#include "duckdb_compat.hpp"\n' >"$tu/tu.cpp"
+"$cxx" -std=c++17 -fsyntax-only -I"$duckdb_include" -I"$root/src/include" -isystem "$stray" "$tu/tu.cpp"
 echo "duckdb_compat.hpp compiles with $planted stray header(s) on the include path"
