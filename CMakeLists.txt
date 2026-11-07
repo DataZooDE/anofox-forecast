@@ -207,7 +207,21 @@ if(TELEMETRY_SUPPORTED)
     # and libssl-3-x64.dll / libcrypto-3-x64.dll (Windows, issue #215). On Windows this
     # requires `openssl` in vcpkg.json so the x64-windows-static-release triplet
     # supplies static libs built with /MT (matching the extension's CRT).
-    set(OPENSSL_USE_STATIC_LIBS ON)
+    #
+    # Except for a Linux build without vcpkg (a developer's `make`, the
+    # ubuntu-26.04 CI job): there the system OpenSSL is linked shared, as in
+    # the sibling extensions. A static system libcrypto drags in its own static
+    # dependencies, and on Ubuntu 26.04 (OpenSSL 3.5) libcrypto.pc lists
+    # -lz -lzstd -l:libjitterentropy.a. FindOpenSSL then resolves zlib while
+    # its search is restricted to ".a" and picks libz.a, which is not -fPIC,
+    # so linking libduckdb.so fails ("relocation R_X86_64_PC32 against
+    # `z_errmsg' ... recompile with -fPIC"); without zlib1g-dev the generate
+    # step fails instead (ZLIB_LIBRARY NOTFOUND). Shipped binaries (#211) are
+    # not affected: they build with vcpkg, whose openssl wrapper ignores
+    # OPENSSL_USE_STATIC_LIBS and links its own static, zlib-free OpenSSL.
+    if(NOT (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT VCPKG_TOOLCHAIN))
+        set(OPENSSL_USE_STATIC_LIBS ON)
+    endif()
     find_package(OpenSSL QUIET)
     if(OPENSSL_FOUND)
         set(DUCKDB_SRC_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/duckdb/src/include")
