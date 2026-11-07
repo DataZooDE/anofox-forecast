@@ -67,7 +67,7 @@ string.
 |--------|------|-------------|
 | `<group_col>` | (same as input) | Series identifier |
 | `forecast_step` | INTEGER | Horizon step (1-based) |
-| `<date_col>` | TIMESTAMP | Forecast timestamp |
+| `<date_col>` | (same as input) | Forecast timestamp, under the caller's column name (`ts_forecast_panel_by` does not rename it to `ds`) |
 | `yhat` | DOUBLE | Point forecast (constant / flat per series; always ≥ 0) |
 | `model_name` | VARCHAR | `'GlobalCroston'` for kept series; `'DROPPED: too_short'` for series with < 10 valid observations |
 

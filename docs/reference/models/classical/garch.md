@@ -68,10 +68,12 @@ Series with fewer observations are **skipped** (emitted as zero rows) — not er
 | Column | Type | Description |
 |--------|------|-------------|
 | `group_col` | ANY | Series identifier |
-| `<date_col>` | (same as input) | Forecast timestamp |
+| `forecast_step` | INTEGER | Steps ahead of the last observation, `1` to `horizon` |
+| `ds` | (same type as input) | Forecast timestamp, always named `ds` whatever the input date column is called (see [`ts_forecast_by` Returns](../../../api/07-forecasting.md#ts_forecast_by)) |
 | `yhat` | DOUBLE | Conditional **volatility** (std-dev = sqrt(variance)) |
 | `yhat_lower` / `yhat_upper` | DOUBLE | Crate `GARCH::predict_with_intervals` bounds (see caveat below) |
 | `model_name` | VARCHAR | `'GARCH(p,q)'` e.g. `'GARCH(1,1)'` |
+| `level` | DOUBLE | Interval coverage (`confidence_level`, default `0.9`); `NULL` when the model returns no interval (since `2026.10.31`) |
 
 > **Interval centring (D-01; fixed upstream in 0.16.0, UPST-05):** `yhat_lower`/`yhat_upper`
 > are centred on the fitted conditional mean (`mean ∓ z·sqrt(forecast_variance(h))`) —

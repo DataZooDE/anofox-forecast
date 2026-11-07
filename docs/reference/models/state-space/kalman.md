@@ -71,11 +71,13 @@ params := MAP{'kalman_model': 'local_linear_trend'}
 | Column | Type | Description |
 |--------|------|-------------|
 | `group_col` | ANY | Series identifier |
-| `<date_col>` | (same as input) | Forecast timestamp |
+| `forecast_step` | INTEGER | Steps ahead of the last observation, `1` to `horizon` |
+| `ds` | (same type as input) | Forecast timestamp, always named `ds` whatever the input date column is called (see [`ts_forecast_by` Returns](../../../api/07-forecasting.md#ts_forecast_by)) |
 | `yhat` | DOUBLE | Point forecast (h-step ahead) |
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
 | `model_name` | VARCHAR | `'Kalman(local_level)'` or `'Kalman(local_linear_trend)'` — always names the spec that actually ran |
+| `level` | DOUBLE | Interval coverage (`confidence_level`, default `0.9`); `NULL` when the model returns no interval (since `2026.10.31`) |
 
 `model_name` is strict about `kalman_model`: an unrecognized value (anything other than
 `'local_level'` or `'local_linear_trend'`) is a hard SQL error naming the parameter — there

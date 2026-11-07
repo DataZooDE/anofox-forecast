@@ -101,11 +101,12 @@ auto-detectable period.
 |--------|------|-------------|
 | `<group_col>` | (same as input) | Series identifier |
 | `forecast_step` | INTEGER | Forecast horizon step (1, 2, …, horizon) |
-| `<date_col>` | (same as input) | Forecast timestamp |
+| `ds` | (same type as input) | Forecast timestamp, always named `ds` whatever the input date column is called (see [`ts_forecast_by` Returns](../../../api/07-forecasting.md#ts_forecast_by)) |
 | `yhat` | DOUBLE | Point forecast (combined from all named members) |
 | `yhat_lower` | DOUBLE | Lower bound of the crate `Ensemble`'s own `predict_with_intervals` at `confidence_level` (default 0.90) |
 | `yhat_upper` | DOUBLE | Upper bound of the crate `Ensemble`'s own `predict_with_intervals` at `confidence_level` (default 0.90) |
 | `model_name` | VARCHAR | `'Ensemble'` |
+| `level` | DOUBLE | Interval coverage (`confidence_level`, default `0.9`); `NULL` when the model returns no interval (since `2026.10.31`) |
 
 `yhat_lower`/`yhat_upper` are the crate `Ensemble`'s own prediction interval — not `NULL`,
 and not a combination of each member's own individual interval. See

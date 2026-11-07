@@ -75,10 +75,11 @@ Same shape as any `ts_forecast_by` call: `(group_col, forecast_step, ds, yhat, y
 |--------|------|-------------|
 | `group_col` | ANY | Series identifier |
 | `forecast_step` | INTEGER | 1..horizon |
-| `<date_col>` | (same as input) | Forecast timestamp |
+| `ds` | (same type as input) | Forecast timestamp, always named `ds` whatever the input date column is called (see [`ts_forecast_by` Returns](../../../api/07-forecasting.md#ts_forecast_by)) |
 | `yhat` | DOUBLE | Point forecast — mean of the mixture |
 | `yhat_lower` / `yhat_upper` | DOUBLE | Prediction interval at `confidence_level` |
 | `model_name` | VARCHAR | Tagged variant + seasonal + batch_init state |
+| `level` | DOUBLE | Interval coverage (`confidence_level`, default `0.9`); `NULL` when the model returns no interval (since `2026.10.31`) |
 
 `yhat_lower` / `yhat_upper` are Laplace's **own distributional interval** — the forecaster's
 `predict_with_intervals` quantiles from the per-horizon mixture, passed through unchanged

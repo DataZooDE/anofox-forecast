@@ -613,13 +613,25 @@ so every public forecast surface agrees on dates (not just values) for the same 
 **Returns:**
 | Column | Type | Description |
 |--------|------|-------------|
-| `<group_col>` | (same as input) | Series identifier |
-| `<date_col>` | (same as input) | Forecast timestamp |
+| `<group_col>` | (same as input) | Series identifier, under the caller's column name |
+| `forecast_step` | INTEGER | Steps ahead of the last observation, `1` to `horizon` |
+| `ds` | (same type as input) | Forecast timestamp. Always named `ds`, whatever the input date column is called |
 | `yhat` | DOUBLE | Point forecast |
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
 | `model_name` | VARCHAR | Model used |
-| `level` | DOUBLE | Interval coverage as a fraction (`confidence_level`, e.g. `0.9`); `NULL` when the model returns no interval. Appended in #280 |
+| `level` | DOUBLE | Interval coverage as a fraction (`confidence_level`, e.g. `0.9`); `NULL` when the model returns no interval. Added in `2026.10.31` (#280); earlier builds end at `model_name` |
+
+The group column keeps the caller's name but the date column comes back as `ds`, so
+`SELECT month FROM ts_forecast_by('sales', product, month, ...)` is a binder error. Write
+`ds AS month` to get the input name back. `ts_forecast_ensemble_by` returns the same columns;
+`ts_forecast_panel_by` and `ts_forecast_var_by` keep the caller's date column name instead.
+
+```sql
+SELECT product_id, forecast_step, ds AS date, yhat
+FROM ts_forecast_by('sales', product_id, date, amount, 'Naive', 3, '1d')
+ORDER BY product_id, forecast_step;
+```
 
 `level` lets forecasts at several confidence levels be stacked with `UNION ALL` into nested
 fans (one row per series, step and level), the anofox contract `prediction` shape.
@@ -773,7 +785,8 @@ ts_forecast_panel_by(
     horizon       INTEGER,     -- periods to forecast
     frequency     VARCHAR,     -- '1d', '1h', '1mo', ...
     params        MAP{}        -- optional; see per-method params below
-) → TABLE(group_col, forecast_step INT, date_col TIMESTAMP, yhat DOUBLE, model_name VARCHAR)
+) → TABLE(group_col, forecast_step INT, date_col, yhat DOUBLE, model_name VARCHAR)
+  -- date_col keeps the caller's name and type (unlike ts_forecast_by, which returns ds)
 ```
 
 ### Ragged panel handling
@@ -1071,9 +1084,10 @@ ts_forecast_ensemble_by(
     combination_method := '',  -- blend strategy; default '' = 'mean'
     seasonal_period := 0,      -- shared period for all members; 0 = non-seasonal
     confidence_level := 0.90   -- confidence level for the combined forecast's interval
-) → TABLE(group_col, forecast_step INT, date_col TIMESTAMP, yhat DOUBLE,
+) → TABLE(group_col, forecast_step INT, ds, yhat DOUBLE,
           yhat_lower DOUBLE, yhat_upper DOUBLE, model_name VARCHAR,
-          level DOUBLE)  -- level = confidence_level, NULL without an interval (#280)
+          level DOUBLE)  -- ds = forecast date, input type, always named ds (as in ts_forecast_by);
+                         -- level = confidence_level, NULL without an interval (#280)
 ```
 
 ### Parameters
