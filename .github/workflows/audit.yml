@@ -7,6 +7,12 @@
 # Phase 19 (#272, DIST-01/DIST-02) adds the WASM duckdb_signature section
 # parser's own self-test step below -- also a pure python3 scan, no build,
 # no secrets.
+# The compat-stray-headers job compiles src/include/duckdb_compat.hpp (syntax
+# only, no build) against the bundled DuckDB headers with stray headers from
+# another DuckDB version on a later include path, as a system DuckDB package
+# puts them (scripts/check_compat_stray_headers.sh). CI runners have no system
+# DuckDB, so without it a __has_include probe that finds the wrong tree only
+# breaks on developer machines.
 name: Static audits
 
 on:
@@ -49,3 +55,19 @@ jobs:
       # wasm runtime job itself only runs on full-ci).
       - name: WASM sqllogic runner self-test
         run: node test/wasm/sqllogic.mjs --self-test
+
+  compat-stray-headers:
+    name: duckdb_compat.hpp with stray DuckDB headers
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: false
+
+      - name: Fetch the bundled DuckDB headers
+        run: git submodule update --init --depth 1 duckdb
+
+      - name: Compile duckdb_compat.hpp with stray headers on the include path
+        run: scripts/check_compat_stray_headers.sh
