@@ -373,10 +373,10 @@ Return tables with operation-specific columns:
 
 ```text
 -- ts_forecast_by returns:
-| group_col | ds | forecast | lower | upper |
+| group_col | forecast_step | ds | yhat | yhat_lower | yhat_upper | model_name | level |
 
 -- ts_cv_forecast_by returns:
-| fold_id | group_col | date | y | split | yhat | yhat_lower | yhat_upper | model_name |
+| fold_id | group_col | date_col | y | split | yhat | yhat_lower | yhat_upper | model_name | level |
 ```
 
 ---

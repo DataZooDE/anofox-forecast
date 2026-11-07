@@ -1,0 +1,74 @@
+# name: test/sql/ts_forecast_by_returns.test
+# description: #309 -- the documented Returns contract of ts_forecast_by and its
+#   siblings, pinned against an input whose date column is NOT named `ds` (every
+#   older test names it `ds`, which hides the rename). ts_forecast_by and
+#   ts_forecast_ensemble_by keep the caller's group column name but return the date
+#   as `ds` (type follows the input); ts_forecast_panel_by keeps the caller's date
+#   name. Fixture is the issue's: 36 monthly rows, group `product`, date `month`.
+# group: [sql]
+
+require anofox_forecast
+
+statement ok
+CREATE TABLE sales AS
+SELECT 'A' AS product, ('2023-01-01'::DATE + (i || ' months')::INTERVAL)::DATE AS month, 100.0 + i AS revenue
+FROM range(36) t(i);
+
+# ---------------------------------------------------------------------------
+# ts_forecast_by: exact names, order and types
+# ---------------------------------------------------------------------------
+query TT
+SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM ts_forecast_by('sales', product, month, revenue, 'AutoETS', 12, '1mo'));
+----
+product	VARCHAR
+forecast_step	INTEGER
+ds	DATE
+yhat	DOUBLE
+yhat_lower	DOUBLE
+yhat_upper	DOUBLE
+model_name	VARCHAR
+level	DOUBLE
+
+# The caller's date column name is not kept ...
+statement error
+SELECT product, month, yhat FROM ts_forecast_by('sales', product, month, revenue, 'AutoETS', 12, '1mo');
+----
+Referenced column "month" not found
+
+# ... it is `ds`, and `ds AS month` restores it.
+query ITI
+SELECT count(*), min(month)::VARCHAR, max(forecast_step)
+FROM (SELECT ds AS month, forecast_step FROM ts_forecast_by('sales', product, month, revenue, 'AutoETS', 12, '1mo'));
+----
+12	2026-01-01	12
+
+# The type of `ds` follows the input: a TIMESTAMP date gives a TIMESTAMP `ds`.
+statement ok
+CREATE TABLE sales_ts AS SELECT product, month::TIMESTAMP AS month, revenue FROM sales;
+
+query T
+SELECT column_type FROM (DESCRIBE SELECT * FROM ts_forecast_by('sales_ts', product, month, revenue, 'Naive', 3, '1mo')) WHERE column_name = 'ds';
+----
+TIMESTAMP
+
+# ---------------------------------------------------------------------------
+# ts_forecast_ensemble_by: same shape as ts_forecast_by
+# ---------------------------------------------------------------------------
+query T
+SELECT string_agg(column_name || ':' || column_type, ',') FROM (DESCRIBE SELECT * FROM ts_forecast_ensemble_by('sales', product, month, revenue, ['Naive', 'SES'], 3, '1mo'));
+----
+product:VARCHAR,forecast_step:INTEGER,ds:DATE,yhat:DOUBLE,yhat_lower:DOUBLE,yhat_upper:DOUBLE,model_name:VARCHAR,level:DOUBLE
+
+# ---------------------------------------------------------------------------
+# ts_forecast_panel_by: the exception -- keeps the caller's date name and type
+# ---------------------------------------------------------------------------
+statement ok
+CREATE TABLE panel AS
+SELECT p::VARCHAR AS product, ('2023-01-01'::DATE + (i || ' months')::INTERVAL)::DATE AS month,
+       100.0 + i + p * 3 + sin(i) AS revenue
+FROM range(36) t(i), range(3) s(p);
+
+query T
+SELECT string_agg(column_name || ':' || column_type, ',') FROM (DESCRIBE SELECT * FROM ts_forecast_panel_by('panel', product, month, revenue, 'GlobalTheta', 3, '1mo', MAP{}));
+----
+product:VARCHAR,forecast_step:INTEGER,month:DATE,yhat:DOUBLE,model_name:VARCHAR

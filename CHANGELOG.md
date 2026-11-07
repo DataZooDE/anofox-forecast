@@ -10,6 +10,21 @@ use the semver numbering this project started with.
 
 ## [Unreleased]
 
+### Fixed — docs
+
+- **`ts_forecast_by`'s Returns table matches its output (#309).** The table listed the date
+  column under the caller's name and left out `forecast_step`. The function returns
+  `<group_col>, forecast_step, ds, yhat, yhat_lower, yhat_upper, model_name, level`: the
+  group column keeps the caller's name, the date always comes back as `ds` (its type follows
+  the input), so `SELECT month FROM ts_forecast_by(..., month, ...)` is a binder error and
+  `ds AS month` restores the name. `level` was added in `2026.10.31` (#280); earlier builds
+  end at `model_name`. The same fix is applied to the `ts_forecast_ensemble_by` signature,
+  the 37 model reference pages and the overview in `00-api-design.md`.
+  `ts_forecast_panel_by`'s signature now says its date column keeps the caller's name and
+  type (it claimed TIMESTAMP). No function output changed. `test/sql/ts_forecast_by_returns.test`
+  pins the names, order and types against an input whose date column is not called `ds`; every
+  older test named it `ds`, which is why the drift went unnoticed.
+
 ### Fixed — tests
 
 - **The DuckDB-Wasm harness's sqllogic runner is strict (ported from anofox-optimize PR #21).**

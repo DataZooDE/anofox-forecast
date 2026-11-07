@@ -28,10 +28,13 @@ Random Walk with Drift. Extends Naive by adding a constant drift (average change
 | Column | Type | Description |
 |--------|------|-------------|
 | `group_col` | ANY | Series identifier (only for `_by` variant) |
-| `<date_col>` | (same as input) | Forecast timestamp |
+| `forecast_step` | INTEGER | Steps ahead of the last observation, `1` to `horizon` |
+| `ds` | (same type as input) | Forecast timestamp, always named `ds` whatever the input date column is called (see [`ts_forecast_by` Returns](../../../api/07-forecasting.md#ts_forecast_by)) |
 | `yhat` | DOUBLE | Point forecast |
 | `yhat_lower` | DOUBLE | Lower prediction interval |
 | `yhat_upper` | DOUBLE | Upper prediction interval |
+| `model_name` | VARCHAR | Model used |
+| `level` | DOUBLE | Interval coverage (`confidence_level`, default `0.9`); `NULL` when the model returns no interval (since `2026.10.31`) |
 
 `yhat_lower` / `yhat_upper` are the model's own prediction interval (crate
 `predict_with_intervals`) at `confidence_level` (default 0.90). See
