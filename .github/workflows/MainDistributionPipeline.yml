@@ -227,6 +227,48 @@ jobs:
             coverage-summary.txt
           if-no-files-found: ignore
 
+  linux-make-ubuntu-2604:
+    name: Linux non-vcpkg build (ubuntu-26.04, make release)
+    # Builds the way a developer does: plain `make release` with the system
+    # OpenSSL, no vcpkg, which the distribution matrix never does (see the
+    # OPENSSL_USE_STATIC_LIBS comment in CMakeLists.txt for the ubuntu-26.04
+    # break this guards). Runs with the full matrix (main, tags,
+    # workflow_dispatch, `full-ci` PRs); nothing `needs` it.
+    if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci') }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    env:
+      GEN: ninja
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: 'recursive'
+
+      - name: Install build dependencies
+        run: sudo apt-get update -y -qq && sudo apt-get install -y -qq ninja-build ccache libssl-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ github.job }}
+          max-size: 1G
+
+      - name: Build (release, no vcpkg)
+        run: make release
+
+      # Telemetry falls back to a no-OpenSSL build without failing, so check that
+      # the shared system OpenSSL branch was really built.
+      - name: Shared system OpenSSL linked
+        run: ldd build/release/duckdb | grep -q 'libssl\.so\.3'
+
+      # Aggregated, so a missing extension is an error, not zero rows.
+      - name: Smoke test
+        run: ./build/release/duckdb -c "SELECT CASE WHEN count(*) FILTER (WHERE loaded) = 1 THEN 'anofox_forecast loaded' ELSE error('anofox_forecast not loaded') END FROM duckdb_extensions() WHERE extension_name = 'anofox_forecast'"
+
   sanitizer-tests:
     name: ASAN + UBSAN sqllogictests (Linux debug, non-blocking)
     # As anofox-statistics: a debug build of DuckDB + the extension with
