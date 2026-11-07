@@ -227,6 +227,47 @@ jobs:
             coverage-summary.txt
           if-no-files-found: ignore
 
+  linux-make-ubuntu-2604:
+    name: Linux non-vcpkg build (ubuntu-26.04, make release)
+    # Builds the way a developer does: plain `make release` with the system
+    # OpenSSL, no vcpkg. The distribution matrix never takes this path (it
+    # links vcpkg's OpenSSL inside a manylinux container), so a break here
+    # stays invisible there. On ubuntu-26.04 (OpenSSL 3.5.5) the static
+    # libcrypto.pc lists -lz, and OPENSSL_USE_STATIC_LIBS made FindOpenSSL
+    # resolve the non-PIC /usr/lib/x86_64-linux-gnu/libz.a, which fails the
+    # libduckdb.so link ("relocation R_X86_64_PC32 against `z_errmsg' ...
+    # recompile with -fPIC"). Runs with the full matrix (main, tags,
+    # workflow_dispatch, `full-ci` PRs); nothing `needs` it, so it never
+    # holds up a deploy.
+    if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci') }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    env:
+      GEN: ninja
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: 'recursive'
+
+      - name: Install build dependencies
+        run: sudo apt-get update -y -qq && sudo apt-get install -y -qq ninja-build ccache libssl-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: linux-make-${{ github.job }}-ubuntu-26.04
+          max-size: 1G
+
+      - name: Build (release, no vcpkg)
+        run: make release
+
+      - name: Smoke test
+        run: ./build/release/duckdb -c "SELECT CASE WHEN loaded THEN 'anofox_forecast loaded' ELSE error('anofox_forecast not loaded') END FROM duckdb_extensions() WHERE extension_name = 'anofox_forecast'"
+
   sanitizer-tests:
     name: ASAN + UBSAN sqllogictests (Linux debug, non-blocking)
     # As anofox-statistics: a debug build of DuckDB + the extension with
