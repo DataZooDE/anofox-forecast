@@ -18,13 +18,13 @@ description: >
   exogenous regressors, or writing `ts_forecast_by` / `ts_forecast` /
   `ts_forecast_exog_by` / `ts_forecast_agg` / `ts_forecast_var_by` /
   `ts_forecast_ensemble_by` calls.
-version: 2026.09.26
+version: 2026.10.31
 user-invocable: false
 ---
 
 # Anofox Forecast — Models & `ts_forecast_by` Cheat Sheet
 
-**Extension:** `anofox_forecast` (Rust crate `anofox-forecast` v0.16.2) | **DuckDB:** v2.0.0 / v1.5.6 | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
+**Extension:** `anofox_forecast` v2026.10.31 (Rust crate `anofox-forecast` v0.19.0) | **DuckDB:** v2.0.0 / v1.5.6 | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
 
 36 forecasting models exposed by SQL via three call surfaces (table macro, aggregate, scalar) + `ts_forecast_var_by` for multivariate VAR.
 

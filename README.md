@@ -102,7 +102,7 @@ Install in any Claude Code session:
 | `anofox-forecast-detection` | Seasonality, period, changepoint, peak detection |
 | `anofox-forecast-data-prep` | Gap filling, imputation, differencing, hierarchical keys |
 
-The skills live in [`plugins/anofox-forecast/`](plugins/anofox-forecast/) and stay in sync with the extension's SQL surface. For in-repo development, load them directly with `claude --plugin-dir ./plugins/anofox-forecast`.
+The skills live in [`plugins/anofox-forecast/`](plugins/anofox-forecast/). `make check-docs` (and a CI job that gates every deploy) runs each of their SQL examples against the shipped extension, resolves every function name they mention, and checks that they carry the released version. For in-repo development, load them directly with `claude --plugin-dir ./plugins/anofox-forecast`.
 
 
 ## Attribution

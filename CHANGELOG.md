@@ -10,6 +10,21 @@ use the semver numbering this project started with.
 
 ## [Unreleased]
 
+### Changed — docs and release
+
+- **The doc-snippet check runs in CI and gates the deploy.** `scripts/check_doc_snippets.py`
+  was a manual release step; nothing ran it, and the Claude Code skills sat at
+  `2026.09.26` (crate `v0.16.2`) through three releases. A new `Doc snippets` job per track
+  (v1.5.6, v2.0.0) loads the packaged linux_amd64 artifact into the official CLI
+  (`--duckdb`/`--extension`) and runs every ```sql block in README, `docs/` and the skills;
+  each deploy waits for its track's job, as it waits for the smoke test.
+- **Plugin version agreement.** `make check-docs` now fails when `plugin.json`, a `SKILL.md`
+  `version:` or a skill's `**Extension:**` header is behind the newest `## [YYYY.MM.DD]`
+  release, or names a crate version other than `Cargo.lock`'s. `make bump-plugin`
+  (`scripts/bump_plugin_version.sh`) sets them all in the release commit. The skills are
+  bumped here to `2026.10.31` / crate `v0.19.0`; the models skill's header gains its missing
+  extension version.
+
 ### Fixed — docs
 
 - **`ts_forecast_by`'s Returns table matches its output (#309).** The table listed the date

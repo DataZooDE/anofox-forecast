@@ -50,12 +50,22 @@ jobs:
       extension_name: anofox_forecast
       exclude_archs: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && 'windows_amd64_rtools;windows_amd64_mingw' || 'linux_arm64;linux_amd64_musl;osx_amd64;osx_arm64;windows_amd64;windows_amd64_mingw;windows_amd64_rtools;windows_arm64;wasm_mvp;wasm_eh;wasm_threads' }}
 
+  # README, docs/ and the Claude Code skills still describe the v1.5.6 binary, and the
+  # plugin carries the newest release. Gates the deploy, like the smoke test.
+  duckdb-v15-doc-snippets:
+    name: Doc snippets (v1.5.6)
+    needs: duckdb-v15-build
+    uses: ./.github/workflows/_doc_snippets.yml
+    with:
+      duckdb_version: v1.5.6
+      extension_name: anofox_forecast
+
   duckdb-v15-deploy:
     name: Deploy extension binaries (v1.5.6)
-    needs: [duckdb-v15-build, duckdb-v15-smoke-test]
+    needs: [duckdb-v15-build, duckdb-v15-smoke-test, duckdb-v15-doc-snippets]
     # Deploy only artifacts that passed the smoke test (as anofox-statistics):
     # `!cancelled()` alone let a FAILED smoke test fall through to deploy.
-    if: ${{ !cancelled() && needs.duckdb-v15-smoke-test.result == 'success' }}
+    if: ${{ !cancelled() && needs.duckdb-v15-smoke-test.result == 'success' && needs.duckdb-v15-doc-snippets.result == 'success' }}
     uses: ./.github/workflows/_extension_deploy.yml
     secrets: inherit
     with:
@@ -97,10 +107,20 @@ jobs:
       extension_name: anofox_forecast
       exclude_archs: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && 'windows_amd64_rtools;windows_amd64_mingw' || 'linux_arm64;linux_amd64_musl;osx_amd64;osx_arm64;windows_amd64;windows_amd64_mingw;windows_amd64_rtools;windows_arm64;wasm_mvp;wasm_eh;wasm_threads' }}
 
+  # README, docs/ and the Claude Code skills still describe the v2.0.0 binary, and the
+  # plugin carries the newest release. Gates the deploy, like the smoke test.
+  duckdb-stable-doc-snippets:
+    name: Doc snippets (v2.0.0)
+    needs: duckdb-stable-build
+    uses: ./.github/workflows/_doc_snippets.yml
+    with:
+      duckdb_version: v2.0.0
+      extension_name: anofox_forecast
+
   duckdb-stable-deploy:
     name: Deploy extension binaries (v2.0.0 stable)
-    needs: [duckdb-stable-build, duckdb-stable-smoke-test]
-    if: ${{ !cancelled() && needs.duckdb-stable-smoke-test.result == 'success' }}
+    needs: [duckdb-stable-build, duckdb-stable-smoke-test, duckdb-stable-doc-snippets]
+    if: ${{ !cancelled() && needs.duckdb-stable-smoke-test.result == 'success' && needs.duckdb-stable-doc-snippets.result == 'success' }}
     uses: ./.github/workflows/_extension_deploy.yml
     secrets: inherit
     with:

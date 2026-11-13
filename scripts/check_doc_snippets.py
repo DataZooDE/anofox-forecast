@@ -11,6 +11,7 @@ Usage:
     python3 scripts/check_doc_snippets.py [FILE ...]
     python3 scripts/check_doc_snippets.py --changed-since REF
     python3 scripts/check_doc_snippets.py --out PATH [FILE ...]
+    python3 scripts/check_doc_snippets.py --duckdb CLI --extension PATH.duckdb_extension
 
 Default scan (no FILE args, no --changed-since): README.md, every docs/**/*.md and
 every plugins/anofox-forecast/skills/**/*.md -- every ```sql fence in each is executed
@@ -56,15 +57,22 @@ Writes a TSV (columns: status, file, line, first SQL line, detail) to --out PATH
 Exit codes: 0 clean; 1 if FAIL or STALE count is non-zero; 2 if the duckdb binary is
 missing or the registered-function-name query itself fails.
 
-WR-04 (Phase 18 review): this gate requires a built `build/release/duckdb` and is
-therefore NOT wired into the no-build `.github/workflows/audit.yml` job (which only
-runs `audit_no_stats_in_cpp.py` and `check_length_only_tests.py` against source text).
-It is a required manual step of the release Definition of Done -- run it by hand (or
-via `make release && make check-docs`) before every release/tag, alongside
-`check_correctness_inventory.py` (see that script's own docstring for the same
-caveat). Do not add this to MainDistributionPipeline.yml: that workflow is DuckDB's
-own extension-ci-tools reusable workflow, not a place for project-local gates.
+Plugin version agreement (default full scan only): plugins/anofox-forecast/.claude-plugin/
+plugin.json "version", every SKILL.md frontmatter `version:` and every SKILL.md
+`**Extension:** `anofox_forecast` vX (Rust crate `anofox-forecast` vY)` header line must
+carry the newest released `## [YYYY.MM.DD]` heading in CHANGELOG.md (X) and the
+anofox-forecast crate version in Cargo.lock (Y). A mismatch is a FAIL row. The skills sat
+at 2026.09.26 / v0.16.2 through three releases before this check existed. Fix with
+`make bump-plugin` (scripts/bump_plugin_version.sh) in the release commit.
+
+CI mode: `--duckdb CLI --extension PATH` runs every block in the given (official) DuckDB
+CLI and rewrites `LOAD anofox_forecast` to `LOAD 'PATH'`, so the packaged
+.duckdb_extension is what gets checked, not the statically linked build/release/duckdb.
+MainDistributionPipeline.yml runs it that way after each build (.github/workflows/
+_doc_snippets.yml), and each track's deploy waits for it, like the smoke test.
+Locally it still needs a built `build/release/duckdb` (`make release && make check-docs`).
 """
+import json
 import os
 import re
 import shutil
@@ -83,6 +91,16 @@ EXPECTED_ERRORS_FILE = os.path.join(SUPPORT_DIR, "expected_errors.txt")
 SYNOPSIS_FILE = os.path.join(SUPPORT_DIR, "synopsis.txt")
 REMOVED_NAMES_FILE = os.path.join(SUPPORT_DIR, "removed_names.txt")
 DUCKDB_BIN = os.path.join(REPO_ROOT, "build", "release", "duckdb")
+EXTENSION_PATH = None  # --extension: LOAD this file instead of the linked-in extension
+LOAD_EXT_RE = re.compile(r"\bLOAD\s+anofox_forecast\b", re.IGNORECASE)
+PLUGIN_DIR = os.path.join("plugins", "anofox-forecast")
+RELEASE_RE = re.compile(r"^## \[(\d{4}\.\d{1,2}\.\d{1,2})\]", re.M)
+VERSION_FM_RE = re.compile(r"^version:\s*(\S+)\s*$", re.M)
+HEADER_RE = re.compile(
+    r"^\*\*Extension:\*\* `anofox_forecast` v([0-9.]+) \(Rust crate `anofox-forecast` v([0-9.]+)\)",
+    re.M,
+)
+CRATE_LOCK_RE = re.compile(r'^name = "anofox-forecast"\nversion = "([^"]+)"', re.M)
 DEFAULT_OUT = os.path.join(REPO_ROOT, "build", "doc-snippets.tsv")
 
 DEFAULT_SCAN_DIRS = ["docs", os.path.join("plugins", "anofox-forecast", "skills")]
@@ -265,6 +283,8 @@ def run_block_safe(sql_text, timeout=120):
         env = dict(os.environ)
         env["HOME"] = tmp_dir
         full_sql = "SET autoinstall_known_extensions = false;\n" + sql_text
+        if EXTENSION_PATH:
+            full_sql = LOAD_EXT_RE.sub("LOAD '" + EXTENSION_PATH.replace("'", "''") + "'", full_sql)
         try:
             result = subprocess.run(
                 [DUCKDB_BIN, "-unsigned", "-bail", "-list", ":memory:"],
@@ -331,7 +351,41 @@ def collect_name_mentions(rel_path, text):
     return mentions
 
 
+def plugin_version_failures():
+    """(file, detail) for every plugin/skill version that disagrees with CHANGELOG/Cargo.lock."""
+    releases = RELEASE_RE.findall(read_text(os.path.join(REPO_ROOT, "CHANGELOG.md")))
+    want = releases[0] if releases else None
+    m = CRATE_LOCK_RE.search(read_text(os.path.join(REPO_ROOT, "Cargo.lock")))
+    want_crate = m.group(1) if m else None
+    failures = []
+    manifest = os.path.join(PLUGIN_DIR, ".claude-plugin", "plugin.json")
+
+    got = json.loads(read_text(os.path.join(REPO_ROOT, manifest))).get("version")
+    if got != want:
+        failures.append((manifest, f"version {got} != newest CHANGELOG release {want}"))
+    skills_root = os.path.join(REPO_ROOT, PLUGIN_DIR, "skills")
+    for name in sorted(os.listdir(skills_root)):
+        path = os.path.join(skills_root, name, "SKILL.md")
+        if not os.path.exists(path):
+            continue
+        rel = os.path.relpath(path, REPO_ROOT)
+        text = read_text(path)
+        fm = VERSION_FM_RE.search(text.split("\n---", 1)[0])
+        if (fm.group(1) if fm else None) != want:
+            failures.append((rel, f"version: {fm.group(1) if fm else None} != newest CHANGELOG release {want}"))
+        h = HEADER_RE.search(text)
+        if not h:
+            failures.append((rel, "no '**Extension:** `anofox_forecast` vX (Rust crate `anofox-forecast` vY)' header"))
+            continue
+        if h.group(1) != want:
+            failures.append((rel, f"header v{h.group(1)} != newest CHANGELOG release {want}"))
+        if h.group(2) != want_crate:
+            failures.append((rel, f"header crate v{h.group(2)} != Cargo.lock anofox-forecast {want_crate}"))
+    return failures
+
+
 def main():
+    global DUCKDB_BIN, EXTENSION_PATH
     args = sys.argv[1:]
     files_arg = []
     changed_since = None
@@ -351,6 +405,15 @@ def main():
                 print("ERROR: --out requires a PATH argument", file=sys.stderr)
                 return 1
             out_path = args[i]
+        elif a in ("--duckdb", "--extension"):
+            i += 1
+            if i >= len(args):
+                print(f"ERROR: {a} requires a PATH argument", file=sys.stderr)
+                return 1
+            if a == "--duckdb":
+                DUCKDB_BIN = os.path.abspath(args[i])
+            else:
+                EXTENSION_PATH = os.path.abspath(args[i])
         else:
             files_arg.append(a)
         i += 1
@@ -476,6 +539,10 @@ def main():
             elif name not in all_mentioned_names:
                 rows.append(("STALE", "scripts/doc_snippets/removed_names.txt", "", "", f"{name} is no longer mentioned anywhere"))
                 status_counts["STALE"] += 1
+
+        for rel, detail in plugin_version_failures():
+            rows.append(("FAIL", rel, "", "", detail))
+            status_counts["FAIL"] += 1
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     with open(out_path, "w") as f:
