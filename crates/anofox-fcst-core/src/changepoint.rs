@@ -1563,11 +1563,8 @@ mod tests {
             result.changepoints
         );
         assert!(!result.is_changepoint[0], "index 0 must never be flagged");
-        for i in 1..50 {
-            assert!(
-                !result.is_changepoint[i],
-                "index {i} (before the step) must not be flagged"
-            );
+        for (i, &flagged) in result.is_changepoint.iter().enumerate().take(50).skip(1) {
+            assert!(!flagged, "index {i} (before the step) must not be flagged");
         }
     }
 
