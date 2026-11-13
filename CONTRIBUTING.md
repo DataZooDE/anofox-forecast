@@ -51,11 +51,20 @@ in 09-RESEARCH.md Pitfall 2). Re-run
    make test-rust  # Run Rust unit tests
    ```
 
-4. If you're modifying documentation:
+4. If you're modifying documentation or the Claude Code skills
+   (`plugins/anofox-forecast/skills/`):
    ```bash
-   # Edit files in docs/api/ or docs/guides/
-   make test-docs
+   # Edit files in docs/, README.md or the SKILL.md files
+   make check-docs   # every ```sql block runs, every ts_* name resolves
    ```
+   A change to a signature, option or return column belongs in the skill that
+   mentions it, in the same PR. CI runs `check-docs` against the shipped artifact
+   on both tracks and each deploy waits for it.
+
+   **At release**, after writing the `## [YYYY.MM.DD]` CHANGELOG heading, run
+   `make bump-plugin`: it sets `plugin.json`, every `SKILL.md` `version:` and the
+   skills' header line to that release and to the crate version in `Cargo.lock`.
+   `check-docs` fails, and the deploy stops, until they agree.
 
 5. Run code quality checks before committing:
    ```bash
@@ -97,8 +106,8 @@ These same checks run in GitHub Actions CI, so running them locally before pushi
 
 - **API documentation**: Edit files in `docs/api/`
 - **Guides**: Edit files in `docs/guides/`
-- **SQL examples**: Edit files in `test/sql/docs_examples/`
-- **Test examples**: Run `make test-docs` to validate SQL examples
+- **SQL examples**: live in the ```sql blocks of the docs and skills themselves
+- **Test examples**: Run `make check-docs` to validate them (needs `make release` first)
 
 ### Code Style
 

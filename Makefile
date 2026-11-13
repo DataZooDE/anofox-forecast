@@ -8,7 +8,7 @@ EXT_CONFIG=${PROJ_DIR}extension_config.cmake
 include extension-ci-tools/makefiles/duckdb_extension.Makefile
 
 # Rust targets (for local development)
-.PHONY: rust rust_debug rust_test fmt check header audit check-docs benchmark-setup benchmark-m4 benchmark-m5
+.PHONY: rust rust_debug rust_test fmt check header audit check-docs bump-plugin benchmark-setup benchmark-m4 benchmark-m5
 
 rust:
 	cargo build --release
@@ -47,6 +47,11 @@ audit:
 #   GEN=ninja make release && make check-docs && python3 scripts/check_correctness_inventory.py
 check-docs:
 	python3 scripts/check_doc_snippets.py
+
+# Release step: set plugin.json and every SKILL.md to the newest CHANGELOG release
+# and the anofox-forecast crate version in Cargo.lock (make check-docs fails until then).
+bump-plugin:
+	./scripts/bump_plugin_version.sh
 
 # Benchmark targets
 benchmark-setup:

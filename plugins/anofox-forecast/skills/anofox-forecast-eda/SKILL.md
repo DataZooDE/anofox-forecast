@@ -9,13 +9,13 @@ description: >
   Durbin-Watson, Jarque-Bera, combined report). Use before forecasting to
   understand series characteristics (length, gaps, trend, seasonality
   strength, intermittency) or to validate model residuals after fitting.
-version: 2026.09.26
+version: 2026.10.31
 user-invocable: false
 ---
 
 # Anofox Forecast — EDA & Data Quality Cheat Sheet
 
-**Extension:** `anofox_forecast` v2026.09.26 (Rust crate `anofox-forecast` v0.16.2) | **DuckDB:** v2.0.0 / v1.5.6 | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
+**Extension:** `anofox_forecast` v2026.10.31 (Rust crate `anofox-forecast` v0.19.0) | **DuckDB:** v2.0.0 / v1.5.6 | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
 
 Understand your data before modelling it: per-series statistics, data-quality scores, feature vectors for ML.
 

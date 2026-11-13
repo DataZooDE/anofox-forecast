@@ -541,18 +541,13 @@ mod tests {
     fn test_classical_decompose_constant_additive_exact() {
         let values = vec![1.0; 48];
         let result = classical_decompose(&values, 12, ClassicalKind::Additive).unwrap();
-        for i in 0..6 {
-            assert!(result.trend[i].is_nan(), "trend[{i}] should be NaN");
-        }
-        for i in 42..48 {
-            assert!(result.trend[i].is_nan(), "trend[{i}] should be NaN");
-        }
-        for i in 6..42 {
-            assert!(
-                (result.trend[i] - 1.0).abs() < 1e-12,
-                "trend[{i}] = {}",
-                result.trend[i]
-            );
+        assert_eq!(result.trend.len(), 48);
+        for (i, &t) in result.trend.iter().enumerate() {
+            if !(6..42).contains(&i) {
+                assert!(t.is_nan(), "trend[{i}] should be NaN");
+            } else {
+                assert!((t - 1.0).abs() < 1e-12, "trend[{i}] = {t}");
+            }
         }
         for (i, &s) in result.seasonal.iter().enumerate() {
             assert!(s.abs() < 1e-12, "seasonal[{i}] = {s}");
