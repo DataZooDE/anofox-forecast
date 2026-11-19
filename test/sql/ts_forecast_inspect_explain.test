@@ -176,3 +176,49 @@ FROM anofox_fcst_ts_forecast_explain_by('explain_panel', product_id, ds, y, 'ETS
 WHERE product_id = 'A';
 ----
 8	8
+
+#######################################
+# #315: params are validated exactly like ts_forecast_by (closed key set,
+# 'model' only with method='ETS') instead of being silently ignored.
+#######################################
+
+statement error
+SELECT * FROM ts_forecast_inspect_by('explain_panel', product_id, ds, y, 'AutoETS', {seasonal_period: 12, bogus_key: 1});
+----
+Unknown parameter(s): 'bogus_key'
+
+statement error
+SELECT * FROM ts_forecast_inspect_by('explain_panel', product_id, ds, y, 'AutoETS', MAP{'seasonal_period': '12', 'bogus_key': '1'});
+----
+Unknown parameter(s): 'bogus_key'
+
+statement error
+SELECT * FROM ts_forecast_inspect_by('explain_panel', product_id, ds, y, 'AutoETS', {seasonal_period: 12, model: 'AAA'});
+----
+Parameter 'model' (value: 'AAA') is only valid when method='ETS'
+
+statement error
+SELECT * FROM ts_forecast_explain_by('explain_panel', product_id, ds, y, 'ETS', 8, {seasonal_period: 12, bogus_key: 1});
+----
+Unknown parameter(s): 'bogus_key'
+
+statement error
+SELECT * FROM ts_forecast_explain_by('explain_panel', product_id, ds, y, 'Theta', 8, {seasonal_period: 12, model: 'AAA'});
+----
+Parameter 'model' (value: 'AAA') is only valid when method='ETS'
+
+# Every key ts_forecast_by accepts is still accepted (confidence_level was
+# outside the old inspect-local subset), and 'model' still works with ETS.
+query II
+SELECT (inspection).model_family, (inspection).seasonal_period
+FROM ts_forecast_inspect_by('explain_panel', product_id, ds, y, 'AutoETS', {seasonal_period: 12, confidence_level: 0.95})
+WHERE product_id = 'A';
+----
+Ets	12
+
+query I
+SELECT (decomposition).horizon
+FROM ts_forecast_explain_by('explain_panel', product_id, ds, y, 'ETS', 8, {seasonal_period: 12, model: 'AAA'})
+WHERE product_id = 'A';
+----
+8

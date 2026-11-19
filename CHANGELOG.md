@@ -10,9 +10,21 @@ use the semver numbering this project started with.
 
 ## [Unreleased]
 
+## [2026.11.19] - 2026-11-19 — forecasting crate 0.21.0, inspect params validated
+
+### Fixed
+
+- **`ts_forecast_inspect_by` / `ts_forecast_explain_by` validate `params` like
+  `ts_forecast_by` (#315).** Both parsed a local subset of keys and silently ignored the
+  rest, so `{model: 'AAA'}` with `AutoETS` or a typo such as `{bogus_key: 1}` inspected a
+  different fit than the one requested, without any error. They now use the shared
+  parser behind `ts_forecast_by` and `ts_forecast_agg`: unknown keys error with
+  `Unknown parameter(s): ...`, `model` is accepted only with `method = 'ETS'`, and every
+  valid key is applied. Calls with valid params are unchanged.
+
 ### Changed — dependencies
 
-- **`anofox-forecast` 0.19.0 → 0.20.0.** No SQL signature or output column changes.
+- **`anofox-forecast` 0.19.0 → 0.21.0.** No SQL signature or output column changes.
   - `AutoETS` (and `AutoEnsemble`'s ETS candidate) now considers seasonal models once a
     series has **two** full cycles instead of three (crate #245), e.g. 24 instead of 36
     monthly observations. Short, clearly seasonal series that used to get a flat
@@ -21,6 +33,21 @@ use the semver numbering this project started with.
     small-valued series the multi-start optimiser skipped every start after the first, so
     multiplicative-error models were scored on a worse optimum.
   - Seasonal `AutoARIMA` is about 1.6× faster (crate #247), with bitwise-identical results.
+  - Seasonal `AutoARIMA`'s final model reuses the exact fit from the refit pass instead of
+    fitting the same order again (crate 0.21.0; about 3 s of an 80 s m = 30 weekly fit),
+    with the same result. The crate also gains
+    `with_time_budget` / `with_max_models` to bound one fit (crate #250, raised from #318).
+    They are not exposed in SQL yet.
+
+### Changed — build and distribution
+
+- **No `wasm_threads` binary on the DuckDB v2.0.0 line.** extension-ci-tools #490
+  (merged 2026-11-19 into `v2.0-cyanoptera`) now links `wasm_threads` with real shared
+  memory, and rustup's prebuilt `wasm32-unknown-emscripten` std is not compiled with
+  atomics, so the link fails (`--shared-memory is disallowed by alloc-*.rcgu.o`).
+  Earlier `wasm_threads` builds linked only because they were not actually shared-memory.
+  Fixing it needs nightly Rust with `-Zbuild-std`, which the shared workflow does not
+  expose. Browser users use `wasm_eh` (or `wasm_mvp`). The v1.5.6 line is unchanged.
 
 ### Changed — docs and release
 
