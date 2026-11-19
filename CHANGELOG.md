@@ -10,6 +10,16 @@ use the semver numbering this project started with.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`ts_forecast_inspect_by` / `ts_forecast_explain_by` validate `params` like
+  `ts_forecast_by` (#315).** Both parsed a local subset of keys and silently ignored the
+  rest, so `{model: 'AAA'}` with `AutoETS` or a typo such as `{bogus_key: 1}` inspected a
+  different fit than the one requested, without any error. They now use the shared
+  parser behind `ts_forecast_by` and `ts_forecast_agg`: unknown keys error with
+  `Unknown parameter(s): ...`, `model` is accepted only with `method = 'ETS'`, and every
+  valid key is applied. Calls with valid params are unchanged.
+
 ### Changed — docs and release
 
 - **The doc-snippet check runs in CI and gates the deploy.** `scripts/check_doc_snippets.py`

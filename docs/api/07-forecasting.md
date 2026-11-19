@@ -1409,6 +1409,12 @@ Two macros expose the crate's `Inspectable` and `Explainable` surfaces
 as wide-STRUCT tables. Both require the `json` extension (auto-loaded
 if `autoload_known_extensions` is on).
 
+Both validate `params` exactly like `ts_forecast_by`: the same closed key
+set, so an unknown key errors with `Unknown parameter(s): ...`, and
+`model` is accepted only with `method = 'ETS'`. Before #315 these two
+macros silently ignored unknown and inapplicable keys, so the inspected
+fit could differ from the one requested.
+
 ### `ts_forecast_inspect_by` — fit-state snapshot per group
 
 Returns one row per group with a nullable, uniformly-typed STRUCT
