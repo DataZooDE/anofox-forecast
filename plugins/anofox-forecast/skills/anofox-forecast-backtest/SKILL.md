@@ -13,7 +13,7 @@ user-invocable: false
 
 # Anofox Forecast — Backtesting, CV, Metrics & Conformal Cheat Sheet
 
-**Extension:** `anofox_forecast` v2026.10.31 (Rust crate `anofox-forecast` v0.19.0) | **DuckDB:** v2.0.0 / v1.5.6 | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
+**Extension:** `anofox_forecast` v2026.10.31 (Rust crate `anofox-forecast` v0.20.0) | **DuckDB:** v2.0.0 / v1.5.6 | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
 
 Time-series-aware cross-validation, error metrics, and distribution-free intervals.
 

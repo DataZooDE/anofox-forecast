@@ -10,6 +10,18 @@ use the semver numbering this project started with.
 
 ## [Unreleased]
 
+### Changed — dependencies
+
+- **`anofox-forecast` 0.19.0 → 0.20.0.** No SQL signature or output column changes.
+  - `AutoETS` (and `AutoEnsemble`'s ETS candidate) now considers seasonal models once a
+    series has **two** full cycles instead of three (crate #245), e.g. 24 instead of 36
+    monthly observations. Short, clearly seasonal series that used to get a flat
+    non-seasonal model can now select a seasonal one, so forecasts for them change.
+  - `AutoETS` model choice no longer depends on the units of the data (crate #246): on
+    small-valued series the multi-start optimiser skipped every start after the first, so
+    multiplicative-error models were scored on a worse optimum.
+  - Seasonal `AutoARIMA` is about 1.6× faster (crate #247), with bitwise-identical results.
+
 ### Changed — docs and release
 
 - **The doc-snippet check runs in CI and gates the deploy.** `scripts/check_doc_snippets.py`
