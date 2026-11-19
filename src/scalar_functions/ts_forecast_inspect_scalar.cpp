@@ -1,5 +1,6 @@
 #include "anofox_forecast_extension.hpp"
 #include "anofox_fcst_ffi.h"
+#include "ts_forecast_params.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/scalar_function.hpp"
@@ -32,80 +33,23 @@ namespace duckdb {
 // stays a single string.
 // ============================================================================
 
-// --- Shared parameter parsing (mirrors ts_forecast_scalar.cpp; kept local
-// to avoid pulling that whole translation unit into this one) ---
-
-static string InspectParseStringParam(const Value &params_value, const string &key, const string &default_val) {
-    if (params_value.IsNull()) return default_val;
-    if (params_value.type().id() == LogicalTypeId::MAP) {
-        auto &map_children = MapValue::GetChildren(params_value);
-        for (auto &child : map_children) {
-            auto &k = StructValue::GetChildren(child)[0];
-            auto &v = StructValue::GetChildren(child)[1];
-            if (k.ToString() == key && !v.IsNull()) return v.ToString();
-        }
-    } else if (params_value.type().id() == LogicalTypeId::STRUCT) {
-        auto &struct_children = StructValue::GetChildren(params_value);
-        auto &child_types = StructType::GetChildTypes(params_value.type());
-        for (idx_t i = 0; i < child_types.size(); i++) {
-            if (NameString(child_types[i].first) == key && !struct_children[i].IsNull()) {
-                return struct_children[i].ToString();
-            }
-        }
-    }
-    return default_val;
-}
-
-static int64_t InspectParseInt64Param(const Value &params_value, const string &key, int64_t default_val) {
-    string s = InspectParseStringParam(params_value, key, "");
-    if (s.empty()) return default_val;
-    try { return std::stoll(s); } catch (...) { return default_val; }
-}
-
+// Params go through the same shared parser/writer as ts_forecast_by and
+// ts_forecast_agg (ts_forecast_params.hpp): closed key set, 'model' only with
+// method='ETS', every valid key applied. A local subset parser used to sit
+// here and silently ignored unknown or inapplicable keys (#315).
 static void FillForecastOptions(ForecastOptions &opts,
                                  const string &method,
                                  const Value &params_val,
                                  int32_t horizon) {
-    memset(&opts, 0, sizeof(opts));
-    strncpy(opts.model, method.c_str(), sizeof(opts.model) - 1);
-    opts.model[sizeof(opts.model) - 1] = '\0';
-
-    string model_spec = InspectParseStringParam(params_val, "model", "");
-    if (!model_spec.empty()) {
-        strncpy(opts.ets_model, model_spec.c_str(), sizeof(opts.ets_model) - 1);
-        opts.ets_model[sizeof(opts.ets_model) - 1] = '\0';
+    ForecastParamSet p;
+    if (!params_val.IsNull()) {
+        p = ParseForecastParamSet(params_val);
     }
-
-    int64_t seasonal_period = InspectParseInt64Param(params_val, "seasonal_period", 0);
-    string seasonal_periods_str = InspectParseStringParam(params_val, "seasonal_periods", "");
-    string model_pool = InspectParseStringParam(params_val, "model_pool", "");
-    string laplace_variant = InspectParseStringParam(params_val, "laplace_variant", "");
-    bool laplace_seasonal_batch_init =
-        InspectParseInt64Param(params_val, "laplace_seasonal_batch_init", 0) != 0;
-
+    memset(&opts, 0, sizeof(opts));
+    ApplyForecastParamSet(p, method, opts);
     opts.horizon = horizon;
-    opts.confidence_level = 0.90;
-    opts.seasonal_period = static_cast<int>(seasonal_period);
-    opts.auto_detect_seasonality = (seasonal_period == 0 && seasonal_periods_str.empty());
     opts.include_fitted = false;
     opts.include_residuals = false;
-    opts.window = 0;
-
-    if (!seasonal_periods_str.empty()) {
-        strncpy(opts.seasonal_periods_str, seasonal_periods_str.c_str(),
-                sizeof(opts.seasonal_periods_str) - 1);
-        opts.seasonal_periods_str[sizeof(opts.seasonal_periods_str) - 1] = '\0';
-    }
-    if (!model_pool.empty()) {
-        strncpy(opts.model_pool, model_pool.c_str(), sizeof(opts.model_pool) - 1);
-        opts.model_pool[sizeof(opts.model_pool) - 1] = '\0';
-    }
-    if (!laplace_variant.empty()) {
-        strncpy(opts.laplace_variant, laplace_variant.c_str(),
-                sizeof(opts.laplace_variant) - 1);
-        opts.laplace_variant[sizeof(opts.laplace_variant) - 1] = '\0';
-    }
-    opts.laplace_seasonal_batch_init = laplace_seasonal_batch_init;
 }
 
 // Extract a LIST(DOUBLE) row into a flat (values, validity) pair suitable
