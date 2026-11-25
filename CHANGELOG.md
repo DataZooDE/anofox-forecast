@@ -10,6 +10,8 @@ use the semver numbering this project started with.
 
 ## [Unreleased]
 
+## [2026.11.25] - 2026-11-25 — bounded AutoARIMA fits, AutoETS seasonal component
+
 ### Fixed
 
 - **`ts_forecast_inspect_by`: `seasonal_component` is populated for seasonal `AutoETS`
