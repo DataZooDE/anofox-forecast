@@ -1187,6 +1187,13 @@ typedef struct ForecastOptions {
      * is "AutoARIMA".
      */
     int64_t time_budget_ms;
+    /**
+     * Externally supplied ETS / TSB / ARIMA parameters (#317) as
+     * `key=value` pairs separated by `;`, e.g.
+     * `"alpha=0.3;beta=0.05"` or `"ar_coefficients=[0.5, -0.2]"`. Empty =
+     * none. Parsed and validated by `anofox_fcst_core::parse_fixed_params`.
+     */
+    char fixed_params_str[1024];
 } ForecastOptions;
 
 /**
@@ -1406,6 +1413,10 @@ typedef struct ForecastOptionsExog {
      * AutoARIMA time budget. See [`ForecastOptions::time_budget_ms`].
      */
     int64_t time_budget_ms;
+    /**
+     * Fixed model parameters. See [`ForecastOptions::fixed_params_str`].
+     */
+    char fixed_params_str[1024];
 } ForecastOptionsExog;
 
 /**

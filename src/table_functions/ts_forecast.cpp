@@ -1,3 +1,4 @@
+#include "ts_forecast_params.hpp"
 #include "anofox_forecast_extension.hpp"
 #include "anofox_fcst_ffi.h"
 #include "duckdb.hpp"
@@ -358,7 +359,10 @@ static void ExogValidateParamKeys(const Value &params_value) {
         "garch_p", "garch_q", "kalman_model",
         "top_k", "combination_method",
         "arima_order", "seasonal_order",
-        "max_models", "time_budget_ms" // AutoARIMA fit-cost limits (#318)
+        "max_models", "time_budget_ms", // AutoARIMA fit-cost limits (#318)
+        "alpha", "beta", "gamma", "phi", "alpha_d", "alpha_p", // fixed params (#317)
+        "ar_coefficients", "ma_coefficients", "seasonal_ar_coefficients", "seasonal_ma_coefficients",
+        "intercept"
     };
 
     if (params_value.IsNull()) return;
@@ -389,7 +393,7 @@ static void ExogValidateParamKeys(const Value &params_value) {
             unknown_list += "'" + unknown_keys[i] + "'";
         }
         throw InvalidInputException(
-            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init, garch_p, garch_q, kalman_model, top_k, combination_method, arima_order, seasonal_order, max_models, time_budget_ms",
+            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init, garch_p, garch_q, kalman_model, top_k, combination_method, arima_order, seasonal_order, max_models, time_budget_ms, alpha, beta, gamma, phi, alpha_d, alpha_p, ar_coefficients, ma_coefficients, seasonal_ar_coefficients, seasonal_ma_coefficients, intercept",
             unknown_list);
     }
 }
@@ -497,6 +501,7 @@ static void TsForecastExogFunction(DataChunk &args, ExpressionState &state, Vect
         string seasonal_order;
         int64_t max_models = 0;
         int64_t time_budget_ms = 0;
+        string fixed_params;
 
         if (has_params) {
             auto p_idx = params_data.sel->get_index(row_idx);
@@ -521,6 +526,7 @@ static void TsForecastExogFunction(DataChunk &args, ExpressionState &state, Vect
                 seasonal_order = ExogParseStringParam(params_val, "seasonal_order", "");
                 max_models = ExogParseInt64Param(params_val, "max_models", 0);
                 time_budget_ms = ExogParseInt64Param(params_val, "time_budget_ms", 0);
+                fixed_params = PackFixedParams(params_val);
             }
         }
 
@@ -584,6 +590,7 @@ static void TsForecastExogFunction(DataChunk &args, ExpressionState &state, Vect
         SetCField(opts.seasonal_order_str, seasonal_order);
         opts.max_models = max_models;
         opts.time_budget_ms = time_budget_ms;
+        SetFixedParams(opts.fixed_params_str, fixed_params);
 
         ForecastResult fcst_result;
         memset(&fcst_result, 0, sizeof(fcst_result));

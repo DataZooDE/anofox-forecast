@@ -216,9 +216,9 @@ documented in their own sections because of their distinct parameter/output shap
 ### State Space & ARIMA Models (4)
 | Model | Description | Required | Optional |
 |-------|-------------|----------|----------|
-| `ETS` | Error-Trend-Seasonal model. Without a `model` spec, runs the crate's own `AutoETS` selection (not a hand-picked `'AAA'` default) and reports the chosen spec, e.g. `ETS(A,A,M)` — the same selection a standalone `AutoETS` call would make | — | *seasonal_period*, *model* |
+| `ETS` | Error-Trend-Seasonal model. Without a `model` spec, runs the crate's own `AutoETS` selection (not a hand-picked `'AAA'` default) and reports the chosen spec, e.g. `ETS(A,A,M)` — the same selection a standalone `AutoETS` call would make | — | *seasonal_period*, *model*; with *model*, fixed *alpha*/*beta*/*gamma*/*phi* ([given parameters](#forecasting-with-given-model-parameters)) |
 | `AutoETS` | Automatic ETS selection; a crate fit/predict failure or panic is a hard error naming `AutoETS` — never a silent HoltWinters/Holt/SES substitution | — | *seasonal_period* (auto-detected if omitted) |
-| `ARIMA` | Real crate `ARIMA`/`SARIMA` fit at an explicit order (not a heuristic) | **arima_order** `[p,d,q]` | *seasonal_order* `[P,D,Q]` (+ `seasonal_period`); `p,q,P,Q ≤ 10`, `d,D ≤ 2`; `model_name` appends `" with drift"` / `" with non-zero mean"` when the crate's own AICc comparison keeps a non-zero intercept |
+| `ARIMA` | Real crate `ARIMA`/`SARIMA` fit at an explicit order (not a heuristic) | **arima_order** `[p,d,q]` | *seasonal_order* `[P,D,Q]` (+ `seasonal_period`); `p,q,P,Q ≤ 10`, `d,D ≤ 2`; `model_name` appends `" with drift"` / `" with non-zero mean"` when the crate's own AICc comparison keeps a non-zero intercept; fixed *ar_coefficients* / *ma_coefficients* / *seasonal_ar_coefficients* / *seasonal_ma_coefficients* / *intercept* ([given parameters](#forecasting-with-given-model-parameters)) |
 | `AutoARIMA` | Automatic ARIMA/SARIMA order search | — | *seasonal_period* (auto-detected if omitted), *max_models*, *time_budget_ms* (see [Bounding AutoARIMA fit time](#bounding-autoarima-fit-time)) |
 
 `ARIMA` without `arima_order` is a hard SQL error naming `AutoARIMA` as the alternative:
@@ -282,6 +282,54 @@ The keys work on every AutoARIMA surface: `ts_forecast_by`, `ts_forecast_agg`,
 from a period auto-detected as `30` on weekly data, passing `seasonal_period` explicitly
 (`1`, or `52` for a yearly cycle) is often the better fix.
 
+#### Forecasting with given model parameters
+
+For hyper-model forecasting (a global learner predicts the parameters of a classical model,
+which then produces the forecast), `ETS`, `TSB` and `ARIMA` accept externally supplied
+parameters (#317). The given values are used exactly; only what the table lists as estimated
+is fitted. Each key is valid only with its own model, and an unparsable value is an error.
+
+| Model | Keys | Still estimated |
+|---|---|---|
+| `ETS` with a `model` spec | `alpha` (required), and `beta` / `gamma` / `phi` exactly when the spec has a trend / seasonality / damping. `alpha`, `beta`, `gamma` in `(0, 1)`, `phi` in `(0, 1]` | Initial states (`l_0`, `b_0`, `s_0..s_{m-1}`), by maximum likelihood |
+| `TSB` | `alpha_d`, `alpha_p` in `[0.01, 0.99]`; an omitted one keeps the default `0.1` | Initial demand level and probability |
+| `ARIMA` with `arima_order` | `ar_coefficients` (`p` values), `ma_coefficients` (`q`), `seasonal_ar_coefficients` (`P`), `seasonal_ma_coefficients` (`Q`), `intercept` (default `0`) | Nothing |
+
+A list must have exactly the order's length; an omitted list counts as empty. `intercept`
+follows R `Arima`: the mean of the differenced series (the drift when `d + D = 1`). Lists can
+be `DOUBLE[]` in STRUCT form or `'[0.5, -0.2]'` strings in MAP form. Parameters are constant
+over the series; time-varying parameters are not supported.
+
+```sql
+CREATE OR REPLACE TABLE air AS
+SELECT 'A' AS id, ('1949-01-01'::DATE + INTERVAL (i) MONTH)::DATE AS ds,
+       (112 + 2.5 * i + 25 * sin(2 * pi() * i / 12)) * (1 + 0.1 * sin(2 * pi() * i / 12)) + (i % 5) AS y
+FROM range(120) t(i);
+
+-- ETS(A,A,A) with given smoothing parameters
+SELECT forecast_step, ROUND(yhat, 2) AS yhat, model_name
+FROM ts_forecast_by('air', id, ds, y, 'ETS', 3, '1mo',
+                    {model: 'AAA', seasonal_period: 12, alpha: 0.1, beta: 0.01, gamma: 0.2})
+ORDER BY forecast_step;
+
+-- The fit uses them as given; the estimated initial states are in raw_json
+SELECT (inspection).alpha, (inspection).beta, (inspection).gamma,
+       json_extract((inspection).raw_json, '$.Ets.initial_level')::DOUBLE AS l0
+FROM ts_forecast_inspect_by('air', id, ds, y, 'ETS',
+                            {model: 'AAA', seasonal_period: 12, alpha: 0.1, beta: 0.01, gamma: 0.2});
+
+-- AR(1) with mean 300: the one-step forecast is 300 + 0.5 * (y_T - 300)
+SELECT forecast_step, ROUND(yhat, 2) AS yhat, model_name
+FROM ts_forecast_by('air', id, ds, y, 'ARIMA', 3, '1mo',
+                    {arima_order: '[1,0,0]', ar_coefficients: [0.5], intercept: 300})
+ORDER BY forecast_step;
+```
+
+The keys work on `ts_forecast_by`, `ts_forecast_agg`, `ts_forecast_exog_by`,
+`ts_cv_forecast_by`, `ts_forecast_inspect_by` and `ts_forecast_explain_by`.
+`ts_forecast_inspect_by` also accepts a fixed-spec `'ETS'` (with or without fixed
+parameters), so the parameters can be read back.
+
 ### Multiple Seasonality Models (6)
 | Model | Description | Required | Optional |
 |-------|-------------|----------|----------|
@@ -300,7 +348,7 @@ from a period auto-detected as `30` on weekly data, passing `seasonal_period` ex
 | `CrostonSBA` | Syntetos-Boylan Approximation | — |
 | `ADIDA` | Aggregate-Disaggregate IDA | — |
 | `IMAPA` | Intermittent Multiple Aggregation | — |
-| `TSB` | Teunter-Syntetos-Babai method | — (fixed smoothing, no `alpha_d`/`alpha_p` keys accepted) |
+| `TSB` | Teunter-Syntetos-Babai method | *alpha_d*, *alpha_p* (default `0.1` each; see [given parameters](#forecasting-with-given-model-parameters)) |
 
 ### Distributional Models (1)
 
@@ -647,6 +695,9 @@ so every public forecast surface agrees on dates (not just values) for the same 
 | `confidence_level` | DOUBLE | all models | Interval confidence level; default `0.90`, range `(0, 1)` |
 | `max_models` | INTEGER | `AutoARIMA` | Cap on models visited by the stepwise search; default `94` |
 | `time_budget_ms` | INTEGER | `AutoARIMA` | Wall-clock budget per series fit; default unbounded; not reproducible |
+| `alpha`, `beta`, `gamma`, `phi` | DOUBLE | `ETS` + `model` | Fixed smoothing parameters; initial states estimated ([given parameters](#forecasting-with-given-model-parameters)) |
+| `alpha_d`, `alpha_p` | DOUBLE | `TSB` | Fixed demand-size / probability smoothing |
+| `ar_coefficients`, `ma_coefficients`, `seasonal_ar_coefficients`, `seasonal_ma_coefficients`, `intercept` | `DOUBLE[]` / DOUBLE | `ARIMA` + `arima_order` | Fixed coefficients and mean |
 
 **Returns:**
 | Column | Type | Description |
@@ -1496,7 +1547,7 @@ FROM ts_forecast_inspect_by('air', id, ds, y, 'AutoETS', {seasonal_period: 12});
 -- ETS(A,A,A) | 120 | 110.07... | 12
 ```
 
-**Supported models (fit state):** `AutoETS`, `AutoARIMA`, `AutoTheta`,
+**Supported models (fit state):** `ETS` (with a `model` spec; without one it is AutoETS selection), `AutoETS`, `AutoARIMA`, `AutoTheta`,
 `AutoTBATS`, `MFLES`, `AutoMFLES`, `MSTL`, `AutoMSTL`, `Laplace`. Any
 other model errors with `does not implement Inspectable`.
 

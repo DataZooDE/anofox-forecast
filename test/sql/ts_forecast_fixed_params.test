@@ -1,0 +1,199 @@
+# name: test/sql/ts_forecast_fixed_params.test
+# description: Externally supplied model parameters for ETS / TSB / ARIMA (#317)
+# group: [anofox_forecast]
+
+require anofox_forecast
+
+require json
+
+statement ok
+CREATE TABLE air AS
+SELECT 'S' || (i // 96) AS id,
+       ('2015-01-01'::DATE + INTERVAL (i % 96) MONTH)::TIMESTAMP AS ds,
+       ((120 + 2.5 * (i % 96)) * (1 + 0.2 * sin(2 * pi() * (i % 96) / 12)) + ((i * 7919) % 11) + 10 * (i // 96))::DOUBLE AS y
+FROM range(192) t(i);
+
+#######################################
+# ETS: fixed smoothing parameters, initial states estimated
+#######################################
+
+# The supplied values are used exactly (fixed-spec ETS is now inspectable)
+query IIIII
+SELECT (inspection).spec, (inspection).alpha, (inspection).beta, (inspection).gamma, len((inspection).seasonal_component)
+FROM ts_forecast_inspect_by('air', id, ds, y, 'ETS', {model: 'AAA', seasonal_period: 12, alpha: 0.1, beta: 0.01, gamma: 0.2})
+ORDER BY id;
+----
+ETS(A,A,A)	0.1	0.01	0.2	96
+ETS(A,A,A)	0.1	0.01	0.2	96
+
+# MAP form gives the same forecast as STRUCT form
+query I
+SELECT count(*) FROM (
+    SELECT id, forecast_step, yhat FROM ts_forecast_by('air', id, ds, y, 'ETS', 6, '1mo', {model: 'AAA', seasonal_period: 12, alpha: 0.1, beta: 0.01, gamma: 0.2})
+    EXCEPT
+    SELECT id, forecast_step, yhat FROM ts_forecast_by('air', id, ds, y, 'ETS', 6, '1mo', MAP{'model': 'AAA', 'seasonal_period': '12', 'alpha': '0.1', 'beta': '0.01', 'gamma': '0.2'})
+);
+----
+0
+
+# Different parameters, different forecast
+query I
+SELECT count(*) > 0 FROM (
+    SELECT id, forecast_step, yhat FROM ts_forecast_by('air', id, ds, y, 'ETS', 6, '1mo', {model: 'AAA', seasonal_period: 12, alpha: 0.1, beta: 0.01, gamma: 0.2})
+    EXCEPT
+    SELECT id, forecast_step, yhat FROM ts_forecast_by('air', id, ds, y, 'ETS', 6, '1mo', {model: 'AAA', seasonal_period: 12, alpha: 0.6, beta: 0.01, gamma: 0.2})
+);
+----
+true
+
+# Hyper-model round trip: AutoETS's own inspected parameters, fed back as fixed
+# parameters, reproduce its forecast (states re-estimated) to within 1%
+statement ok
+CREATE TABLE auto_insp AS
+SELECT id, (inspection).spec AS spec, (inspection).alpha AS alpha, (inspection).beta AS beta, (inspection).gamma AS gamma
+FROM ts_forecast_inspect_by('air', id, ds, y, 'AutoETS', {seasonal_period: 12});
+
+query I
+SELECT count(*) FROM auto_insp WHERE spec = 'ETS(M,A,M)';
+----
+2
+
+query I
+SELECT max(abs(f.yhat - a.yhat) / abs(a.yhat)) < 0.01
+FROM ts_forecast_by('air', id, ds, y, 'AutoETS', 6, '1mo', {seasonal_period: 12}) a
+JOIN (
+    SELECT * FROM ts_forecast_by('air', id, ds, y, 'ETS', 6, '1mo',
+        {model: 'MAM', seasonal_period: 12,
+         alpha: (SELECT alpha FROM auto_insp WHERE id = 'S0'),
+         beta:  (SELECT beta  FROM auto_insp WHERE id = 'S0'),
+         gamma: (SELECT gamma FROM auto_insp WHERE id = 'S0')})
+) f USING (id, forecast_step)
+WHERE id = 'S0';
+----
+true
+
+#######################################
+# ARIMA: fixed coefficients (intercept = mean, R Arima convention)
+#######################################
+
+# AR(1) one-step forecast is mu + phi * (y_T - mu) exactly
+query I
+SELECT abs(f.yhat - (100 + 0.5 * (l.y - 100))) < 1e-9
+FROM ts_forecast_by('air', id, ds, y, 'ARIMA', 1, '1mo', {arima_order: '[1,0,0]', ar_coefficients: [0.5], intercept: 100}) f
+JOIN (SELECT id, arg_max(y, ds) AS y FROM air GROUP BY id) l USING (id)
+WHERE id = 'S0';
+----
+true
+
+query II
+SELECT count(*), any_value(model_name)
+FROM ts_forecast_by('air', id, ds, y, 'ARIMA', 3, '1mo', {arima_order: '[1,0,1]', ar_coefficients: [0.6], ma_coefficients: [-0.3], intercept: 150});
+----
+6	ARIMA(1,0,1) with non-zero mean
+
+query I
+SELECT count(*)
+FROM ts_forecast_by('air', id, ds, y, 'ARIMA', 3, '1mo',
+    {arima_order: '[1,0,0]', seasonal_order: '[1,1,0]', seasonal_period: 12,
+     ar_coefficients: [0.4], seasonal_ar_coefficients: [-0.3], intercept: 2.5});
+----
+6
+
+#######################################
+# TSB: fixed alpha_d / alpha_p
+#######################################
+
+statement ok
+CREATE TABLE demand AS
+SELECT 'D' AS id, ('2020-01-01'::DATE + INTERVAL (i) DAY)::TIMESTAMP AS ds,
+       [0, 0, 3, 0, 5, 0, 0, 2, 0, 4][i % 10 + 1]::DOUBLE AS y
+FROM range(60) t(i);
+
+query I
+SELECT (SELECT any_value(yhat) FROM ts_forecast_by('demand', id, ds, y, 'TSB', 1, '1d', MAP{}))
+    <> (SELECT any_value(yhat) FROM ts_forecast_by('demand', id, ds, y, 'TSB', 1, '1d', {alpha_d: 0.5, alpha_p: 0.5}));
+----
+true
+
+#######################################
+# Other surfaces accept the keys
+#######################################
+
+query I
+SELECT count(*) FROM (
+    SELECT id, (ts_forecast_agg(ds, y, 'ETS', 6, {model: 'AAA', seasonal_period: 12, alpha: 0.1, beta: 0.01, gamma: 0.2})).point_forecast AS p
+    FROM air GROUP BY id
+) WHERE len(p) = 6;
+----
+2
+
+statement ok
+CREATE TABLE air_folds AS SELECT * FROM ts_cv_folds_by('air', id, ds, y, 2, 6, MAP{});
+
+query I
+SELECT count(*) FROM ts_cv_forecast_by('air_folds', id, ds, y, 'ARIMA', {arima_order: '[1,0,0]', ar_coefficients: [0.5], intercept: 150});
+----
+24
+
+statement ok
+CREATE TABLE air_x AS SELECT *, (y / 10)::DOUBLE AS x FROM air;
+
+statement ok
+CREATE TABLE air_future AS
+SELECT 'S' || g AS id, ('2023-01-01'::DATE + INTERVAL (i - 1) MONTH)::TIMESTAMP AS ds, (20.0 + i)::DOUBLE AS x
+FROM range(2) a(g), range(1, 4) b(i);
+
+query I
+SELECT count(*) FROM ts_forecast_exog_by('air_x', id, ds, y, ['x'], 'air_future', ds, ['x'], '1mo', 'ETS', 3,
+    {model: 'AAA', seasonal_period: 12, alpha: 0.1, beta: 0.01, gamma: 0.2});
+----
+6
+
+query I
+SELECT count(*) FROM ts_forecast_explain_by('air', id, ds, y, 'ETS', 3, {model: 'AAA', seasonal_period: 12, alpha: 0.1, beta: 0.01, gamma: 0.2});
+----
+2
+
+#######################################
+# Errors
+#######################################
+
+statement error
+SELECT * FROM ts_forecast_by('air', id, ds, y, 'AutoETS', 3, '1mo', {alpha: 0.3});
+----
+only valid with method='ETS'
+
+statement error
+SELECT * FROM ts_forecast_by('air', id, ds, y, 'ETS', 3, '1mo', {alpha: 0.3});
+----
+explicit model spec
+
+statement error
+SELECT * FROM ts_forecast_by('air', id, ds, y, 'ETS', 3, '1mo', {model: 'AAN', alpha: 0.3});
+----
+requires a fixed beta
+
+statement error
+SELECT * FROM ts_forecast_by('air', id, ds, y, 'ETS', 3, '1mo', MAP{'model': 'ANN', 'alpha': 'abc'});
+----
+must be a number
+
+statement error
+SELECT * FROM ts_forecast_by('air', id, ds, y, 'ARIMA', 3, '1mo', {arima_order: '[2,0,0]', ar_coefficients: [0.5]});
+----
+ar_coefficients
+
+statement error
+SELECT * FROM ts_forecast_by('air', id, ds, y, 'ARIMA', 3, '1mo', {ar_coefficients: [0.5]});
+----
+arima_order
+
+statement error
+SELECT * FROM ts_forecast_by('demand', id, ds, y, 'TSB', 3, '1d', {alpha_d: 1.5});
+----
+[0.01, 0.99]
+
+statement error
+SELECT * FROM ts_forecast_by('air', id, ds, y, 'ETS', 3, '1mo', MAP{'model': 'ANN', 'alpha': '0.3;beta=0.1'});
+----
+Invalid value for parameter 'alpha'
