@@ -460,6 +460,14 @@ pub struct ForecastOptions {
     /// consulted when model is "ARIMA"; parsed and bounds-checked by
     /// `anofox_fcst_core::parse_order_triplet`.
     pub seasonal_order_str: [c_char; 32],
+    /// AutoARIMA: maximum number of models the stepwise search visits
+    /// (#318). 0 = crate default (94, R's `nmodels`); negative is an error.
+    /// Only valid when model is "AutoARIMA".
+    pub max_models: i64,
+    /// AutoARIMA: wall-clock budget for one fit in milliseconds (#318).
+    /// 0 = unbounded (default); negative is an error. Only valid when model
+    /// is "AutoARIMA".
+    pub time_budget_ms: i64,
 }
 
 /// Panel forecast result — returned by `anofox_ts_forecast_panel`.
@@ -547,6 +555,8 @@ impl Default for ForecastOptions {
             ensemble_method: [0; 32],
             arima_order_str: [0; 32],
             seasonal_order_str: [0; 32],
+            max_models: 0,
+            time_budget_ms: 0,
         }
     }
 }
@@ -645,6 +655,10 @@ pub struct ForecastOptionsExog {
     pub arima_order_str: [c_char; 32],
     /// ARIMA seasonal order string. See [`ForecastOptions::seasonal_order_str`].
     pub seasonal_order_str: [c_char; 32],
+    /// AutoARIMA model cap. See [`ForecastOptions::max_models`].
+    pub max_models: i64,
+    /// AutoARIMA time budget. See [`ForecastOptions::time_budget_ms`].
+    pub time_budget_ms: i64,
 }
 
 impl Default for ForecastOptionsExog {
@@ -676,6 +690,8 @@ impl Default for ForecastOptionsExog {
             ensemble_method: [0; 32],
             arima_order_str: [0; 32],
             seasonal_order_str: [0; 32],
+            max_models: 0,
+            time_budget_ms: 0,
         }
     }
 }

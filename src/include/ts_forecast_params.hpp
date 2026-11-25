@@ -44,6 +44,8 @@ struct ForecastParamSet {
     string ensemble_method = "";
     string arima_order = "";
     string seasonal_order = "";
+    int64_t max_models = 0;     // AutoARIMA only, 0 = default (#318)
+    int64_t time_budget_ms = 0; // AutoARIMA only, 0 = unbounded (#318)
 };
 
 // Verbatim semantics of the former ts_forecast_scalar.cpp ParseStringParam:
@@ -105,7 +107,7 @@ inline double ForecastParamDouble(const Value &params_value, const string &key, 
     }
 }
 
-// The 15-key closed set every forecast surface (ts_forecast_native.cpp,
+// The 17-key closed set every forecast surface (ts_forecast_native.cpp,
 // ts_cv_forecast_native.cpp, ts_forecast.cpp's exog path, and now this
 // shared header for ts_forecast_by/ts_forecast_agg) validates against.
 // Message text is byte-identical to ts_forecast_native.cpp's
@@ -117,7 +119,8 @@ inline void ValidateForecastParamKeys(const Value &params_value) {
         "laplace_variant", "laplace_seasonal_batch_init",
         "garch_p", "garch_q", "kalman_model",
         "top_k", "combination_method",  // Phase 4: AutoEnsemble params
-        "arima_order", "seasonal_order" // D-08/D-09, plan 10-02
+        "arima_order", "seasonal_order", // D-08/D-09, plan 10-02
+        "max_models", "time_budget_ms"   // AutoARIMA fit-cost limits (#318)
     };
 
     if (params_value.IsNull()) {
@@ -152,7 +155,7 @@ inline void ValidateForecastParamKeys(const Value &params_value) {
             unknown_list += "'" + unknown_keys[i] + "'";
         }
         throw InvalidInputException(
-            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init, garch_p, garch_q, kalman_model, top_k, combination_method, arima_order, seasonal_order",
+            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init, garch_p, garch_q, kalman_model, top_k, combination_method, arima_order, seasonal_order, max_models, time_budget_ms",
             unknown_list);
     }
 }
@@ -185,6 +188,8 @@ inline ForecastParamSet ParseForecastParamSet(const Value &params_in) {
     p.ensemble_method = ForecastParamString(params_value, "combination_method", "");
     p.arima_order = ForecastParamString(params_value, "arima_order", "");
     p.seasonal_order = ForecastParamString(params_value, "seasonal_order", "");
+    p.max_models = ForecastParamInt64(params_value, "max_models", 0);
+    p.time_budget_ms = ForecastParamInt64(params_value, "time_budget_ms", 0);
 
     // WR-03: reject arima_order/seasonal_order strings that would silently
     // truncate when ApplyForecastParamSet below copies them into the fixed
@@ -271,6 +276,9 @@ inline void ApplyForecastParamSet(const ForecastParamSet &p, const string &metho
         strncpy(opts.seasonal_order_str, p.seasonal_order.c_str(), sizeof(opts.seasonal_order_str) - 1);
         opts.seasonal_order_str[sizeof(opts.seasonal_order_str) - 1] = '\0';
     }
+    // AutoARIMA fit-cost limits (#318); validated in Rust.
+    opts.max_models = p.max_models;
+    opts.time_budget_ms = p.time_budget_ms;
 }
 
 } // namespace duckdb

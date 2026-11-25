@@ -128,6 +128,7 @@ None yet.
 | 261029-wbq | #289: _ts_fill_forward_native WASM-only wrong results (Rust EH toolchain) | 2026-10-30 | 01da744c | [261029-wbq-289-ts-fill-forward-native-wasm-only-wro](./quick/261029-wbq-289-ts-fill-forward-native-wasm-only-wro/) |
 | 261030-2gw | #287: changepoint deseasonalize auto default | 2026-10-30 | 045486fa | [261030-2gw-287-changepoint-deseasonalize-auto-defau](./quick/261030-2gw-287-changepoint-deseasonalize-auto-defau/) |
 | 261106-srk | Strict DuckDB-Wasm sqllogic runner (port from anofox-optimize PR #21) | 2026-11-06 | 9f9a86f6 | [261106-srk-wasm-strict-sqllogic-runner](./quick/261106-srk-wasm-strict-sqllogic-runner/) |
+| 261125-ddg | #318: AutoARIMA fit-cost limits max_models / time_budget_ms; #321 re-verified fixed | 2026-11-25 | 34698596 | [261125-ddg-318-autoarima-fit-budget](./quick/261125-ddg-318-autoarima-fit-budget/) |
 
 ### Roadmap Evolution
 

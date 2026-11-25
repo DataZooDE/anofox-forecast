@@ -178,7 +178,7 @@ documented in their own sections because of their distinct parameter/output shap
 | Model | Description | Optional Params |
 |-------|-------------|-----------------|
 | `AutoETS` | Automatic ETS model selection | *seasonal_period* |
-| `AutoARIMA` | Automatic ARIMA model selection | *seasonal_period* |
+| `AutoARIMA` | Automatic ARIMA model selection | *seasonal_period*, *max_models*, *time_budget_ms* |
 | `AutoTheta` | Automatic Theta method selection | *seasonal_period* |
 | `AutoEnsemble` | Auto-fit ARIMA/ETS/Theta, rank by MSE, combine top-K | *top_k*, *combination_method*, *seasonal_period* |
 | `AutoMFLES` | Currently an alias for `MFLES` (same code path) | *seasonal_periods[]* |
@@ -219,7 +219,7 @@ documented in their own sections because of their distinct parameter/output shap
 | `ETS` | Error-Trend-Seasonal model. Without a `model` spec, runs the crate's own `AutoETS` selection (not a hand-picked `'AAA'` default) and reports the chosen spec, e.g. `ETS(A,A,M)` — the same selection a standalone `AutoETS` call would make | — | *seasonal_period*, *model* |
 | `AutoETS` | Automatic ETS selection; a crate fit/predict failure or panic is a hard error naming `AutoETS` — never a silent HoltWinters/Holt/SES substitution | — | *seasonal_period* (auto-detected if omitted) |
 | `ARIMA` | Real crate `ARIMA`/`SARIMA` fit at an explicit order (not a heuristic) | **arima_order** `[p,d,q]` | *seasonal_order* `[P,D,Q]` (+ `seasonal_period`); `p,q,P,Q ≤ 10`, `d,D ≤ 2`; `model_name` appends `" with drift"` / `" with non-zero mean"` when the crate's own AICc comparison keeps a non-zero intercept |
-| `AutoARIMA` | Automatic ARIMA/SARIMA order search | — | *seasonal_period* (auto-detected if omitted) |
+| `AutoARIMA` | Automatic ARIMA/SARIMA order search | — | *seasonal_period* (auto-detected if omitted), *max_models*, *time_budget_ms* (see [Bounding AutoARIMA fit time](#bounding-autoarima-fit-time)) |
 
 `ARIMA` without `arima_order` is a hard SQL error naming `AutoARIMA` as the alternative:
 
@@ -245,6 +245,42 @@ FROM ts_forecast_by(
 ORDER BY forecast_step;
 -- model_name = 'ARIMA(0,1,1)(0,1,1)[12]'
 ```
+
+#### Bounding AutoARIMA fit time
+
+A seasonal AutoARIMA search with a long period (`m = 30`, `52`, `24` on hundreds of points)
+can take minutes per series; R's `auto.arima` is just as slow there. Two opt-in keys bound
+the cost of one fit (#318). Both default to unbounded, so results without them are
+unchanged, and both are valid only with `'AutoARIMA'` (any other model is an error):
+
+| Key | Type | Default | Effect |
+|---|---|---|---|
+| `max_models` | INTEGER > 0 | `94` (R's `nmodels`) | Maximum number of models the stepwise search visits. Deterministic. |
+| `time_budget_ms` | INTEGER > 0 | unbounded | Wall-clock budget for one series' fit. When it runs out, the best model found so far is returned. **Not reproducible** across machines or load; ignored in DuckDB-Wasm (no clock). |
+
+```sql
+CREATE OR REPLACE TABLE weekly AS
+SELECT 'W1' AS id,
+       ('2015-01-04'::DATE + INTERVAL (7 * i) DAY)::DATE AS ds,
+       1000.0 + 0.8 * i + 40.0 * sin(2 * pi() * i / 52.0) + (i * 7919) % 13 AS y
+FROM range(0, 400) t(i);
+
+-- Deterministic cap on the search
+SELECT forecast_step, ROUND(yhat, 1) AS yhat, model_name
+FROM ts_forecast_by('weekly', id, ds, y, 'AutoARIMA', 3, '1w',
+                    {seasonal_period: 52, max_models: 10})
+ORDER BY forecast_step;
+
+-- At most ~2 s per series, best model found so far
+SELECT count(*) AS n
+FROM ts_forecast_by('weekly', id, ds, y, 'AutoARIMA', 13, '1w',
+                    {seasonal_period: 52, time_budget_ms: 2000});
+```
+
+The keys work on every AutoARIMA surface: `ts_forecast_by`, `ts_forecast_agg`,
+`ts_forecast_exog_by`, `ts_cv_forecast_by` and `ts_forecast_inspect_by`. If the cost comes
+from a period auto-detected as `30` on weekly data, passing `seasonal_period` explicitly
+(`1`, or `52` for a yearly cycle) is often the better fix.
 
 ### Multiple Seasonality Models (6)
 | Model | Description | Required | Optional |
@@ -609,6 +645,8 @@ so every public forecast surface agrees on dates (not just values) for the same 
 | `seasonal_period` | INTEGER | seasonal-capable models | Single seasonal period; see per-model tables above for auto-detect/required behavior |
 | `seasonal_periods` | `[p1, p2, ...]` (JSON-array string in MAP form) | `MSTL`, `TBATS`, `MFLES` + Auto variants | Multiple seasonal periods |
 | `confidence_level` | DOUBLE | all models | Interval confidence level; default `0.90`, range `(0, 1)` |
+| `max_models` | INTEGER | `AutoARIMA` | Cap on models visited by the stepwise search; default `94` |
+| `time_budget_ms` | INTEGER | `AutoARIMA` | Wall-clock budget per series fit; default unbounded; not reproducible |
 
 **Returns:**
 | Column | Type | Description |
@@ -1435,6 +1473,28 @@ Returns one row per group with a nullable, uniformly-typed STRUCT
 All other fields are `NULL` for a given family. `raw_json` carries the
 untransformed serde payload for callers that need shapes the wide
 struct doesn't expose (nested Laplace `GaussianMixture` state, etc.).
+
+For `Ets`, each in-sample fitted value splits into `trend_component` (the level/trend part,
+`l`, `l + b` or `l + phi*b` before the update) and `seasonal_component` (the rest: `s` for
+additive, `(l + phi*b)(s - 1)` for multiplicative seasonality), so
+`trend_component + seasonal_component + residuals` equals the input series.
+`seasonal_component` is `NULL` only for non-seasonal specs. The time-0 states are in
+`raw_json` as `$.Ets.initial_level`, `$.Ets.initial_trend` and `$.Ets.initial_seasonals`
+(in-sample step `t`, 0-based, uses `initial_seasonals[t % seasonal_period]`).
+
+```sql
+CREATE OR REPLACE TABLE air AS
+SELECT 'A' AS id, ('1949-01-01'::DATE + INTERVAL (i) MONTH)::TIMESTAMP AS ds,
+       (112 + 2.5 * i + 25 * sin(2 * pi() * i / 12)) * (1 + 0.1 * sin(2 * pi() * i / 12)) + (i % 5) AS y
+FROM range(120) t(i);
+
+SELECT (inspection).spec,
+       len((inspection).seasonal_component) AS n_seasonal,
+       json_extract((inspection).raw_json, '$.Ets.initial_level')::DOUBLE AS l0,
+       json_array_length(json_extract((inspection).raw_json, '$.Ets.initial_seasonals')) AS n_s0
+FROM ts_forecast_inspect_by('air', id, ds, y, 'AutoETS', {seasonal_period: 12});
+-- ETS(A,A,A) | 120 | 110.07... | 12
+```
 
 **Supported models (fit state):** `AutoETS`, `AutoARIMA`, `AutoTheta`,
 `AutoTBATS`, `MFLES`, `AutoMFLES`, `MSTL`, `AutoMSTL`, `Laplace`. Any

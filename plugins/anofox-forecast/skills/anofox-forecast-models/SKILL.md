@@ -18,13 +18,13 @@ description: >
   exogenous regressors, or writing `ts_forecast_by` / `ts_forecast` /
   `ts_forecast_exog_by` / `ts_forecast_agg` / `ts_forecast_var_by` /
   `ts_forecast_ensemble_by` calls.
-version: 2026.11.19
+version: 2026.11.25
 user-invocable: false
 ---
 
 # Anofox Forecast — Models & `ts_forecast_by` Cheat Sheet
 
-**Extension:** `anofox_forecast` v2026.11.19 (Rust crate `anofox-forecast` v0.21.0) | **DuckDB:** v2.0.0 / v1.5.6 | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
+**Extension:** `anofox_forecast` v2026.11.25 (Rust crate `anofox-forecast` v0.22.0) | **DuckDB:** v2.0.0 / v1.5.6 | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
 
 36 forecasting models exposed by SQL via three call surfaces (table macro, aggregate, scalar) + `ts_forecast_var_by` for multivariate VAR.
 
@@ -551,7 +551,7 @@ fitted values and input handling" section for the full input-handling contract.
 | Model | Params | Best for |
 |---|---|---|
 | `AutoETS` | `seasonal_period`, `model_pool` | Unknown patterns — default pick. A crate fit/predict failure or panic is a hard error naming `AutoETS` — never a silent HoltWinters/Holt/SES substitution. |
-| `AutoARIMA` | `seasonal_period` | Unknown patterns, ARIMA family |
+| `AutoARIMA` | `seasonal_period`, `max_models`, `time_budget_ms` | Unknown patterns, ARIMA family |
 | `AutoTheta` | `seasonal_period` | Unknown patterns, Theta family (best RMSE on M5-monthly) |
 | `AutoMFLES` | `seasonal_periods[]` | Multiple seasonalities. Currently an alias for `MFLES` (same code path, same reported `model_name` = `MFLES`). |
 | `AutoMSTL` | `seasonal_periods[]` | Multiple seasonalities. Currently an alias for `MSTL` (same code path, same reported `model_name` = `MSTL`). |
@@ -633,6 +633,13 @@ uses, so `['ETS','ETS']` as an ensemble member equals standalone `'ETS'` bit-for
 is a hard error naming `AutoARIMA`; with an order, it runs a real crate fit and `model_name`
 appends `" with drift"` / `" with non-zero mean"` when the crate's own AICc comparison keeps
 a non-zero intercept.
+**AutoARIMA fit cost (#318):** a long seasonal period (m = 30/52 on hundreds of weekly
+points, m = 24 hourly) makes one fit take minutes, which looks like a hang in a batch. Bound
+it with `max_models` (cap on the stepwise search, default 94, deterministic) or
+`time_budget_ms` (best model within the budget, default unbounded, not reproducible across
+machines or load; ignored in Wasm). Both error with any model other than `AutoARIMA`. If the
+period was auto-detected (e.g. 30 on weekly data), passing `seasonal_period` explicitly is
+often the better fix.
 
 **Kalman details:**
 - `local_level` (default): random walk + noise; h-step forecast is flat at filtered level.

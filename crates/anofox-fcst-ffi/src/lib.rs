@@ -4493,6 +4493,7 @@ unsafe fn build_core_options(
     let seasonal_order_str = c_field_str(&opts.seasonal_order_str, "seasonal_order")?;
     let seasonal_order =
         anofox_fcst_core::parse_order_triplet("seasonal_order", seasonal_order_str)?;
+    let auto_arima_limits = auto_arima_limits(opts.max_models, opts.time_budget_ms)?;
 
     Ok(anofox_fcst_core::ForecastOptions {
         model: model_type,
@@ -4515,6 +4516,7 @@ unsafe fn build_core_options(
         ensemble_method,
         arima_order,
         seasonal_order,
+        auto_arima_limits,
     })
 }
 
@@ -4560,6 +4562,7 @@ unsafe fn build_core_options_exog(
     let seasonal_order_str = c_field_str(&opts.seasonal_order_str, "seasonal_order")?;
     let seasonal_order =
         anofox_fcst_core::parse_order_triplet("seasonal_order", seasonal_order_str)?;
+    let auto_arima_limits = auto_arima_limits(opts.max_models, opts.time_budget_ms)?;
 
     Ok(anofox_fcst_core::ForecastOptionsExog {
         model: model_type,
@@ -4583,6 +4586,30 @@ unsafe fn build_core_options_exog(
         ensemble_method,
         arima_order,
         seasonal_order,
+        auto_arima_limits,
+    })
+}
+
+/// FFI `max_models` / `time_budget_ms` (0 = unset) → core limits (#318).
+/// Negative values are an error, never a silent "unset".
+fn auto_arima_limits(
+    max_models: i64,
+    time_budget_ms: i64,
+) -> Result<anofox_fcst_core::AutoArimaLimits, anofox_fcst_core::ForecastError> {
+    let non_negative = |param: &str, v: i64| {
+        if v < 0 {
+            Err(anofox_fcst_core::ForecastError::InvalidParameter {
+                param: param.to_string(),
+                value: v.to_string(),
+                reason: "must be > 0 (or 0 / omitted for the default)".to_string(),
+            })
+        } else {
+            Ok((v > 0).then_some(v as u64))
+        }
+    };
+    Ok(anofox_fcst_core::AutoArimaLimits {
+        max_models: non_negative("max_models", max_models)?.map(|v| v as usize),
+        time_budget_ms: non_negative("time_budget_ms", time_budget_ms)?,
     })
 }
 

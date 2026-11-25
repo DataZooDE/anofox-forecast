@@ -1175,6 +1175,18 @@ typedef struct ForecastOptions {
      * `anofox_fcst_core::parse_order_triplet`.
      */
     char seasonal_order_str[32];
+    /**
+     * AutoARIMA: maximum number of models the stepwise search visits
+     * (#318). 0 = crate default (94, R's `nmodels`); negative is an error.
+     * Only valid when model is "AutoARIMA".
+     */
+    int64_t max_models;
+    /**
+     * AutoARIMA: wall-clock budget for one fit in milliseconds (#318).
+     * 0 = unbounded (default); negative is an error. Only valid when model
+     * is "AutoARIMA".
+     */
+    int64_t time_budget_ms;
 } ForecastOptions;
 
 /**
@@ -1386,6 +1398,14 @@ typedef struct ForecastOptionsExog {
      * ARIMA seasonal order string. See [`ForecastOptions::seasonal_order_str`].
      */
     char seasonal_order_str[32];
+    /**
+     * AutoARIMA model cap. See [`ForecastOptions::max_models`].
+     */
+    int64_t max_models;
+    /**
+     * AutoARIMA time budget. See [`ForecastOptions::time_budget_ms`].
+     */
+    int64_t time_budget_ms;
 } ForecastOptionsExog;
 
 /**
