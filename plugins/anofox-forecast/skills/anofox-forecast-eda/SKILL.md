@@ -15,7 +15,7 @@ user-invocable: false
 
 # Anofox Forecast — EDA & Data Quality Cheat Sheet
 
-**Extension:** `anofox_forecast` v2026.11.19 (Rust crate `anofox-forecast` v0.21.0) | **DuckDB:** v2.0.0 / v1.5.6 | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
+**Extension:** `anofox_forecast` v2026.11.19 (Rust crate `anofox-forecast` v0.22.0) | **DuckDB:** v2.0.0 / v1.5.6 | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
 
 Understand your data before modelling it: per-series statistics, data-quality scores, feature vectors for ML.
 

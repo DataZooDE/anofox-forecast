@@ -10,6 +10,21 @@ use the semver numbering this project started with.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`ts_forecast_inspect_by`: `seasonal_component` is populated for seasonal `AutoETS`
+  fits (#316).** It was always `NULL`, and `trend_component` was a copy of
+  `fitted_values`. Each fitted value now splits into a level/trend part and a seasonal
+  part, so `trend_component + seasonal_component + residuals` equals the input series.
+  The time-0 states (`initial_level`, `initial_trend`, `initial_seasonals`) are in
+  `raw_json`; with the smoothing parameters they reproduce the fit. Forecasts and model
+  choice are unchanged. Fixed upstream in anofox-forecast 0.22.0.
+
+### Changed — dependencies
+
+- **`anofox-forecast` 0.21.0 → 0.22.0** (the #316 fix above). No SQL signature or
+  output column changes.
+
 ### Added
 
 - **AutoARIMA fit-cost limits `max_models` and `time_budget_ms` (#318).** A seasonal

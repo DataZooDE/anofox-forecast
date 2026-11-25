@@ -1474,6 +1474,28 @@ All other fields are `NULL` for a given family. `raw_json` carries the
 untransformed serde payload for callers that need shapes the wide
 struct doesn't expose (nested Laplace `GaussianMixture` state, etc.).
 
+For `Ets`, each in-sample fitted value splits into `trend_component` (the level/trend part,
+`l`, `l + b` or `l + phi*b` before the update) and `seasonal_component` (the rest: `s` for
+additive, `(l + phi*b)(s - 1)` for multiplicative seasonality), so
+`trend_component + seasonal_component + residuals` equals the input series.
+`seasonal_component` is `NULL` only for non-seasonal specs. The time-0 states are in
+`raw_json` as `$.Ets.initial_level`, `$.Ets.initial_trend` and `$.Ets.initial_seasonals`
+(in-sample step `t`, 0-based, uses `initial_seasonals[t % seasonal_period]`).
+
+```sql
+CREATE OR REPLACE TABLE air AS
+SELECT 'A' AS id, ('1949-01-01'::DATE + INTERVAL (i) MONTH)::TIMESTAMP AS ds,
+       (112 + 2.5 * i + 25 * sin(2 * pi() * i / 12)) * (1 + 0.1 * sin(2 * pi() * i / 12)) + (i % 5) AS y
+FROM range(120) t(i);
+
+SELECT (inspection).spec,
+       len((inspection).seasonal_component) AS n_seasonal,
+       json_extract((inspection).raw_json, '$.Ets.initial_level')::DOUBLE AS l0,
+       json_array_length(json_extract((inspection).raw_json, '$.Ets.initial_seasonals')) AS n_s0
+FROM ts_forecast_inspect_by('air', id, ds, y, 'AutoETS', {seasonal_period: 12});
+-- ETS(A,A,A) | 120 | 110.07... | 12
+```
+
 **Supported models (fit state):** `AutoETS`, `AutoARIMA`, `AutoTheta`,
 `AutoTBATS`, `MFLES`, `AutoMFLES`, `MSTL`, `AutoMSTL`, `Laplace`. Any
 other model errors with `does not implement Inspectable`.
