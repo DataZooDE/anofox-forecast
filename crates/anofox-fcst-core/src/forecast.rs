@@ -345,6 +345,45 @@ impl ModelType {
     }
 }
 
+/// AutoARIMA fit-cost limits (#318), forwarded to the crate's
+/// `AutoARIMAConfig::with_max_models` / `with_time_budget`. `None` keeps the
+/// crate default: at most 94 models (R's `nmodels`) and no time budget.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AutoArimaLimits {
+    /// Maximum number of models the stepwise search visits.
+    pub max_models: Option<usize>,
+    /// Wall-clock budget for one fit, in milliseconds. When it runs out the
+    /// best model found so far is returned, so a budgeted fit is not
+    /// reproducible across machines or load. Ignored on wasm32 (no clock).
+    pub time_budget_ms: Option<u64>,
+}
+
+impl AutoArimaLimits {
+    /// `true` when either limit is set.
+    pub fn is_set(&self) -> bool {
+        self.max_models.is_some() || self.time_budget_ms.is_some()
+    }
+}
+
+/// Rejects AutoARIMA fit-cost limits on any other model (same rule as
+/// `arima_order` on non-ARIMA models): a silently ignored limit would
+/// look like it was applied.
+fn validate_auto_arima_limits(model: ModelType, limits: &AutoArimaLimits) -> Result<()> {
+    if model != ModelType::AutoARIMA && limits.is_set() {
+        let param = if limits.max_models.is_some() {
+            "max_models"
+        } else {
+            "time_budget_ms"
+        };
+        return Err(ForecastError::InvalidParameter {
+            param: param.to_string(),
+            value: model.name().to_string(),
+            reason: "only valid when method='AutoARIMA'".to_string(),
+        });
+    }
+    Ok(())
+}
+
 /// Forecast options.
 #[derive(Debug, Clone)]
 pub struct ForecastOptions {
@@ -408,6 +447,9 @@ pub struct ForecastOptions {
     /// and a non-zero `arima_order` (D-08/D-09). The seasonal period itself
     /// always comes from `seasonal_period`, never from auto-detection.
     pub seasonal_order: Option<[usize; 3]>,
+    /// AutoARIMA fit-cost limits (#318). Default = unbounded, identical to
+    /// the crate default. Only valid when model is `AutoARIMA`.
+    pub auto_arima_limits: AutoArimaLimits,
 }
 
 impl Default for ForecastOptions {
@@ -433,6 +475,7 @@ impl Default for ForecastOptions {
             ensemble_method: None,
             arima_order: None,
             seasonal_order: None,
+            auto_arima_limits: AutoArimaLimits::default(),
         }
     }
 }
@@ -552,6 +595,8 @@ pub struct ForecastOptionsExog {
     pub arima_order: Option<[usize; 3]>,
     /// ARIMA seasonal order `[P, D, Q]`. See [`ForecastOptions::seasonal_order`].
     pub seasonal_order: Option<[usize; 3]>,
+    /// AutoARIMA fit-cost limits. See [`ForecastOptions::auto_arima_limits`].
+    pub auto_arima_limits: AutoArimaLimits,
 }
 
 impl Default for ForecastOptionsExog {
@@ -578,6 +623,7 @@ impl Default for ForecastOptionsExog {
             ensemble_method: None,
             arima_order: None,
             seasonal_order: None,
+            auto_arima_limits: AutoArimaLimits::default(),
         }
     }
 }
@@ -606,6 +652,7 @@ impl From<ForecastOptions> for ForecastOptionsExog {
             ensemble_method: opts.ensemble_method,
             arima_order: opts.arima_order,
             seasonal_order: opts.seasonal_order,
+            auto_arima_limits: opts.auto_arima_limits,
         }
     }
 }
@@ -641,6 +688,7 @@ impl From<&ForecastOptionsExog> for ForecastOptions {
             ensemble_method: opts.ensemble_method.clone(),
             arima_order: opts.arima_order,
             seasonal_order: opts.seasonal_order,
+            auto_arima_limits: opts.auto_arima_limits,
         }
     }
 }
@@ -716,6 +764,7 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
             reason: "only valid when method='ARIMA'".to_string(),
         });
     }
+    validate_auto_arima_limits(options.model, &options.auto_arima_limits)?;
 
     // Generate forecast based on model
     // Note: Auto* models (AutoARIMA, AutoETS, etc.) run their respective algorithms
@@ -791,7 +840,13 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
             options.arima_order,
             options.seasonal_order,
         ),
-        ModelType::AutoARIMA => forecast_auto_arima(&prep.values, extended_horizon, period, level),
+        ModelType::AutoARIMA => forecast_auto_arima(
+            &prep.values,
+            extended_horizon,
+            period,
+            options.auto_arima_limits,
+            level,
+        ),
         // Multiple Seasonality. MFLES/AutoMFLES both report model_name "MFLES"
         // (D-06 — "Auto" is a documented, deprecated input alias only).
         ModelType::MFLES | ModelType::AutoMFLES => {
@@ -1048,6 +1103,8 @@ pub fn forecast_with_exog(
         options.auto_detect_seasonality,
         !options.seasonal_periods.is_empty(),
     )?;
+
+    validate_auto_arima_limits(options.model, &options.auto_arima_limits)?;
 
     let mut result = forecast_crate_exog(
         &prep.values,
@@ -1308,7 +1365,7 @@ fn forecast_crate_exog(
             }
         }
         ModelType::AutoARIMA => fit_predict_exog(
-            new_auto_arima(period),
+            new_auto_arima(period, options.auto_arima_limits),
             &ts,
             horizon,
             &future_map,
@@ -1771,12 +1828,18 @@ fn new_auto_theta(period: usize) -> AutoTheta {
     }
 }
 
-fn new_auto_arima(period: usize) -> AutoARIMA {
-    let cfg = if period > 1 {
+fn new_auto_arima(period: usize, limits: AutoArimaLimits) -> AutoARIMA {
+    let mut cfg = if period > 1 {
         AutoARIMAConfig::default().with_seasonal_period(period)
     } else {
         AutoARIMAConfig::default()
     };
+    if let Some(max_models) = limits.max_models {
+        cfg = cfg.with_max_models(max_models);
+    }
+    if let Some(ms) = limits.time_budget_ms {
+        cfg = cfg.with_time_budget(std::time::Duration::from_millis(ms));
+    }
     AutoARIMA::with_config(cfg)
 }
 
@@ -2219,6 +2282,7 @@ fn forecast_auto_arima(
     values: &[f64],
     horizon: usize,
     period: usize,
+    limits: AutoArimaLimits,
     level: f64,
 ) -> Result<ForecastOutput> {
     use chrono::{Duration, TimeZone, Utc};
@@ -2233,7 +2297,7 @@ fn forecast_auto_arima(
         ForecastError::ComputationError(format!("Failed to create TimeSeries: {}", e))
     })?;
 
-    let mut model = new_auto_arima(period);
+    let mut model = new_auto_arima(period, limits);
 
     // Fit the model
     model
@@ -2542,6 +2606,8 @@ pub fn forecast_inspect(values: &[Option<f64>], options: &ForecastOptions) -> Re
     use anofox_forecast::prelude::Forecaster;
 
     // Explicit input policy (D-11/D-12) — see forecast()'s matching comment.
+    validate_auto_arima_limits(options.model, &options.auto_arima_limits)?;
+
     let prep = prepare_series(values)?;
 
     // D-07: resolve_period errors for a period-requiring model (AutoTBATS/
@@ -2574,7 +2640,7 @@ pub fn forecast_inspect(values: &[Option<f64>], options: &ForecastOptions) -> Re
             Inspectable::explanation(&model)
         }
         ModelType::AutoARIMA => {
-            let mut model = new_auto_arima(period);
+            let mut model = new_auto_arima(period, options.auto_arima_limits);
             model.fit(&ts).map_err(|e| {
                 ForecastError::ComputationError(format!("AutoARIMA fit failed: {e}"))
             })?;
@@ -2688,6 +2754,8 @@ pub fn forecast_explain(
     use anofox_forecast::prelude::Forecaster;
 
     // Explicit input policy (D-11/D-12) — see forecast()'s matching comment.
+    validate_auto_arima_limits(options.model, &options.auto_arima_limits)?;
+
     let prep = prepare_series(values)?;
 
     // D-07: resolve_period errors for MSTL/AutoMSTL with nothing detected
@@ -3587,7 +3655,7 @@ pub(crate) fn build_forecaster(
 
     match model_type {
         // Auto-selection models
-        ModelType::AutoARIMA => Ok(Box::new(new_auto_arima(p))),
+        ModelType::AutoARIMA => Ok(Box::new(new_auto_arima(p, AutoArimaLimits::default()))),
         ModelType::AutoETS => Ok(Box::new(new_auto_ets(p, None))),
         ModelType::AutoTheta => Ok(Box::new(new_auto_theta(p))),
         // Theta family (not in requires_seasonal_period — non-seasonal is a
@@ -4333,6 +4401,98 @@ mod tests {
             msg.contains("arima_order") && msg.contains("AutoARIMA"),
             "expected the no-order ARIMA error to name arima_order and AutoARIMA, got: {msg}"
         );
+    }
+
+    /// Seasonal series long enough that an unbounded AutoARIMA(m = 52) fit
+    /// is slow (#318).
+    fn long_weekly_series() -> Vec<Option<f64>> {
+        (0..550)
+            .map(|i| {
+                let t = i as f64;
+                Some(
+                    1000.0
+                        + 0.8 * t
+                        + 40.0 * (2.0 * std::f64::consts::PI * t / 52.0).sin()
+                        + 7.0 * ((i * 7919) % 13) as f64,
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_auto_arima_limits_bound_the_fit() {
+        // #318: a time budget stops the stepwise search and returns the best
+        // model so far; max_models caps the number of visited models.
+        let values = long_weekly_series();
+        for limits in [
+            AutoArimaLimits {
+                time_budget_ms: Some(300),
+                ..Default::default()
+            },
+            AutoArimaLimits {
+                max_models: Some(2),
+                ..Default::default()
+            },
+        ] {
+            let options = ForecastOptions {
+                model: ModelType::AutoARIMA,
+                horizon: 13,
+                seasonal_period: 52,
+                auto_detect_seasonality: false,
+                auto_arima_limits: limits,
+                ..Default::default()
+            };
+            let start = std::time::Instant::now();
+            let result = forecast(&values, &options).unwrap();
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(20),
+                "{limits:?} took {:?}",
+                start.elapsed()
+            );
+            assert_eq!(result.point.len(), 13);
+            assert!(result.point.iter().all(|v| v.is_finite()));
+            assert!(result.model_name.starts_with("AutoARIMA("));
+        }
+    }
+
+    #[test]
+    fn test_auto_arima_limits_rejected_on_other_models() {
+        // #318: a limit on a model that ignores it is an error, not a silent no-op.
+        let values: Vec<Option<f64>> = (0..30).map(|i| Some(10.0 + i as f64)).collect();
+        for limits in [
+            AutoArimaLimits {
+                max_models: Some(10),
+                ..Default::default()
+            },
+            AutoArimaLimits {
+                time_budget_ms: Some(1000),
+                ..Default::default()
+            },
+        ] {
+            let options = ForecastOptions {
+                model: ModelType::AutoETS,
+                horizon: 3,
+                auto_arima_limits: limits,
+                ..Default::default()
+            };
+            let param = if limits.max_models.is_some() {
+                "max_models"
+            } else {
+                "time_budget_ms"
+            };
+            for msg in [
+                forecast(&values, &options).unwrap_err().to_string(),
+                forecast_inspect(&values, &options).unwrap_err().to_string(),
+                forecast_explain(&values, 3, &options)
+                    .unwrap_err()
+                    .to_string(),
+            ] {
+                assert!(
+                    msg.contains(param) && msg.contains("AutoARIMA"),
+                    "expected an error naming {param} and AutoARIMA, got: {msg}"
+                );
+            }
+        }
     }
 
     #[test]

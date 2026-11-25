@@ -17,6 +17,7 @@ This folder contains runnable SQL examples demonstrating time series forecasting
 |------|-------------|-------------|
 | [`synthetic_forecasting_examples.sql`](synthetic_forecasting_examples.sql) | Multi-series forecasting examples | Synthetic |
 | [`crate_delegation_examples.sql`](crate_delegation_examples.sql) | Self-checking proof of Phase 10 crate-delegation behaviour: real crate prediction intervals, ARIMA via `arima_order`/`seasonal_order`, `'ETS'` = AutoETS selection, AutoARIMA with regressors, trailing-NULL realignment | AirPassengers + synthetic |
+| [`auto_arima_limits.sql`](auto_arima_limits.sql) | Self-checking: bound AutoARIMA fit cost with `max_models` / `time_budget_ms` (#318) | Synthetic weekly |
 
 ## Quick Start
 

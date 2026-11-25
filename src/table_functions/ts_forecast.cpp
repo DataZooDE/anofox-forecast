@@ -357,7 +357,8 @@ static void ExogValidateParamKeys(const Value &params_value) {
         "laplace_variant", "laplace_seasonal_batch_init",
         "garch_p", "garch_q", "kalman_model",
         "top_k", "combination_method",
-        "arima_order", "seasonal_order"
+        "arima_order", "seasonal_order",
+        "max_models", "time_budget_ms" // AutoARIMA fit-cost limits (#318)
     };
 
     if (params_value.IsNull()) return;
@@ -388,7 +389,7 @@ static void ExogValidateParamKeys(const Value &params_value) {
             unknown_list += "'" + unknown_keys[i] + "'";
         }
         throw InvalidInputException(
-            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init, garch_p, garch_q, kalman_model, top_k, combination_method, arima_order, seasonal_order",
+            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init, garch_p, garch_q, kalman_model, top_k, combination_method, arima_order, seasonal_order, max_models, time_budget_ms",
             unknown_list);
     }
 }
@@ -494,6 +495,8 @@ static void TsForecastExogFunction(DataChunk &args, ExpressionState &state, Vect
         string ensemble_method;
         string arima_order;
         string seasonal_order;
+        int64_t max_models = 0;
+        int64_t time_budget_ms = 0;
 
         if (has_params) {
             auto p_idx = params_data.sel->get_index(row_idx);
@@ -516,6 +519,8 @@ static void TsForecastExogFunction(DataChunk &args, ExpressionState &state, Vect
                 ensemble_method = ExogParseStringParam(params_val, "combination_method", "");
                 arima_order = ExogParseStringParam(params_val, "arima_order", "");
                 seasonal_order = ExogParseStringParam(params_val, "seasonal_order", "");
+                max_models = ExogParseInt64Param(params_val, "max_models", 0);
+                time_budget_ms = ExogParseInt64Param(params_val, "time_budget_ms", 0);
             }
         }
 
@@ -577,6 +582,8 @@ static void TsForecastExogFunction(DataChunk &args, ExpressionState &state, Vect
         SetCField(opts.ensemble_method, ensemble_method);
         SetCField(opts.arima_order_str, arima_order);
         SetCField(opts.seasonal_order_str, seasonal_order);
+        opts.max_models = max_models;
+        opts.time_budget_ms = time_budget_ms;
 
         ForecastResult fcst_result;
         memset(&fcst_result, 0, sizeof(fcst_result));

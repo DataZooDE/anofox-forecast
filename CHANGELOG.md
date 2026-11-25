@@ -10,6 +10,19 @@ use the semver numbering this project started with.
 
 ## [Unreleased]
 
+### Added
+
+- **AutoARIMA fit-cost limits `max_models` and `time_budget_ms` (#318).** A seasonal
+  AutoARIMA search with a long period (m = 30 or 52 on 550 weekly points) takes 80 to
+  200 s per series, so batches looked hung. Two new `params` keys bound one fit:
+  `max_models` caps the stepwise search (deterministic), and `time_budget_ms` returns the
+  best model found within the budget (not reproducible across machines or load; ignored
+  in DuckDB-Wasm). On the W118 series from the issue, `{time_budget_ms: 2000}` finishes in
+  2.4 s instead of 211 s. Both default to unbounded, so results without them are
+  unchanged. They work on `ts_forecast_by`, `ts_forecast_agg`, `ts_forecast_exog_by`,
+  `ts_cv_forecast_by` and `ts_forecast_inspect_by`, and are an error with any model
+  other than `AutoARIMA`.
+
 ## [2026.11.19] - 2026-11-19 — forecasting crate 0.21.0, inspect params validated
 
 ### Fixed

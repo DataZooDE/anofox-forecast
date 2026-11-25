@@ -1,0 +1,122 @@
+# name: test/sql/ts_forecast_auto_arima_limits.test
+# description: AutoARIMA fit-cost limits max_models / time_budget_ms (#318) on every forecast surface
+# group: [anofox_forecast]
+
+require anofox_forecast
+
+require json
+
+statement ok
+CREATE TABLE weekly AS
+SELECT 'S' || (i // 104) AS id,
+       ('2020-01-05'::DATE + INTERVAL (7 * (i % 104)) DAY)::TIMESTAMP AS ds,
+       (500 + 0.7 * (i % 104) + 30 * sin(2 * pi() * (i % 104) / 13) + ((i * 7919) % 11))::DOUBLE AS y
+FROM range(208) t(i);
+
+#######################################
+# Defaults are unchanged: omitting the keys == the crate defaults (94 models, no budget)
+#######################################
+
+query I
+SELECT count(*) FROM (
+    SELECT id, forecast_step, yhat FROM ts_forecast_by('weekly', id, ds, y, 'AutoARIMA', 5, '1w', {seasonal_period: 13})
+    EXCEPT
+    SELECT id, forecast_step, yhat FROM ts_forecast_by('weekly', id, ds, y, 'AutoARIMA', 5, '1w', {seasonal_period: 13, max_models: 94})
+);
+----
+0
+
+#######################################
+# max_models is deterministic: same model and values on every call
+#######################################
+
+query II
+SELECT count(*), bool_and(model_name LIKE 'AutoARIMA(%')
+FROM ts_forecast_by('weekly', id, ds, y, 'AutoARIMA', 5, '1w', {seasonal_period: 13, max_models: 3});
+----
+10	true
+
+query I
+SELECT count(*) FROM (
+    SELECT id, forecast_step, yhat, model_name FROM ts_forecast_by('weekly', id, ds, y, 'AutoARIMA', 5, '1w', {seasonal_period: 13, max_models: 3})
+    EXCEPT
+    SELECT id, forecast_step, yhat, model_name FROM ts_forecast_by('weekly', id, ds, y, 'AutoARIMA', 5, '1w', MAP{'seasonal_period': '13', 'max_models': '3'})
+);
+----
+0
+
+# time_budget_ms returns a forecast (the best model found within the budget)
+query II
+SELECT count(*), bool_and(model_name LIKE 'AutoARIMA(%' AND isfinite(yhat))
+FROM ts_forecast_by('weekly', id, ds, y, 'AutoARIMA', 5, '1w', {seasonal_period: 13, time_budget_ms: 500});
+----
+10	true
+
+#######################################
+# Every other forecast surface accepts the keys
+#######################################
+
+query I
+SELECT count(*) FROM (
+    SELECT id, (ts_forecast_agg(ds, y, 'AutoARIMA', 5, {seasonal_period: 13, max_models: 3})).point_forecast AS p
+    FROM weekly GROUP BY id
+) WHERE len(p) = 5;
+----
+2
+
+query I
+SELECT count(*) FROM ts_forecast_inspect_by('weekly', id, ds, y, 'AutoARIMA', {seasonal_period: 13, max_models: 3, time_budget_ms: 2000});
+----
+2
+
+statement ok
+CREATE TABLE weekly_folds AS
+SELECT * FROM ts_cv_folds_by('weekly', id, ds, y, 2, 5, MAP{});
+
+query I
+SELECT count(*) FROM ts_cv_forecast_by('weekly_folds', id, ds, y, 'AutoARIMA', {seasonal_period: 13, max_models: 3, time_budget_ms: 2000});
+----
+20
+
+statement ok
+CREATE TABLE weekly_x AS SELECT *, (y / 10)::DOUBLE AS x FROM weekly;
+
+statement ok
+CREATE TABLE weekly_future AS
+SELECT 'S' || g AS id, ('2022-01-02'::DATE + INTERVAL (7 * (i - 1)) DAY)::TIMESTAMP AS ds, (60.0 + i)::DOUBLE AS x
+FROM range(2) a(g), range(1, 6) b(i);
+
+query I
+SELECT count(*) FROM ts_forecast_exog_by('weekly_x', id, ds, y, ['x'], 'weekly_future', ds, ['x'], '1w', 'AutoARIMA', 5,
+    {seasonal_period: 13, max_models: 3, time_budget_ms: 2000});
+----
+10
+
+#######################################
+# Errors: other models, negative values
+#######################################
+
+statement error
+SELECT * FROM ts_forecast_by('weekly', id, ds, y, 'AutoETS', 5, '1w', {max_models: 3});
+----
+only valid when method='AutoARIMA'
+
+statement error
+SELECT * FROM ts_forecast_by('weekly', id, ds, y, 'ARIMA', 5, '1w', {arima_order: '[1,1,1]', time_budget_ms: 100});
+----
+only valid when method='AutoARIMA'
+
+statement error
+SELECT * FROM ts_forecast_inspect_by('weekly', id, ds, y, 'AutoETS', {time_budget_ms: 100});
+----
+only valid when method='AutoARIMA'
+
+statement error
+SELECT * FROM ts_forecast_by('weekly', id, ds, y, 'AutoARIMA', 5, '1w', {max_models: -1});
+----
+max_models
+
+statement error
+SELECT * FROM ts_cv_forecast_by('weekly_folds', id, ds, y, 'AutoARIMA', {time_budget_ms: -5});
+----
+time_budget_ms

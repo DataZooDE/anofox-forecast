@@ -60,6 +60,8 @@ struct TsForecastNativeBindData : public TableFunctionData {
     // ARIMA order params (D-08/D-09, plan 10-02)
     string arima_order = "";
     string seasonal_order = "";
+    int64_t max_models = 0;     // AutoARIMA only, 0 = default (#318)
+    int64_t time_budget_ms = 0; // AutoARIMA only, 0 = unbounded (#318)
 
     // Type preservation
     DateColumnType date_col_type = DateColumnType::TIMESTAMP;
@@ -287,7 +289,8 @@ static void ValidateParamKeys(const Value &params_value) {
         "laplace_variant", "laplace_seasonal_batch_init",
         "garch_p", "garch_q", "kalman_model",
         "top_k", "combination_method",   // Phase 4: AutoEnsemble params
-        "arima_order", "seasonal_order"  // D-08/D-09, plan 10-02
+        "arima_order", "seasonal_order", // D-08/D-09, plan 10-02
+        "max_models", "time_budget_ms"   // AutoARIMA fit-cost limits (#318)
     };
 
     vector<string> unknown_keys;
@@ -317,7 +320,7 @@ static void ValidateParamKeys(const Value &params_value) {
             unknown_list += "'" + unknown_keys[i] + "'";
         }
         throw InvalidInputException(
-            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init, garch_p, garch_q, kalman_model, top_k, combination_method, arima_order, seasonal_order",
+            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init, garch_p, garch_q, kalman_model, top_k, combination_method, arima_order, seasonal_order, max_models, time_budget_ms",
             unknown_list);
     }
 }
@@ -379,6 +382,8 @@ static unique_ptr<FunctionData> TsForecastNativeBind(
         // ARIMA order params (D-08/D-09, plan 10-02)
         bind_data->arima_order = ParseStringFromParams(params, "arima_order", "");
         bind_data->seasonal_order = ParseStringFromParams(params, "seasonal_order", "");
+        bind_data->max_models = ParseInt64FromParams(params, "max_models", 0);
+        bind_data->time_budget_ms = ParseInt64FromParams(params, "time_budget_ms", 0);
 
         // WR-03: reject arima_order/seasonal_order strings that would
         // silently truncate when copied into the fixed 32-byte
@@ -709,6 +714,8 @@ static OperatorFinalizeResultType TsForecastNativeFinalize(
                         sizeof(opts.seasonal_order_str) - 1);
                 opts.seasonal_order_str[sizeof(opts.seasonal_order_str) - 1] = '\0';
             }
+            opts.max_models = bind_data.max_models;
+            opts.time_budget_ms = bind_data.time_budget_ms;
 
             // Call Rust FFI
             ForecastResult fcst_result;
