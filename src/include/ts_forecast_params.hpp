@@ -46,6 +46,7 @@ struct ForecastParamSet {
     string seasonal_order = "";
     int64_t max_models = 0;     // AutoARIMA only, 0 = default (#318)
     int64_t time_budget_ms = 0; // AutoARIMA only, 0 = unbounded (#318)
+    string fixed_params = "";   // packed ETS/TSB/ARIMA fixed params (#317)
 };
 
 // Verbatim semantics of the former ts_forecast_scalar.cpp ParseStringParam:
@@ -107,7 +108,43 @@ inline double ForecastParamDouble(const Value &params_value, const string &key, 
     }
 }
 
-// The 17-key closed set every forecast surface (ts_forecast_native.cpp,
+// Externally supplied ETS / TSB / ARIMA parameters (#317). Each surface
+// passes the raw values through as `key=value;...` in
+// ForecastOptions::fixed_params_str; Rust parses and validates them strictly
+// (parse_fixed_params / validate_fixed_params), so this is the only list.
+static const char *const FIXED_PARAM_KEYS[] = {
+    "alpha", "beta", "gamma", "phi", "alpha_d", "alpha_p",
+    "ar_coefficients", "ma_coefficients", "seasonal_ar_coefficients", "seasonal_ma_coefficients",
+    "intercept"};
+
+// Packs the supplied fixed-parameter keys of a (normalized) params MAP or
+// STRUCT. A DOUBLE[] value arrives as "[0.5, -0.2]". `;` / `=` inside a
+// value would let one key smuggle in another, so they are rejected.
+inline string PackFixedParams(const Value &params_value) {
+    string packed;
+    for (auto key : FIXED_PARAM_KEYS) {
+        string v = ForecastParamString(params_value, key, "");
+        if (v.empty()) {
+            continue;
+        }
+        if (v.find(';') != string::npos || v.find('=') != string::npos) {
+            throw InvalidInputException("Invalid value for parameter '%s': '%s'", key, v);
+        }
+        packed += string(key) + "=" + v + ";";
+    }
+    if (packed.size() > sizeof(ForecastOptions::fixed_params_str) - 1) {
+        throw InvalidInputException("Fixed model parameters are too long (max %d characters)",
+                                    (int)(sizeof(ForecastOptions::fixed_params_str) - 1));
+    }
+    return packed;
+}
+
+inline void SetFixedParams(char (&dst)[1024], const string &packed) {
+    strncpy(dst, packed.c_str(), sizeof(dst) - 1);
+    dst[sizeof(dst) - 1] = '\0';
+}
+
+// The 28-key closed set every forecast surface (ts_forecast_native.cpp,
 // ts_cv_forecast_native.cpp, ts_forecast.cpp's exog path, and now this
 // shared header for ts_forecast_by/ts_forecast_agg) validates against.
 // Message text is byte-identical to ts_forecast_native.cpp's
@@ -120,7 +157,10 @@ inline void ValidateForecastParamKeys(const Value &params_value) {
         "garch_p", "garch_q", "kalman_model",
         "top_k", "combination_method",  // Phase 4: AutoEnsemble params
         "arima_order", "seasonal_order", // D-08/D-09, plan 10-02
-        "max_models", "time_budget_ms"   // AutoARIMA fit-cost limits (#318)
+        "max_models", "time_budget_ms",  // AutoARIMA fit-cost limits (#318)
+        "alpha", "beta", "gamma", "phi", "alpha_d", "alpha_p", // fixed params (#317)
+        "ar_coefficients", "ma_coefficients", "seasonal_ar_coefficients", "seasonal_ma_coefficients",
+        "intercept"
     };
 
     if (params_value.IsNull()) {
@@ -155,7 +195,7 @@ inline void ValidateForecastParamKeys(const Value &params_value) {
             unknown_list += "'" + unknown_keys[i] + "'";
         }
         throw InvalidInputException(
-            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init, garch_p, garch_q, kalman_model, top_k, combination_method, arima_order, seasonal_order, max_models, time_budget_ms",
+            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init, garch_p, garch_q, kalman_model, top_k, combination_method, arima_order, seasonal_order, max_models, time_budget_ms, alpha, beta, gamma, phi, alpha_d, alpha_p, ar_coefficients, ma_coefficients, seasonal_ar_coefficients, seasonal_ma_coefficients, intercept",
             unknown_list);
     }
 }
@@ -190,6 +230,7 @@ inline ForecastParamSet ParseForecastParamSet(const Value &params_in) {
     p.seasonal_order = ForecastParamString(params_value, "seasonal_order", "");
     p.max_models = ForecastParamInt64(params_value, "max_models", 0);
     p.time_budget_ms = ForecastParamInt64(params_value, "time_budget_ms", 0);
+    p.fixed_params = PackFixedParams(params_value);
 
     // WR-03: reject arima_order/seasonal_order strings that would silently
     // truncate when ApplyForecastParamSet below copies them into the fixed
@@ -279,6 +320,7 @@ inline void ApplyForecastParamSet(const ForecastParamSet &p, const string &metho
     // AutoARIMA fit-cost limits (#318); validated in Rust.
     opts.max_models = p.max_models;
     opts.time_budget_ms = p.time_budget_ms;
+    SetFixedParams(opts.fixed_params_str, p.fixed_params);
 }
 
 } // namespace duckdb

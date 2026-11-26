@@ -7,13 +7,13 @@ description: >
   time-series-aware CV, computing metrics (MAE / RMSE / MAPE /
   MASE / coverage), or attaching distribution-free prediction
   intervals to forecasts.
-version: 2026.11.25
+version: 2026.11.26
 user-invocable: false
 ---
 
 # Anofox Forecast — Backtesting, CV, Metrics & Conformal Cheat Sheet
 
-**Extension:** `anofox_forecast` v2026.11.25 (Rust crate `anofox-forecast` v0.22.0) | **DuckDB:** v2.0.0 / v1.5.6 | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
+**Extension:** `anofox_forecast` v2026.11.26 (Rust crate `anofox-forecast` v0.23.0) | **DuckDB:** v2.0.0 / v1.5.6 | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
 
 Time-series-aware cross-validation, error metrics, and distribution-free intervals.
 

@@ -10,6 +10,34 @@ use the semver numbering this project started with.
 
 ## [Unreleased]
 
+## [2026.11.26] - 2026-11-26 — forecasting with given model parameters
+
+### Added
+
+- **Forecasting with given model parameters (#317).** For hyper-model forecasting (a
+  global learner predicts the parameters of a classical model), `ETS`, `TSB` and `ARIMA`
+  accept externally supplied parameters, used exactly as given:
+  - `ETS` with a `model` spec: `alpha`, `beta`, `gamma`, `phi`. Only the initial states are
+    estimated, by maximum likelihood (crate `ETS::with_fixed_params`).
+  - `TSB`: `alpha_d`, `alpha_p`.
+  - `ARIMA` with `arima_order`: `ar_coefficients`, `ma_coefficients`,
+    `seasonal_ar_coefficients`, `seasonal_ma_coefficients`, `intercept` (R `Arima`'s mean
+    of the differenced series). Nothing is estimated.
+
+  Each key is valid only with its own model, a missing or extra parameter for the spec is
+  an error, and unparsable values are errors, not defaults. They work on
+  `ts_forecast_by`, `ts_forecast_agg`, `ts_forecast_exog_by`, `ts_cv_forecast_by`,
+  `ts_forecast_inspect_by` and `ts_forecast_explain_by`. Time-varying parameters are not
+  supported.
+- **`ts_forecast_inspect_by` accepts a fixed-spec `'ETS'`** (with a `model` spec), so its
+  fitted or given parameters and initial states can be read back. Without a spec, `'ETS'`
+  is inspected as AutoETS selection.
+
+### Changed — dependencies
+
+- **`anofox-forecast` 0.22.0 → 0.23.0** (`ETS::with_fixed_params`, `Inspectable` for
+  `ETS`). No existing SQL signature, output column or result changes.
+
 ## [2026.11.25] - 2026-11-25 — bounded AutoARIMA fits, AutoETS seasonal component
 
 ### Fixed

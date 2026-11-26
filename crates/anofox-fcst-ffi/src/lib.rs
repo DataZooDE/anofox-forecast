@@ -4494,6 +4494,8 @@ unsafe fn build_core_options(
     let seasonal_order =
         anofox_fcst_core::parse_order_triplet("seasonal_order", seasonal_order_str)?;
     let auto_arima_limits = auto_arima_limits(opts.max_models, opts.time_budget_ms)?;
+    let fixed_params =
+        anofox_fcst_core::parse_fixed_params(c_field_str(&opts.fixed_params_str, "fixed_params")?)?;
 
     Ok(anofox_fcst_core::ForecastOptions {
         model: model_type,
@@ -4517,6 +4519,7 @@ unsafe fn build_core_options(
         arima_order,
         seasonal_order,
         auto_arima_limits,
+        fixed_params,
     })
 }
 
@@ -4563,6 +4566,8 @@ unsafe fn build_core_options_exog(
     let seasonal_order =
         anofox_fcst_core::parse_order_triplet("seasonal_order", seasonal_order_str)?;
     let auto_arima_limits = auto_arima_limits(opts.max_models, opts.time_budget_ms)?;
+    let fixed_params =
+        anofox_fcst_core::parse_fixed_params(c_field_str(&opts.fixed_params_str, "fixed_params")?)?;
 
     Ok(anofox_fcst_core::ForecastOptionsExog {
         model: model_type,
@@ -4587,6 +4592,7 @@ unsafe fn build_core_options_exog(
         arima_order,
         seasonal_order,
         auto_arima_limits,
+        fixed_params,
     })
 }
 

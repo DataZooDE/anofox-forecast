@@ -18,13 +18,13 @@ description: >
   exogenous regressors, or writing `ts_forecast_by` / `ts_forecast` /
   `ts_forecast_exog_by` / `ts_forecast_agg` / `ts_forecast_var_by` /
   `ts_forecast_ensemble_by` calls.
-version: 2026.11.25
+version: 2026.11.26
 user-invocable: false
 ---
 
 # Anofox Forecast — Models & `ts_forecast_by` Cheat Sheet
 
-**Extension:** `anofox_forecast` v2026.11.25 (Rust crate `anofox-forecast` v0.22.0) | **DuckDB:** v2.0.0 / v1.5.6 | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
+**Extension:** `anofox_forecast` v2026.11.26 (Rust crate `anofox-forecast` v0.23.0) | **DuckDB:** v2.0.0 / v1.5.6 | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
 
 36 forecasting models exposed by SQL via three call surfaces (table macro, aggregate, scalar) + `ts_forecast_var_by` for multivariate VAR.
 
@@ -633,6 +633,14 @@ uses, so `['ETS','ETS']` as an ensemble member equals standalone `'ETS'` bit-for
 is a hard error naming `AutoARIMA`; with an order, it runs a real crate fit and `model_name`
 appends `" with drift"` / `" with non-zero mean"` when the crate's own AICc comparison keeps
 a non-zero intercept.
+**Given model parameters (#317):** for hyper-model forecasting, `ETS` (with `model`) takes
+fixed `alpha`/`beta`/`gamma`/`phi` (only the initial states are estimated), `TSB` takes
+`alpha_d`/`alpha_p`, and `ARIMA` (with `arima_order`) takes `ar_coefficients`,
+`ma_coefficients`, `seasonal_ar_coefficients`, `seasonal_ma_coefficients` and `intercept` (R
+`Arima` mean). Every parameter the spec uses must be given; each key errors on any other
+model. Read AutoETS's choice back with `ts_forecast_inspect_by` and feed it in, e.g.
+`{model: 'AAA', seasonal_period: 12, alpha: 0.1, beta: 0.01, gamma: 0.2}`.
+
 **AutoARIMA fit cost (#318):** a long seasonal period (m = 30/52 on hundreds of weekly
 points, m = 24 hourly) makes one fit take minutes, which looks like a hang in a batch. Bound
 it with `max_models` (cap on the stepwise search, default 94, deterministic) or
@@ -787,7 +795,7 @@ Fit-state snapshot. Signature returns `TABLE(group_col, inspection STRUCT(...))`
 
 Fields not in the current family are `NULL`. `raw_json` carries the full serde payload.
 
-Supported models: `AutoETS`, `AutoARIMA`, `AutoTheta`, `AutoTBATS`, `MFLES`, `AutoMFLES`, `MSTL`, `AutoMSTL`, `Laplace`. Others raise `does not implement Inspectable`.
+Supported models: `ETS` (with a `model` spec), `AutoETS`, `AutoARIMA`, `AutoTheta`, `AutoTBATS`, `MFLES`, `AutoMFLES`, `MSTL`, `AutoMSTL`, `Laplace`. Others raise `does not implement Inspectable`.
 
 ```sql
 -- Read AutoETS smoothing params per group

@@ -468,6 +468,11 @@ pub struct ForecastOptions {
     /// 0 = unbounded (default); negative is an error. Only valid when model
     /// is "AutoARIMA".
     pub time_budget_ms: i64,
+    /// Externally supplied ETS / TSB / ARIMA parameters (#317) as
+    /// `key=value` pairs separated by `;`, e.g.
+    /// `"alpha=0.3;beta=0.05"` or `"ar_coefficients=[0.5, -0.2]"`. Empty =
+    /// none. Parsed and validated by `anofox_fcst_core::parse_fixed_params`.
+    pub fixed_params_str: [c_char; 1024],
 }
 
 /// Panel forecast result — returned by `anofox_ts_forecast_panel`.
@@ -557,6 +562,7 @@ impl Default for ForecastOptions {
             seasonal_order_str: [0; 32],
             max_models: 0,
             time_budget_ms: 0,
+            fixed_params_str: [0; 1024],
         }
     }
 }
@@ -659,6 +665,8 @@ pub struct ForecastOptionsExog {
     pub max_models: i64,
     /// AutoARIMA time budget. See [`ForecastOptions::time_budget_ms`].
     pub time_budget_ms: i64,
+    /// Fixed model parameters. See [`ForecastOptions::fixed_params_str`].
+    pub fixed_params_str: [c_char; 1024],
 }
 
 impl Default for ForecastOptionsExog {
@@ -692,6 +700,7 @@ impl Default for ForecastOptionsExog {
             seasonal_order_str: [0; 32],
             max_models: 0,
             time_budget_ms: 0,
+            fixed_params_str: [0; 1024],
         }
     }
 }

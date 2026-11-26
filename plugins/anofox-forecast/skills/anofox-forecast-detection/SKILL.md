@@ -6,13 +6,13 @@ description: >
   periods before configuring seasonal forecasting models, detecting
   structural breaks, analysing peak timing regularity, or decomposing
   a series into trend / seasonal / residual components.
-version: 2026.11.25
+version: 2026.11.26
 user-invocable: false
 ---
 
 # Anofox Forecast — Detection & Decomposition Cheat Sheet
 
-**Extension:** `anofox_forecast` v2026.11.25 (Rust crate `anofox-forecast` v0.22.0) | **DuckDB:** v2.0.0 / v1.5.6 | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
+**Extension:** `anofox_forecast` v2026.11.26 (Rust crate `anofox-forecast` v0.23.0) | **DuckDB:** v2.0.0 / v1.5.6 | **Dual naming:** `ts_*` and `anofox_fcst_ts_*`
 
 Detect signal structure. When both `seasonal_period` and `seasonal_periods` are omitted,
 `ts_forecast_by` / `ts_cv_forecast_by` / the scalar paths / `ts_forecast_agg` all auto-detect

@@ -1,12 +1,13 @@
 //! Forecasting module wrapping anofox-forecast crate.
 
 use crate::error::{ForecastError, Result};
+use crate::fixed_params::{check_arima_coefficients, validate_fixed_params, FixedParams};
 use crate::imputation::fill_nulls_interpolate;
 use crate::seasonality::detect_seasonality;
 
 // Model types from anofox-forecast crate
 use anofox_forecast::core::{CalendarAnnotations, TimeSeries};
-use anofox_forecast::models::arima::{AutoARIMA, AutoARIMAConfig, ARIMA, SARIMA};
+use anofox_forecast::models::arima::{AutoARIMA, AutoARIMAConfig, SARIMASpec, ARIMA, SARIMA};
 use anofox_forecast::models::baseline::{
     Naive, SeasonalNaive as SeasonalNaiveModel,
     SeasonalWindowAverage as SeasonalWindowAverageModel, SimpleMovingAverage,
@@ -450,6 +451,9 @@ pub struct ForecastOptions {
     /// AutoARIMA fit-cost limits (#318). Default = unbounded, identical to
     /// the crate default. Only valid when model is `AutoARIMA`.
     pub auto_arima_limits: AutoArimaLimits,
+    /// Externally supplied ETS / TSB / ARIMA parameters (#317). Default =
+    /// none, every parameter estimated.
+    pub fixed_params: FixedParams,
 }
 
 impl Default for ForecastOptions {
@@ -476,6 +480,7 @@ impl Default for ForecastOptions {
             arima_order: None,
             seasonal_order: None,
             auto_arima_limits: AutoArimaLimits::default(),
+            fixed_params: FixedParams::default(),
         }
     }
 }
@@ -597,6 +602,8 @@ pub struct ForecastOptionsExog {
     pub seasonal_order: Option<[usize; 3]>,
     /// AutoARIMA fit-cost limits. See [`ForecastOptions::auto_arima_limits`].
     pub auto_arima_limits: AutoArimaLimits,
+    /// Fixed model parameters. See [`ForecastOptions::fixed_params`].
+    pub fixed_params: FixedParams,
 }
 
 impl Default for ForecastOptionsExog {
@@ -624,6 +631,7 @@ impl Default for ForecastOptionsExog {
             arima_order: None,
             seasonal_order: None,
             auto_arima_limits: AutoArimaLimits::default(),
+            fixed_params: FixedParams::default(),
         }
     }
 }
@@ -653,6 +661,7 @@ impl From<ForecastOptions> for ForecastOptionsExog {
             arima_order: opts.arima_order,
             seasonal_order: opts.seasonal_order,
             auto_arima_limits: opts.auto_arima_limits,
+            fixed_params: opts.fixed_params,
         }
     }
 }
@@ -689,6 +698,7 @@ impl From<&ForecastOptionsExog> for ForecastOptions {
             arima_order: opts.arima_order,
             seasonal_order: opts.seasonal_order,
             auto_arima_limits: opts.auto_arima_limits,
+            fixed_params: opts.fixed_params.clone(),
         }
     }
 }
@@ -765,6 +775,11 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
         });
     }
     validate_auto_arima_limits(options.model, &options.auto_arima_limits)?;
+    validate_fixed_params(
+        options.model,
+        options.ets_spec.as_deref(),
+        &options.fixed_params,
+    )?;
 
     // Generate forecast based on model
     // Note: Auto* models (AutoARIMA, AutoETS, etc.) run their respective algorithms
@@ -810,6 +825,7 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
             extended_horizon,
             period,
             options.ets_spec.as_deref(),
+            &options.fixed_params,
             level,
         ),
         ModelType::AutoETS => forecast_auto_ets(
@@ -839,6 +855,7 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
             options.seasonal_period,
             options.arima_order,
             options.seasonal_order,
+            &options.fixed_params,
         ),
         ModelType::AutoARIMA => forecast_auto_arima(
             &prep.values,
@@ -899,7 +916,9 @@ pub fn forecast(values: &[Option<f64>], options: &ForecastOptions) -> Result<For
             forecast_croston_optimized(&prep.values, extended_horizon, level)
         }
         ModelType::CrostonSBA => forecast_croston_sba(&prep.values, extended_horizon, level),
-        ModelType::TSB => forecast_tsb(&prep.values, extended_horizon, level),
+        ModelType::TSB => {
+            forecast_tsb(&prep.values, extended_horizon, &options.fixed_params, level)
+        }
         ModelType::ADIDA => forecast_adida(&prep.values, extended_horizon, level),
         ModelType::IMAPA => forecast_imapa(&prep.values, extended_horizon, level),
         // Distributional
@@ -1105,6 +1124,11 @@ pub fn forecast_with_exog(
     )?;
 
     validate_auto_arima_limits(options.model, &options.auto_arima_limits)?;
+    validate_fixed_params(
+        options.model,
+        options.ets_spec.as_deref(),
+        &options.fixed_params,
+    )?;
 
     let mut result = forecast_crate_exog(
         &prep.values,
@@ -1343,7 +1367,7 @@ fn forecast_crate_exog(
                 let s = options.seasonal_period;
                 let name = format!("ARIMA({p},{d},{q})({cap_p},{cap_d},{cap_q})[{s}]");
                 fit_predict_exog(
-                    SARIMA::new(p, d, q, cap_p, cap_d, cap_q, s),
+                    new_sarima_model(p, d, q, cap_p, cap_d, cap_q, s, &options.fixed_params)?,
                     &ts,
                     horizon,
                     &future_map,
@@ -1354,7 +1378,7 @@ fn forecast_crate_exog(
             } else {
                 let name = format!("ARIMA({p},{d},{q})");
                 fit_predict_exog(
-                    ARIMA::new(p, d, q),
+                    new_arima_model(p, d, q, &options.fixed_params)?,
                     &ts,
                     horizon,
                     &future_map,
@@ -1437,14 +1461,9 @@ fn forecast_crate_exog(
                         notation, e
                     ))
                 })?;
-                let seasonal_period = if parsed_spec.has_seasonal() && period > 1 {
-                    period
-                } else {
-                    1
-                };
                 let name = parsed_spec.short_name();
                 fit_predict_exog(
-                    ETSModel::new(parsed_spec, seasonal_period),
+                    new_ets_model(parsed_spec, period, &options.fixed_params)?,
                     &ts,
                     horizon,
                     &future_map,
@@ -1980,6 +1999,7 @@ fn forecast_ets(
     horizon: usize,
     period: usize,
     ets_spec: Option<&str>,
+    fixed: &FixedParams,
     level: f64,
 ) -> Result<ForecastOutput> {
     // Parse and validate ETS specification if provided
@@ -2013,7 +2033,10 @@ fn forecast_ets(
         // User explicitly requested this spec — if it fails to fit,
         // return ComputationError so the group is skipped (null forecast),
         // not an InvalidInput error that would abort the whole pipeline.
-        return forecast_with_ets_spec(values, horizon, period, &parsed_spec, level).map_err(|e| {
+        // Fixed parameters that don't fit the spec are a hard error (#317),
+        // raised before the fit-failure mapping below.
+        let model = new_ets_model(parsed_spec, period, fixed)?;
+        return forecast_with_ets_spec(values, horizon, model, &parsed_spec, level).map_err(|e| {
             ForecastError::ComputationError(format!(
                 "ETS model '{}' failed to fit: {}",
                 notation, e
@@ -2028,26 +2051,90 @@ fn forecast_ets(
     forecast_auto_ets_core(values, horizon, period, None, level, false)
 }
 
-/// Forecast using the anofox-forecast ETS model with explicit spec.
-fn forecast_with_ets_spec(
-    values: &[f64],
-    horizon: usize,
-    period: usize,
-    spec: &ETSSpec,
-    level: f64,
-) -> Result<ForecastOutput> {
-    // Determine seasonal period for the model
+/// ETS for an explicit spec. Supplied smoothing parameters (#317) are kept
+/// exactly and only the initial states are estimated; otherwise the crate's
+/// joint optimiser estimates everything. A non-seasonal spec (or no usable
+/// period) runs with period 1.
+fn new_ets_model(spec: ETSSpec, period: usize, fixed: &FixedParams) -> Result<ETSModel> {
     let seasonal_period = if spec.has_seasonal() && period > 1 {
         period
     } else {
         1
     };
+    if !fixed.has_ets() {
+        return Ok(ETSModel::new(spec, seasonal_period));
+    }
+    ETSModel::with_fixed_params(
+        spec,
+        seasonal_period,
+        fixed.alpha.unwrap_or(f64::NAN),
+        fixed.beta,
+        fixed.gamma,
+        fixed.phi,
+    )
+    .map_err(|e| ForecastError::InvalidInput(format!("fixed ETS parameters: {e}")))
+}
 
+/// Non-seasonal ARIMA at `[p, d, q]`: fixed coefficients (#317) when any are
+/// supplied (checked against the order), otherwise estimated. The crate's
+/// ARIMA stores the intercept in mean form, R `Arima`'s convention.
+fn new_arima_model(p: usize, d: usize, q: usize, fixed: &FixedParams) -> Result<ARIMA> {
+    if !fixed.has_arima() {
+        return Ok(ARIMA::new(p, d, q));
+    }
+    check_arima_coefficients(fixed, [p, d, q], None)?;
+    Ok(ARIMA::with_coefficients(
+        p,
+        d,
+        q,
+        fixed.ar.clone().unwrap_or_default(),
+        fixed.ma.clone().unwrap_or_default(),
+        fixed.intercept.unwrap_or(0.0),
+    ))
+}
+
+/// SARIMA counterpart of [`new_arima_model`]. `intercept` is the mean of the
+/// differenced series (R `Arima`); the crate's SARIMA stores the constant
+/// form `c = mu * phi(1) * Phi(1)`, so it is converted here.
+#[allow(clippy::too_many_arguments)]
+fn new_sarima_model(
+    p: usize,
+    d: usize,
+    q: usize,
+    cap_p: usize,
+    cap_d: usize,
+    cap_q: usize,
+    s: usize,
+    fixed: &FixedParams,
+) -> Result<SARIMA> {
+    if !fixed.has_arima() {
+        return Ok(SARIMA::new(p, d, q, cap_p, cap_d, cap_q, s));
+    }
+    check_arima_coefficients(fixed, [p, d, q], Some([cap_p, cap_d, cap_q]))?;
+    let ar = fixed.ar.clone().unwrap_or_default();
+    let sar = fixed.sar.clone().unwrap_or_default();
+    let mu = fixed.intercept.unwrap_or(0.0);
+    let c = mu * (1.0 - ar.iter().sum::<f64>()) * (1.0 - sar.iter().sum::<f64>());
+    Ok(SARIMA::with_coefficients(
+        SARIMASpec::new(p, d, q, cap_p, cap_d, cap_q, s),
+        ar,
+        fixed.ma.clone().unwrap_or_default(),
+        sar,
+        fixed.sma.clone().unwrap_or_default(),
+        c,
+    ))
+}
+
+/// Forecast using the anofox-forecast ETS model with explicit spec.
+fn forecast_with_ets_spec(
+    values: &[f64],
+    horizon: usize,
+    mut forecaster: ETSModel,
+    spec: &ETSSpec,
+    level: f64,
+) -> Result<ForecastOutput> {
     // Create TimeSeries from values (must include timestamps)
     let time_series = make_timeseries(values)?;
-
-    // Create the ETS forecaster
-    let mut forecaster = ETSModel::new(*spec, seasonal_period);
 
     // Fit the model
     forecaster
@@ -2206,6 +2293,7 @@ fn forecast_arima(
     seasonal_period: usize,
     arima_order: Option<[usize; 3]>,
     seasonal_order: Option<[usize; 3]>,
+    fixed: &FixedParams,
 ) -> Result<ForecastOutput> {
     let Some([p, d, q]) = arima_order else {
         return Err(ForecastError::InvalidInput(
@@ -2244,7 +2332,7 @@ fn forecast_arima(
         let [cap_p, cap_d, cap_q] = seasonal_order.expect("seasonal_nonzero implies Some");
         let s = seasonal_period;
         let name = format!("ARIMA({p},{d},{q})({cap_p},{cap_d},{cap_q})[{s}]");
-        let mut model = SARIMA::new(p, d, q, cap_p, cap_d, cap_q, s);
+        let mut model = new_sarima_model(p, d, q, cap_p, cap_d, cap_q, s, fixed)?;
         model
             .fit(&ts)
             .map_err(|e| ForecastError::ComputationError(format!("{name} fit failed: {e}")))?;
@@ -2259,7 +2347,7 @@ fn forecast_arima(
         out
     } else {
         let name = format!("ARIMA({p},{d},{q})");
-        let mut model = ARIMA::new(p, d, q);
+        let mut model = new_arima_model(p, d, q, fixed)?;
         model
             .fit(&ts)
             .map_err(|e| ForecastError::ComputationError(format!("{name} fit failed: {e}")))?;
@@ -2607,6 +2695,11 @@ pub fn forecast_inspect(values: &[Option<f64>], options: &ForecastOptions) -> Re
 
     // Explicit input policy (D-11/D-12) — see forecast()'s matching comment.
     validate_auto_arima_limits(options.model, &options.auto_arima_limits)?;
+    validate_fixed_params(
+        options.model,
+        options.ets_spec.as_deref(),
+        &options.fixed_params,
+    )?;
 
     let prep = prepare_series(values)?;
 
@@ -2634,6 +2727,29 @@ pub fn forecast_inspect(values: &[Option<f64>], options: &ForecastOptions) -> Re
                 None => None,
             };
             let mut model = new_auto_ets(period, pool);
+            model.fit(&ts).map_err(|e| {
+                ForecastError::ComputationError(format!("AutoETS fit failed: {e}"))
+            })?;
+            Inspectable::explanation(&model)
+        }
+        // A fixed-spec 'ETS' (#317): fitted with any supplied smoothing
+        // parameters. Without a spec, 'ETS' is AutoETS selection and is
+        // inspected as such.
+        ModelType::ETS if options.ets_spec.is_some() => {
+            let notation = options.ets_spec.as_deref().unwrap_or_default();
+            let spec = ETSSpec::from_notation(notation).map_err(|e| {
+                ForecastError::InvalidInput(format!(
+                    "Invalid ETS model specification '{notation}': {e}"
+                ))
+            })?;
+            let mut model = new_ets_model(spec, period, &options.fixed_params)?;
+            model.fit(&ts).map_err(|e| {
+                ForecastError::ComputationError(format!("ETS fit failed: {e}"))
+            })?;
+            Inspectable::explanation(&model)
+        }
+        ModelType::ETS => {
+            let mut model = new_auto_ets(period, None);
             model.fit(&ts).map_err(|e| {
                 ForecastError::ComputationError(format!("AutoETS fit failed: {e}"))
             })?;
@@ -2718,7 +2834,7 @@ pub fn forecast_inspect(values: &[Option<f64>], options: &ForecastOptions) -> Re
         other => {
             return Err(ForecastError::InvalidModel(format!(
                 "Model '{}' does not implement Inspectable. Supported models: \
-                 AutoETS, AutoARIMA, AutoTheta, AutoTBATS, MFLES, AutoMFLES, MSTL, AutoMSTL, Laplace.",
+                 ETS, AutoETS, AutoARIMA, AutoTheta, AutoTBATS, MFLES, AutoMFLES, MSTL, AutoMSTL, Laplace.",
                 other.name()
             )));
         }
@@ -2748,13 +2864,18 @@ pub fn forecast_explain(
     options: &ForecastOptions,
 ) -> Result<String> {
     use anofox_forecast::models::explain::{Explainable, ForecastExplanation};
-    use anofox_forecast::models::exponential::{ETSSpec, ETS as ETSModel};
+    use anofox_forecast::models::exponential::ETSSpec;
     use anofox_forecast::models::mstl_forecaster::MSTLForecaster;
     use anofox_forecast::models::theta::Theta;
     use anofox_forecast::prelude::Forecaster;
 
     // Explicit input policy (D-11/D-12) — see forecast()'s matching comment.
     validate_auto_arima_limits(options.model, &options.auto_arima_limits)?;
+    validate_fixed_params(
+        options.model,
+        options.ets_spec.as_deref(),
+        &options.fixed_params,
+    )?;
 
     let prep = prepare_series(values)?;
 
@@ -2787,7 +2908,7 @@ pub fn forecast_explain(
             let parsed = ETSSpec::from_notation(spec).map_err(|e| {
                 ForecastError::ComputationError(format!("Invalid ETS spec '{spec}': {e}"))
             })?;
-            let mut model = ETSModel::new(parsed, period);
+            let mut model = new_ets_model(parsed, period, &options.fixed_params)?;
             model
                 .fit(&ts)
                 .map_err(|e| ForecastError::ComputationError(format!("ETS fit failed: {e}")))?;
@@ -3432,9 +3553,19 @@ fn forecast_croston_sba(values: &[f64], horizon: usize, level: f64) -> Result<Fo
     extract_forecast(&model, horizon, level, "CrostonSBA")
 }
 
-fn forecast_tsb(values: &[f64], horizon: usize, level: f64) -> Result<ForecastOutput> {
+fn forecast_tsb(
+    values: &[f64],
+    horizon: usize,
+    fixed: &FixedParams,
+    level: f64,
+) -> Result<ForecastOutput> {
     let ts = make_timeseries(values)?;
     let mut model = TSB::new();
+    // Supplied smoothing (#317; range checked in validate_fixed_params). An
+    // omitted one keeps the crate default 0.1.
+    if fixed.has_tsb() {
+        model = model.with_params(fixed.alpha_d.unwrap_or(0.1), fixed.alpha_p.unwrap_or(0.1));
+    }
     model
         .fit(&ts)
         .map_err(|e| ForecastError::ComputationError(format!("TSB fit failed: {}", e)))?;
@@ -4492,6 +4623,173 @@ mod tests {
                     "expected an error naming {param} and AutoARIMA, got: {msg}"
                 );
             }
+        }
+    }
+
+    fn monthly_series(n: usize) -> Vec<f64> {
+        (0..n)
+            .map(|i| {
+                let t = i as f64;
+                (120.0 + 2.5 * t) * (1.0 + 0.2 * (2.0 * std::f64::consts::PI * t / 12.0).sin())
+                    + ((i * 7919) % 11) as f64
+            })
+            .collect()
+    }
+
+    fn fixed_forecast(
+        model: ModelType,
+        extra: impl FnOnce(&mut ForecastOptions),
+    ) -> Result<Vec<f64>> {
+        let values: Vec<Option<f64>> = monthly_series(96).into_iter().map(Some).collect();
+        let mut options = ForecastOptions {
+            model,
+            horizon: 12,
+            auto_detect_seasonality: false,
+            ..Default::default()
+        };
+        extra(&mut options);
+        forecast(&values, &options).map(|o| o.point)
+    }
+
+    #[test]
+    fn test_fixed_arima_coefficients_round_trip() {
+        // #317: the estimated model's own coefficients, passed back as fixed
+        // parameters, give the same forecast (intercept in R's mean form).
+        let ts = make_timeseries(&monthly_series(96)).unwrap();
+        let mut est = ARIMA::new(1, 0, 1);
+        est.fit(&ts).unwrap();
+        let expected = est.predict(12).unwrap().primary().to_vec();
+        let got = fixed_forecast(ModelType::ARIMA, |o| {
+            o.arima_order = Some([1, 0, 1]);
+            o.fixed_params = FixedParams {
+                ar: Some(est.ar_coefficients().to_vec()),
+                ma: Some(est.ma_coefficients().to_vec()),
+                intercept: Some(est.intercept()),
+                ..Default::default()
+            };
+        })
+        .unwrap();
+        for (g, e) in got.iter().zip(&expected) {
+            assert!((g - e).abs() < 1e-8 * e.abs().max(1.0), "{g} vs {e}");
+        }
+    }
+
+    #[test]
+    fn test_fixed_sarima_coefficients_round_trip() {
+        // The crate's SARIMA stores c = mu * phi(1) * Phi(1); the SQL
+        // intercept is mu, so the round trip checks the conversion.
+        let ts = make_timeseries(&monthly_series(96)).unwrap();
+        let mut est = SARIMA::new(1, 0, 0, 1, 1, 0, 12);
+        est.fit(&ts).unwrap();
+        let expected = est.predict(12).unwrap().primary().to_vec();
+        let ar = est.ar_coefficients().to_vec();
+        let sar = est.seasonal_ar_coefficients().to_vec();
+        let mu =
+            est.intercept() / ((1.0 - ar.iter().sum::<f64>()) * (1.0 - sar.iter().sum::<f64>()));
+        let got = fixed_forecast(ModelType::ARIMA, |o| {
+            o.arima_order = Some([1, 0, 0]);
+            o.seasonal_order = Some([1, 1, 0]);
+            o.seasonal_period = 12;
+            o.fixed_params = FixedParams {
+                ar: Some(ar),
+                sar: Some(sar),
+                intercept: Some(mu),
+                ..Default::default()
+            };
+        })
+        .unwrap();
+        for (g, e) in got.iter().zip(&expected) {
+            assert!((g - e).abs() < 1e-8 * e.abs().max(1.0), "{g} vs {e}");
+        }
+    }
+
+    #[test]
+    fn test_fixed_ets_and_tsb_params() {
+        // ETS: the given smoothing parameters are used (inspection reports
+        // them) and the forecast differs from the estimated fit.
+        let est = fixed_forecast(ModelType::ETS, |o| {
+            o.ets_spec = Some("AAA".into());
+            o.seasonal_period = 12;
+        })
+        .unwrap();
+        let set = |o: &mut ForecastOptions| {
+            o.ets_spec = Some("AAA".into());
+            o.seasonal_period = 12;
+            o.fixed_params = FixedParams {
+                alpha: Some(0.05),
+                beta: Some(0.01),
+                gamma: Some(0.3),
+                ..Default::default()
+            };
+        };
+        let fixed = fixed_forecast(ModelType::ETS, set).unwrap();
+        assert!(fixed.iter().all(|v| v.is_finite()));
+        assert!(fixed.iter().zip(&est).any(|(a, b)| (a - b).abs() > 1e-6));
+
+        let values: Vec<Option<f64>> = monthly_series(96).into_iter().map(Some).collect();
+        let mut options = ForecastOptions {
+            model: ModelType::ETS,
+            auto_detect_seasonality: false,
+            ..Default::default()
+        };
+        set(&mut options);
+        let json: serde_json::Value =
+            serde_json::from_str(&forecast_inspect(&values, &options).unwrap()).unwrap();
+        assert_eq!(json["Ets"]["alpha"], 0.05);
+        assert_eq!(json["Ets"]["gamma"], 0.3);
+
+        // TSB: alpha_d / alpha_p change the forecast.
+        let tsb_default = fixed_forecast(ModelType::TSB, |_| {}).unwrap();
+        let tsb_fixed = fixed_forecast(ModelType::TSB, |o| {
+            o.fixed_params = FixedParams {
+                alpha_d: Some(0.5),
+                alpha_p: Some(0.5),
+                ..Default::default()
+            };
+        })
+        .unwrap();
+        assert!((tsb_default[0] - tsb_fixed[0]).abs() > 1e-9);
+    }
+
+    #[test]
+    fn test_fixed_params_errors() {
+        for (model, f, needle) in [
+            (
+                ModelType::ETS,
+                Box::new(|o: &mut ForecastOptions| {
+                    o.fixed_params.alpha = Some(0.3);
+                }) as Box<dyn FnOnce(&mut ForecastOptions)>,
+                "model spec",
+            ),
+            (
+                ModelType::ETS,
+                Box::new(|o: &mut ForecastOptions| {
+                    o.ets_spec = Some("AAN".into());
+                    o.fixed_params.alpha = Some(0.3);
+                }),
+                "requires a fixed beta",
+            ),
+            (
+                ModelType::AutoETS,
+                Box::new(|o: &mut ForecastOptions| o.fixed_params.alpha = Some(0.3)),
+                "method='ETS'",
+            ),
+            (
+                ModelType::ARIMA,
+                Box::new(|o: &mut ForecastOptions| {
+                    o.arima_order = Some([2, 0, 0]);
+                    o.fixed_params.ar = Some(vec![0.5]);
+                }),
+                "ar_coefficients",
+            ),
+            (
+                ModelType::TSB,
+                Box::new(|o: &mut ForecastOptions| o.fixed_params.alpha_d = Some(1.5)),
+                "[0.01, 0.99]",
+            ),
+        ] {
+            let msg = fixed_forecast(model, f).unwrap_err().to_string();
+            assert!(msg.contains(needle), "expected '{needle}', got: {msg}");
         }
     }
 

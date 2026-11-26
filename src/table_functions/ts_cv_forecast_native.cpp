@@ -1,3 +1,4 @@
+#include "ts_forecast_params.hpp"
 #include "duckdb_compat.hpp"
 #include "ts_cv_forecast_native.hpp"
 #include "ts_fill_gaps_native.hpp"  // For DateColumnType, helper functions
@@ -54,6 +55,7 @@ struct TsCvForecastNativeBindData : public TableFunctionData {
     string seasonal_order = "";
     int64_t max_models = 0;     // AutoARIMA only, 0 = default (#318)
     int64_t time_budget_ms = 0; // AutoARIMA only, 0 = unbounded (#318)
+    string fixed_params = "";   // packed ETS/TSB/ARIMA fixed params (#317)
 
     // Column indices (resolved by name in bind)
     idx_t fold_id_col = 0;
@@ -259,7 +261,10 @@ static void ValidateParamKeys(const Value &params_value) {
         "model", "seasonal_period", "seasonal_periods", "confidence_level", "window", "model_pool",
         "laplace_variant", "laplace_seasonal_batch_init",
         "arima_order", "seasonal_order", // D-08/D-09, plan 10-02
-        "max_models", "time_budget_ms"   // AutoARIMA fit-cost limits (#318)
+        "max_models", "time_budget_ms",  // AutoARIMA fit-cost limits (#318)
+        "alpha", "beta", "gamma", "phi", "alpha_d", "alpha_p", // fixed params (#317)
+        "ar_coefficients", "ma_coefficients", "seasonal_ar_coefficients", "seasonal_ma_coefficients",
+        "intercept"
     };
 
     vector<string> unknown_keys;
@@ -289,7 +294,7 @@ static void ValidateParamKeys(const Value &params_value) {
             unknown_list += "'" + unknown_keys[i] + "'";
         }
         throw InvalidInputException(
-            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init, arima_order, seasonal_order, max_models, time_budget_ms",
+            "Unknown parameter(s): %s. Valid parameters are: model, seasonal_period, seasonal_periods, confidence_level, window, model_pool, laplace_variant, laplace_seasonal_batch_init, arima_order, seasonal_order, max_models, time_budget_ms, alpha, beta, gamma, phi, alpha_d, alpha_p, ar_coefficients, ma_coefficients, seasonal_ar_coefficients, seasonal_ma_coefficients, intercept",
             unknown_list);
     }
 }
@@ -396,6 +401,7 @@ static unique_ptr<FunctionData> TsCvForecastNativeBind(
         bind_data->seasonal_order = ParseStringFromParams(params, "seasonal_order", "");
         bind_data->max_models = ParseInt64FromParams(params, "max_models", 0);
         bind_data->time_budget_ms = ParseInt64FromParams(params, "time_budget_ms", 0);
+        bind_data->fixed_params = PackFixedParams(params);
 
         // WR-03: reject arima_order/seasonal_order strings that would
         // silently truncate when copied into the fixed 32-byte
@@ -736,6 +742,7 @@ static OperatorFinalizeResultType TsCvForecastNativeFinalize(
             }
             opts.max_models = bind_data.max_models;
             opts.time_budget_ms = bind_data.time_budget_ms;
+            SetFixedParams(opts.fixed_params_str, bind_data.fixed_params);
 
             // Call Rust FFI
             ForecastResult fcst_result;

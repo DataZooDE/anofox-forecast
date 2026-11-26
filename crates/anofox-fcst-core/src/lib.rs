@@ -12,6 +12,7 @@ pub mod detrending;
 pub mod error;
 pub mod features;
 pub mod filter;
+pub mod fixed_params;
 pub mod forecast;
 pub mod gaps;
 pub mod imputation;
@@ -94,6 +95,7 @@ pub use filter::{
     diff, diff_aligned, diff_lag, drop_edge_zeros, drop_leading_zeros, drop_trailing_zeros,
     is_constant, is_constant_slice, is_short,
 };
+pub use fixed_params::{parse_fixed_params, FixedParams};
 pub use forecast::{
     forecast, forecast_explain, forecast_explicit_ensemble, forecast_inspect, forecast_with_exog,
     inspect_auto_ensemble, inspect_explicit_ensemble, list_models, parse_order_triplet,
