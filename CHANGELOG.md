@@ -31,6 +31,11 @@ use the semver numbering this project started with.
   fitted or given parameters and initial states can be read back. Without a spec, `'ETS'`
   is inspected as AutoETS selection.
 
+### Changed — dependencies
+
+- **`anofox-forecast` 0.22.0 → 0.23.0** (`ETS::with_fixed_params`, `Inspectable` for
+  `ETS`). No existing SQL signature, output column or result changes.
+
 ## [2026.11.25] - 2026-11-25 — bounded AutoARIMA fits, AutoETS seasonal component
 
 ### Fixed
