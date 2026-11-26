@@ -6,13 +6,13 @@ description: >
   detrending, hierarchical key operations. Use when preparing raw time
   series for downstream forecasting or backtesting with `ts_forecast_by`
   / `ts_cv_folds_by`.
-version: 2026.11.25
+version: 2026.11.26
 user-invocable: false
 ---
 
 # Anofox Forecast — Data Preparation Cheat Sheet
 
-**Extension:** `anofox_forecast` v2026.11.25 (Rust crate `anofox-forecast` v0.23.0) | **DuckDB:** v2.0.0 / v1.5.6 | **Dual naming:** `ts_*` and `anofox_fcst_ts_*` (identical)
+**Extension:** `anofox_forecast` v2026.11.26 (Rust crate `anofox-forecast` v0.23.0) | **DuckDB:** v2.0.0 / v1.5.6 | **Dual naming:** `ts_*` and `anofox_fcst_ts_*` (identical)
 
 Prep raw time series so downstream forecasting / CV has clean input: no gaps, no unwanted NULLs, no degenerate series, correct hierarchy.
 

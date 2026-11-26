@@ -10,6 +10,8 @@ use the semver numbering this project started with.
 
 ## [Unreleased]
 
+## [2026.11.26] - 2026-11-26 — forecasting with given model parameters
+
 ### Added
 
 - **Forecasting with given model parameters (#317).** For hyper-model forecasting (a
